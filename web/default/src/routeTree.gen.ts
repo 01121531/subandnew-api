@@ -9,79 +9,32 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as UserAgreementRouteImport } from './routes/user-agreement'
-import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as authRouteRouteImport } from './routes/(auth)/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
-import { Route as RankingsIndexRouteImport } from './routes/rankings/index'
-import { Route as PricingIndexRouteImport } from './routes/pricing/index'
-import { Route as AboutIndexRouteImport } from './routes/about/index'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
-import { Route as ConsoleTopupRouteImport } from './routes/console/topup'
-import { Route as ConsoleLogRouteImport } from './routes/console/log'
-import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors404RouteImport } from './routes/(errors)/404'
 import { Route as errors403RouteImport } from './routes/(errors)/403'
 import { Route as errors401RouteImport } from './routes/(errors)/401'
-import { Route as authSignUpRouteImport } from './routes/(auth)/sign-up'
 import { Route as authSignInRouteImport } from './routes/(auth)/sign-in'
-import { Route as authResetRouteImport } from './routes/(auth)/reset'
-import { Route as authRegisterRouteImport } from './routes/(auth)/register'
 import { Route as authOtpRouteImport } from './routes/(auth)/otp'
 import { Route as authOauthRouteImport } from './routes/(auth)/oauth'
-import { Route as authForgotPasswordRouteImport } from './routes/(auth)/forgot-password'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
-import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$modelId/index'
-import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
-import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authenticated/usage-logs/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
-import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
-import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
-import { Route as AuthenticatedProxyPoolIndexRouteImport } from './routes/_authenticated/proxy-pool/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
-import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
-import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
-import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
-import { Route as AuthenticatedDatasetCapturesIndexRouteImport } from './routes/_authenticated/dataset-captures/index'
-import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
-import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
-import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
-import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
+import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
+import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
-import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
-import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
-import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedSystemSettingsSiteIndexRouteImport } from './routes/_authenticated/system-settings/site/index'
-import { Route as AuthenticatedSystemSettingsSecurityIndexRouteImport } from './routes/_authenticated/system-settings/security/index'
-import { Route as AuthenticatedSystemSettingsOperationsIndexRouteImport } from './routes/_authenticated/system-settings/operations/index'
-import { Route as AuthenticatedSystemSettingsModelsIndexRouteImport } from './routes/_authenticated/system-settings/models/index'
-import { Route as AuthenticatedSystemSettingsContentIndexRouteImport } from './routes/_authenticated/system-settings/content/index'
-import { Route as AuthenticatedSystemSettingsBillingIndexRouteImport } from './routes/_authenticated/system-settings/billing/index'
 import { Route as AuthenticatedSystemSettingsAuthIndexRouteImport } from './routes/_authenticated/system-settings/auth/index'
 import { Route as AuthenticatedSystemSettingsSiteSectionRouteImport } from './routes/_authenticated/system-settings/site/$section'
-import { Route as AuthenticatedSystemSettingsSecuritySectionRouteImport } from './routes/_authenticated/system-settings/security/$section'
-import { Route as AuthenticatedSystemSettingsOperationsSectionRouteImport } from './routes/_authenticated/system-settings/operations/$section'
-import { Route as AuthenticatedSystemSettingsModelsSectionRouteImport } from './routes/_authenticated/system-settings/models/$section'
-import { Route as AuthenticatedSystemSettingsContentSectionRouteImport } from './routes/_authenticated/system-settings/content/$section'
-import { Route as AuthenticatedSystemSettingsBillingSectionRouteImport } from './routes/_authenticated/system-settings/billing/$section'
 import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './routes/_authenticated/system-settings/auth/$section'
 
-const UserAgreementRoute = UserAgreementRouteImport.update({
-  id: '/user-agreement',
-  path: '/user-agreement',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
-  id: '/privacy-policy',
-  path: '/privacy-policy',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
@@ -100,40 +53,10 @@ const SetupIndexRoute = SetupIndexRouteImport.update({
   path: '/setup/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const RankingsIndexRoute = RankingsIndexRouteImport.update({
-  id: '/rankings/',
-  path: '/rankings/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PricingIndexRoute = PricingIndexRouteImport.update({
-  id: '/pricing/',
-  path: '/pricing/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutIndexRoute = AboutIndexRouteImport.update({
-  id: '/about/',
-  path: '/about/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const OauthProviderRoute = OauthProviderRouteImport.update({
   id: '/oauth/$provider',
   path: '/oauth/$provider',
   getParentRoute: () => rootRouteImport,
-} as any)
-const ConsoleTopupRoute = ConsoleTopupRouteImport.update({
-  id: '/console/topup',
-  path: '/console/topup',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ConsoleLogRoute = ConsoleLogRouteImport.update({
-  id: '/console/log',
-  path: '/console/log',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedChat2linkRoute = AuthenticatedChat2linkRouteImport.update({
-  id: '/chat2link',
-  path: '/chat2link',
-  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const errors503Route = errors503RouteImport.update({
   id: '/(errors)/503',
@@ -160,24 +83,9 @@ const errors401Route = errors401RouteImport.update({
   path: '/401',
   getParentRoute: () => rootRouteImport,
 } as any)
-const authSignUpRoute = authSignUpRouteImport.update({
-  id: '/sign-up',
-  path: '/sign-up',
-  getParentRoute: () => authRouteRoute,
-} as any)
 const authSignInRoute = authSignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authResetRoute = authResetRouteImport.update({
-  id: '/reset',
-  path: '/reset',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authRegisterRoute = authRegisterRouteImport.update({
-  id: '/register',
-  path: '/register',
   getParentRoute: () => authRouteRoute,
 } as any)
 const authOtpRoute = authOtpRouteImport.update({
@@ -190,26 +98,10 @@ const authOauthRoute = authOauthRouteImport.update({
   path: '/oauth',
   getParentRoute: () => authRouteRoute,
 } as any)
-const authForgotPasswordRoute = authForgotPasswordRouteImport.update({
-  id: '/forgot-password',
-  path: '/forgot-password',
-  getParentRoute: () => authRouteRoute,
-} as any)
 const AuthenticatedSystemSettingsRouteRoute =
   AuthenticatedSystemSettingsRouteRouteImport.update({
     id: '/system-settings',
     path: '/system-settings',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const PricingModelIdIndexRoute = PricingModelIdIndexRouteImport.update({
-  id: '/pricing/$modelId/',
-  path: '/pricing/$modelId/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedWalletIndexRoute =
-  AuthenticatedWalletIndexRouteImport.update({
-    id: '/wallet/',
-    path: '/wallet/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
@@ -217,12 +109,6 @@ const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
   path: '/users/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedUsageLogsIndexRoute =
-  AuthenticatedUsageLogsIndexRouteImport.update({
-    id: '/usage-logs/',
-    path: '/usage-logs/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedSystemSettingsIndexRoute =
   AuthenticatedSystemSettingsIndexRouteImport.update({
     id: '/',
@@ -235,75 +121,22 @@ const AuthenticatedSystemInfoIndexRoute =
     path: '/system-info/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedSubscriptionsIndexRoute =
-  AuthenticatedSubscriptionsIndexRouteImport.update({
-    id: '/subscriptions/',
-    path: '/subscriptions/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedRedemptionCodesIndexRoute =
-  AuthenticatedRedemptionCodesIndexRouteImport.update({
-    id: '/redemption-codes/',
-    path: '/redemption-codes/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedProxyPoolIndexRoute =
-  AuthenticatedProxyPoolIndexRouteImport.update({
-    id: '/proxy-pool/',
-    path: '/proxy-pool/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
     path: '/profile/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedPlaygroundIndexRoute =
-  AuthenticatedPlaygroundIndexRouteImport.update({
-    id: '/playground/',
-    path: '/playground/',
+const AuthenticatedInstancesIndexRoute =
+  AuthenticatedInstancesIndexRouteImport.update({
+    id: '/instances/',
+    path: '/instances/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedModelsIndexRoute =
-  AuthenticatedModelsIndexRouteImport.update({
-    id: '/models/',
-    path: '/models/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
-  id: '/keys/',
-  path: '/keys/',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedDatasetCapturesIndexRoute =
-  AuthenticatedDatasetCapturesIndexRouteImport.update({
-    id: '/dataset-captures/',
-    path: '/dataset-captures/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedDashboardIndexRoute =
-  AuthenticatedDashboardIndexRouteImport.update({
-    id: '/dashboard/',
-    path: '/dashboard/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedChannelsIndexRoute =
-  AuthenticatedChannelsIndexRouteImport.update({
-    id: '/channels/',
-    path: '/channels/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedUsageLogsSectionRoute =
-  AuthenticatedUsageLogsSectionRouteImport.update({
-    id: '/usage-logs/$section',
-    path: '/usage-logs/$section',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedModelsSectionRoute =
-  AuthenticatedModelsSectionRouteImport.update({
-    id: '/models/$section',
-    path: '/models/$section',
+const AuthenticatedInstancesIdRoute =
+  AuthenticatedInstancesIdRouteImport.update({
+    id: '/instances/$id',
+    path: '/instances/$id',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedErrorsErrorRoute =
@@ -312,56 +145,10 @@ const AuthenticatedErrorsErrorRoute =
     path: '/errors/$error',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedDashboardSectionRoute =
-  AuthenticatedDashboardSectionRouteImport.update({
-    id: '/dashboard/$section',
-    path: '/dashboard/$section',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
-  id: '/chat/$chatId',
-  path: '/chat/$chatId',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const authUserResetRoute = authUserResetRouteImport.update({
-  id: '/user/reset',
-  path: '/user/reset',
-  getParentRoute: () => authRouteRoute,
-} as any)
 const AuthenticatedSystemSettingsSiteIndexRoute =
   AuthenticatedSystemSettingsSiteIndexRouteImport.update({
     id: '/site/',
     path: '/site/',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsSecurityIndexRoute =
-  AuthenticatedSystemSettingsSecurityIndexRouteImport.update({
-    id: '/security/',
-    path: '/security/',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsOperationsIndexRoute =
-  AuthenticatedSystemSettingsOperationsIndexRouteImport.update({
-    id: '/operations/',
-    path: '/operations/',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsModelsIndexRoute =
-  AuthenticatedSystemSettingsModelsIndexRouteImport.update({
-    id: '/models/',
-    path: '/models/',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsContentIndexRoute =
-  AuthenticatedSystemSettingsContentIndexRouteImport.update({
-    id: '/content/',
-    path: '/content/',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsBillingIndexRoute =
-  AuthenticatedSystemSettingsBillingIndexRouteImport.update({
-    id: '/billing/',
-    path: '/billing/',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
 const AuthenticatedSystemSettingsAuthIndexRoute =
@@ -376,36 +163,6 @@ const AuthenticatedSystemSettingsSiteSectionRoute =
     path: '/site/$section',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
-const AuthenticatedSystemSettingsSecuritySectionRoute =
-  AuthenticatedSystemSettingsSecuritySectionRouteImport.update({
-    id: '/security/$section',
-    path: '/security/$section',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsOperationsSectionRoute =
-  AuthenticatedSystemSettingsOperationsSectionRouteImport.update({
-    id: '/operations/$section',
-    path: '/operations/$section',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsModelsSectionRoute =
-  AuthenticatedSystemSettingsModelsSectionRouteImport.update({
-    id: '/models/$section',
-    path: '/models/$section',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsContentSectionRoute =
-  AuthenticatedSystemSettingsContentSectionRouteImport.update({
-    id: '/content/$section',
-    path: '/content/$section',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
-const AuthenticatedSystemSettingsBillingSectionRoute =
-  AuthenticatedSystemSettingsBillingSectionRouteImport.update({
-    id: '/billing/$section',
-    path: '/billing/$section',
-    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
-  } as any)
 const AuthenticatedSystemSettingsAuthSectionRoute =
   AuthenticatedSystemSettingsAuthSectionRouteImport.update({
     id: '/auth/$section',
@@ -415,125 +172,51 @@ const AuthenticatedSystemSettingsAuthSectionRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/privacy-policy': typeof PrivacyPolicyRoute
-  '/user-agreement': typeof UserAgreementRoute
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
-  '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
   '/otp': typeof authOtpRoute
-  '/register': typeof authRegisterRoute
-  '/reset': typeof authResetRoute
   '/sign-in': typeof authSignInRoute
-  '/sign-up': typeof authSignUpRoute
   '/401': typeof errors401Route
   '/403': typeof errors403Route
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/chat2link': typeof AuthenticatedChat2linkRoute
-  '/console/log': typeof ConsoleLogRoute
-  '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
-  '/about/': typeof AboutIndexRoute
-  '/pricing/': typeof PricingIndexRoute
-  '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
-  '/user/reset': typeof authUserResetRoute
-  '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
-  '/channels/': typeof AuthenticatedChannelsIndexRoute
-  '/dashboard/': typeof AuthenticatedDashboardIndexRoute
-  '/dataset-captures/': typeof AuthenticatedDatasetCapturesIndexRoute
-  '/keys/': typeof AuthenticatedKeysIndexRoute
-  '/models/': typeof AuthenticatedModelsIndexRoute
-  '/playground/': typeof AuthenticatedPlaygroundIndexRoute
+  '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
-  '/proxy-pool/': typeof AuthenticatedProxyPoolIndexRoute
-  '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
-  '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
-  '/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
-  '/wallet/': typeof AuthenticatedWalletIndexRoute
-  '/pricing/$modelId/': typeof PricingModelIdIndexRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
-  '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
-  '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
-  '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
-  '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
-  '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
   '/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
-  '/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
-  '/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
-  '/system-settings/models/': typeof AuthenticatedSystemSettingsModelsIndexRoute
-  '/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
-  '/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/privacy-policy': typeof PrivacyPolicyRoute
-  '/user-agreement': typeof UserAgreementRoute
-  '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
   '/otp': typeof authOtpRoute
-  '/register': typeof authRegisterRoute
-  '/reset': typeof authResetRoute
   '/sign-in': typeof authSignInRoute
-  '/sign-up': typeof authSignUpRoute
   '/401': typeof errors401Route
   '/403': typeof errors403Route
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
-  '/chat2link': typeof AuthenticatedChat2linkRoute
-  '/console/log': typeof ConsoleLogRoute
-  '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
-  '/about': typeof AboutIndexRoute
-  '/pricing': typeof PricingIndexRoute
-  '/rankings': typeof RankingsIndexRoute
   '/setup': typeof SetupIndexRoute
-  '/user/reset': typeof authUserResetRoute
-  '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
-  '/channels': typeof AuthenticatedChannelsIndexRoute
-  '/dashboard': typeof AuthenticatedDashboardIndexRoute
-  '/dataset-captures': typeof AuthenticatedDatasetCapturesIndexRoute
-  '/keys': typeof AuthenticatedKeysIndexRoute
-  '/models': typeof AuthenticatedModelsIndexRoute
-  '/playground': typeof AuthenticatedPlaygroundIndexRoute
+  '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/instances': typeof AuthenticatedInstancesIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
-  '/proxy-pool': typeof AuthenticatedProxyPoolIndexRoute
-  '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
-  '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
-  '/usage-logs': typeof AuthenticatedUsageLogsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
-  '/wallet': typeof AuthenticatedWalletIndexRoute
-  '/pricing/$modelId': typeof PricingModelIdIndexRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
-  '/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
-  '/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
-  '/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
-  '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
-  '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
   '/system-settings/auth': typeof AuthenticatedSystemSettingsAuthIndexRoute
-  '/system-settings/billing': typeof AuthenticatedSystemSettingsBillingIndexRoute
-  '/system-settings/content': typeof AuthenticatedSystemSettingsContentIndexRoute
-  '/system-settings/models': typeof AuthenticatedSystemSettingsModelsIndexRoute
-  '/system-settings/operations': typeof AuthenticatedSystemSettingsOperationsIndexRoute
-  '/system-settings/security': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/system-settings/site': typeof AuthenticatedSystemSettingsSiteIndexRoute
 }
 export interface FileRoutesById {
@@ -541,253 +224,105 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/(auth)': typeof authRouteRouteWithChildren
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
-  '/privacy-policy': typeof PrivacyPolicyRoute
-  '/user-agreement': typeof UserAgreementRoute
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
-  '/(auth)/forgot-password': typeof authForgotPasswordRoute
   '/(auth)/oauth': typeof authOauthRoute
   '/(auth)/otp': typeof authOtpRoute
-  '/(auth)/register': typeof authRegisterRoute
-  '/(auth)/reset': typeof authResetRoute
   '/(auth)/sign-in': typeof authSignInRoute
-  '/(auth)/sign-up': typeof authSignUpRoute
   '/(errors)/401': typeof errors401Route
   '/(errors)/403': typeof errors403Route
   '/(errors)/404': typeof errors404Route
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
-  '/_authenticated/chat2link': typeof AuthenticatedChat2linkRoute
-  '/console/log': typeof ConsoleLogRoute
-  '/console/topup': typeof ConsoleTopupRoute
   '/oauth/$provider': typeof OauthProviderRoute
-  '/about/': typeof AboutIndexRoute
-  '/pricing/': typeof PricingIndexRoute
-  '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
-  '/(auth)/user/reset': typeof authUserResetRoute
-  '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
-  '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
-  '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
-  '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
-  '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
-  '/_authenticated/dataset-captures/': typeof AuthenticatedDatasetCapturesIndexRoute
-  '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
-  '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
-  '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
+  '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
-  '/_authenticated/proxy-pool/': typeof AuthenticatedProxyPoolIndexRoute
-  '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
-  '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
-  '/_authenticated/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
-  '/_authenticated/wallet/': typeof AuthenticatedWalletIndexRoute
-  '/pricing/$modelId/': typeof PricingModelIdIndexRoute
   '/_authenticated/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
-  '/_authenticated/system-settings/billing/$section': typeof AuthenticatedSystemSettingsBillingSectionRoute
-  '/_authenticated/system-settings/content/$section': typeof AuthenticatedSystemSettingsContentSectionRoute
-  '/_authenticated/system-settings/models/$section': typeof AuthenticatedSystemSettingsModelsSectionRoute
-  '/_authenticated/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
-  '/_authenticated/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/_authenticated/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
   '/_authenticated/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
-  '/_authenticated/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
-  '/_authenticated/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
-  '/_authenticated/system-settings/models/': typeof AuthenticatedSystemSettingsModelsIndexRoute
-  '/_authenticated/system-settings/operations/': typeof AuthenticatedSystemSettingsOperationsIndexRoute
-  '/_authenticated/system-settings/security/': typeof AuthenticatedSystemSettingsSecurityIndexRoute
   '/_authenticated/system-settings/site/': typeof AuthenticatedSystemSettingsSiteIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/privacy-policy'
-    | '/user-agreement'
     | '/system-settings'
-    | '/forgot-password'
     | '/oauth'
     | '/otp'
-    | '/register'
-    | '/reset'
     | '/sign-in'
-    | '/sign-up'
     | '/401'
     | '/403'
     | '/404'
     | '/500'
     | '/503'
-    | '/chat2link'
-    | '/console/log'
-    | '/console/topup'
     | '/oauth/$provider'
-    | '/about/'
-    | '/pricing/'
-    | '/rankings/'
     | '/setup/'
-    | '/user/reset'
-    | '/chat/$chatId'
-    | '/dashboard/$section'
     | '/errors/$error'
-    | '/models/$section'
-    | '/usage-logs/$section'
-    | '/channels/'
-    | '/dashboard/'
-    | '/dataset-captures/'
-    | '/keys/'
-    | '/models/'
-    | '/playground/'
+    | '/instances/$id'
+    | '/instances/'
     | '/profile/'
-    | '/proxy-pool/'
-    | '/redemption-codes/'
-    | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
-    | '/usage-logs/'
     | '/users/'
-    | '/wallet/'
-    | '/pricing/$modelId/'
     | '/system-settings/auth/$section'
-    | '/system-settings/billing/$section'
-    | '/system-settings/content/$section'
-    | '/system-settings/models/$section'
-    | '/system-settings/operations/$section'
-    | '/system-settings/security/$section'
     | '/system-settings/site/$section'
     | '/system-settings/auth/'
-    | '/system-settings/billing/'
-    | '/system-settings/content/'
-    | '/system-settings/models/'
-    | '/system-settings/operations/'
-    | '/system-settings/security/'
     | '/system-settings/site/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/privacy-policy'
-    | '/user-agreement'
-    | '/forgot-password'
     | '/oauth'
     | '/otp'
-    | '/register'
-    | '/reset'
     | '/sign-in'
-    | '/sign-up'
     | '/401'
     | '/403'
     | '/404'
     | '/500'
     | '/503'
-    | '/chat2link'
-    | '/console/log'
-    | '/console/topup'
     | '/oauth/$provider'
-    | '/about'
-    | '/pricing'
-    | '/rankings'
     | '/setup'
-    | '/user/reset'
-    | '/chat/$chatId'
-    | '/dashboard/$section'
     | '/errors/$error'
-    | '/models/$section'
-    | '/usage-logs/$section'
-    | '/channels'
-    | '/dashboard'
-    | '/dataset-captures'
-    | '/keys'
-    | '/models'
-    | '/playground'
+    | '/instances/$id'
+    | '/instances'
     | '/profile'
-    | '/proxy-pool'
-    | '/redemption-codes'
-    | '/subscriptions'
     | '/system-info'
     | '/system-settings'
-    | '/usage-logs'
     | '/users'
-    | '/wallet'
-    | '/pricing/$modelId'
     | '/system-settings/auth/$section'
-    | '/system-settings/billing/$section'
-    | '/system-settings/content/$section'
-    | '/system-settings/models/$section'
-    | '/system-settings/operations/$section'
-    | '/system-settings/security/$section'
     | '/system-settings/site/$section'
     | '/system-settings/auth'
-    | '/system-settings/billing'
-    | '/system-settings/content'
-    | '/system-settings/models'
-    | '/system-settings/operations'
-    | '/system-settings/security'
     | '/system-settings/site'
   id:
     | '__root__'
     | '/'
     | '/(auth)'
     | '/_authenticated'
-    | '/privacy-policy'
-    | '/user-agreement'
     | '/_authenticated/system-settings'
-    | '/(auth)/forgot-password'
     | '/(auth)/oauth'
     | '/(auth)/otp'
-    | '/(auth)/register'
-    | '/(auth)/reset'
     | '/(auth)/sign-in'
-    | '/(auth)/sign-up'
     | '/(errors)/401'
     | '/(errors)/403'
     | '/(errors)/404'
     | '/(errors)/500'
     | '/(errors)/503'
-    | '/_authenticated/chat2link'
-    | '/console/log'
-    | '/console/topup'
     | '/oauth/$provider'
-    | '/about/'
-    | '/pricing/'
-    | '/rankings/'
     | '/setup/'
-    | '/(auth)/user/reset'
-    | '/_authenticated/chat/$chatId'
-    | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
-    | '/_authenticated/models/$section'
-    | '/_authenticated/usage-logs/$section'
-    | '/_authenticated/channels/'
-    | '/_authenticated/dashboard/'
-    | '/_authenticated/dataset-captures/'
-    | '/_authenticated/keys/'
-    | '/_authenticated/models/'
-    | '/_authenticated/playground/'
+    | '/_authenticated/instances/$id'
+    | '/_authenticated/instances/'
     | '/_authenticated/profile/'
-    | '/_authenticated/proxy-pool/'
-    | '/_authenticated/redemption-codes/'
-    | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
-    | '/_authenticated/usage-logs/'
     | '/_authenticated/users/'
-    | '/_authenticated/wallet/'
-    | '/pricing/$modelId/'
     | '/_authenticated/system-settings/auth/$section'
-    | '/_authenticated/system-settings/billing/$section'
-    | '/_authenticated/system-settings/content/$section'
-    | '/_authenticated/system-settings/models/$section'
-    | '/_authenticated/system-settings/operations/$section'
-    | '/_authenticated/system-settings/security/$section'
     | '/_authenticated/system-settings/site/$section'
     | '/_authenticated/system-settings/auth/'
-    | '/_authenticated/system-settings/billing/'
-    | '/_authenticated/system-settings/content/'
-    | '/_authenticated/system-settings/models/'
-    | '/_authenticated/system-settings/operations/'
-    | '/_authenticated/system-settings/security/'
     | '/_authenticated/system-settings/site/'
   fileRoutesById: FileRoutesById
 }
@@ -795,39 +330,17 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   authRouteRoute: typeof authRouteRouteWithChildren
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
-  PrivacyPolicyRoute: typeof PrivacyPolicyRoute
-  UserAgreementRoute: typeof UserAgreementRoute
   errors401Route: typeof errors401Route
   errors403Route: typeof errors403Route
   errors404Route: typeof errors404Route
   errors500Route: typeof errors500Route
   errors503Route: typeof errors503Route
-  ConsoleLogRoute: typeof ConsoleLogRoute
-  ConsoleTopupRoute: typeof ConsoleTopupRoute
   OauthProviderRoute: typeof OauthProviderRoute
-  AboutIndexRoute: typeof AboutIndexRoute
-  PricingIndexRoute: typeof PricingIndexRoute
-  RankingsIndexRoute: typeof RankingsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
-  PricingModelIdIndexRoute: typeof PricingModelIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/user-agreement': {
-      id: '/user-agreement'
-      path: '/user-agreement'
-      fullPath: '/user-agreement'
-      preLoaderRoute: typeof UserAgreementRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/privacy-policy': {
-      id: '/privacy-policy'
-      path: '/privacy-policy'
-      fullPath: '/privacy-policy'
-      preLoaderRoute: typeof PrivacyPolicyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
@@ -856,54 +369,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/rankings/': {
-      id: '/rankings/'
-      path: '/rankings'
-      fullPath: '/rankings/'
-      preLoaderRoute: typeof RankingsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/pricing/': {
-      id: '/pricing/'
-      path: '/pricing'
-      fullPath: '/pricing/'
-      preLoaderRoute: typeof PricingIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/about/': {
-      id: '/about/'
-      path: '/about'
-      fullPath: '/about/'
-      preLoaderRoute: typeof AboutIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/oauth/$provider': {
       id: '/oauth/$provider'
       path: '/oauth/$provider'
       fullPath: '/oauth/$provider'
       preLoaderRoute: typeof OauthProviderRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/console/topup': {
-      id: '/console/topup'
-      path: '/console/topup'
-      fullPath: '/console/topup'
-      preLoaderRoute: typeof ConsoleTopupRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/console/log': {
-      id: '/console/log'
-      path: '/console/log'
-      fullPath: '/console/log'
-      preLoaderRoute: typeof ConsoleLogRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/chat2link': {
-      id: '/_authenticated/chat2link'
-      path: '/chat2link'
-      fullPath: '/chat2link'
-      preLoaderRoute: typeof AuthenticatedChat2linkRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/(errors)/503': {
       id: '/(errors)/503'
@@ -940,32 +411,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof errors401RouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/(auth)/sign-up': {
-      id: '/(auth)/sign-up'
-      path: '/sign-up'
-      fullPath: '/sign-up'
-      preLoaderRoute: typeof authSignUpRouteImport
-      parentRoute: typeof authRouteRoute
-    }
     '/(auth)/sign-in': {
       id: '/(auth)/sign-in'
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof authSignInRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/reset': {
-      id: '/(auth)/reset'
-      path: '/reset'
-      fullPath: '/reset'
-      preLoaderRoute: typeof authResetRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/register': {
-      id: '/(auth)/register'
-      path: '/register'
-      fullPath: '/register'
-      preLoaderRoute: typeof authRegisterRouteImport
       parentRoute: typeof authRouteRoute
     }
     '/(auth)/otp': {
@@ -982,13 +432,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof authOauthRouteImport
       parentRoute: typeof authRouteRoute
     }
-    '/(auth)/forgot-password': {
-      id: '/(auth)/forgot-password'
-      path: '/forgot-password'
-      fullPath: '/forgot-password'
-      preLoaderRoute: typeof authForgotPasswordRouteImport
-      parentRoute: typeof authRouteRoute
-    }
     '/_authenticated/system-settings': {
       id: '/_authenticated/system-settings'
       path: '/system-settings'
@@ -996,32 +439,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/pricing/$modelId/': {
-      id: '/pricing/$modelId/'
-      path: '/pricing/$modelId'
-      fullPath: '/pricing/$modelId/'
-      preLoaderRoute: typeof PricingModelIdIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/wallet/': {
-      id: '/_authenticated/wallet/'
-      path: '/wallet'
-      fullPath: '/wallet/'
-      preLoaderRoute: typeof AuthenticatedWalletIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/users/': {
       id: '/_authenticated/users/'
       path: '/users'
       fullPath: '/users/'
       preLoaderRoute: typeof AuthenticatedUsersIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/usage-logs/': {
-      id: '/_authenticated/usage-logs/'
-      path: '/usage-logs'
-      fullPath: '/usage-logs/'
-      preLoaderRoute: typeof AuthenticatedUsageLogsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/system-settings/': {
@@ -1038,27 +460,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemInfoIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/subscriptions/': {
-      id: '/_authenticated/subscriptions/'
-      path: '/subscriptions'
-      fullPath: '/subscriptions/'
-      preLoaderRoute: typeof AuthenticatedSubscriptionsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/redemption-codes/': {
-      id: '/_authenticated/redemption-codes/'
-      path: '/redemption-codes'
-      fullPath: '/redemption-codes/'
-      preLoaderRoute: typeof AuthenticatedRedemptionCodesIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/proxy-pool/': {
-      id: '/_authenticated/proxy-pool/'
-      path: '/proxy-pool'
-      fullPath: '/proxy-pool/'
-      preLoaderRoute: typeof AuthenticatedProxyPoolIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/profile/': {
       id: '/_authenticated/profile/'
       path: '/profile'
@@ -1066,60 +467,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/playground/': {
-      id: '/_authenticated/playground/'
-      path: '/playground'
-      fullPath: '/playground/'
-      preLoaderRoute: typeof AuthenticatedPlaygroundIndexRouteImport
+    '/_authenticated/instances/': {
+      id: '/_authenticated/instances/'
+      path: '/instances'
+      fullPath: '/instances/'
+      preLoaderRoute: typeof AuthenticatedInstancesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/models/': {
-      id: '/_authenticated/models/'
-      path: '/models'
-      fullPath: '/models/'
-      preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/keys/': {
-      id: '/_authenticated/keys/'
-      path: '/keys'
-      fullPath: '/keys/'
-      preLoaderRoute: typeof AuthenticatedKeysIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dataset-captures/': {
-      id: '/_authenticated/dataset-captures/'
-      path: '/dataset-captures'
-      fullPath: '/dataset-captures/'
-      preLoaderRoute: typeof AuthenticatedDatasetCapturesIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/dashboard/': {
-      id: '/_authenticated/dashboard/'
-      path: '/dashboard'
-      fullPath: '/dashboard/'
-      preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/channels/': {
-      id: '/_authenticated/channels/'
-      path: '/channels'
-      fullPath: '/channels/'
-      preLoaderRoute: typeof AuthenticatedChannelsIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/usage-logs/$section': {
-      id: '/_authenticated/usage-logs/$section'
-      path: '/usage-logs/$section'
-      fullPath: '/usage-logs/$section'
-      preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/models/$section': {
-      id: '/_authenticated/models/$section'
-      path: '/models/$section'
-      fullPath: '/models/$section'
-      preLoaderRoute: typeof AuthenticatedModelsSectionRouteImport
+    '/_authenticated/instances/$id': {
+      id: '/_authenticated/instances/$id'
+      path: '/instances/$id'
+      fullPath: '/instances/$id'
+      preLoaderRoute: typeof AuthenticatedInstancesIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/errors/$error': {
@@ -1129,67 +488,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedErrorsErrorRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/dashboard/$section': {
-      id: '/_authenticated/dashboard/$section'
-      path: '/dashboard/$section'
-      fullPath: '/dashboard/$section'
-      preLoaderRoute: typeof AuthenticatedDashboardSectionRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/chat/$chatId': {
-      id: '/_authenticated/chat/$chatId'
-      path: '/chat/$chatId'
-      fullPath: '/chat/$chatId'
-      preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/(auth)/user/reset': {
-      id: '/(auth)/user/reset'
-      path: '/user/reset'
-      fullPath: '/user/reset'
-      preLoaderRoute: typeof authUserResetRouteImport
-      parentRoute: typeof authRouteRoute
-    }
     '/_authenticated/system-settings/site/': {
       id: '/_authenticated/system-settings/site/'
       path: '/site'
       fullPath: '/system-settings/site/'
       preLoaderRoute: typeof AuthenticatedSystemSettingsSiteIndexRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/security/': {
-      id: '/_authenticated/system-settings/security/'
-      path: '/security'
-      fullPath: '/system-settings/security/'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsSecurityIndexRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/operations/': {
-      id: '/_authenticated/system-settings/operations/'
-      path: '/operations'
-      fullPath: '/system-settings/operations/'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsOperationsIndexRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/models/': {
-      id: '/_authenticated/system-settings/models/'
-      path: '/models'
-      fullPath: '/system-settings/models/'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsModelsIndexRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/content/': {
-      id: '/_authenticated/system-settings/content/'
-      path: '/content'
-      fullPath: '/system-settings/content/'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsContentIndexRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/billing/': {
-      id: '/_authenticated/system-settings/billing/'
-      path: '/billing'
-      fullPath: '/system-settings/billing/'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsBillingIndexRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
     '/_authenticated/system-settings/auth/': {
@@ -1206,41 +509,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsSiteSectionRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
     }
-    '/_authenticated/system-settings/security/$section': {
-      id: '/_authenticated/system-settings/security/$section'
-      path: '/security/$section'
-      fullPath: '/system-settings/security/$section'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsSecuritySectionRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/operations/$section': {
-      id: '/_authenticated/system-settings/operations/$section'
-      path: '/operations/$section'
-      fullPath: '/system-settings/operations/$section'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsOperationsSectionRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/models/$section': {
-      id: '/_authenticated/system-settings/models/$section'
-      path: '/models/$section'
-      fullPath: '/system-settings/models/$section'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsModelsSectionRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/content/$section': {
-      id: '/_authenticated/system-settings/content/$section'
-      path: '/content/$section'
-      fullPath: '/system-settings/content/$section'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsContentSectionRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
-    '/_authenticated/system-settings/billing/$section': {
-      id: '/_authenticated/system-settings/billing/$section'
-      path: '/billing/$section'
-      fullPath: '/system-settings/billing/$section'
-      preLoaderRoute: typeof AuthenticatedSystemSettingsBillingSectionRouteImport
-      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
-    }
     '/_authenticated/system-settings/auth/$section': {
       id: '/_authenticated/system-settings/auth/$section'
       path: '/auth/$section'
@@ -1252,25 +520,15 @@ declare module '@tanstack/react-router' {
 }
 
 interface authRouteRouteChildren {
-  authForgotPasswordRoute: typeof authForgotPasswordRoute
   authOauthRoute: typeof authOauthRoute
   authOtpRoute: typeof authOtpRoute
-  authRegisterRoute: typeof authRegisterRoute
-  authResetRoute: typeof authResetRoute
   authSignInRoute: typeof authSignInRoute
-  authSignUpRoute: typeof authSignUpRoute
-  authUserResetRoute: typeof authUserResetRoute
 }
 
 const authRouteRouteChildren: authRouteRouteChildren = {
-  authForgotPasswordRoute: authForgotPasswordRoute,
   authOauthRoute: authOauthRoute,
   authOtpRoute: authOtpRoute,
-  authRegisterRoute: authRegisterRoute,
-  authResetRoute: authResetRoute,
   authSignInRoute: authSignInRoute,
-  authSignUpRoute: authSignUpRoute,
-  authUserResetRoute: authUserResetRoute,
 }
 
 const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
@@ -1280,18 +538,8 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
 interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsIndexRoute: typeof AuthenticatedSystemSettingsIndexRoute
   AuthenticatedSystemSettingsAuthSectionRoute: typeof AuthenticatedSystemSettingsAuthSectionRoute
-  AuthenticatedSystemSettingsBillingSectionRoute: typeof AuthenticatedSystemSettingsBillingSectionRoute
-  AuthenticatedSystemSettingsContentSectionRoute: typeof AuthenticatedSystemSettingsContentSectionRoute
-  AuthenticatedSystemSettingsModelsSectionRoute: typeof AuthenticatedSystemSettingsModelsSectionRoute
-  AuthenticatedSystemSettingsOperationsSectionRoute: typeof AuthenticatedSystemSettingsOperationsSectionRoute
-  AuthenticatedSystemSettingsSecuritySectionRoute: typeof AuthenticatedSystemSettingsSecuritySectionRoute
   AuthenticatedSystemSettingsSiteSectionRoute: typeof AuthenticatedSystemSettingsSiteSectionRoute
   AuthenticatedSystemSettingsAuthIndexRoute: typeof AuthenticatedSystemSettingsAuthIndexRoute
-  AuthenticatedSystemSettingsBillingIndexRoute: typeof AuthenticatedSystemSettingsBillingIndexRoute
-  AuthenticatedSystemSettingsContentIndexRoute: typeof AuthenticatedSystemSettingsContentIndexRoute
-  AuthenticatedSystemSettingsModelsIndexRoute: typeof AuthenticatedSystemSettingsModelsIndexRoute
-  AuthenticatedSystemSettingsOperationsIndexRoute: typeof AuthenticatedSystemSettingsOperationsIndexRoute
-  AuthenticatedSystemSettingsSecurityIndexRoute: typeof AuthenticatedSystemSettingsSecurityIndexRoute
   AuthenticatedSystemSettingsSiteIndexRoute: typeof AuthenticatedSystemSettingsSiteIndexRoute
 }
 
@@ -1301,30 +549,10 @@ const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettings
       AuthenticatedSystemSettingsIndexRoute,
     AuthenticatedSystemSettingsAuthSectionRoute:
       AuthenticatedSystemSettingsAuthSectionRoute,
-    AuthenticatedSystemSettingsBillingSectionRoute:
-      AuthenticatedSystemSettingsBillingSectionRoute,
-    AuthenticatedSystemSettingsContentSectionRoute:
-      AuthenticatedSystemSettingsContentSectionRoute,
-    AuthenticatedSystemSettingsModelsSectionRoute:
-      AuthenticatedSystemSettingsModelsSectionRoute,
-    AuthenticatedSystemSettingsOperationsSectionRoute:
-      AuthenticatedSystemSettingsOperationsSectionRoute,
-    AuthenticatedSystemSettingsSecuritySectionRoute:
-      AuthenticatedSystemSettingsSecuritySectionRoute,
     AuthenticatedSystemSettingsSiteSectionRoute:
       AuthenticatedSystemSettingsSiteSectionRoute,
     AuthenticatedSystemSettingsAuthIndexRoute:
       AuthenticatedSystemSettingsAuthIndexRoute,
-    AuthenticatedSystemSettingsBillingIndexRoute:
-      AuthenticatedSystemSettingsBillingIndexRoute,
-    AuthenticatedSystemSettingsContentIndexRoute:
-      AuthenticatedSystemSettingsContentIndexRoute,
-    AuthenticatedSystemSettingsModelsIndexRoute:
-      AuthenticatedSystemSettingsModelsIndexRoute,
-    AuthenticatedSystemSettingsOperationsIndexRoute:
-      AuthenticatedSystemSettingsOperationsIndexRoute,
-    AuthenticatedSystemSettingsSecurityIndexRoute:
-      AuthenticatedSystemSettingsSecurityIndexRoute,
     AuthenticatedSystemSettingsSiteIndexRoute:
       AuthenticatedSystemSettingsSiteIndexRoute,
   }
@@ -1336,53 +564,23 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
-  AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
-  AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
-  AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
-  AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
-  AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
-  AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
-  AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
-  AuthenticatedDatasetCapturesIndexRoute: typeof AuthenticatedDatasetCapturesIndexRoute
-  AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
-  AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
-  AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
+  AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
+  AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
-  AuthenticatedProxyPoolIndexRoute: typeof AuthenticatedProxyPoolIndexRoute
-  AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
-  AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
-  AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
-  AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
-  AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,
-  AuthenticatedChatChatIdRoute: AuthenticatedChatChatIdRoute,
-  AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
-  AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
-  AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
-  AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
-  AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
-  AuthenticatedDatasetCapturesIndexRoute:
-    AuthenticatedDatasetCapturesIndexRoute,
-  AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
-  AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
-  AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
+  AuthenticatedInstancesIdRoute: AuthenticatedInstancesIdRoute,
+  AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
-  AuthenticatedProxyPoolIndexRoute: AuthenticatedProxyPoolIndexRoute,
-  AuthenticatedRedemptionCodesIndexRoute:
-    AuthenticatedRedemptionCodesIndexRoute,
-  AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
-  AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
-  AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
@@ -1392,21 +590,13 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   authRouteRoute: authRouteRouteWithChildren,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
-  PrivacyPolicyRoute: PrivacyPolicyRoute,
-  UserAgreementRoute: UserAgreementRoute,
   errors401Route: errors401Route,
   errors403Route: errors403Route,
   errors404Route: errors404Route,
   errors500Route: errors500Route,
   errors503Route: errors503Route,
-  ConsoleLogRoute: ConsoleLogRoute,
-  ConsoleTopupRoute: ConsoleTopupRoute,
   OauthProviderRoute: OauthProviderRoute,
-  AboutIndexRoute: AboutIndexRoute,
-  PricingIndexRoute: PricingIndexRoute,
-  RankingsIndexRoute: RankingsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
-  PricingModelIdIndexRoute: PricingModelIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

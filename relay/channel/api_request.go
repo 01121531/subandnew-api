@@ -16,7 +16,6 @@ import (
 	appconstant "github.com/01121531/HUICHUAN-AI/constant"
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/pkg/datasetcapture"
 	"github.com/01121531/HUICHUAN-AI/relay/common"
 	"github.com/01121531/HUICHUAN-AI/relay/constant"
 	"github.com/01121531/HUICHUAN-AI/relay/helper"
@@ -331,11 +330,6 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
-	if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-		if err := captureSession.CaptureUpstreamRequest(req); err != nil {
-			logger.LogWarn(c, "dataset capture skipped effective upstream request: "+err.Error())
-		}
-	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)
@@ -368,11 +362,6 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 		return nil, err
 	}
 	applyHeaderOverrideToRequest(req, headerOverride)
-	if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-		if err := captureSession.CaptureUpstreamRequest(req); err != nil {
-			logger.LogWarn(c, "dataset capture skipped effective upstream form request: "+err.Error())
-		}
-	}
 	resp, err := doRequest(c, req, info)
 	if err != nil {
 		return nil, fmt.Errorf("do request failed: %w", err)

@@ -15,7 +15,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/middleware"
 	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/pkg/datasetcapture"
 	perfmetrics "github.com/01121531/HUICHUAN-AI/pkg/perf_metrics"
 	"github.com/01121531/HUICHUAN-AI/relay"
 	relaycommon "github.com/01121531/HUICHUAN-AI/relay/common"
@@ -193,18 +192,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
-			if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-				captureSession.FailAttempt()
-			}
 			logger.LogError(c, channelErr.Error())
 			huichuanError = channelErr
 			break
 		}
 
 		addUsedChannel(c, channel.Id)
-		if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-			captureSession.BeginAttempt(common.GetContextKeyString(c, constant.ContextKeyOriginalModel), channel.Name)
-		}
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -230,15 +223,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		if huichuanError == nil {
 			relayInfo.LastError = nil
-			if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-				captureSession.SucceedAttempt()
-			}
 			return
 		}
 
-		if captureSession := datasetcapture.FromContext(c.Request.Context()); captureSession != nil {
-			captureSession.FailAttempt()
-		}
 		huichuanError = service.NormalizeViolationFeeError(huichuanError)
 		relayInfo.LastError = huichuanError
 

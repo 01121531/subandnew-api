@@ -4,9 +4,9 @@ import "time"
 
 const (
 	RepositoryOwner  = "01121531"
-	RepositoryName   = "HUICHUAN-AI"
-	RepositoryURL    = "https://github.com/01121531/HUICHUAN-AI"
-	LatestReleaseURL = "https://api.github.com/repos/01121531/HUICHUAN-AI/releases/latest"
+	RepositoryName   = "subandnew-api"
+	RepositoryURL    = "https://github.com/01121531/subandnew-api"
+	LatestReleaseURL = "https://api.github.com/repos/01121531/subandnew-api/releases/latest"
 
 	helperCommand = "__huichuan_apply_update"
 )

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/01121531/HUICHUAN-AI/common"
@@ -90,26 +89,11 @@ func WeChatAuth(c *gin.Context) {
 			return
 		}
 	} else {
-		if common.RegisterEnabled {
-			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
-			user.DisplayName = "WeChat User"
-			user.Role = common.RoleCommonUser
-			user.Status = common.UserStatusEnabled
-
-			if err := user.Insert(0); err != nil {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"message": err.Error(),
-				})
-				return
-			}
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "管理员关闭了新用户注册",
-			})
-			return
-		}
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "账号未绑定，控制平面不开放新用户注册",
+		})
+		return
 	}
 
 	if user.Status != common.UserStatusEnabled {

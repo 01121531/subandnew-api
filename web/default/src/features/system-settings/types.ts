@@ -812,25 +812,15 @@ export type SystemTaskListResponse = {
 }
 
 export type SiteSettings = {
-  'theme.frontend': string
-  Notice: string
   SystemName: string
   Logo: string
   Footer: string
-  About: string
-  HomePageContent: string
   ServerAddress: string
-  'legal.user_agreement': string
-  'legal.privacy_policy': string
-  HeaderNavModules: string
-  SidebarModulesAdmin: string
 }
 
 export type AuthSettings = {
   PasswordLoginEnabled: boolean
-  PasswordRegisterEnabled: boolean
   EmailVerificationEnabled: boolean
-  RegisterEnabled: boolean
   EmailDomainRestrictionEnabled: boolean
   EmailAliasRestrictionEnabled: boolean
   EmailDomainWhitelist: string

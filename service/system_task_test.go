@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -60,6 +61,39 @@ func countSystemTasks(t *testing.T, taskType string) int64 {
 	var count int64
 	require.NoError(t, model.DB.Model(&model.SystemTask{}).Where("type = ?", taskType).Count(&count).Error)
 	return count
+}
+
+func TestManagedInstanceProbeSchedulerUsesScopedTasksAndBackoff(t *testing.T) {
+	truncate(t)
+	now := common.GetTimestamp()
+	due := &model.ManagedInstance{
+		Name: "due", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://due.example.com",
+		Environment: "production", TLSVerify: true, CheckIntervalSeconds: 60,
+	}
+	notDue := &model.ManagedInstance{
+		Name: "not-due", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://not-due.example.com",
+		Environment: "production", TLSVerify: true, CheckIntervalSeconds: 60, LastCheckedAt: now,
+	}
+	require.NoError(t, model.DB.Create(due).Error)
+	require.NoError(t, model.DB.Create(notDue).Error)
+
+	scheduleDueManagedInstanceProbes(now)
+	scheduleDueManagedInstanceProbes(now)
+
+	var tasks []*model.SystemTask
+	require.NoError(t, model.DB.Where("type = ?", model.SystemTaskTypeManagedInstanceProbe).Find(&tasks).Error)
+	require.Len(t, tasks, 1)
+	require.Equal(t, fmt.Sprintf("%d", due.Id), tasks[0].ScopeKey)
+}
+
+func TestManagedInstanceProbeDueAppliesFailureBackoff(t *testing.T) {
+	now := int64(10_000)
+	instance := &model.ManagedInstance{
+		Id: 4, CheckIntervalSeconds: 60, LastCheckedAt: now - 100, ConsecutiveFailures: 2,
+	}
+	require.False(t, managedInstanceProbeDue(instance, now))
+	instance.LastCheckedAt = now - 300
+	require.True(t, managedInstanceProbeDue(instance, now))
 }
 
 func TestSystemTaskSchedulerCreatesWhenDueAndDedups(t *testing.T) {

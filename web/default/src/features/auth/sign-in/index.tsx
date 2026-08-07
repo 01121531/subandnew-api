@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link, useSearch } from '@tanstack/react-router'
+import { useSearch } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { useStatus } from '@/hooks/use-status'
@@ -37,19 +37,6 @@ export function SignIn() {
           <h1 className='text-3xl font-bold tracking-[-0.03em]'>
             {t('Sign in')}
           </h1>
-          {!status?.self_use_mode_enabled &&
-            status?.register_enabled !== false && (
-              <p className='text-muted-foreground text-sm'>
-                {t("Don't have an account?")}{' '}
-                <Link
-                  to='/sign-up'
-                  className='font-medium text-violet-600 underline decoration-violet-500/30 underline-offset-4 transition-colors hover:text-violet-500 dark:text-violet-300'
-                >
-                  {t('Sign up')}
-                </Link>
-                .
-              </p>
-            )}
         </div>
 
         <UserAuthForm redirectTo={redirect} />

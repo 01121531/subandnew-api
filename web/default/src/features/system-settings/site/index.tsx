@@ -25,18 +25,10 @@ import {
 } from './section-registry.tsx'
 
 const defaultSiteSettings: SiteSettings = {
-  'theme.frontend': 'default',
-  Notice: '',
   SystemName: 'HUICHUAN',
   Logo: '',
   Footer: '',
-  About: '',
-  HomePageContent: '',
   ServerAddress: '',
-  'legal.user_agreement': '',
-  'legal.privacy_policy': '',
-  HeaderNavModules: '',
-  SidebarModulesAdmin: '',
 }
 
 export function SiteSettings() {

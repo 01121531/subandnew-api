@@ -18,7 +18,7 @@
    - `darwin/amd64`
    - `darwin/arm64`
 3. 不支持 Docker、Kubernetes、多实例、`go run`、环境变量覆盖版本号、无法定位或无法替换当前可执行文件的场景。
-4. 只安装固定仓库 `01121531/HUICHUAN-AI` 的最新稳定 SemVer Release；客户端只提交 `release_id`，服务端会重新拉取最新 Release 并校验 ID。
+4. 只安装固定仓库 `01121531/subandnew-api` 的最新稳定 SemVer Release；客户端只提交 `release_id`，服务端会重新拉取最新 Release 并校验 ID。
 5. Release 资产命名约定：
    - Windows: `huichuan-ai-<version>-windows-amd64.exe` + `checksums-windows.txt`
    - Linux: `huichuan-ai-<version>-linux-amd64` / `huichuan-ai-<version>-linux-arm64` + `checksums-linux.txt`

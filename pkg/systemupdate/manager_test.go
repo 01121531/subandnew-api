@@ -183,7 +183,7 @@ func TestSaveStateReplacesExistingFile(t *testing.T) {
 }
 
 func TestValidateDownloadURL(t *testing.T) {
-	require.NoError(t, validateDownloadURL("https://github.com/01121531/HUICHUAN-AI/releases/download/v1.0.0/app.exe"))
+	require.NoError(t, validateDownloadURL("https://github.com/01121531/subandnew-api/releases/download/v1.0.0/app.exe"))
 	require.NoError(t, validateDownloadURL("https://release-assets.githubusercontent.com/example"))
 	require.Error(t, validateDownloadURL("http://github.com/file"))
 	require.Error(t, validateDownloadURL("https://example.com/file"))

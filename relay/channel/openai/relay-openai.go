@@ -12,7 +12,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/relay/channel/openrouter"
 	relaycommon "github.com/01121531/HUICHUAN-AI/relay/common"
-	relayconstant "github.com/01121531/HUICHUAN-AI/relay/constant"
 	"github.com/01121531/HUICHUAN-AI/relay/helper"
 	"github.com/01121531/HUICHUAN-AI/service"
 	"github.com/01121531/HUICHUAN-AI/service/relayconvert"
@@ -102,43 +101,6 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 	return helper.ObjectData(c, lastStreamResponse)
 }
 
-func sendNERVChatStreamReplacement(c *gin.Context, info *relaycommon.RelayInfo, responseID string, created int64, model string, systemFingerprint string, text string) error {
-	contentChunk := dto.ChatCompletionsStreamResponse{
-		Id:      responseID,
-		Object:  "chat.completion.chunk",
-		Created: created,
-		Model:   model,
-		Choices: []dto.ChatCompletionsStreamResponseChoice{{
-			Index: 0,
-			Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-				Content: &text,
-			},
-		}},
-	}
-	if systemFingerprint != "" {
-		contentChunk.SystemFingerprint = &systemFingerprint
-	}
-	if err := helper.ObjectData(c, contentChunk); err != nil {
-		return err
-	}
-
-	finishReason := "stop"
-	finishChunk := dto.ChatCompletionsStreamResponse{
-		Id:      responseID,
-		Object:  "chat.completion.chunk",
-		Created: created,
-		Model:   model,
-		Choices: []dto.ChatCompletionsStreamResponseChoice{{
-			Index:        0,
-			FinishReason: &finishReason,
-		}},
-	}
-	if systemFingerprint != "" {
-		finishChunk.SystemFingerprint = &systemFingerprint
-	}
-	return helper.ObjectData(c, finishChunk)
-}
-
 func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.HUICHUANError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -157,20 +119,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
-	nervTarget := nervChatTarget(info)
-	nervStreamGate := info.RelayFormat == types.RelayFormatOpenAI &&
-		info.RelayMode == relayconstant.RelayModeChatCompletions &&
-		service.NERVStreamTamperGateEnabled(nervTarget)
-	nervBufferedStreamData := make([]string, 0)
-
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		if lastStreamData != "" {
-			if nervStreamGate {
-				nervBufferedStreamData = append(nervBufferedStreamData, lastStreamData)
-			} else if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
+			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
 				sr.Error(err)
 			}
@@ -216,20 +170,7 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
-			if nervStreamGate {
-				nervBufferedStreamData = append(nervBufferedStreamData, lastStreamData)
-			} else {
-				_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-			}
-		}
-		if nervStreamGate {
-			if replacement, tampered := service.ApplyNERVTamperToStreamText(responseTextBuilder.String(), nervTarget, model); tampered {
-				_ = sendNERVChatStreamReplacement(c, info, responseId, createAt, model, systemFingerprint, replacement)
-			} else {
-				for _, streamData := range nervBufferedStreamData {
-					_ = sendStreamData(c, info, streamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-				}
-			}
+			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
 		}
 	}
 
@@ -286,8 +227,6 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		}
 	}
 
-	wasTampered := service.ApplyNERVTamperToChatResponse(&simpleResponse, nervChatTarget(info))
-
 	forceFormat := false
 	if info.ChannelSetting.ForceFormat {
 		forceFormat = true
@@ -311,13 +250,6 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
-
-	if wasTampered {
-		responseBody, err = common.Marshal(simpleResponse)
-		if err != nil {
-			return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
-		}
-	}
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:

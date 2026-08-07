@@ -434,11 +434,11 @@ export function PublicHeader(props: PublicHeaderProps) {
           >
             {showAuthButtons && (
               <Link
-                to={isAuthenticated ? "/dashboard" : "/sign-in"}
+                to={isAuthenticated ? "/instances" : "/sign-in"}
                 onClick={() => setMobileOpen(false)}
                 className="inline-flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 text-sm font-medium text-white shadow-lg shadow-violet-500/20 transition-opacity hover:opacity-90 active:opacity-80"
               >
-                {isAuthenticated ? t("Go to Dashboard") : t("Sign in")}
+                {isAuthenticated ? t("Instance center") : t("Sign in")}
               </Link>
             )}
           </div>

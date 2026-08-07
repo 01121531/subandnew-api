@@ -160,15 +160,15 @@ export function Footer(props: FooterProps) {
         links: [
           {
             text: t("footer.columns.about.links.aboutProject"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
           {
             text: t("footer.columns.about.links.contact"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
           {
             text: t("footer.columns.about.links.features"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
         ],
       },
@@ -177,15 +177,15 @@ export function Footer(props: FooterProps) {
         links: [
           {
             text: t("footer.columns.docs.links.quickStart"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
           {
             text: t("footer.columns.docs.links.installation"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
           {
             text: t("footer.columns.docs.links.apiDocs"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
         ],
       },
@@ -202,7 +202,7 @@ export function Footer(props: FooterProps) {
           },
           {
             text: t("footer.columns.related.links.huichuanKeyTool"),
-            href: "https://github.com/01121531/HUICHUAN-AI",
+            href: "https://github.com/01121531/subandnew-api",
           },
         ],
       },

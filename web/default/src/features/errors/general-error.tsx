@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils'
 
 import { ErrorPageShell } from './error-page-shell'
 
-const FEEDBACK_URL = 'https://github.com/01121531/HUICHUAN-AI/issues'
+const FEEDBACK_URL = 'https://github.com/01121531/subandnew-api/issues'
 
 type GeneralErrorProps = React.HTMLAttributes<HTMLDivElement> & {
   minimal?: boolean

@@ -22,10 +22,6 @@ func SetUserPermissions(userID int, permissions PermissionsMap) error {
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
-	if err := validatePermissionDependencies(permissions); err != nil {
-		return err
-	}
-
 	for resource, actions := range permissions {
 		if !isKnownResource(resource) {
 			continue
@@ -47,10 +43,6 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 	if e == nil {
 		return fmt.Errorf("authz enforcer is not initialized")
 	}
-	if err := validatePermissionDependencies(permissions); err != nil {
-		return err
-	}
-
 	for resource, actions := range permissions {
 		if !isKnownResource(resource) {
 			continue
@@ -69,17 +61,6 @@ func SetUserPermissionsInTx(tx *gorm.DB, userID int, permissions PermissionsMap)
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rules).Error; err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func validatePermissionDependencies(permissions PermissionsMap) error {
-	actions, ok := permissions[ResourceDatasetCapture]
-	if !ok || !actions[ActionDownload] {
-		return nil
-	}
-	if !actions[ActionView] {
-		return fmt.Errorf("dataset capture download permission requires view permission")
 	}
 	return nil
 }

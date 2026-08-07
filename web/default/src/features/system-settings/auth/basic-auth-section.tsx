@@ -46,9 +46,7 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const basicAuthSchema = z.object({
   PasswordLoginEnabled: z.boolean(),
-  PasswordRegisterEnabled: z.boolean(),
   EmailVerificationEnabled: z.boolean(),
-  RegisterEnabled: z.boolean(),
   EmailDomainRestrictionEnabled: z.boolean(),
   EmailAliasRestrictionEnabled: z.boolean(),
   EmailDomainWhitelist: z.string(),
@@ -123,48 +121,6 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
                   <FormLabel>{t('Password Login')}</FormLabel>
                   <FormDescription>
                     {t('Allow users to log in with password')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='RegisterEnabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Registration Enabled')}</FormLabel>
-                  <FormDescription>
-                    {t('Allow new users to register')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='PasswordRegisterEnabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Password Registration')}</FormLabel>
-                  <FormDescription>
-                    {t('Allow registration with password')}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>

@@ -114,6 +114,29 @@ func TestQueuedSystemTasksAllowMultiplePendingRows(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestScopedSystemTasksDeduplicatePerScopeAndClaimConcurrently(t *testing.T) {
+	truncateTables(t)
+
+	first, err := CreateScopedSystemTask(SystemTaskTypeManagedInstanceProbe, "instance:1", nil, nil)
+	require.NoError(t, err)
+	_, err = CreateScopedSystemTask(SystemTaskTypeManagedInstanceProbe, "instance:1", nil, nil)
+	require.Error(t, err)
+	second, err := CreateScopedSystemTask(SystemTaskTypeManagedInstanceProbe, "instance:2", nil, nil)
+	require.NoError(t, err)
+
+	firstClaimed, ok, err := ClaimScopedSystemTask(first.ID, first.Type, "runner-a", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, ok)
+	secondClaimed, ok, err := ClaimScopedSystemTask(second.ID, second.Type, "runner-b", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, UpdateSystemTaskState(firstClaimed.TaskID, "runner-a", map[string]int{"progress": 50}))
+	require.NoError(t, RenewSystemTaskLock(secondClaimed.TaskID, "runner-b", common.GetTimestamp()+120))
+	require.NoError(t, FinishSystemTask(firstClaimed.TaskID, "runner-a", SystemTaskStatusSucceeded, nil, ""))
+	require.NoError(t, FinishSystemTask(secondClaimed.TaskID, "runner-b", SystemTaskStatusSucceeded, nil, ""))
+}
+
 func TestSystemTaskLockPreventsConcurrentClaim(t *testing.T) {
 	truncateTables(t)
 
@@ -195,6 +218,37 @@ func TestExpireStaleSystemTaskLockFailsOldRunAndAllowsNewRun(t *testing.T) {
 	second, err := CreateSystemTask(SystemTaskTypeLogCleanup, nil, nil)
 	require.NoError(t, err)
 	require.NotEqual(t, first.TaskID, second.TaskID)
+}
+
+func TestExpiredOperationTaskAlsoFailsBusinessOperation(t *testing.T) {
+	truncateTables(t)
+
+	task, err := CreateScopedSystemTask(SystemTaskTypeManagedInstanceOperation, "7", nil, nil)
+	require.NoError(t, err)
+	claimed, ok, err := ClaimScopedSystemTask(task.ID, task.Type, "runner-a", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, ok)
+	operation := &ManagedInstanceOperation{
+		OperationId: "miop_lease_test", InstanceId: 7, TaskId: claimed.TaskID, ActorId: 11, ExecutedBy: 12,
+		Action: ManagedInstanceActionRefreshInventory, Status: ManagedInstanceOperationStatusRunning,
+		RiskLevel: "low", RequiredCapability: "channels.list", IdempotencyKey: "digest", IdempotencyFingerprint: "fingerprint",
+		PlanHash: "plan", Parameters: "{}", Plan: "{}",
+	}
+	require.NoError(t, DB.Create(operation).Error)
+	require.NoError(t, DB.Model(&SystemTaskScopeLock{}).Where("task_id = ?", claimed.TaskID).
+		Update("locked_until", common.GetTimestamp()-1).Error)
+
+	require.NoError(t, ExpireStaleSystemTaskLocks(common.GetTimestamp()))
+
+	var reloaded ManagedInstanceOperation
+	require.NoError(t, DB.First(&reloaded, operation.Id).Error)
+	assert.Equal(t, ManagedInstanceOperationStatusFailed, reloaded.Status)
+	assert.Equal(t, "task_lease_expired", reloaded.ErrorCode)
+	assert.NotZero(t, reloaded.FinishedAt)
+	var audit ManagedInstanceAudit
+	require.NoError(t, DB.Where("instance_id = ? AND action = ?", 7, "operation_complete").First(&audit).Error)
+	assert.Equal(t, "failed", audit.Outcome)
+	assert.NotContains(t, audit.Details, "digest")
 }
 
 func TestFindEarliestPendingSystemTasks(t *testing.T) {

@@ -9,14 +9,12 @@ build
 *.db-journal
 logs
 web/default/dist
-web/classic/dist
 web/node_modules
+web/*/node_modules
+web/default/src/i18n/locales/_reports/*.untranslated.json
 web/node_modules.stale-*
 web/_stale-node_modules.stale-*
 web/default/_stale-node_modules.stale-*
-web/classic/_stale-node_modules.stale-*
-web/classic/node_modules/_stale-*
-web/classic/node_modules/@visactor/_stale-*
 web/dist
 .env
 one-api
@@ -32,8 +30,6 @@ plans
 .claude
 .cursor
 
-electron/node_modules
-electron/dist
 data/
 .gomodcache/
 .gocache-temp

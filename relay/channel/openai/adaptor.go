@@ -225,7 +225,7 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
 		if header.Get("HTTP-Referer") == "" {
-			header.Set("HTTP-Referer", "https://github.com/01121531/HUICHUAN-AI")
+			header.Set("HTTP-Referer", "https://github.com/01121531/subandnew-api")
 		}
 		if header.Get("X-OpenRouter-Title") == "" {
 			header.Set("X-OpenRouter-Title", "HUICHUAN")
@@ -354,10 +354,6 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 				request.Messages[0].Role = "developer"
 			}
 		}
-	}
-
-	if err := service.ApplyNERVToChatRequest(request, nervChatTarget(info)); err != nil {
-		return nil, err
 	}
 
 	return request, nil
@@ -614,9 +610,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 	if info != nil && request.Reasoning != nil && request.Reasoning.Effort != "" {
 		info.ReasoningEffort = request.Reasoning.Effort
 	}
-	if err := service.ApplyNERVToResponsesRequest(&request, nervResponsesTarget(info)); err != nil {
-		return nil, err
-	}
 	return request, nil
 }
 
@@ -699,33 +692,5 @@ func (a *Adaptor) GetChannelName() string {
 		return openrouter.ChannelName
 	default:
 		return ChannelName
-	}
-}
-
-func nervChatTarget(info *relaycommon.RelayInfo) service.NERVTarget {
-	if info == nil {
-		return service.NERVTargetOpenAIChat
-	}
-	switch info.RelayFormat {
-	case types.RelayFormatClaude:
-		return service.NERVTargetClaudeToOpenAI
-	case types.RelayFormatGemini:
-		return service.NERVTargetGeminiToOpenAI
-	default:
-		return service.NERVTargetOpenAIChat
-	}
-}
-
-func nervResponsesTarget(info *relaycommon.RelayInfo) service.NERVTarget {
-	if info == nil {
-		return service.NERVTargetOpenAIResponses
-	}
-	switch info.RelayFormat {
-	case types.RelayFormatClaude:
-		return service.NERVTargetClaudeToOpenAI
-	case types.RelayFormatGemini:
-		return service.NERVTargetGeminiToOpenAI
-	default:
-		return service.NERVTargetOpenAIResponses
 	}
 }

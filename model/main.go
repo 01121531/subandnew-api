@@ -329,11 +329,9 @@ func migrateDB() error {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&SystemTaskScopeLock{},
 		&CasbinRule{},
 		&AuthzRole{},
-		&DatasetCaptureIndex{},
-		&DatasetCaptureAccessAudit{},
-		&DatasetCaptureAccessAuditItem{},
 		&ProxyGroup{},
 		&Proxy{},
 		&ChannelProxyBinding{},
@@ -342,6 +340,10 @@ func migrateDB() error {
 		&ProxyStateEvent{},
 		&ProxyUpstreamAttempt{},
 		&ProxyGroupWaiter{},
+		&ManagedInstance{},
+		&ManagedInstanceCredential{},
+		&ManagedInstanceAudit{},
+		&ManagedInstanceOperation{},
 	)
 	if err != nil {
 		return err
@@ -398,9 +400,7 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
-		{&DatasetCaptureIndex{}, "DatasetCaptureIndex"},
-		{&DatasetCaptureAccessAudit{}, "DatasetCaptureAccessAudit"},
-		{&DatasetCaptureAccessAuditItem{}, "DatasetCaptureAccessAuditItem"},
+		{&SystemTaskScopeLock{}, "SystemTaskScopeLock"},
 		{&ProxyGroup{}, "ProxyGroup"},
 		{&Proxy{}, "Proxy"},
 		{&ChannelProxyBinding{}, "ChannelProxyBinding"},
@@ -409,6 +409,10 @@ func migrateDBFast() error {
 		{&ProxyStateEvent{}, "ProxyStateEvent"},
 		{&ProxyUpstreamAttempt{}, "ProxyUpstreamAttempt"},
 		{&ProxyGroupWaiter{}, "ProxyGroupWaiter"},
+		{&ManagedInstance{}, "ManagedInstance"},
+		{&ManagedInstanceCredential{}, "ManagedInstanceCredential"},
+		{&ManagedInstanceAudit{}, "ManagedInstanceAudit"},
+		{&ManagedInstanceOperation{}, "ManagedInstanceOperation"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

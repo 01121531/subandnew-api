@@ -1,10 +1,7 @@
 {
   "name": "huichuan-web-workspace",
   "private": true,
-  "workspaces": [
-    "default",
-    "classic"
-  ],
+  "workspaces": ["default"],
   "devDependencies": {
     "typescript": "6.0.3"
   },

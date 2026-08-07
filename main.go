@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
-	"github.com/01121531/HUICHUAN-AI/controller"
 	"github.com/01121531/HUICHUAN-AI/i18n"
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/middleware"
@@ -25,11 +23,9 @@ import (
 	"github.com/01121531/HUICHUAN-AI/oauth"
 	perfmetrics "github.com/01121531/HUICHUAN-AI/pkg/perf_metrics"
 	"github.com/01121531/HUICHUAN-AI/pkg/systemupdate"
-	"github.com/01121531/HUICHUAN-AI/relay"
 	"github.com/01121531/HUICHUAN-AI/router"
 	"github.com/01121531/HUICHUAN-AI/service"
 	"github.com/01121531/HUICHUAN-AI/service/authz"
-	"github.com/01121531/HUICHUAN-AI/setting/dataset_capture_setting"
 	_ "github.com/01121531/HUICHUAN-AI/setting/performance_setting"
 	"github.com/01121531/HUICHUAN-AI/setting/ratio_setting"
 
@@ -48,22 +44,11 @@ var buildFS embed.FS
 //go:embed web/default/dist/index.html
 var indexPage []byte
 
-//go:embed web/classic/dist
-var classicBuildFS embed.FS
-
-//go:embed web/classic/dist/index.html
-var classicIndexPage []byte
-
 func main() {
 	if systemupdate.RunHelperIfRequested() {
 		return
 	}
 	closeSharedResourcesOnExit := true
-	defer func() {
-		if closeSharedResourcesOnExit {
-			middleware.CloseDatasetCapture()
-		}
-	}()
 	startTime := time.Now()
 
 	err := InitResources()
@@ -91,87 +76,18 @@ func main() {
 		}
 	}()
 
-	if common.RedisEnabled {
-		// for compatibility with old versions
-		common.MemoryCacheEnabled = true
-	}
-	if common.MemoryCacheEnabled {
-		common.SysLog("memory cache enabled")
-		common.SysLog(fmt.Sprintf("sync frequency: %d seconds", common.SyncFrequency))
-
-		// Add panic recovery and retry for InitChannelCache
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					common.SysLog(fmt.Sprintf("InitChannelCache panic: %v, retrying once", r))
-					// Retry once
-					_, _, fixErr := model.FixAbility()
-					if fixErr != nil {
-						common.FatalLog(fmt.Sprintf("InitChannelCache failed: %s", fixErr.Error()))
-					}
-				}
-			}()
-			model.InitChannelCache()
-		}()
-
-		go model.SyncChannelCache(common.SyncFrequency)
-	}
-
-	// Warm pricing after channel cache initialization so Advanced Custom
-	// endpoint inference can read cached route settings on first request.
-	model.GetPricing()
-
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
 
-	// 数据看板
-	go model.UpdateQuotaData()
-
-	if os.Getenv("CHANNEL_UPDATE_FREQUENCY") != "" {
-		frequency, err := strconv.Atoi(os.Getenv("CHANNEL_UPDATE_FREQUENCY"))
-		if err != nil {
-			common.FatalLog("failed to parse CHANNEL_UPDATE_FREQUENCY: " + err.Error())
-		}
-		go controller.AutomaticallyUpdateChannels(frequency)
-	}
-
-	// Codex credential auto-refresh check every 10 minutes, refresh when expires within 1 day
-	service.StartCodexCredentialAutoRefreshTask()
-
-	// Subscription quota reset task (daily/weekly/monthly/custom)
-	service.StartSubscriptionQuotaResetTask()
-
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartSystemInstanceReporter()
 
-	// Wire task polling adaptor factory (breaks service -> relay import cycle).
-	// Must run before the system task runner starts: the async_task_poll handler
-	// calls service.RunTaskPollingOnce, which needs this factory set.
-	service.GetTaskAdaptorFunc = func(platform constant.TaskPlatform) service.TaskPollingAdaptor {
-		a := relay.GetTaskAdaptor(platform)
-		if a == nil {
-			return nil
-		}
-		return a
-	}
-
-	// Register the periodic channel test, upstream model update, and async task
-	// polling (Midjourney / Suno / video) jobs as scheduled system tasks
-	// (DB-lease dedup across masters + run history), then start the runner that
-	// schedules and executes them. Master-only execution and the UpdateTask
-	// switch are enforced inside the runner and each handler's Enabled().
-	controller.RegisterScheduledSystemTasks()
+	// Run only handlers registered by the control-plane task packages.
 	service.StartSystemTaskRunner()
-
-	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
-		common.BatchUpdateEnabled = true
-		common.SysLog("batch update enabled with interval " + strconv.Itoa(common.BatchUpdateInterval) + "s")
-		model.InitBatchUpdater()
-	}
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
@@ -192,7 +108,7 @@ func main() {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/huichuan", err),
+				"message": fmt.Sprintf("Panic detected, error: %v. Please report it here: https://github.com/01121531/subandnew-api/issues", err),
 				"type":    "huichuan_panic",
 			},
 		})
@@ -221,10 +137,8 @@ func main() {
 
 	// 设置路由
 	router.SetRouter(server, router.ThemeAssets{
-		DefaultBuildFS:   buildFS,
-		DefaultIndexPage: indexPage,
-		ClassicBuildFS:   classicBuildFS,
-		ClassicIndexPage: classicIndexPage,
+		BuildFS:   buildFS,
+		IndexPage: indexPage,
 	})
 	var port = os.Getenv("PORT")
 	if port == "" {
@@ -301,7 +215,6 @@ func InjectUmamiAnalytics() {
 	analyticsInject := []byte(analyticsInjectBuilder.String())
 	placeholder := []byte("<!--umami-->\n")
 	indexPage = bytes.ReplaceAll(indexPage, placeholder, analyticsInject)
-	classicIndexPage = bytes.ReplaceAll(classicIndexPage, placeholder, analyticsInject)
 }
 
 func InjectGoogleAnalytics() {
@@ -325,7 +238,6 @@ func InjectGoogleAnalytics() {
 	analyticsInject := []byte(analyticsInjectBuilder.String())
 	placeholder := []byte("<!--Google Analytics-->\n")
 	indexPage = bytes.ReplaceAll(indexPage, placeholder, analyticsInject)
-	classicIndexPage = bytes.ReplaceAll(classicIndexPage, placeholder, analyticsInject)
 }
 
 func InitResources() error {
@@ -365,22 +277,6 @@ func InitResources() error {
 
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()
-	if err = authz.MigrateLegacyDatasetCapturePermissions(model.DB); err != nil {
-		common.FatalLog("failed to migrate dataset capture permissions: " + err.Error())
-		return err
-	}
-	if dataset_capture_setting.IsEnabled() {
-		if err = service.ReconcileDatasetCaptureIndex(
-			middleware.DatasetCapturePathTemplate(),
-			middleware.DatasetCaptureNode(),
-		); err != nil {
-			common.SysError("failed to reconcile dataset capture index: " + err.Error())
-		}
-	}
-	// Initialize capture workers during startup so the first matching API
-	// request never pays directory calibration or disk-probe costs.
-	middleware.ReloadDatasetCapture()
-
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()
 

@@ -54,6 +54,9 @@ func TestMain(m *testing.M) {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&SystemTaskScopeLock{},
+		&ManagedInstanceOperation{},
+		&ManagedInstanceAudit{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -82,7 +85,10 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
+		DB.Exec("DELETE FROM system_task_scope_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		DB.Exec("DELETE FROM managed_instance_operations")
+		DB.Exec("DELETE FROM managed_instance_audits")
 	})
 }
 

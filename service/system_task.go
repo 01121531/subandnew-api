@@ -230,26 +230,55 @@ func EnqueueQueuedSystemTask(taskType string, payload any, state any) (*model.Sy
 	return task, nil
 }
 
-// runSystemTaskClaimPass tries to claim one pending task per registered type
-// and dispatches each claimed task in its own goroutine so a long-running
-// handler (e.g. channel test) never blocks another type (e.g. log cleanup).
+// EnqueueScopedSystemTask deduplicates work by type and scope while allowing
+// different scopes to execute concurrently.
+func EnqueueScopedSystemTask(taskType string, scopeKey string, payload any, state any) (*model.SystemTask, bool, error) {
+	activeTask, err := model.GetActiveScopedSystemTask(taskType, scopeKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if activeTask != nil {
+		return activeTask, false, nil
+	}
+	task, err := model.CreateScopedSystemTask(taskType, scopeKey, payload, state)
+	if err != nil {
+		activeTask, activeErr := model.GetActiveScopedSystemTask(taskType, scopeKey)
+		if activeErr == nil && activeTask != nil {
+			return activeTask, false, nil
+		}
+		return nil, false, err
+	}
+	notifySystemTaskRunner()
+	return task, true, nil
+}
+
+// runSystemTaskClaimPass dispatches unscoped work under its per-type lease and
+// scoped work under an independent type+scope lease.
 func runSystemTaskClaimPass(runnerID string) {
 	handlers := registeredSystemTaskHandlers()
+	handlersByType := make(map[string]SystemTaskHandler, len(handlers))
 	taskTypes := make([]string, 0, len(handlers))
 	for _, handler := range handlers {
 		taskTypes = append(taskTypes, handler.Type())
+		handlersByType[handler.Type()] = handler
 	}
-	pendingTasks, err := model.FindEarliestPendingSystemTasks(taskTypes)
+	pendingTasks, err := model.FindPendingSystemTasksByTypes(taskTypes, 100)
 	if err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("system task runner query failed: %v", err))
 		return
 	}
-	for _, handler := range handlers {
-		task := pendingTasks[handler.Type()]
-		if task == nil {
+	for _, task := range pendingTasks {
+		handler := handlersByType[task.Type]
+		if handler == nil {
 			continue
 		}
-		claimedTask, claimed, err := model.ClaimSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
+		var claimedTask *model.SystemTask
+		var claimed bool
+		if task.ScopeKey == "" {
+			claimedTask, claimed, err = model.ClaimSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
+		} else {
+			claimedTask, claimed, err = model.ClaimScopedSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
+		}
 		if err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("system task claim failed: %v", err))
 			continue
@@ -312,6 +341,7 @@ func runSystemTaskScheduler() {
 			continue
 		}
 	}
+	scheduleDueManagedInstanceProbes(now)
 }
 
 // runWithLeaseHeartbeat renews the per-type lock on a background ticker while

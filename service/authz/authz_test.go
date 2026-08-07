@@ -105,9 +105,15 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionSensitiveWrite: true,
 			ActionSecretView:     false,
 		},
-		ResourceDatasetCapture: {
-			ActionView:     false,
-			ActionDownload: false,
+		ResourceManagedInstance: {
+			ManagedInstanceActionView:         true,
+			ManagedInstanceActionCreate:       false,
+			ManagedInstanceActionUpdate:       false,
+			ManagedInstanceActionDelete:       false,
+			ManagedInstanceActionOperate:      false,
+			ManagedInstanceActionBatchOperate: false,
+			ManagedInstanceActionSecretRotate: false,
+			ManagedInstanceActionAudit:        false,
 		},
 	}, ExplicitUserPermissions(42))
 	assert.Equal(t, PermissionsMap{
@@ -137,9 +143,15 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 			ActionSensitiveWrite: false,
 			ActionSecretView:     false,
 		},
-		ResourceDatasetCapture: {
-			ActionView:     false,
-			ActionDownload: false,
+		ResourceManagedInstance: {
+			ManagedInstanceActionView:         true,
+			ManagedInstanceActionCreate:       false,
+			ManagedInstanceActionUpdate:       false,
+			ManagedInstanceActionDelete:       false,
+			ManagedInstanceActionOperate:      false,
+			ManagedInstanceActionBatchOperate: false,
+			ManagedInstanceActionSecretRotate: false,
+			ManagedInstanceActionAudit:        false,
 		},
 	}, ExplicitUserPermissions(42))
 	assert.Empty(t, ExplicitUserOverrides(42))
@@ -164,20 +176,6 @@ func TestClearUserAuthorizationRemovesOverrides(t *testing.T) {
 	assert.True(t, Can(90, common.RoleAdminUser, ChannelWrite))
 	assert.False(t, Can(90, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(90, common.RoleCommonUser, ChannelRead))
-}
-
-func TestDatasetCaptureDownloadPermissionRequiresView(t *testing.T) {
-	db := newAuthzTestDB(t)
-	require.NoError(t, Init(db))
-
-	err := SetUserPermissions(91, PermissionsMap{
-		ResourceDatasetCapture: {
-			ActionDownload: true,
-		},
-	})
-	require.EqualError(t, err, "dataset capture download permission requires view permission")
-	assert.False(t, Can(91, common.RoleAdminUser, DatasetCaptureView))
-	assert.False(t, Can(91, common.RoleAdminUser, DatasetCaptureDownload))
 }
 
 func TestSetUserPermissionsInTxDoesNotMutateEnforcerBeforeReload(t *testing.T) {
@@ -248,47 +246,8 @@ func TestCapabilitiesUseCatalogShape(t *testing.T) {
 	assert.True(t, capabilities[ResourceChannel][ActionWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSensitiveWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSecretView])
-	assert.False(t, capabilities[ResourceDatasetCapture][ActionView])
-	assert.False(t, capabilities[ResourceDatasetCapture][ActionDownload])
-}
-
-func TestMigrateLegacyDatasetCapturePermissions(t *testing.T) {
-	db := newAuthzTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}))
-	require.NoError(t, db.Create(&model.Option{Key: legacyDatasetCaptureAdminVisibleOption, Value: "true"}).Error)
-	require.NoError(t, db.Create(&model.User{Id: 10, Username: "admin-one", Password: "password", Role: common.RoleAdminUser, AffCode: "admin-one"}).Error)
-	require.NoError(t, db.Create(&model.User{Id: 11, Username: "admin-two", Password: "password", Role: common.RoleAdminUser, AffCode: "admin-two"}).Error)
-	require.NoError(t, db.Create(&model.User{Id: 12, Username: "user", Password: "password", Role: common.RoleCommonUser, AffCode: "user"}).Error)
-	require.NoError(t, Init(db))
-
-	require.NoError(t, MigrateLegacyDatasetCapturePermissions(db))
-	assert.True(t, Can(10, common.RoleAdminUser, DatasetCaptureView))
-	assert.True(t, Can(10, common.RoleAdminUser, DatasetCaptureDownload))
-	assert.True(t, Can(11, common.RoleAdminUser, DatasetCaptureView))
-	assert.False(t, Can(12, common.RoleCommonUser, DatasetCaptureView))
-
-	var marker model.Option
-	require.NoError(t, db.Where("key = ?", datasetCapturePermissionMigratedOption).Take(&marker).Error)
-	assert.Equal(t, "true", marker.Value)
-
-	require.NoError(t, SetUserPermissions(10, PermissionsMap{
-		ResourceDatasetCapture: {
-			ActionView:     false,
-			ActionDownload: false,
-		},
-	}))
-	require.NoError(t, MigrateLegacyDatasetCapturePermissions(db))
-	assert.False(t, Can(10, common.RoleAdminUser, DatasetCaptureView), "completed migration must not regrant revoked access")
-}
-
-func TestMigrateLegacyDatasetCapturePermissionsKeepsAdminsDeniedWhenLegacyOptionIsFalse(t *testing.T) {
-	db := newAuthzTestDB(t)
-	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}))
-	require.NoError(t, db.Create(&model.Option{Key: legacyDatasetCaptureAdminVisibleOption, Value: "false"}).Error)
-	require.NoError(t, db.Create(&model.User{Id: 20, Username: "admin", Password: "password", Role: common.RoleAdminUser, AffCode: "admin"}).Error)
-	require.NoError(t, Init(db))
-
-	require.NoError(t, MigrateLegacyDatasetCapturePermissions(db))
-	assert.False(t, Can(20, common.RoleAdminUser, DatasetCaptureView))
-	assert.False(t, Can(20, common.RoleAdminUser, DatasetCaptureDownload))
+	assert.True(t, capabilities[ResourceManagedInstance][ManagedInstanceActionView])
+	assert.False(t, capabilities[ResourceManagedInstance][ManagedInstanceActionCreate])
+	assert.False(t, capabilities[ResourceManagedInstance][ManagedInstanceActionOperate])
+	assert.False(t, capabilities[ResourceManagedInstance][ManagedInstanceActionSecretRotate])
 }

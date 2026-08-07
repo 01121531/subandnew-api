@@ -695,7 +695,6 @@ func UpdateUser(c *gin.Context) {
 		updatedUser.Password = "" // rollback to what it should be
 	}
 	updatePassword := updatedUser.Password != ""
-	datasetCapturePermissionsBefore := datasetCapturePermissionStateForUser(updatedUser.Id, originUser.Role)
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
@@ -714,7 +713,6 @@ func UpdateUser(c *gin.Context) {
 			return
 		}
 	}
-	datasetCapturePermissionsAfter := datasetCapturePermissionStateForUser(updatedUser.Id, originUser.Role)
 	if err := model.InvalidateUserCache(updatedUser.Id); err != nil {
 		common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", updatedUser.Id, err.Error()))
 	}
@@ -722,7 +720,6 @@ func UpdateUser(c *gin.Context) {
 		"username": originUser.Username,
 		"id":       updatedUser.Id,
 	})
-	recordDatasetCapturePermissionUpdate(c, updatedUser.Id, datasetCapturePermissionsBefore, datasetCapturePermissionsAfter)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -1006,12 +1003,6 @@ func CreateUser(c *gin.Context) {
 			return
 		}
 	}
-	recordDatasetCapturePermissionUpdate(
-		c,
-		cleanUser.Id,
-		datasetCapturePermissionState{},
-		datasetCapturePermissionStateForUser(cleanUser.Id, cleanUser.Role),
-	)
 	cleanUser.FinishInsert(0)
 
 	recordManageAuditFor(c, cleanUser.Id, "user.create", map[string]interface{}{
@@ -1039,37 +1030,6 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 		return true, authz.ClearUserAuthorizationInTx(tx, userID)
 	}
 	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
-}
-
-type datasetCapturePermissionState struct {
-	View     bool
-	Download bool
-}
-
-func datasetCapturePermissionStateForUser(userID int, role int) datasetCapturePermissionState {
-	capabilities := authz.Capabilities(userID, role)
-	actions := capabilities[authz.ResourceDatasetCapture]
-	return datasetCapturePermissionState{
-		View:     actions[authz.ActionView],
-		Download: actions[authz.ActionDownload],
-	}
-}
-
-func recordDatasetCapturePermissionUpdate(
-	c *gin.Context,
-	targetUserID int,
-	before datasetCapturePermissionState,
-	after datasetCapturePermissionState,
-) {
-	if before == after {
-		return
-	}
-	recordManageAuditFor(c, targetUserID, "dataset_capture.permission_update", map[string]interface{}{
-		"view_before":     before.View,
-		"view_after":      after.View,
-		"download_before": before.Download,
-		"download_after":  after.Download,
-	})
 }
 
 type ManageRequest struct {

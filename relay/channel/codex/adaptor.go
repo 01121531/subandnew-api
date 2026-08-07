@@ -13,7 +13,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/relay/channel/openai"
 	relaycommon "github.com/01121531/HUICHUAN-AI/relay/common"
 	relayconstant "github.com/01121531/HUICHUAN-AI/relay/constant"
-	"github.com/01121531/HUICHUAN-AI/service"
 	"github.com/01121531/HUICHUAN-AI/types"
 
 	"github.com/gin-gonic/gin"
@@ -90,9 +89,6 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 				}
 			}
 		}
-	}
-	if err := service.ApplyNERVToResponsesRequest(&request, service.NERVTargetCodexResponses); err != nil {
-		return nil, err
 	}
 	// Codex backend requires the `instructions` field to be present.
 	// Keep it consistent with Codex CLI behavior by defaulting to an empty string.

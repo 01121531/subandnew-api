@@ -2,7 +2,7 @@
 
 本文档提供使用宝塔面板 Docker 功能部署 HUICHUAN 的图文教程。
 
-> 📖 官方文档：[宝塔面板部署](https://github.com/01121531/HUICHUAN-AI)
+> 📖 官方文档：[宝塔面板部署](https://github.com/01121531/subandnew-api)
 
 ***
 
@@ -136,10 +136,10 @@ docker-compose down && docker-compose up -d
 
 ## 相关链接
 
-- [官方文档](https://github.com/01121531/HUICHUAN-AI)
-- [环境变量配置](https://github.com/01121531/HUICHUAN-AI)
-- [常见问题](https://github.com/01121531/HUICHUAN-AI)
-- [GitHub 仓库](https://github.com/01121531/HUICHUAN-AI)
+- [官方文档](https://github.com/01121531/subandnew-api)
+- [环境变量配置](https://github.com/01121531/subandnew-api)
+- [常见问题](https://github.com/01121531/subandnew-api)
+- [GitHub 仓库](https://github.com/01121531/subandnew-api)
 
 ***
 

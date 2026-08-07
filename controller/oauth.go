@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/01121531/HUICHUAN-AI/common"
 	"github.com/01121531/HUICHUAN-AI/i18n"
@@ -12,7 +11,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/oauth"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
 // providerParams returns map with Provider key for i18n templates
@@ -104,8 +102,8 @@ func HandleOAuth(c *gin.Context) {
 		return
 	}
 
-	// 7. Find or create user
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
+	// 7. Only authenticate an account that Root already created and bound.
+	user, err := findOAuthUser(provider, oauthUser)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
@@ -116,8 +114,6 @@ func HandleOAuth(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
 		case *OAuthRegistrationDisabledError:
 			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
-		case *OAuthEmailAlreadyTakenError:
-			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		default:
 			common.ApiError(c, err)
 		}
@@ -202,8 +198,9 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 	})
 }
 
-// findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+// findOAuthUser only authenticates accounts that were created by Root and
+// explicitly bound to this provider.
+func findOAuthUser(provider oauth.Provider, oauthUser *oauth.OAuthUser) (*model.User, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
@@ -239,108 +236,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		}
 	}
 
-	// User doesn't exist, create new user if registration is enabled
-	if !common.RegisterEnabled {
-		return nil, &OAuthRegistrationDisabledError{}
-	}
-
-	// Set up new user
-	user.Username = provider.GetProviderPrefix() + strconv.Itoa(model.GetMaxUserId()+1)
-
-	if oauthUser.Username != "" {
-		if exists, err := model.CheckUserExistOrDeleted(oauthUser.Username, ""); err == nil && !exists {
-			// 防止索引退化
-			if len(oauthUser.Username) <= model.UserNameMaxLength {
-				user.Username = oauthUser.Username
-			}
-		}
-	}
-
-	if oauthUser.DisplayName != "" {
-		user.DisplayName = oauthUser.DisplayName
-	} else if oauthUser.Username != "" {
-		user.DisplayName = oauthUser.Username
-	} else {
-		user.DisplayName = provider.GetName() + " User"
-	}
-	if oauthUser.Email != "" {
-		user.Email = model.NormalizeEmail(oauthUser.Email)
-		if err := model.EnsureEmailAvailable(user.Email, 0); err != nil {
-			if errors.Is(err, model.ErrEmailAlreadyTaken) {
-				return nil, &OAuthEmailAlreadyTakenError{}
-			}
-			return nil, err
-		}
-	}
-	user.Role = common.RoleCommonUser
-	user.Status = common.UserStatusEnabled
-
-	// Handle affiliate code
-	affCode := session.Get("aff")
-	inviterId := 0
-	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
-	}
-
-	// Use transaction to ensure user creation and OAuth binding are atomic
-	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
-		// Custom provider: create user and binding in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Create OAuth binding
-			binding := &model.UserOAuthBinding{
-				UserId:         user.Id,
-				ProviderId:     genericProvider.GetProviderId(),
-				ProviderUserId: oauthUser.ProviderUserID,
-			}
-			if err := model.CreateUserOAuthBindingWithTx(tx, binding); err != nil {
-				return err
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		// Perform post-transaction tasks (logs, sidebar config, inviter rewards)
-		user.FinalizeOAuthUserCreation(inviterId)
-	} else {
-		// Built-in provider: create user and update provider ID in a transaction
-		err := model.DB.Transaction(func(tx *gorm.DB) error {
-			// Create user
-			if err := user.InsertWithTx(tx, inviterId); err != nil {
-				return err
-			}
-
-			// Set the provider user ID on the user model and update
-			provider.SetProviderUserID(user, oauthUser.ProviderUserID)
-			if err := tx.Model(user).Updates(map[string]interface{}{
-				"github_id":   user.GitHubId,
-				"discord_id":  user.DiscordId,
-				"oidc_id":     user.OidcId,
-				"linux_do_id": user.LinuxDOId,
-				"wechat_id":   user.WeChatId,
-				"telegram_id": user.TelegramId,
-			}).Error; err != nil {
-				return err
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		// Perform post-transaction tasks
-		user.FinalizeOAuthUserCreation(inviterId)
-	}
-
-	return user, nil
+	return nil, &OAuthRegistrationDisabledError{}
 }
 
 // Error types for OAuth
@@ -354,12 +250,6 @@ type OAuthRegistrationDisabledError struct{}
 
 func (e *OAuthRegistrationDisabledError) Error() string {
 	return "registration is disabled"
-}
-
-type OAuthEmailAlreadyTakenError struct{}
-
-func (e *OAuthEmailAlreadyTakenError) Error() string {
-	return "email is already in use"
 }
 
 // handleOAuthError handles OAuth errors and returns translated message

@@ -24,7 +24,7 @@ type GeneralSetting struct {
 
 // 默认配置
 var generalSetting = GeneralSetting{
-	DocsLink:                   "https://github.com/01121531/HUICHUAN-AI",
+	DocsLink:                   "https://github.com/01121531/subandnew-api",
 	PingIntervalEnabled:        false,
 	PingIntervalSeconds:        60,
 	QuotaDisplayType:           QuotaDisplayTypeUSD,
