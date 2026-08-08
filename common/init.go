@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/01121531/HUICHUAN-AI/constant"
+	"github.com/01121531/subandnew-api/constant"
 )
 
 var (

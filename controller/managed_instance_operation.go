@@ -5,10 +5,11 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/i18n"
-	"github.com/01121531/HUICHUAN-AI/service/authz"
-	"github.com/01121531/HUICHUAN-AI/service/managedinstance"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/i18n"
+	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
+	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
 )
 
@@ -82,6 +83,10 @@ func PlanManagedInstanceOperation(c *gin.Context) {
 }
 
 func ExecuteManagedInstanceOperation(c *gin.Context) {
+	executeManagedInstanceOperation(c, "", model.ManagedInstanceActionApplyConfig)
+}
+
+func executeManagedInstanceOperation(c *gin.Context, expectedAction string, rejectedAction string) {
 	instanceID, ok := managedInstanceID(c)
 	if !ok {
 		return
@@ -93,6 +98,7 @@ func ExecuteManagedInstanceOperation(c *gin.Context) {
 	}
 	operation, task, err := managedinstance.ExecuteOperation(instanceID, managedinstance.ExecuteOperationInput{
 		OperationID: request.OperationID, IdempotencyKey: request.IdempotencyKey, ActorID: c.GetInt("id"),
+		ExpectedAction: expectedAction, RejectedAction: rejectedAction,
 	})
 	if err != nil {
 		managedInstanceOperationError(c, err)
@@ -106,6 +112,10 @@ func ExecuteManagedInstanceOperation(c *gin.Context) {
 }
 
 func GetManagedInstanceOperation(c *gin.Context) {
+	getManagedInstanceOperation(c, "", model.ManagedInstanceActionApplyConfig)
+}
+
+func getManagedInstanceOperation(c *gin.Context, expectedAction string, rejectedAction string) {
 	instanceID, ok := managedInstanceID(c)
 	if !ok {
 		return
@@ -113,6 +123,10 @@ func GetManagedInstanceOperation(c *gin.Context) {
 	operation, err := managedinstance.GetOperation(instanceID, c.Param("operation_id"))
 	if err != nil {
 		managedInstanceOperationError(c, err)
+		return
+	}
+	if expectedAction != "" && operation.Action != expectedAction || rejectedAction != "" && operation.Action == rejectedAction {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "managed instance operation not found"})
 		return
 	}
 	userID := c.GetInt("id")

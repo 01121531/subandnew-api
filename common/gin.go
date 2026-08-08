@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/01121531/HUICHUAN-AI/constant"
+	"github.com/01121531/subandnew-api/constant"
 	"github.com/gin-gonic/gin"
 )
 

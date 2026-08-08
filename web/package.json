@@ -6,7 +6,6 @@
     "typescript": "6.0.3"
   },
   "catalog": {
-    "@lobehub/icons": "^5.10.1",
     "@rsbuild/core": "^2.1.4",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-tailwindcss": "^2.0.3",
@@ -19,9 +18,6 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-icons": "^5.7.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "sse.js": "^2.8.0"
+    "react-icons": "^5.7.0"
   }
 }

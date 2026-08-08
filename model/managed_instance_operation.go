@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"gorm.io/gorm"
 )
 
@@ -9,6 +9,7 @@ const (
 	ManagedInstanceActionRefreshInventory = "refresh_inventory"
 	ManagedInstanceActionTestResources    = "test_resources"
 	ManagedInstanceActionToggleResource   = "toggle_resource"
+	ManagedInstanceActionApplyConfig      = "apply_config"
 
 	ManagedInstanceOperationStatusPlanned   = "planned"
 	ManagedInstanceOperationStatusQueued    = "queued"

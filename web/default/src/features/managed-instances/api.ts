@@ -22,6 +22,13 @@ import type {
   ManagedInstancePreflight,
   ManagedInstanceTask,
   ManagedInstanceSummary,
+  ManagedConfigBinding,
+  ManagedConfigMode,
+  ManagedConfigPreview,
+  ManagedConfigSchema,
+  ManagedConfigTemplate,
+  ManagedConfigTemplateInput,
+  ManagedConfigTemplateList,
 } from './types'
 
 export async function getManagedInstances(
@@ -220,5 +227,101 @@ export async function deleteManagedInstance(
   id: number
 ): Promise<ApiResponse<{ id: number }>> {
   const response = await api.delete(`/api/managed-instances/${id}`)
+  return response.data
+}
+
+export async function getManagedConfigSchemas(): Promise<
+  ApiResponse<ManagedConfigSchema[]>
+> {
+  const response = await api.get('/api/managed-config/schemas')
+  return response.data
+}
+
+export async function getManagedConfigTemplates(
+  kind: string
+): Promise<ApiResponse<ManagedConfigTemplateList>> {
+  const params = new URLSearchParams({ kind })
+  const response = await api.get(
+    `/api/managed-config/templates?${params.toString()}`
+  )
+  return response.data
+}
+
+export async function createManagedConfigTemplate(
+  input: ManagedConfigTemplateInput
+): Promise<ApiResponse<ManagedConfigTemplate>> {
+  const response = await api.post('/api/managed-config/templates', input)
+  return response.data
+}
+
+export async function updateManagedConfigTemplate(
+  id: number,
+  input: ManagedConfigTemplateInput
+): Promise<ApiResponse<ManagedConfigTemplate>> {
+  const response = await api.put(`/api/managed-config/templates/${id}`, input)
+  return response.data
+}
+
+export async function deleteManagedConfigTemplate(
+  id: number
+): Promise<ApiResponse<{ id: number }>> {
+  const response = await api.delete(`/api/managed-config/templates/${id}`)
+  return response.data
+}
+
+export async function getManagedInstanceConfig(
+  id: number
+): Promise<ApiResponse<ManagedConfigBinding | null>> {
+  const response = await api.get(`/api/managed-instances/${id}/config`, {
+    disableDuplicate: true,
+  })
+  return response.data
+}
+
+export async function setManagedInstanceConfig(
+  id: number,
+  input: { template_id: number; mode: ManagedConfigMode }
+): Promise<ApiResponse<ManagedConfigBinding>> {
+  const response = await api.put(`/api/managed-instances/${id}/config`, input)
+  return response.data
+}
+
+export async function refreshManagedInstanceConfig(
+  id: number
+): Promise<ApiResponse<ManagedConfigPreview>> {
+  const response = await api.post(`/api/managed-instances/${id}/config/refresh`)
+  return response.data
+}
+
+export async function planManagedInstanceConfigApply(
+  id: number,
+  input: { expected_observed_hash: string; idempotency_key: string }
+): Promise<ApiResponse<ManagedInstanceOperation>> {
+  const response = await api.post(
+    `/api/managed-instances/${id}/config/apply/plan`,
+    input
+  )
+  return response.data
+}
+
+export async function executeManagedInstanceConfigApply(
+  id: number,
+  input: ManagedInstanceOperationExecuteInput
+): Promise<ApiResponse<ManagedInstanceOperationExecution>> {
+  const response = await api.post(
+    `/api/managed-instances/${id}/config/apply`,
+    input
+  )
+  return response.data
+}
+
+export async function getManagedInstanceConfigOperation(
+  id: number,
+  operationId: string
+): Promise<ApiResponse<ManagedInstanceOperation>> {
+  const response = await api.get(
+    `/api/managed-instances/${id}/config/operations/${encodeURIComponent(operationId)}`,
+    { disableDuplicate: true }
+  )
   return response.data
 }

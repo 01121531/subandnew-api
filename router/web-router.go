@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/middleware"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/middleware"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"

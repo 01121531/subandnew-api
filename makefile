@@ -3,8 +3,8 @@ API_DIR = .
 DEV_WEB_DEFAULT_PORT ?= 5173
 DEV_COMPOSE_FILE = docker-compose.dev.yml
 DEV_POSTGRES_SERVICE = postgres
-DEV_API_SERVICE = huichuan
-DEV_POSTGRES_DB = huichuan
+DEV_API_SERVICE = control-plane
+DEV_POSTGRES_DB = subandnew_api
 DEV_POSTGRES_USER = root
 DEV_SQLITE_PATH ?= one-api.db
 

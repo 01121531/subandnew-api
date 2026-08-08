@@ -41,8 +41,7 @@ func TestSelectAssets(t *testing.T) {
 		TagName: "v1.2.3",
 		Assets: []githubAsset{
 			{ID: 1, Name: "checksums-windows.txt"},
-			{ID: 2, Name: "huichuan-v1.2.3.exe"},
-			{ID: 3, Name: "huichuan-ai-v1.2.3-windows-amd64.exe"},
+			{ID: 3, Name: "subandnew-api-v1.2.3-windows-amd64.exe"},
 		},
 	}
 	binary, checksum, err := selectAssets(release)
@@ -67,9 +66,9 @@ func TestPlatformReleaseAssetNames(t *testing.T) {
 	require.Equal(t, "windows", releaseArtifactPlatform("windows"))
 	require.Equal(t, "linux", releaseArtifactPlatform("linux"))
 	require.Equal(t, "macos", releaseArtifactPlatform("darwin"))
-	require.Equal(t, "huichuan-ai-v1.2.3-windows-amd64.exe", releaseBinaryName("v1.2.3", "windows", "amd64"))
-	require.Equal(t, "huichuan-ai-v1.2.3-linux-arm64", releaseBinaryName("v1.2.3", "linux", "arm64"))
-	require.Equal(t, "huichuan-ai-v1.2.3-macos-arm64", releaseBinaryName("v1.2.3", "darwin", "arm64"))
+	require.Equal(t, "subandnew-api-v1.2.3-windows-amd64.exe", releaseBinaryName("v1.2.3", "windows", "amd64"))
+	require.Equal(t, "subandnew-api-v1.2.3-linux-arm64", releaseBinaryName("v1.2.3", "linux", "arm64"))
+	require.Equal(t, "subandnew-api-v1.2.3-macos-arm64", releaseBinaryName("v1.2.3", "darwin", "arm64"))
 }
 
 func TestPublicReleaseInfoShowsInvalidDifferentTag(t *testing.T) {
@@ -82,8 +81,8 @@ func TestChecksumForFile(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "checksums-windows.txt")
 	hash := strings.Repeat("a", sha256.Size*2)
-	require.NoError(t, os.WriteFile(path, []byte(hash+"  huichuan-ai-v1.0.0-windows-amd64.exe\n"), 0600))
-	actual, err := checksumForFile(path, "huichuan-ai-v1.0.0-windows-amd64.exe")
+	require.NoError(t, os.WriteFile(path, []byte(hash+"  subandnew-api-v1.0.0-windows-amd64.exe\n"), 0600))
+	actual, err := checksumForFile(path, "subandnew-api-v1.0.0-windows-amd64.exe")
 	require.NoError(t, err)
 	require.Equal(t, hash, actual)
 	_, err = checksumForFile(path, "other.exe")

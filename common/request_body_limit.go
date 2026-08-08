@@ -1,6 +1,6 @@
 package common
 
-import "github.com/01121531/HUICHUAN-AI/constant"
+import "github.com/01121531/subandnew-api/constant"
 
 const defaultAnonymousRequestBodyLimitKB = 512
 

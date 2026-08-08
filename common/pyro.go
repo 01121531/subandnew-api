@@ -13,10 +13,10 @@ func StartPyroScope() error {
 		return nil
 	}
 
-	pyroscopeAppName := GetEnvOrDefaultString("PYROSCOPE_APP_NAME", "huichuan")
+	pyroscopeAppName := GetEnvOrDefaultString("PYROSCOPE_APP_NAME", "subandnew-api")
 	pyroscopeBasicAuthUser := GetEnvOrDefaultString("PYROSCOPE_BASIC_AUTH_USER", "")
 	pyroscopeBasicAuthPassword := GetEnvOrDefaultString("PYROSCOPE_BASIC_AUTH_PASSWORD", "")
-	pyroscopeHostname := GetEnvOrDefaultString("HOSTNAME", "huichuan")
+	pyroscopeHostname := GetEnvOrDefaultString("HOSTNAME", "subandnew-api")
 
 	mutexRate := GetEnvOrDefault("PYROSCOPE_MUTEX_RATE", 5)
 	blockRate := GetEnvOrDefault("PYROSCOPE_BLOCK_RATE", 5)

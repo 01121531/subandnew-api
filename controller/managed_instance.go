@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/service"
-	"github.com/01121531/HUICHUAN-AI/service/managedinstance"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -338,6 +338,8 @@ func managedInstanceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrWriteModeForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
+	case errors.Is(err, managedinstance.ErrConfigOperationActive):
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrCredentialKeyNotConfigured):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "managed instance credential encryption is not configured"})
 	default:

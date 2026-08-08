@@ -24,18 +24,14 @@ export type AdminPermissionMatrix = Record<string, Record<string, boolean>>
 export type AdminCapabilities = AdminPermissionMatrix
 
 export const ADMIN_PERMISSION_RESOURCES = {
-  DATASET_CAPTURE: 'dataset_capture',
   MANAGED_INSTANCE: 'managed_instance',
+  MANAGED_TEMPLATE: 'managed_template',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
-  READ: 'read',
   OPERATE: 'operate',
-  WRITE: 'write',
-  SENSITIVE_WRITE: 'sensitive_write',
-  SECRET_VIEW: 'secret_view',
   VIEW: 'view',
-  DOWNLOAD: 'download',
+  APPLY: 'apply',
   CREATE: 'create',
   UPDATE: 'update',
   DELETE: 'delete',

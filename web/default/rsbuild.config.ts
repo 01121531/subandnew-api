@@ -16,12 +16,9 @@ export default defineConfig(({ envMode }) => {
     'http://localhost:3000'
 
   const isProd = envMode === 'production'
-  const devProxy = Object.fromEntries(
-    (['/api', '/mj', '/pg'] as const).map((key) => [
-      key,
-      { target: serverUrl, changeOrigin: true },
-    ])
-  ) as Record<string, { target: string; changeOrigin: boolean }>
+  const devProxy = {
+    '/api': { target: serverUrl, changeOrigin: true },
+  }
 
   return {
     plugins: [pluginReact(), pluginTailwindcss({ optimize: false })],

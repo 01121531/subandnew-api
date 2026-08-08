@@ -1,8 +1,8 @@
 package performance_setting
 
 import (
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/setting/config"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/setting/config"
 )
 
 type PerformanceSetting struct {

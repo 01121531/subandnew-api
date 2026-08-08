@@ -10,9 +10,9 @@ import (
 	"golang.org/x/text/language"
 	"gopkg.in/yaml.v3"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
-	"github.com/01121531/HUICHUAN-AI/dto"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/constant"
+	"github.com/01121531/subandnew-api/dto"
 )
 
 const (

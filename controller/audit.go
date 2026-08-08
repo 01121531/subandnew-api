@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/constant"
+	"github.com/01121531/subandnew-api/model"
 	"github.com/gin-gonic/gin"
 )
 

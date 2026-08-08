@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 )
 
 type accessPolicyPayload struct {

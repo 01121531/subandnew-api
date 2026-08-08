@@ -1,6 +1,6 @@
-huichuan Notices
+SubAndNew API Notices
 
-huichuan
+SubAndNew API
 Copyright (c) QuantumNous and contributors.
 
 This project is licensed under the GNU Affero General Public License v3.0.
@@ -19,7 +19,7 @@ Modified versions that present a user interface must also preserve a visible
 link to the original project in a prominent about, legal, footer, or
 attribution location:
 
-https://github.com/01121531/subandnew-api
+https://github.com/01121531/HUICHUAN-AI
 
 Modified versions must not misrepresent the origin of the software and must
 mark their changes in accordance with AGPLv3 Section 7(c).
@@ -35,13 +35,6 @@ reproduced below. Preserve this file with Docker images, standalone binaries,
 and frontend bundles distributed to users.
 
 ==== Apache-2.0 Notices ====
-
-AWS SDK for Go
-Copyright 2015 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-Copyright 2014-2015 Stripe, Inc.
-
-smithy-go
-Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 otp
 Copyright (c) 2014, Paul Querna

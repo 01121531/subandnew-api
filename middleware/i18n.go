@@ -3,10 +3,10 @@ package middleware
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
-	"github.com/01121531/HUICHUAN-AI/dto"
-	"github.com/01121531/HUICHUAN-AI/i18n"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/constant"
+	"github.com/01121531/subandnew-api/dto"
+	"github.com/01121531/subandnew-api/i18n"
 )
 
 // I18n middleware detects and sets the language preference for the request

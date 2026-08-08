@@ -54,8 +54,10 @@ jobs:
           CGO_ENABLED: 0
         run: |
           VERSION='${{ github.ref_name }}'
-          OUTPUT="subandnew-api-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-          go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=${VERSION}'" -o "${OUTPUT}"
+          PLATFORM='${{ matrix.goos }}'
+          if [ "$PLATFORM" = 'darwin' ]; then PLATFORM='macos'; fi
+          OUTPUT="subandnew-api-${VERSION}-${PLATFORM}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -ldflags "-s -w -X 'github.com/01121531/subandnew-api/common.Version=${VERSION}'" -o "${OUTPUT}"
       - uses: actions/upload-artifact@v4
         with:
           name: subandnew-api-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -65,11 +67,23 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/download-artifact@v4
         with:
           pattern: subandnew-api-*
           merge-multiple: true
+      - name: Generate release checksums
+        shell: bash
+        run: |
+          sha256sum subandnew-api-*-linux-* > checksums-linux.txt
+          sha256sum subandnew-api-*-macos-* > checksums-macos.txt
+          sha256sum subandnew-api-*-windows-* > checksums-windows.txt
       - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          files: subandnew-api-*
+          files: |
+            subandnew-api-*
+            checksums-*.txt
+            LICENSE
+            NOTICE
+            THIRD-PARTY-LICENSES.md
           generate_release_notes: true

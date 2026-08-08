@@ -6,7 +6,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -16,8 +16,10 @@ var expectedControlPlaneTables = []string{
 	"authz_roles",
 	"casbin_rule",
 	"custom_oauth_providers",
+	"managed_config_templates",
 	"managed_instance_alerts",
 	"managed_instance_audits",
+	"managed_instance_config_bindings",
 	"managed_instance_credentials",
 	"managed_instance_operation_batch_items",
 	"managed_instance_operation_batches",

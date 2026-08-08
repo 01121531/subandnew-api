@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -44,6 +44,8 @@ type ExecuteOperationInput struct {
 	IdempotencyKey string
 	ActorID        int
 	BatchID        string
+	ExpectedAction string
+	RejectedAction string
 }
 
 type OperationView struct {
@@ -66,13 +68,16 @@ type operationDefinition struct {
 }
 
 type operationPlan struct {
-	Action             string `json:"action"`
-	RiskLevel          string `json:"risk_level"`
-	WritesRemote       bool   `json:"writes_remote"`
-	RequiredCapability string `json:"required_capability"`
-	TargetCount        int    `json:"target_count"`
-	Summary            string `json:"summary"`
-	ExpectedETag       string `json:"expected_etag,omitempty"`
+	Action             string       `json:"action"`
+	RiskLevel          string       `json:"risk_level"`
+	WritesRemote       bool         `json:"writes_remote"`
+	RequiredCapability string       `json:"required_capability"`
+	TargetCount        int          `json:"target_count"`
+	Summary            string       `json:"summary"`
+	ExpectedETag       string       `json:"expected_etag,omitempty"`
+	ExpectedConfigHash string       `json:"expected_config_hash,omitempty"`
+	TemplateID         int64        `json:"template_id,omitempty"`
+	Differences        []ConfigDiff `json:"differences,omitempty"`
 }
 
 type refreshInventoryParameters struct{}
@@ -86,6 +91,14 @@ type toggleResourceParameters struct {
 	Enabled    *bool `json:"enabled"`
 }
 
+type applyConfigParameters struct {
+	TemplateID    int64          `json:"template_id"`
+	SchemaVersion int            `json:"schema_version"`
+	ExpectedHash  string         `json:"expected_hash"`
+	Desired       map[string]any `json:"desired"`
+	Rollback      map[string]any `json:"rollback"`
+}
+
 type managedInstanceOperationTaskPayload struct {
 	OperationID string `json:"operation_id"`
 	InstanceID  int64  `json:"instance_id"`
@@ -94,11 +107,25 @@ type managedInstanceOperationTaskPayload struct {
 }
 
 type remoteOperationResult struct {
-	Action       string             `json:"action"`
-	ResourceKind string             `json:"resource_kind"`
-	Count        int                `json:"count,omitempty"`
-	Items        []remoteResultItem `json:"items,omitempty"`
+	Action        string             `json:"action"`
+	ResourceKind  string             `json:"resource_kind"`
+	Count         int                `json:"count,omitempty"`
+	Items         []remoteResultItem `json:"items,omitempty"`
+	ChangedFields []string           `json:"changed_fields,omitempty"`
+	ObservedHash  string             `json:"observed_hash,omitempty"`
+	DesiredHash   string             `json:"desired_hash,omitempty"`
+	Verified      bool               `json:"verified,omitempty"`
+	Compensated   bool               `json:"compensated,omitempty"`
 }
+
+type ConfigApplyError struct {
+	Code        string
+	Compensated bool
+	Result      *remoteOperationResult
+	Unknown     bool
+}
+
+func (err *ConfigApplyError) Error() string { return "managed config apply failed: " + err.Code }
 
 type remoteResultItem struct {
 	ResourceID int64 `json:"resource_id"`
@@ -141,9 +168,11 @@ func PlanOperation(instanceID int64, input PlanOperationInput) (*OperationView, 
 		Summary: operationSummary(input.Action, targetCount),
 	}
 	if definition.writes {
-		plan.ExpectedETag, err = latestInventoryETag(instanceID, defaultResourceKind(instance.Kind))
-		if err != nil {
-			return nil, err
+		if input.Action != model.ManagedInstanceActionApplyConfig {
+			plan.ExpectedETag, err = latestInventoryETag(instanceID, defaultResourceKind(instance.Kind))
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	planJSON, _ := json.Marshal(plan)
@@ -197,6 +226,10 @@ func ExecuteOperation(instanceID int64, input ExecuteOperationInput) (*Operation
 	if err != nil {
 		return nil, nil, err
 	}
+	if input.ExpectedAction != "" && operation.Action != input.ExpectedAction ||
+		input.RejectedAction != "" && operation.Action == input.RejectedAction {
+		return nil, nil, ErrOperationNotFound
+	}
 	if !sameSecret(operation.IdempotencyKey, idempotencyDigest(input.IdempotencyKey)) {
 		return nil, nil, ErrIdempotencyConflict
 	}
@@ -213,6 +246,11 @@ func ExecuteOperation(instanceID int64, input ExecuteOperationInput) (*Operation
 	}
 	if err := authorizeOperation(instance, definition); err != nil {
 		return nil, nil, err
+	}
+	if operation.Action == model.ManagedInstanceActionApplyConfig {
+		if err := authorizeConfigApplyBinding(instanceID, operation.Parameters); err != nil {
+			return nil, nil, err
+		}
 	}
 	if operation.Status != model.ManagedInstanceOperationStatusPlanned {
 		task, taskErr := operationTask(operation.TaskId)
@@ -358,6 +396,9 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 		} else {
 			err = authorizeOperation(instance, definition)
 		}
+		if err == nil && operation.Action == model.ManagedInstanceActionApplyConfig {
+			err = authorizeConfigApplyBinding(operation.InstanceId, operation.Parameters)
+		}
 	}
 	var remoteResult *remoteOperationResult
 	var remoteWriteSent atomic.Bool
@@ -365,7 +406,7 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 		var credential *CredentialMaterial
 		credential, err = loadCredential(operation.InstanceId)
 		if err == nil {
-			if operation.WritesRemote {
+			if operation.WritesRemote && operation.Action != model.ManagedInstanceActionApplyConfig {
 				err = verifyOperationInventoryETag(ctx, &operation, instance)
 			}
 		}
@@ -374,7 +415,7 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 		}
 		if err == nil {
 			executionContext := ctx
-			if operation.WritesRemote {
+			if operation.WritesRemote && operation.Action != model.ManagedInstanceActionApplyConfig {
 				executionContext = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 					WroteRequest: func(httptrace.WroteRequestInfo) { remoteWriteSent.Store(true) },
 				})
@@ -389,7 +430,12 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 			status = model.ManagedInstanceOperationStatusUnknown
 			code = "remote_result_unknown"
 		}
-		if finishErr := finishOperation(&operation, nil, code, status, taskID, runnerID); finishErr != nil {
+		var failureResult json.RawMessage
+		var configApplyError *ConfigApplyError
+		if errors.As(err, &configApplyError) && configApplyError.Result != nil {
+			failureResult, _ = json.Marshal(configApplyError.Result)
+		}
+		if finishErr := finishOperation(&operation, failureResult, code, status, taskID, runnerID); finishErr != nil {
 			return nil, finishErr
 		}
 		return operationView(&operation), &OperationExecutionError{Code: code}
@@ -405,6 +451,17 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 }
 
 func remoteWriteResultMayBeUnknown(requestWritten bool, err error) bool {
+	var configApplyError *ConfigApplyError
+	if errors.As(err, &configApplyError) && configApplyError.Compensated {
+		return false
+	}
+	if errors.As(err, &configApplyError) && configApplyError.Unknown {
+		return true
+	}
+	var configWriteUnknown *remoteConfigWriteUnknownError
+	if errors.As(err, &configWriteUnknown) {
+		return true
+	}
 	var probeError *ProbeError
 	return requestWritten && err != nil && !errors.As(err, &probeError)
 }
@@ -438,6 +495,11 @@ func finishOperation(operation *model.ManagedInstanceOperation, result json.RawM
 		operation.Result = string(result)
 		operation.ErrorCode = errorCode
 		operation.FinishedAt = now
+		if operation.Action == model.ManagedInstanceActionApplyConfig && status == model.ManagedInstanceOperationStatusSucceeded {
+			if err := markConfigApplyCompleted(tx, operation.InstanceId, operation.Parameters, result); err != nil {
+				return err
+			}
+		}
 		details := map[string]any{"operation_id": operation.OperationId, "action": operation.Action}
 		if errorCode != "" {
 			details["error_code"] = errorCode
@@ -477,19 +539,19 @@ func executeRemoteOperation(ctx context.Context, instance *model.ManagedInstance
 		if err != nil {
 			return nil, err
 		}
-		return executeNewAPIOperation(ctx, connector, headers, action, parameters)
+		return executeNewAPIOperation(ctx, connector, instance, headers, action, parameters)
 	case model.ManagedInstanceKindSub2API:
 		headers, err := sub2APIAuthHeaders(credential)
 		if err != nil {
 			return nil, err
 		}
-		return executeSub2APIOperation(ctx, connector, headers, action, parameters)
+		return executeSub2APIOperation(ctx, connector, instance, headers, action, parameters)
 	default:
 		return nil, ErrUnsupportedCapability
 	}
 }
 
-func executeNewAPIOperation(ctx context.Context, connector *Connector, headers http.Header, action string, parameters json.RawMessage) (*remoteOperationResult, error) {
+func executeNewAPIOperation(ctx context.Context, connector *Connector, instance *model.ManagedInstance, headers http.Header, action string, parameters json.RawMessage) (*remoteOperationResult, error) {
 	switch action {
 	case model.ManagedInstanceActionRefreshInventory:
 		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/channel/", headers, nil)
@@ -528,12 +590,14 @@ func executeNewAPIOperation(ctx context.Context, connector *Connector, headers h
 			return nil, err
 		}
 		return &remoteOperationResult{Action: action, ResourceKind: "channel", Count: 1, Items: []remoteResultItem{{ResourceID: params.ResourceID, Succeeded: true, Enabled: params.Enabled}}}, nil
+	case model.ManagedInstanceActionApplyConfig:
+		return executeConfigApply(ctx, connector, instance, headers, parameters)
 	default:
 		return nil, ErrInvalidOperation
 	}
 }
 
-func executeSub2APIOperation(ctx context.Context, connector *Connector, headers http.Header, action string, parameters json.RawMessage) (*remoteOperationResult, error) {
+func executeSub2APIOperation(ctx context.Context, connector *Connector, instance *model.ManagedInstance, headers http.Header, action string, parameters json.RawMessage) (*remoteOperationResult, error) {
 	switch action {
 	case model.ManagedInstanceActionRefreshInventory:
 		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/accounts", headers, nil)
@@ -572,6 +636,8 @@ func executeSub2APIOperation(ctx context.Context, connector *Connector, headers 
 			return nil, err
 		}
 		return &remoteOperationResult{Action: action, ResourceKind: "account", Count: 1, Items: []remoteResultItem{{ResourceID: params.ResourceID, Succeeded: true, Enabled: params.Enabled}}}, nil
+	case model.ManagedInstanceActionApplyConfig:
+		return executeConfigApply(ctx, connector, instance, headers, parameters)
 	default:
 		return nil, ErrInvalidOperation
 	}
@@ -594,6 +660,8 @@ func operationDefinitionFor(kind string, action string) (operationDefinition, er
 		return operationDefinition{capability: prefix + ".test"}, nil
 	case model.ManagedInstanceActionToggleResource:
 		return operationDefinition{capability: prefix + ".toggle", writes: true}, nil
+	case model.ManagedInstanceActionApplyConfig:
+		return operationDefinition{capability: "config.apply", writes: true}, nil
 	default:
 		return operationDefinition{}, fmt.Errorf("%w: unsupported action", ErrInvalidOperation)
 	}
@@ -651,6 +719,8 @@ func normalizeOperationParameters(action string, raw json.RawMessage) (json.RawM
 		}
 		encoded, _ := json.Marshal(params)
 		return encoded, 1, nil
+	case model.ManagedInstanceActionApplyConfig:
+		return nil, 0, fmt.Errorf("%w: use the config apply planning endpoint", ErrInvalidOperation)
 	default:
 		return nil, 0, fmt.Errorf("%w: unsupported action", ErrInvalidOperation)
 	}
@@ -867,6 +937,10 @@ func operationSummary(action string, targetCount int) string {
 }
 
 func managedInstanceOperationErrorCode(err error) string {
+	var configApplyError *ConfigApplyError
+	if errors.As(err, &configApplyError) {
+		return configApplyError.Code
+	}
 	var executionError *OperationExecutionError
 	if errors.As(err, &executionError) && executionError.Code != "" {
 		return executionError.Code

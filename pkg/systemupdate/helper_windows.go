@@ -20,7 +20,7 @@ func RunHelperIfRequested() bool {
 		return false
 	}
 	if err := applyUpdatePlan(os.Args[2]); err != nil {
-		fmt.Fprintf(os.Stderr, "HUICHUAN updater failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "SubAndNew updater failed: %v\n", err)
 	}
 	return true
 }

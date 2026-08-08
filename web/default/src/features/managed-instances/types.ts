@@ -204,6 +204,7 @@ export type ManagedInstanceOperationAction =
   | 'refresh_inventory'
   | 'test_resources'
   | 'toggle_resource'
+  | 'apply_config'
 
 export type ManagedInstanceOperationStatus =
   | 'planned'
@@ -215,17 +216,25 @@ export type ManagedInstanceOperationStatus =
 
 interface ManagedInstanceOperationPlan {
   action: ManagedInstanceOperationAction
-  risk_level: 'low'
+  risk_level: 'low' | 'medium'
   writes_remote: boolean
   required_capability: string
   target_count: number
   summary: string
+  expected_config_hash?: string
+  template_id?: number
+  differences?: ManagedConfigDiff[]
 }
 
 export interface ManagedInstanceOperationParameters {
   resource_ids?: number[]
   resource_id?: number
   enabled?: boolean
+  template_id?: number
+  schema_version?: number
+  expected_hash?: string
+  desired?: Record<string, unknown>
+  rollback?: Record<string, unknown>
 }
 
 interface ManagedInstanceOperationResultItem {
@@ -239,6 +248,11 @@ interface ManagedInstanceOperationResult {
   resource_kind: string
   count?: number
   items?: ManagedInstanceOperationResultItem[]
+  changed_fields?: string[]
+  observed_hash?: string
+  desired_hash?: string
+  verified?: boolean
+  compensated?: boolean
 }
 
 export interface ManagedInstanceOperation {
@@ -250,7 +264,7 @@ export interface ManagedInstanceOperation {
   executed_by: number
   action: ManagedInstanceOperationAction
   status: ManagedInstanceOperationStatus
-  risk_level: 'low'
+  risk_level: 'low' | 'medium'
   writes_remote: boolean
   required_capability: string
   idempotency_fingerprint: string
@@ -346,4 +360,82 @@ export interface ApiResponse<T> {
   success: boolean
   message: string
   data: T
+}
+
+export interface ManagedConfigFieldSchema {
+  key: string
+  remote_key: string
+  type: 'string' | 'integer' | 'boolean'
+  description: string
+  min?: number
+  max?: number
+  min_length?: number
+  max_length?: number
+  format?: string
+  enum?: Array<string | number | boolean>
+}
+
+export interface ManagedConfigSchema {
+  kind: ManagedInstanceKind
+  version: number
+  fields: ManagedConfigFieldSchema[]
+}
+
+export interface ManagedConfigTemplate {
+  id: number
+  name: string
+  description: string
+  kind: ManagedInstanceKind
+  schema_version: number
+  values: Record<string, unknown>
+  created_by: number
+  updated_by: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ManagedConfigTemplateList {
+  items: ManagedConfigTemplate[]
+}
+
+export type ManagedConfigMode = 'disabled' | 'audit' | 'enforce'
+type ManagedConfigDriftStatus = 'unknown' | 'in_sync' | 'drifted' | 'failed'
+
+export interface ManagedConfigBinding {
+  id: number
+  instance_id: number
+  template_id: number
+  mode: ManagedConfigMode
+  drift_status: ManagedConfigDriftStatus
+  desired_hash: string
+  last_observed_hash: string
+  last_error_code?: string
+  last_checked_at: number
+  last_applied_at: number
+  template: ManagedConfigTemplate
+}
+
+interface ManagedConfigDiff {
+  key: string
+  current: unknown
+  desired: unknown
+}
+
+export interface ManagedConfigPreview {
+  binding: ManagedConfigBinding
+  observed: Record<string, unknown>
+  desired: Record<string, unknown>
+  differences: ManagedConfigDiff[]
+  observed_hash: string
+  desired_hash: string
+  drifted: boolean
+  observed_at: number
+}
+
+export interface ManagedConfigTemplateInput {
+  name: string
+  description: string
+  kind: ManagedInstanceKind
+  schema_version: number
+  values: Record<string, unknown>
 }

@@ -1,8 +1,8 @@
-# HUICHUAN-AI 多实例统一管理二开方案
+# SubAndNew API 多实例统一管理二开方案
 
-> 文档状态：实施中 v0.2
+> 文档状态：Phase 3 已实现 v0.3
 >
-> 适用项目：HUICHUAN-AI
+> 适用项目：SubAndNew API（基于 HUICHUAN-AI 二次开发）
 >
 > 最近更新：2026-08-08
 >
@@ -163,12 +163,18 @@ HUICHUAN-AI 已具备 Gin、GORM、React、权限目录、管理审计和带数�
 
 ### 5.5 配置模板与漂移
 
-模板不保存整份远端数据库，只管理明确白名单内的配置项，例如：
+模板不保存整份远端配置，只管理版本化 Schema 明确允许的公开 UI 配置。当前 Schema v1 白名单为：
 
-- 通用超时、重试和日志策略。
-- 可公开的倍率或分组规则。
-- 告警阈值。
-- 指定资源的启停基线。
+| 统一字段 | New API / HUICHUAN-AI | Sub2API |
+| --- | --- | --- |
+| `ui.site_name` | `SystemName` | `site_name` |
+| `ui.logo_url` | `Logo` | `site_logo` |
+| `ui.site_subtitle` | 不支持 | `site_subtitle` |
+| `ui.docs_url` | 不支持 | `doc_url` |
+| `ui.compact_home` | 不支持 | `compact_home_enabled` |
+| `ui.table_page_size` | 不支持 | `table_default_page_size` |
+
+Schema 严格拒绝未知字段、类型错误、非法 URL、越界数值和运行时敏感配置。倍率、分组、日志、数据库、认证、邮件、支付、代理及其他运行参数不进入首版白名单。
 
 模板应用流程固定为：
 
@@ -725,26 +731,24 @@ router/
 
 本批删除前后均由只读子代理复核实际引用图。复核确认当前 Router 不引用旧 Distributor，控制平面不引用异步任务 Model、Service 或适配器；历史渠道类型数字仍保留在 `constant/channel.go`，因为这些值可能已写入旧数据库，必须随整个 Channel 模块和显式旧数据清理工具一起删除，禁止单独重排编号。
 
-下一阶段：
+后续可选工作：
 
-- 提供旧表归档、`dry-run` 和 Root 显式执行的数据清理工具；普通升级流程继续禁止破坏性迁移。
-- 完成配置基线、漂移检测、批量编排和跨实例操作策略。
-- 补齐真实 New API/Sub2API 版本矩阵与端到端部署验证，并逐步清零保留前端的历史 Lint 基线。
+- 扩展经过真实版本契约验证的配置白名单，继续禁止直接透传任意远端字段。
+- 增加真实 New API/Sub2API 部署矩阵的端到端验证。
+- Phase 4 联邦路由需单独设计与压测，不进入当前默认控制平面。
 
 本节是实际仓库状态记录；后续每个删除批次只有在 Go 编译、前端类型检查和生产构建通过后才标记完成。
 
 本轮验证记录：
 
-- `go test ./... -run '^$'`：全部 Go 包编译通过。
-- `go test ./model ./controller ./router ./service/managedinstance -count=1`：控制平面 Model、Controller、旧业务路由禁用门禁和实例管理服务测试通过。
-- `go test ./model -run 'TestSystemTask|MigrateDB|MigrateLogDB|CloseDB' -count=1`：控制平面迁移与系统任务测试通过，覆盖旧活动任务升级收口。
-- `go test ./service/managedinstance -count=1`：适配器、凭据、SSRF、六阶段预检、完整分页快照、告警、受控操作、ETag 冲突和任务租约提交保护测试通过。
-- `go test ./service -run 'TestManagedInstance|TestSystemTask|TestRunSystemTask|TestEnqueue|TestScoped|TestRunWithLease' -count=1`：超过 500 个实例的分批调度、作用域锁、任务租约与取消测试通过。
-- `go test ./model ./controller ./router -run 'MigrateDB|MigrateLogDB|CloseDB|ManagedInstance' -count=1`：控制平面迁移白名单、旧表保留、数据库关闭保护和权限路由测试通过。
-- `tsgo -b`、`rsbuild build`：通过；本批修改文件已由项目 `oxfmt` 格式化。
-- 全新 SQLite 真实启动通过：`GET /api/status` 返回 `200`，未登录访问 `/api/managed-instances` 返回 JSON `401`，`/v1/videos` 与 `/api/task` 返回 `404`；旧 `/mj`、`/suno` 路径只进入通用前端 HTML 兜底，不再进入任务处理器。
-- 全仓 `oxlint` 仍存在旧前端模块的历史错误和告警；当前主要位于 Profile、通用表格/布局组件及设置页，本批类型检查和生产构建均通过，这些 Lint 基线随对应旧模块删除或保留模块整理逐批清零。
-- `go test ./model ./service ./controller ./router ./service/managedinstance -count=1` 中除 `service` 外均通过；`service` 仍有既存代理运行时测试失败：`proxy_state_events` 测试表缺少 `group_id`，以及暂停恢复测试期望 `recovering` 但得到 `available`。控制平面相关 Service 定向测试单独通过，本批未修改上述代理逻辑。
+- `go test ./... -count=1`：全量 Go 测试通过。
+- `go vet ./...`：全量静态检查通过。
+- `bun run typecheck`、`bun run build`：前端类型检查和生产构建通过。
+- `bun run knip`：无未使用文件、依赖、导出或类型；过时忽略项已删除。
+- 本轮修改文件的定向 `oxlint` 通过；全仓仍存在保留前端中的历史规范错误，主要位于 Profile、通用表格、布局和认证辅助代码，不影响类型检查与生产构建。
+- 七种语言执行 `i18n:sync` 和 `i18n:prune`，删除旧网关宣传和 HUICHUAN 默认品牌产生的 105 个死翻译键。
+- 全部 GitHub Actions YAML 解析通过，`git diff --check` 通过。
+- 登录页通过 1440x900 桌面和 390x844 移动视口截图与可访问树检查，无重叠或溢出。
 
 ### 15.0.1 Relay、Channel 与代理池删除批次
 
@@ -801,6 +805,40 @@ router/
 - 实例中心增加多选、批量刷新计划预览、显式确认、执行进度轮询和逐实例错误展示；无批量权限时不显示入口。
 
 本批继续执行“HUICHUAN-AI 中无关功能全部删除”的既定边界：不恢复本地 Relay、Channel、Token、商业数据面或旧前端，仅在精简控制平面内增加 NewAPI/Sub2API 多实例编排能力。
+
+### 15.0.4 配置治理、遗留数据和最终清理批次
+
+本批完成 Phase 3 的配置治理闭环：
+
+- 新增版本化配置模板和实例绑定模型；绑定模式为 `disabled`、`audit`、`enforce`，默认使用 `audit`。
+- Schema v1 只允许第 5.5 节列出的公开 UI 字段；严格拒绝未知、敏感和运行时字段，远端完整配置只在请求内存中短暂存在，不写数据库、日志或审计。
+- New API/HUICHUAN-AI 通过 `GET/PUT /api/option/` 读取并逐项稳定排序写入；New API 兼容 PAT Bearer 与旧版 `New-Api-User`，HUICHUAN-AI 使用 `HUICHUAN-User`。只有真实配置读取成功才声明 `config.read/config.apply` 能力。
+- Sub2API 通过 `GET/PUT /api/v1/admin/settings` 读写白名单部分对象，推荐使用 `x-api-key`；读取严格校验成功 `code` 与对象 `data`，写入严格校验成功 `code` 与非空 `message`。
+- 应用固定执行“读取最新状态 -> 校验 observed hash -> 冻结差异与回滚材料 -> 管理员确认 -> 持久化任务 -> 写入 -> 重新读取验证”。绑定或模板在计划后变化会使旧计划失效。
+- New API/HUICHUAN-AI 的逐项写入失败时按反序补偿；补偿成功记录 `config_apply_failed_rolled_back`，无法确认远端写入或补偿结果时进入 `unknown/needs_reconcile`，不自动重复写入。
+- `managed_template.view` 默认授予管理员和 Root；模板管理、绑定和配置应用统一由 `managed_template.apply` 保护，默认仅 Root 拥有。
+- 实例详情新增配置模板管理、动态 Schema 表单、绑定模式、漂移刷新、逐字段差异、计划确认、执行进度和结果展示；无权限或无能力时不暴露入口。
+
+遗留数据工具已实现为离线维护命令：
+
+```bash
+subandnew-api legacy-data inventory --output legacy-inventory.json
+subandnew-api legacy-data archive --output legacy-archive.json
+subandnew-api legacy-data purge --archive legacy-archive.json
+subandnew-api legacy-data purge --archive legacy-archive.json --execute --confirm <database-fingerprint>
+```
+
+- `inventory` 只把显式白名单中的 HUICHUAN 历史业务表列为候选，同时单独报告未知/插件表；未知表不会被推断为可删除对象。
+- `archive` 流式写出 JSON 归档、列结构、逐表/旧用户列内容哈希和 SHA-256 文件校验；验证阶段会复算归档正文每张表的行数、字段集合和内容哈希。
+- `archive` 和 `purge` 遇到未知表均拒绝继续，要求先人工分类；`purge` 默认 dry-run，执行前同时校验归档校验和、逐表内容哈希、归档覆盖范围、当前数据库清单和数据库指纹。
+- 破坏性 DDL 当前仅对 SQLite 开放。MySQL/PostgreSQL 允许清单与归档，但清理由 DBA 根据归档列结构实施，避免跨方言 DDL 无法原子回滚。
+- 普通启动仍只迁移控制平面白名单，不执行 `DROP TABLE` 或 `DROP COLUMN`。
+
+本批继续删除确认无调用方的 HUICHUAN-AI 遗留内容：Capture Proxy ADR 与权限常量、旧 Azure/finish-reason 常量、Relay HTTP 统计中间件、ClickHouse 日志数据库状态、Umami/Google Analytics 注入、公开 Uptime Kuma/API 信息/FAQ 接口、旧通知页签、开发期 `/mj`/`/pg` 代理、Funding 与提交工具配置、Classic 前端目录、残留 Relay 目录及未使用前端组件依赖。发布资产、校验文件、在线更新器、Docker 构建注入和 Go 模块路径统一指向 `01121531/subandnew-api`；Docker 镜像和 Release 同时携带项目许可、NOTICE 与第三方许可清单。
+
+旧 HUICHUAN-AI 二进制到 SubAndNew API 采用一次性手工部署，不保留旧资产名、旧 helper 参数或旧状态目录兼容代码；首次切换后由新在线升级器继续升级。该边界用于避免把已删除品牌协议重新引入运行时。
+
+配置治理、遗留数据工具和删除边界均新增单元/路由测试，并在提交前执行全量 Go 测试、Vet、前端类型检查、生产构建、依赖检查、工作流解析和差异检查。
 
 ### Phase 0：契约验证
 

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"

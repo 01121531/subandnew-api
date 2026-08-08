@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
 )
 
 var (

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/setting/config"
-	"github.com/01121531/HUICHUAN-AI/setting/performance_setting"
-	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/setting/config"
+	"github.com/01121531/subandnew-api/setting/performance_setting"
+	"github.com/01121531/subandnew-api/setting/system_setting"
 	"gorm.io/gorm"
 )
 
@@ -24,7 +24,7 @@ var controlPlaneOptionKeys = map[string]struct{}{
 	"TurnstileCheckEnabled": {}, "EmailDomainRestrictionEnabled": {}, "EmailAliasRestrictionEnabled": {},
 	"EmailDomainWhitelist": {}, "SMTPServer": {}, "SMTPFrom": {}, "SMTPPort": {}, "SMTPAccount": {}, "SMTPToken": {},
 	"SMTPSSLEnabled": {}, "SMTPStartTLSEnabled": {}, "SMTPInsecureSkipVerify": {}, "SMTPForceAuthLogin": {},
-	"Notice": {}, "About": {}, "Footer": {}, "SystemName": {}, "Logo": {}, "ServerAddress": {},
+	"Footer": {}, "SystemName": {}, "Logo": {}, "ServerAddress": {},
 	"GitHubClientId": {}, "GitHubClientSecret": {}, "LinuxDOClientId": {}, "LinuxDOClientSecret": {}, "LinuxDOMinimumTrustLevel": {},
 	"TelegramBotToken": {}, "TelegramBotName": {}, "WeChatServerAddress": {}, "WeChatServerToken": {},
 	"WeChatAccountQRCodeImageURL": {}, "TurnstileSiteKey": {}, "TurnstileSecretKey": {},
@@ -78,7 +78,7 @@ func controlPlaneOptionDefaults() map[string]string {
 		"SMTPStartTLSEnabled":    strconv.FormatBool(common.SMTPStartTLSEnabled),
 		"SMTPInsecureSkipVerify": strconv.FormatBool(common.SMTPInsecureSkipVerify),
 		"SMTPForceAuthLogin":     strconv.FormatBool(common.SMTPForceAuthLogin),
-		"Notice":                 "", "About": "", "Footer": common.Footer, "SystemName": common.SystemName, "Logo": common.Logo,
+		"Footer":                 common.Footer, "SystemName": common.SystemName, "Logo": common.Logo,
 		"ServerAddress":  system_setting.ServerAddress,
 		"GitHubClientId": common.GitHubClientId, "GitHubClientSecret": common.GitHubClientSecret,
 		"LinuxDOClientId": common.LinuxDOClientId, "LinuxDOClientSecret": common.LinuxDOClientSecret,

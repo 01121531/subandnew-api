@@ -20,13 +20,14 @@
 3. 不支持 Docker、Kubernetes、多实例、`go run`、环境变量覆盖版本号、无法定位或无法替换当前可执行文件的场景。
 4. 只安装固定仓库 `01121531/subandnew-api` 的最新稳定 SemVer Release；客户端只提交 `release_id`，服务端会重新拉取最新 Release 并校验 ID。
 5. Release 资产命名约定：
-   - Windows: `huichuan-ai-<version>-windows-amd64.exe` + `checksums-windows.txt`
-   - Linux: `huichuan-ai-<version>-linux-amd64` / `huichuan-ai-<version>-linux-arm64` + `checksums-linux.txt`
-   - macOS: `huichuan-ai-<version>-macos-amd64` / `huichuan-ai-<version>-macos-arm64` + `checksums-macos.txt`
+   - Windows: `subandnew-api-<version>-windows-amd64.exe` + `checksums-windows.txt`
+   - Linux: `subandnew-api-<version>-linux-amd64` / `subandnew-api-<version>-linux-arm64` + `checksums-linux.txt`
+   - macOS: `subandnew-api-<version>-macos-amd64` / `subandnew-api-<version>-macos-arm64` + `checksums-macos.txt`
 6. 下载资产必须匹配当前 `GOOS/GOARCH`，大小受限，并通过 SHA-256 校验后才进入替换阶段。
 7. 当前进程会复制自身为临时 helper。helper 等待原进程退出后备份旧版本、替换新版本、按原工作目录和参数启动服务，并轮询 `/api/status` 校验目标版本。
 8. 新版本健康检查失败时，helper 会终止新进程、恢复旧二进制并尝试启动旧版本。
-9. 状态保存在当前可执行文件相邻的 `.huichuan-update/state.json`，API 不返回本地路径、下载 URL、凭据或请求头。
+9. 状态保存在当前可执行文件相邻的 `.subandnew-update/state.json`，API 不返回本地路径、下载 URL、凭据或请求头。
+10. 从旧 HUICHUAN-AI 二进制迁移到首个 SubAndNew API 版本必须手工部署；升级器不识别旧资产名、旧 helper 参数或旧状态目录。首次迁移完成后才进入本 ADR 定义的在线升级链路。
 
 ## 状态机
 

@@ -34,7 +34,7 @@ const (
 	minShutdownTimeout      = 10 * time.Second
 	maxShutdownTimeout      = 30 * time.Minute
 	processExitGracePeriod  = 30 * time.Second
-	stateDirectoryName      = ".huichuan-update"
+	stateDirectoryName      = ".subandnew-update"
 	stateFileName           = "state.json"
 )
 
@@ -403,7 +403,7 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	request.Header.Set("User-Agent", "HUICHUAN-AI-system-updater")
+	request.Header.Set("User-Agent", "SubAndNew-API-system-updater")
 	if token := strings.TrimSpace(os.Getenv("SYSTEM_UPDATE_GITHUB_TOKEN")); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -450,7 +450,6 @@ func publicReleaseInfo(release githubRelease, currentVersion string) ReleaseInfo
 func selectAssets(release githubRelease) (githubAsset, githubAsset, error) {
 	artifactPlatform := releaseArtifactPlatform(runtime.GOOS)
 	binaryName := releaseBinaryName(release.TagName, runtime.GOOS, runtime.GOARCH)
-	legacyNames := legacyReleaseBinaryNames(release.TagName, runtime.GOOS, runtime.GOARCH)
 	checksumName := fmt.Sprintf("checksums-%s.txt", artifactPlatform)
 	var binary githubAsset
 	var checksum githubAsset
@@ -458,10 +457,8 @@ func selectAssets(release githubRelease) (githubAsset, githubAsset, error) {
 		if asset.Name == checksumName {
 			checksum = asset
 		}
-		for _, name := range append([]string{binaryName}, legacyNames...) {
-			if asset.Name == name {
-				binary = asset
-			}
+		if asset.Name == binaryName {
+			binary = asset
 		}
 	}
 	if binary.ID == 0 || checksum.ID == 0 {
@@ -489,18 +486,11 @@ func releaseArtifactPlatform(goos string) string {
 }
 
 func releaseBinaryName(version string, goos string, goarch string) string {
-	name := fmt.Sprintf("huichuan-ai-%s-%s-%s", version, releaseArtifactPlatform(goos), goarch)
+	name := fmt.Sprintf("subandnew-api-%s-%s-%s", version, releaseArtifactPlatform(goos), goarch)
 	if goos == "windows" {
 		name += ".exe"
 	}
 	return name
-}
-
-func legacyReleaseBinaryNames(version string, goos string, goarch string) []string {
-	if goos == "windows" && goarch == "amd64" {
-		return []string{fmt.Sprintf("huichuan-%s.exe", version)}
-	}
-	return nil
 }
 
 func stagedBinaryName() string {
@@ -512,9 +502,9 @@ func stagedBinaryName() string {
 
 func helperBinaryName() string {
 	if runtime.GOOS == "windows" {
-		return "huichuan-swap.exe"
+		return "subandnew-swap.exe"
 	}
-	return "huichuan-swap"
+	return "subandnew-swap"
 }
 
 func backupBinaryName() string {
@@ -536,7 +526,7 @@ func downloadAsset(ctx context.Context, asset githubAsset, destination string, l
 		return "", err
 	}
 	request.Header.Set("Accept", "application/octet-stream")
-	request.Header.Set("User-Agent", "HUICHUAN-AI-system-updater")
+	request.Header.Set("User-Agent", "SubAndNew-API-system-updater")
 	response, err := restrictedHTTPClient(10 * time.Minute).Do(request)
 	if err != nil {
 		return "", err

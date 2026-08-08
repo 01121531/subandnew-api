@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
@@ -45,7 +45,7 @@ func SetupLogger() {
 	}
 	defer setupLogLock.Unlock()
 
-	logPath := filepath.Join(*common.LogDir, fmt.Sprintf("huichuan-control-%s.log", time.Now().Format("20060102150405")))
+	logPath := filepath.Join(*common.LogDir, fmt.Sprintf("subandnew-control-%s.log", time.Now().Format("20060102150405")))
 	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("failed to open log file: %v", err)

@@ -30,6 +30,7 @@ import {
   getManagedInstanceAudits,
   getManagedInstanceTask,
 } from './api'
+import { ConfigurationGovernancePanel } from './components/configuration-governance-panel'
 import { ControlledOperationsPanel } from './components/controlled-operations-panel'
 import { CredentialSheet } from './components/credential-sheet'
 import { InstanceFormSheet } from './components/instance-form-sheet'
@@ -89,6 +90,11 @@ export function ManagedInstanceDetail({
     user,
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
     ADMIN_PERMISSION_ACTIONS.AUDIT
+  )
+  const canViewConfig = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_TEMPLATE,
+    ADMIN_PERMISSION_ACTIONS.VIEW
   )
 
   const instanceQuery = useQuery({
@@ -284,6 +290,11 @@ export function ManagedInstanceDetail({
             <div className='min-w-0 xl:col-span-2'>
               <ObservabilityPanel instance={instance} />
             </div>
+            {canViewConfig && instance.capabilities.includes('config.read') && (
+              <div className='min-w-0 xl:col-span-2'>
+                <ConfigurationGovernancePanel instance={instance} />
+              </div>
+            )}
             {canCheck && (
               <div className='min-w-0 xl:col-span-2'>
                 <ControlledOperationsPanel instance={instance} />
@@ -779,6 +790,9 @@ function auditActionLabel(action: string): string {
       credential_rotate: 'Credential rotated',
       check: 'Connection check',
       delete: 'Instance removed',
+      config_binding_update: 'Configuration binding updated',
+      config_drift_check: 'Configuration drift checked',
+      config_apply_plan: 'Configuration apply planned',
     }[action] || action
   )
 }

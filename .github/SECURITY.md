@@ -1,13 +1,5 @@
 # Security Policy
 
-> [!IMPORTANT]
-> **Bulk Reporting Policy:** If you need to submit multiple vulnerability reports in bulk, **you must contact us first** ([support@quantumnous.com](mailto:support@quantumnous.com)) to coordinate the submission process. Uncoordinated bulk submissions have caused significant disruption to our team, and we will take the following actions:
->
-> 1. **All uncoordinated bulk reports will be closed without review.**
-> 2. **Repeated offenders may be blocked** from further submissions.
->
-> We welcome thorough security research, but please reach out before submitting multiple reports.
-
 ## Supported Versions
 
 We provide security updates for the following versions:
@@ -31,11 +23,6 @@ We take security vulnerability reports very seriously. If you discover a securit
 
 To report a security issue, please use the GitHub Security Advisories tab to "[Open a draft security advisory](https://github.com/01121531/subandnew-api/security/advisories/new)". This is the preferred method as it provides a built-in private communication channel.
 
-Alternatively, you can report via email:
-
-- **Email:** [support@quantumnous.com](mailto:support@quantumnous.com)
-- **Subject:** `[SECURITY] Security Vulnerability Report`
-
 ### What to Include
 
 To help us understand and resolve the issue more quickly, please include the following information in your report:
@@ -58,7 +45,7 @@ To help us understand and resolve the issue more quickly, please include the fol
 
 ## Security Best Practices
 
-When deploying and using HUICHUAN, we recommend following these security best practices:
+When deploying and using SubAndNew API, we recommend following these security best practices:
 
 ### Deployment Security
 

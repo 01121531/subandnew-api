@@ -1,6 +1,6 @@
 package system_setting
 
-import "github.com/01121531/HUICHUAN-AI/setting/config"
+import "github.com/01121531/subandnew-api/setting/config"
 
 type DiscordSettings struct {
 	Enabled      bool   `json:"enabled"`

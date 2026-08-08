@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -295,6 +295,11 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 		if current.ManagementMode != instance.ManagementMode && instance.ManagementMode != model.ManagedInstanceModeObserve && !input.AllowWriteMode {
 			return ErrWriteModeForbidden
 		}
+		if connectionChanged || current.ManagementMode != instance.ManagementMode {
+			if err := ensureNoActiveConfigApply(tx, id); err != nil {
+				return err
+			}
+		}
 		result := tx.Model(&model.ManagedInstance{}).Where("id = ?", id).Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -330,6 +335,9 @@ func RotateCredential(instanceID int64, input CredentialInput, actorID int) (*Cr
 		return nil, ErrInstanceNotFound
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := ensureNoActiveConfigApply(tx, instanceID); err != nil {
+			return err
+		}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "instance_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
@@ -351,6 +359,9 @@ func Delete(id int64, actorID int) error {
 		return ErrInvalidInstance
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := ensureNoActiveConfigApply(tx, id); err != nil {
+			return err
+		}
 		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceCredential{}).Error; err != nil {
 			return err
 		}
@@ -358,6 +369,9 @@ func Delete(id int64, actorID int) error {
 			return err
 		}
 		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceAlert{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceConfigBinding{}).Error; err != nil {
 			return err
 		}
 		result := tx.Delete(&model.ManagedInstance{}, id)

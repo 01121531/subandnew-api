@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/middleware"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/middleware"
 
 	"github.com/gin-gonic/gin"
 )

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/oauth"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/oauth"
 	"github.com/gin-gonic/gin"
 )
 

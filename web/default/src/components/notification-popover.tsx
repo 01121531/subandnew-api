@@ -39,7 +39,6 @@ import {
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
@@ -56,9 +55,6 @@ interface NotificationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   unreadCount: number
-  activeTab: 'notice' | 'announcements'
-  onTabChange: (tab: 'notice' | 'announcements') => void
-  notice: string
   announcements: AnnouncementItem[]
   loading: boolean
   className?: string
@@ -176,41 +172,6 @@ function EmptyState({
 }
 
 /**
- * Notice tab content
- */
-function NoticeContent({
-  notice,
-  loading,
-  t,
-}: {
-  notice: string
-  loading: boolean
-  t: TFunction
-}) {
-  if (loading) {
-    return (
-      <EmptyState
-        icon={<Bell />}
-        title={t('Loading...')}
-        description={t('Latest platform updates and notices')}
-      />
-    )
-  }
-
-  if (!notice) {
-    return (
-      <EmptyState icon={<Bell />} title={t('No announcements at this time')} />
-    )
-  }
-
-  return (
-    <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
-      <RichContent breaks content={notice} />
-    </ScrollArea>
-  )
-}
-
-/**
  * Announcements tab content
  */
 function AnnouncementsContent({
@@ -294,9 +255,6 @@ export function NotificationPopover({
   open,
   onOpenChange,
   unreadCount,
-  activeTab,
-  onTabChange,
-  notice,
   announcements,
   loading,
   className,
@@ -337,33 +295,11 @@ export function NotificationPopover({
           </p>
         </PopoverHeader>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={onTabChange as (value: string) => void}
-        >
-          <TabsList className='grid w-full grid-cols-2'>
-            <TabsTrigger value='notice' className='gap-1.5'>
-              <Bell className='size-3.5' />
-              {t('Notice')}
-            </TabsTrigger>
-            <TabsTrigger value='announcements' className='gap-1.5'>
-              <Megaphone className='size-3.5' />
-              {t('Timeline')}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value='notice' className='mt-2'>
-            <NoticeContent notice={notice} loading={loading} t={t} />
-          </TabsContent>
-
-          <TabsContent value='announcements' className='mt-2'>
-            <AnnouncementsContent
-              announcements={announcements}
-              loading={loading}
-              t={t}
-            />
-          </TabsContent>
-        </Tabs>
+        <AnnouncementsContent
+          announcements={announcements}
+          loading={loading}
+          t={t}
+        />
 
         <div className='flex justify-end'>
           <Button size='sm' onClick={() => onOpenChange(false)}>

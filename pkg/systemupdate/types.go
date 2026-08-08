@@ -8,7 +8,7 @@ const (
 	RepositoryURL    = "https://github.com/01121531/subandnew-api"
 	LatestReleaseURL = "https://api.github.com/repos/01121531/subandnew-api/releases/latest"
 
-	helperCommand = "__huichuan_apply_update"
+	helperCommand = "__subandnew_apply_update"
 )
 
 type Capability struct {

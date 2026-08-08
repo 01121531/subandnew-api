@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/dto"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

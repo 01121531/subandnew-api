@@ -3,13 +3,12 @@ package controller
 import (
 	"net/http"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
-	"github.com/01121531/HUICHUAN-AI/middleware"
-	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/oauth"
-	"github.com/01121531/HUICHUAN-AI/setting/console_setting"
-	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/constant"
+	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/oauth"
+	"github.com/01121531/subandnew-api/setting/console_setting"
+	"github.com/01121531/subandnew-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -18,9 +17,7 @@ func TestStatus(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "database connection failed"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true, "message": "Server is running", "http_stats": middleware.GetStats(),
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Server is running"})
 }
 
 func GetStatus(c *gin.Context) {
@@ -46,19 +43,12 @@ func GetStatus(c *gin.Context) {
 		"passkey_rp_id": passkey.RPID, "passkey_origins": passkey.Origins,
 		"passkey_allow_insecure":    passkey.AllowInsecureOrigin,
 		"passkey_user_verification": passkey.UserVerification, "passkey_attachment": passkey.AttachmentPreference,
-		"api_info_enabled": console.ApiInfoEnabled, "uptime_kuma_enabled": console.UptimeKumaEnabled,
-		"announcements_enabled": console.AnnouncementsEnabled, "faq_enabled": console.FAQEnabled,
+		"announcements_enabled":  console.AnnouncementsEnabled,
 		"user_agreement_enabled": legal.UserAgreement != "", "privacy_policy_enabled": legal.PrivacyPolicy != "",
 		"docs_link": "https://github.com/01121531/subandnew-api",
 	}
-	if console.ApiInfoEnabled {
-		data["api_info"] = console_setting.GetApiInfo()
-	}
 	if console.AnnouncementsEnabled {
 		data["announcements"] = console_setting.GetAnnouncements()
-	}
-	if console.FAQEnabled {
-		data["faq"] = console_setting.GetFAQ()
 	}
 
 	providers := oauth.GetEnabledCustomProviders()

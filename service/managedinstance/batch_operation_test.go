@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
 

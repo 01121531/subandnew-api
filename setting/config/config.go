@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 )
 
 // ConfigManager 统一管理所有配置

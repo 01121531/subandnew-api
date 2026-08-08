@@ -19,11 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
-import { BrandMark, BrandWordmark } from '@/components/brand-wordmark'
+import { BrandWordmark } from '@/components/brand-wordmark'
 import { PageTransition } from '@/components/page-transition'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { isHuichuanBrand } from '@/lib/brand'
 
 interface ErrorPageShellProps {
   status: number
@@ -35,7 +34,7 @@ interface ErrorPageShellProps {
 
 export function ErrorPageShell(props: ErrorPageShellProps) {
   const { systemName, logo } = useSystemConfig()
-  const displayName = systemName || 'huichuan'
+  const displayName = systemName || 'SubAndNew API'
 
   return (
     <div className='bg-background text-foreground relative isolate min-h-svh overflow-hidden'>
@@ -53,15 +52,7 @@ export function ErrorPageShell(props: ErrorPageShellProps) {
           to='/'
           className='group flex items-center gap-2.5 transition-opacity hover:opacity-80'
         >
-          {isHuichuanBrand(displayName) ? (
-            <BrandMark className='size-8 transition-transform duration-300 group-hover:scale-105' />
-          ) : (
-            <img
-              src={logo}
-              alt=''
-              className='size-8 rounded-xl object-contain'
-            />
-          )}
+          <img src={logo} alt='' className='size-8 rounded-xl object-contain' />
           <BrandWordmark name={displayName} className='text-sm' />
         </Link>
         <ThemeSwitch />
@@ -78,7 +69,7 @@ export function ErrorPageShell(props: ErrorPageShellProps) {
           </div>
 
           <p className='text-sm font-semibold tracking-[0.24em] text-violet-600 uppercase dark:text-violet-300'>
-            HUICHUAN STATUS
+            SYSTEM STATUS
           </p>
           <h1 className='mt-4 text-3xl font-bold tracking-[-0.03em] sm:text-5xl'>
             {props.title}

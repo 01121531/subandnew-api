@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -23,6 +23,7 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{}, &model.ManagedInstanceAlert{},
+		&model.ManagedConfigTemplate{}, &model.ManagedInstanceConfigBinding{},
 	))
 	previousDB := model.DB
 	model.DB = db
@@ -85,6 +86,9 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 	var credentialCount int64
 	require.NoError(t, db.Model(&model.ManagedInstanceCredential{}).Where("instance_id = ?", created.Id).Count(&credentialCount).Error)
 	require.Zero(t, credentialCount)
+	var bindingCount int64
+	require.NoError(t, db.Model(&model.ManagedInstanceConfigBinding{}).Where("instance_id = ?", created.Id).Count(&bindingCount).Error)
+	require.Zero(t, bindingCount)
 	var audits []model.ManagedInstanceAudit
 	require.NoError(t, db.Where("instance_id = ?", created.Id).Order("id asc").Find(&audits).Error)
 	require.Len(t, audits, 4)

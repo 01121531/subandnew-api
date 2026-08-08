@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )

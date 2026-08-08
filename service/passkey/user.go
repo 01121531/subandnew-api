@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 
 	webauthn "github.com/go-webauthn/webauthn/webauthn"
 )

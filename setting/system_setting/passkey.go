@@ -4,8 +4,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/setting/config"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/setting/config"
 )
 
 type PasskeySettings struct {
@@ -35,7 +35,7 @@ func init() {
 func GetPasskeySettings() *PasskeySettings {
 	if defaultPasskeySettings.RPID == "" && ServerAddress != "" {
 		// 从ServerAddress提取域名作为RPID
-		// ServerAddress可能是 "https://huichuan.example.com" 这种格式
+		// ServerAddress may include a scheme, for example "https://control.example.com".
 		serverAddr := strings.TrimSpace(ServerAddress)
 		if parsed, err := url.Parse(serverAddr); err == nil && parsed.Host != "" {
 			defaultPasskeySettings.RPID = parsed.Host

@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/subandnew-api/common"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
@@ -43,6 +43,8 @@ func TestMain(m *testing.M) {
 		&ManagedInstanceAudit{},
 		&ManagedInstanceSnapshot{},
 		&ManagedInstanceAlert{},
+		&ManagedConfigTemplate{},
+		&ManagedInstanceConfigBinding{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -61,6 +63,7 @@ func truncateTables(t *testing.T) {
 			"managed_instance_operation_batch_items", "managed_instance_operation_batches",
 			"managed_instance_audits", "managed_instance_snapshots",
 			"managed_instance_alerts", "managed_instances",
+			"managed_instance_config_bindings", "managed_config_templates",
 		} {
 			DB.Exec("DELETE FROM " + table)
 		}

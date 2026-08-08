@@ -25,7 +25,7 @@ import {
 } from './section-registry.tsx'
 
 const defaultSiteSettings: SiteSettings = {
-  SystemName: 'HUICHUAN',
+  SystemName: 'SubAndNew API',
   Logo: '',
   Footer: '',
   ServerAddress: '',

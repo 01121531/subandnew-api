@@ -788,6 +788,7 @@ function actionTitle(action: ManagedInstanceOperationAction): string {
       refresh_inventory: 'Refresh inventory',
       test_resources: 'Test resources',
       toggle_resource: 'Toggle resource',
+      apply_config: 'Apply configuration',
     } as const
   )[action]
 }

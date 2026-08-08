@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/setting/system_setting"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	webauthn "github.com/go-webauthn/webauthn/webauthn"

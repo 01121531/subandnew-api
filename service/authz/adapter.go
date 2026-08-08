@@ -3,7 +3,7 @@ package authz
 import (
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 	casbinmodel "github.com/casbin/casbin/v2/model"
 	"github.com/casbin/casbin/v2/persist"
 	"gorm.io/gorm"

@@ -22,6 +22,8 @@
 - 支持 `observe`、`operate`、`enforce` 管理模式。
 - 支持操作预览后执行、幂等键、实例级任务锁和审计记录。
 - 首批受控动作：刷新资源、测试资源、启用或停用资源。
+- 支持版本化配置模板、实例绑定、漂移检测、差异预览、定向应用、应用后校验和失败补偿。
+- New API/HUICHUAN-AI 配置采用逐项写入；Sub2API 采用白名单部分对象写入，远端完整配置不落库。
 - Root/管理员按细粒度 RBAC 权限访问实例中心。
 - React 管理端提供实例列表、筛选、新增、编辑、凭据轮换和实例详情。
 
@@ -39,6 +41,31 @@
 控制平面账号只用于身份与权限管理，API 管理接口只接受登录会话，不兼容旧 `User.AccessToken`。旧数据库中的商业化表、列和配置不会在升级时自动删除或重新解释。
 
 升级旧数据库时不会自动删除历史业务表。历史数据必须由管理员在备份后显式归档或清理。
+
+### 旧数据归档与清理
+
+维护命令不会启动 Web 服务，也不会执行自动迁移：
+
+```bash
+# 查看旧表、旧 users 列及数据库指纹
+subandnew-api legacy-data inventory --output legacy-inventory.json
+
+# 流式归档并生成列结构、逐表内容哈希与 SHA-256 校验文件
+subandnew-api legacy-data archive --output legacy-archive.json
+
+# 默认只预演；输出中会给出 execute 所需的数据库指纹
+subandnew-api legacy-data purge --archive legacy-archive.json
+
+# 校验归档完整性后显式清理
+subandnew-api legacy-data purge --archive legacy-archive.json \
+  --execute --confirm <database-fingerprint>
+```
+
+`purge` 会重新计算逐表和旧用户列内容哈希，数据在归档后发生任何变化都会拒绝清理。工具仅识别代码中明确列出的 HUICHUAN 历史表；插件表或其他未知表会单独报告并阻断归档与清理，不会因为“不属于控制平面”而被推断为可删除。管理员、权限、审计、任务和实例管理数据不会进入清理范围。
+
+破坏性 `purge --execute` 当前仅支持 SQLite。MySQL/PostgreSQL 可执行清单和归档，但必须由 DBA 根据归档列结构审核并执行迁移，工具不会在这两类数据库上尝试跨方言 DDL。
+
+从旧 HUICHUAN-AI 二进制迁移时需先手工部署一次 SubAndNew API；在线升级器仅识别 `subandnew-api-*` 资产和 `.subandnew-update` 状态目录，不保留旧产品名的 helper/资产兼容分支。完成首次部署后，后续版本可使用内置在线升级。
 
 ## 快速开始
 
@@ -124,11 +151,14 @@ go build ./...
 | `managed_instance.batch_operate` | 执行批量操作 |
 | `managed_instance.secret_rotate` | 轮换或撤销凭据 |
 | `managed_instance.audit` | 查看详细审计信息 |
+| `managed_template.view` | 查看配置模板、绑定、漂移和差异 |
+| `managed_template.apply` | 管理模板、绑定并执行配置应用，仅 Root 默认拥有 |
 
 ## 验证
 
 ```bash
-go test ./service/managedinstance ./service ./model ./controller ./router -run "ManagedInstance|Operation|SystemTask|Scoped" -count=1
+go test ./... -count=1
+go vet ./...
 cd web/default
 bun run typecheck
 bun run build
@@ -137,8 +167,10 @@ bun run build
 ## 实施状态
 
 - 已完成：实例模型、凭据加密、RBAC、适配器、SSRF 防护、巡检、实例中心、详情页、单实例及批量受控操作。
-- 已完成：本地 Relay、Channel、代理池、Token、计费、订阅、注册及商业化配置的代码删除；新安装只创建控制平面表。
-- 后续：配置基线、漂移检测、显式历史数据归档工具和完整端到端测试。
+- 已完成：配置模板与版本化 Schema、漂移检测、差异预览、两阶段配置应用、应用后验证和失败补偿。
+- 已完成：旧业务数据清单、流式归档、校验、预演和双确认显式清理工具。
+- 已完成：本地 Relay、Channel、代理池、Token、计费、订阅、注册、旧通知/状态集成及商业化配置的代码删除；新安装只创建控制平面表。
+- 可选后续：Phase 4 联邦路由。该能力不属于当前控制平面默认范围。
 
 ## 上游与许可
 

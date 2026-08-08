@@ -18,7 +18,7 @@ web/default/_stale-node_modules.stale-*
 web/dist
 .env
 one-api
-huichuan
+subandnew-api
 /__debug_bin*
 .DS_Store
 tiktoken_cache

@@ -1,6 +1,6 @@
 package authz
 
-import "github.com/01121531/HUICHUAN-AI/common"
+import "github.com/01121531/subandnew-api/common"
 
 // resolveSubjectRoles returns the role keys assigned to a subject. The mapping
 // is derived from the caller's system role.

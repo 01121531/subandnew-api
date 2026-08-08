@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/i18n"
-	"github.com/01121531/HUICHUAN-AI/logger"
-	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
+	"github.com/01121531/subandnew-api/i18n"
+	"github.com/01121531/subandnew-api/logger"
+	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 )
 

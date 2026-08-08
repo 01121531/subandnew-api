@@ -3,9 +3,9 @@ package router
 import (
 	"net/http"
 
-	"github.com/01121531/HUICHUAN-AI/controller"
-	"github.com/01121531/HUICHUAN-AI/middleware"
-	"github.com/01121531/HUICHUAN-AI/service/authz"
+	"github.com/01121531/subandnew-api/controller"
+	"github.com/01121531/subandnew-api/middleware"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,6 +17,14 @@ type permissionRoute struct {
 }
 
 func registerManagedInstanceRoutes(apiRouter *gin.RouterGroup) {
+	templateGroup := apiRouter.Group("/managed-config")
+	templateGroup.Use(middleware.AdminAuth())
+	templateGroup.GET("/schemas", middleware.RequirePermission(authz.ManagedTemplateView), controller.ListManagedConfigSchemas)
+	templateGroup.GET("/templates", middleware.RequirePermission(authz.ManagedTemplateView), controller.ListManagedConfigTemplates)
+	templateGroup.POST("/templates", middleware.RequirePermission(authz.ManagedTemplateApply), controller.CreateManagedConfigTemplate)
+	templateGroup.PUT("/templates/:template_id", middleware.RequirePermission(authz.ManagedTemplateApply), controller.UpdateManagedConfigTemplate)
+	templateGroup.DELETE("/templates/:template_id", middleware.RequirePermission(authz.ManagedTemplateApply), controller.DeleteManagedConfigTemplate)
+
 	routeGroup := apiRouter.Group("/managed-instances")
 	routeGroup.Use(middleware.AdminAuth())
 	for _, route := range managedInstancePermissionRoutes {
@@ -42,6 +50,12 @@ var managedInstancePermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/:id/tasks/:task_id", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceTask},
 	{method: http.MethodGet, path: "/:id/audits", permission: authz.ManagedInstanceAudit, handler: controller.ListManagedInstanceAudits},
 	{method: http.MethodGet, path: "/:id/alerts", permission: authz.ManagedInstanceView, handler: controller.ListManagedInstanceAlertsForInstance},
+	{method: http.MethodGet, path: "/:id/config", permission: authz.ManagedTemplateView, handler: controller.GetManagedInstanceConfig},
+	{method: http.MethodPut, path: "/:id/config", permission: authz.ManagedTemplateApply, handler: controller.SetManagedInstanceConfig},
+	{method: http.MethodPost, path: "/:id/config/refresh", permission: authz.ManagedTemplateView, handler: controller.RefreshManagedInstanceConfig},
+	{method: http.MethodPost, path: "/:id/config/apply/plan", permission: authz.ManagedTemplateApply, handler: controller.PlanManagedInstanceConfigApply},
+	{method: http.MethodPost, path: "/:id/config/apply", permission: authz.ManagedTemplateApply, handler: controller.ExecuteManagedInstanceConfigApply},
+	{method: http.MethodGet, path: "/:id/config/operations/:operation_id", permission: authz.ManagedTemplateApply, handler: controller.GetManagedInstanceConfigOperation},
 	{method: http.MethodPost, path: "/:id/actions/plan", permission: authz.ManagedInstanceOperate, handler: controller.PlanManagedInstanceOperation},
 	{method: http.MethodPost, path: "/:id/actions", permission: authz.ManagedInstanceOperate, handler: controller.ExecuteManagedInstanceOperation},
 	{method: http.MethodGet, path: "/:id/operations/:operation_id", permission: authz.ManagedInstanceOperate, handler: controller.GetManagedInstanceOperation},

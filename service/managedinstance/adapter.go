@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 )
 
 const (
@@ -125,6 +125,9 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 			return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: adminResponse.StatusCode}
 		}
 		capabilities = append(capabilities, "channels.list", "channels.test", "channels.toggle")
+		if probeConfigEndpoint(ctx, connector, detectedKind, headers) {
+			capabilities = append(capabilities, "config.read", "config.apply")
+		}
 	}
 	return &ProbeResult{
 		Kind: detectedKind, Version: status.Data.Version, SystemName: status.Data.SystemName,
@@ -142,7 +145,11 @@ func newAPIAuthHeaders(kind string, credential *CredentialMaterial) (http.Header
 		if strings.TrimSpace(credential.UserID) == "" {
 			return nil, &ProbeError{Code: ProbeErrorAuthentication}
 		}
-		headers.Set("HUICHUAN-User", credential.UserID)
+		if kind == model.ManagedInstanceKindHuichuan {
+			headers.Set("HUICHUAN-User", credential.UserID)
+		} else {
+			headers.Set("New-Api-User", credential.UserID)
+		}
 	}
 	return headers, nil
 }
@@ -194,7 +201,32 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	}
 	result.Version = version.Data.Version
 	result.Capabilities = append(result.Capabilities, "version.read", "accounts.list", "accounts.test", "accounts.toggle")
+	if probeConfigEndpoint(ctx, connector, model.ManagedInstanceKindSub2API, headers) {
+		result.Capabilities = append(result.Capabilities, "config.read", "config.apply")
+	}
 	return result, nil
+}
+
+func probeConfigEndpoint(ctx context.Context, connector *Connector, kind string, headers http.Header) bool {
+	path := "/api/option/"
+	if kind == model.ManagedInstanceKindSub2API {
+		path = "/api/v1/admin/settings"
+	}
+	response, err := connector.DoJSON(ctx, http.MethodGet, path, headers, nil)
+	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+		return false
+	}
+	if kind == model.ManagedInstanceKindSub2API {
+		_, err = decodeSub2Settings(response.Body)
+		return err == nil
+	}
+	var envelope struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			Key string `json:"key"`
+		} `json:"data"`
+	}
+	return json.Unmarshal(response.Body, &envelope) == nil && envelope.Success && envelope.Data != nil
 }
 
 func sub2APIAuthHeaders(credential *CredentialMaterial) (http.Header, error) {

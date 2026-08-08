@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/model"
-	passkeysvc "github.com/01121531/HUICHUAN-AI/service/passkey"
-	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/model"
+	passkeysvc "github.com/01121531/subandnew-api/service/passkey"
+	"github.com/01121531/subandnew-api/setting/system_setting"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"

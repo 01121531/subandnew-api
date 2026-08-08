@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/constant"
+	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/constant"
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -102,6 +102,13 @@ func chooseDB() (*gorm.DB, common.DatabaseType, error) {
 	return db, common.DatabaseTypeMySQL, err
 }
 
+// OpenDatabaseWithoutMigration is reserved for explicit offline maintenance
+// commands. It opens the configured database without AutoMigrate or setup side
+// effects so inventory and archival can run before any ordinary startup work.
+func OpenDatabaseWithoutMigration() (*gorm.DB, common.DatabaseType, error) {
+	return chooseDB()
+}
+
 func InitDB() error {
 	db, dbType, err := chooseDB()
 	if err != nil {
@@ -191,6 +198,8 @@ func controlPlaneModels() []interface{} {
 		&ManagedInstanceOperation{},
 		&ManagedInstanceOperationBatch{},
 		&ManagedInstanceOperationBatchItem{},
+		&ManagedConfigTemplate{},
+		&ManagedInstanceConfigBinding{},
 	}
 }
 

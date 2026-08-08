@@ -1,4 +1,4 @@
-module github.com/01121531/HUICHUAN-AI
+module github.com/01121531/subandnew-api
 
 // +heroku goVersion go1.18
 go 1.25.1
@@ -27,7 +27,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0
 	golang.org/x/text v0.38.0
 	gopkg.in/yaml.v3 v3.0.1

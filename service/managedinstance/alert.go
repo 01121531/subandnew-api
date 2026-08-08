@@ -3,7 +3,7 @@ package managedinstance
 import (
 	"errors"
 
-	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/01121531/subandnew-api/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

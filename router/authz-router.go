@@ -1,8 +1,8 @@
 package router
 
 import (
-	"github.com/01121531/HUICHUAN-AI/controller"
-	"github.com/01121531/HUICHUAN-AI/middleware"
+	"github.com/01121531/subandnew-api/controller"
+	"github.com/01121531/subandnew-api/middleware"
 
 	"github.com/gin-gonic/gin"
 )

@@ -1,11 +1,11 @@
 package router
 
 import (
-	"github.com/01121531/HUICHUAN-AI/controller"
-	"github.com/01121531/HUICHUAN-AI/middleware"
+	"github.com/01121531/subandnew-api/controller"
+	"github.com/01121531/subandnew-api/middleware"
 
 	// Providers register themselves for the optional administrator SSO flow.
-	_ "github.com/01121531/HUICHUAN-AI/oauth"
+	_ "github.com/01121531/subandnew-api/oauth"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
@@ -24,7 +24,6 @@ func SetApiRouter(router *gin.Engine) {
 	api.GET("/setup", controller.GetSetup)
 	api.POST("/setup", requestBodyLimit, controller.PostSetup)
 	api.GET("/status", controller.GetStatus)
-	api.GET("/uptime/status", controller.GetUptimeKumaStatus)
 	api.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
 
 	api.GET("/oauth/state", middleware.CriticalRateLimit(), controller.GenerateOAuthCode)
