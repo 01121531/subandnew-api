@@ -717,25 +717,33 @@ router/
 - 未匹配的 `/v1`、`/api` 和 `/assets` 路径对旧 Relay 404 处理器的回退调用；现在统一返回控制平面 JSON 404。
 - Classic 主题切换配置、双前端嵌入、构建工作区和发布步骤。
 - 项目公开链接和在线升级 Release 来源已迁移到 `01121531/subandnew-api`。
+- 异步模型任务完整运行链：Midjourney、Suno、Sora、Gemini、Vertex、可灵、即梦、海螺、豆包、Vidu 与阿里视频任务的 Middleware、Service、Model、DTO、Relay 处理器、任务适配器、轮询、计费、环境变量、错误包装、倍率和翻译。
+- 任务 Relay 的 `TaskAdaptor`、`TaskRelayInfo`、任务格式与路径枚举、`midjourney-proxy`/`mj-api-secret` 认证兼容分支，以及侧栏中的 Drawing/Task 权限和旧任务显示别名。
+- 没有调用方的 Codex 凭据刷新任务和订阅重置任务；控制平面只保留由实例管理实际注册的任务处理器。
+- 仅由此前删除的支付、充值和导出模块使用的 Go 依赖，包括 `go-epay`、Stripe、`randstr`、`waffo-go` 和 `excelize` 及其间接依赖。
+
+本批删除前后均由只读子代理复核实际引用图。复核确认当前 Router 不引用旧 Distributor，控制平面不引用异步任务 Model、Service 或适配器；历史渠道类型数字仍保留在 `constant/channel.go`，因为这些值可能已写入旧数据库，必须随整个 Channel 模块和显式旧数据清理工具一起删除，禁止单独重排编号。
 
 正在执行：
 
-- 按子代理审查结果继续删除已经没有 Controller 的 Service、Middleware、Model 和 Relay 实现；下一批优先处理异步模型任务与未注册的 Relay 中间件，再处理渠道/代理池，最后处理与管理员用户字段交叉的计费和订阅。
-- 清理仅由已删除模块使用的 Go/Bun 依赖、环境变量、翻译和静态资产。
+- 删除剩余的通用 Relay、Channel、代理池和模型供应商实现；先建立共享类型与控制平面引用图，再按可编译批次移除。
+- 清理与管理员用户字段交叉的旧计费、订阅和渠道数据模型，并提供旧表归档、`dry-run` 和显式清理工具。
+- 继续清理仅由已删除模块使用的 Bun 依赖、死翻译键和静态资产，并逐步清零前端历史 Lint 基线。
 
 本节是实际仓库状态记录；后续每个删除批次只有在 Go 编译、前端类型检查和生产构建通过后才标记完成。
 
 本轮验证记录：
 
 - `go test ./... -run '^$'`：全部 Go 包编译通过。
-- `go test ./controller ./router ./service/managedinstance -count=1`：控制平面 Controller、旧业务路由禁用门禁和实例管理服务测试通过。
+- `go test ./model ./controller ./router ./service/managedinstance -count=1`：控制平面 Model、Controller、旧业务路由禁用门禁和实例管理服务测试通过。
 - `go test ./model -run 'TestSystemTask|MigrateDB|MigrateLogDB|CloseDB' -count=1`：控制平面迁移与系统任务测试通过，覆盖旧活动任务升级收口。
 - `go test ./service/managedinstance -count=1`：适配器、凭据、SSRF、六阶段预检、完整分页快照、告警、受控操作、ETag 冲突和任务租约提交保护测试通过。
 - `go test ./service -run 'TestManagedInstance|TestSystemTask|TestRunSystemTask|TestEnqueue|TestScoped|TestRunWithLease' -count=1`：超过 500 个实例的分批调度、作用域锁、任务租约与取消测试通过。
 - `go test ./model ./controller ./router -run 'MigrateDB|MigrateLogDB|CloseDB|ManagedInstance' -count=1`：控制平面迁移白名单、旧表保留、数据库关闭保护和权限路由测试通过。
-- `tsgo -b`、managed-instances 目录定向 `oxlint`、`rsbuild build`：通过。
-- 全新 SQLite 真实启动通过：`GET /api/status` 返回 `200 + success=true`，`GET /api/channel/` 返回 JSON `404`。
-- 全仓 `oxlint` 仍存在旧前端模块的历史告警，因此不作为本轮新增代码失败；这些告警随对应旧模块删除或保留模块整理逐批清零。
+- `tsgo -b`、`rsbuild build`：通过；本批修改文件已由项目 `oxfmt` 格式化。
+- 全新 SQLite 真实启动通过：`GET /api/status` 返回 `200`，未登录访问 `/api/managed-instances` 返回 JSON `401`，`/v1/videos` 与 `/api/task` 返回 `404`；旧 `/mj`、`/suno` 路径只进入通用前端 HTML 兜底，不再进入任务处理器。
+- 全仓 `oxlint` 仍存在旧前端模块的历史错误和告警；当前主要位于 Profile、通用表格/布局组件及设置页，本批类型检查和生产构建均通过，这些 Lint 基线随对应旧模块删除或保留模块整理逐批清零。
+- `go test ./model ./service ./controller ./router ./service/managedinstance -count=1` 中除 `service` 外均通过；`service` 仍有既存代理运行时测试失败：`proxy_state_events` 测试表缺少 `group_id`，以及暂停恢复测试期望 `recovering` 但得到 `available`。控制平面相关 Service 定向测试单独通过，本批未修改上述代理逻辑。
 
 ### Phase 0：契约验证
 

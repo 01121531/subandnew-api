@@ -1,0 +1,72 @@
+package service
+
+import (
+	"os"
+	"testing"
+
+	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/HUICHUAN-AI/model"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+)
+
+func TestMain(m *testing.M) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		panic("failed to open test db: " + err.Error())
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic("failed to get sql.DB: " + err.Error())
+	}
+	sqlDB.SetMaxOpenConns(1)
+	model.DB = db
+	model.LOG_DB = db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.RedisEnabled = false
+	common.BatchUpdateEnabled = false
+	common.LogConsumeEnabled = true
+
+	if err := db.AutoMigrate(
+		&model.User{},
+		&model.Token{},
+		&model.Log{},
+		&model.Channel{},
+		&model.TopUp{},
+		&model.UserSubscription{},
+		&model.SystemTask{},
+		&model.SystemTaskLock{},
+		&model.SystemTaskScopeLock{},
+		&model.ManagedInstance{},
+		&model.ManagedInstanceCredential{},
+		&model.ManagedInstanceOperation{},
+		&model.ManagedInstanceAudit{},
+		&model.ManagedInstanceSnapshot{},
+		&model.ManagedInstanceAlert{},
+		&model.ProxyGroup{},
+		&model.Proxy{},
+		&model.ChannelProxyBinding{},
+		&model.ProxyLogAnalysis{},
+		&model.ProxyLogAnalysisCursor{},
+		&model.ProxyStateEvent{},
+	); err != nil {
+		panic("failed to migrate: " + err.Error())
+	}
+	os.Exit(m.Run())
+}
+
+func truncate(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, table := range []string{
+			"users", "tokens", "logs", "channels", "top_ups", "user_subscriptions",
+			"system_task_locks", "system_task_scope_locks", "system_tasks",
+			"managed_instance_operations", "managed_instance_credentials",
+			"managed_instance_audits", "managed_instance_snapshots",
+			"managed_instance_alerts", "managed_instances", "proxy_state_events",
+			"proxy_log_analyses", "proxy_log_analysis_cursors",
+		} {
+			model.DB.Exec("DELETE FROM " + table)
+		}
+	})
+}

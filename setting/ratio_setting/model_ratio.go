@@ -24,7 +24,6 @@ const (
 // 1 === ￥0.014 / 1k tokens
 
 var defaultModelRatio = map[string]float64{
-	//"midjourney":                50,
 	"gpt-4-gizmo-*":                             15,
 	"gpt-4o-gizmo-*":                            2.5,
 	"gpt-4-all":                                 15,
@@ -270,8 +269,6 @@ var defaultModelRatio = map[string]float64{
 }
 
 var defaultModelPrice = map[string]float64{
-	"suno_music":                     0.1,
-	"suno_lyrics":                    0.01,
 	"dall-e-3":                       0.04,
 	"imagen-3.0-generate-002":        0.03,
 	"black-forest-labs/flux-1.1-pro": 0.04,

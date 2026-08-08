@@ -83,10 +83,6 @@ const TYPE_LABEL: Record<string, string> = {
   managed_instance_operation: 'Instance operation',
 }
 
-const TYPE_DISPLAY_ID: Record<string, string> = {
-  midjourney_poll: 'drawing_task_poll',
-}
-
 function isActiveStatus(status: SystemTaskStatus) {
   return status === 'pending' || status === 'running'
 }
@@ -140,7 +136,7 @@ function SystemTasksTable(props: SystemTasksTableProps) {
                       {t(TYPE_LABEL[task.type] ?? task.type)}
                     </div>
                     <div className='text-muted-foreground font-mono text-[11px]'>
-                      {TYPE_DISPLAY_ID[task.type] ?? task.type}
+                      {task.type}
                     </div>
                   </div>
                 </TableCell>

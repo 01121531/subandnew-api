@@ -26,13 +26,12 @@ type ClaudeError struct {
 type ErrorType string
 
 const (
-	ErrorTypeHUICHUANError   ErrorType = "huichuan_error"
-	ErrorTypeOpenAIError     ErrorType = "openai_error"
-	ErrorTypeClaudeError     ErrorType = "claude_error"
-	ErrorTypeMidjourneyError ErrorType = "midjourney_error"
-	ErrorTypeGeminiError     ErrorType = "gemini_error"
-	ErrorTypeRerankError     ErrorType = "rerank_error"
-	ErrorTypeUpstreamError   ErrorType = "upstream_error"
+	ErrorTypeHUICHUANError ErrorType = "huichuan_error"
+	ErrorTypeOpenAIError   ErrorType = "openai_error"
+	ErrorTypeClaudeError   ErrorType = "claude_error"
+	ErrorTypeGeminiError   ErrorType = "gemini_error"
+	ErrorTypeRerankError   ErrorType = "rerank_error"
+	ErrorTypeUpstreamError ErrorType = "upstream_error"
 )
 
 type ErrorCode string
