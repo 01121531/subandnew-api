@@ -13,7 +13,6 @@ import (
 
 	"github.com/01121531/HUICHUAN-AI/common"
 	"github.com/01121531/HUICHUAN-AI/logger"
-	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,9 +27,7 @@ type PerformanceStats struct {
 	// 磁盘空间信息
 	DiskSpaceInfo common.DiskSpaceInfo `json:"disk_space_info"`
 	// 配置信息
-	Config         PerformanceConfig           `json:"config"`
-	UsageLogQueue  model.UsageLogQueueStatus   `json:"usage_log_queue"`
-	UsageLogExport UsageLogExportRuntimeStatus `json:"usage_log_export"`
+	Config PerformanceConfig `json:"config"`
 }
 
 // MemoryStats 内存统计
@@ -131,11 +128,9 @@ func GetPerformanceStats(c *gin.Context) {
 			NumGC:        memStats.NumGC,
 			NumGoroutine: runtime.NumGoroutine(),
 		},
-		DiskCacheInfo:  diskCacheInfo,
-		DiskSpaceInfo:  diskSpaceInfo,
-		Config:         config,
-		UsageLogQueue:  model.GetUsageLogQueueStatus(),
-		UsageLogExport: GetUsageLogExportRuntimeStatus(),
+		DiskCacheInfo: diskCacheInfo,
+		DiskSpaceInfo: diskSpaceInfo,
+		Config:        config,
 	}
 
 	c.JSON(http.StatusOK, gin.H{

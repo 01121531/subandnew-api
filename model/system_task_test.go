@@ -94,24 +94,24 @@ func TestSystemTaskActiveKeyPreventsDuplicateActiveRun(t *testing.T) {
 func TestQueuedSystemTasksAllowMultiplePendingRows(t *testing.T) {
 	truncateTables(t)
 
-	first, err := CreateQueuedSystemTask(SystemTaskTypeUsageLogExport, map[string]int{"user": 1}, nil)
+	first, err := CreateQueuedSystemTask(SystemTaskTypeManagedInstanceSync, map[string]int{"instance": 1}, nil)
 	require.NoError(t, err)
-	second, err := CreateQueuedSystemTask(SystemTaskTypeUsageLogExport, map[string]int{"user": 2}, nil)
+	second, err := CreateQueuedSystemTask(SystemTaskTypeManagedInstanceSync, map[string]int{"instance": 2}, nil)
 	require.NoError(t, err)
 
 	assert.Nil(t, first.ActiveKey)
 	assert.Nil(t, second.ActiveKey)
-	pending, err := FindPendingSystemTasks(SystemTaskTypeUsageLogExport, 10)
+	pending, err := FindPendingSystemTasks(SystemTaskTypeManagedInstanceSync, 10)
 	require.NoError(t, err)
 	require.Len(t, pending, 2)
 	assert.Equal(t, first.TaskID, pending[0].TaskID)
 	assert.Equal(t, second.TaskID, pending[1].TaskID)
 
-	claimed, ok, err := ClaimSystemTask(first.ID, SystemTaskTypeUsageLogExport, "runner-a", common.GetTimestamp()+60)
+	claimed, ok, err := ClaimSystemTask(first.ID, SystemTaskTypeManagedInstanceSync, "runner-a", common.GetTimestamp()+60)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NotNil(t, claimed)
-	_, ok, err = ClaimSystemTask(second.ID, SystemTaskTypeUsageLogExport, "runner-b", common.GetTimestamp()+60)
+	_, ok, err = ClaimSystemTask(second.ID, SystemTaskTypeManagedInstanceSync, "runner-b", common.GetTimestamp()+60)
 	require.NoError(t, err)
 	assert.False(t, ok)
 }
@@ -289,26 +289,73 @@ func TestFindEarliestPendingSystemTasks(t *testing.T) {
 func TestGetLatestSystemTask(t *testing.T) {
 	truncateTables(t)
 
-	latest, err := GetLatestSystemTask(SystemTaskTypeChannelTest)
+	latest, err := GetLatestSystemTask(SystemTaskTypeManagedInstanceProbe)
 	require.NoError(t, err)
 	require.Nil(t, latest)
 
-	first, err := CreateSystemTask(SystemTaskTypeChannelTest, nil, nil)
+	first, err := CreateSystemTask(SystemTaskTypeManagedInstanceProbe, nil, nil)
 	require.NoError(t, err)
 
 	runnerID := "runner-a"
-	_, claimed, err := ClaimSystemTask(first.ID, SystemTaskTypeChannelTest, runnerID, common.GetTimestamp()+60)
+	_, claimed, err := ClaimSystemTask(first.ID, SystemTaskTypeManagedInstanceProbe, runnerID, common.GetTimestamp()+60)
 	require.NoError(t, err)
 	require.True(t, claimed)
 	require.NoError(t, FinishSystemTask(first.TaskID, runnerID, SystemTaskStatusSucceeded, nil, ""))
 
-	second, err := CreateSystemTask(SystemTaskTypeChannelTest, nil, nil)
+	second, err := CreateSystemTask(SystemTaskTypeManagedInstanceProbe, nil, nil)
 	require.NoError(t, err)
 
-	latest, err = GetLatestSystemTask(SystemTaskTypeChannelTest)
+	latest, err = GetLatestSystemTask(SystemTaskTypeManagedInstanceProbe)
 	require.NoError(t, err)
 	require.NotNil(t, latest)
 	assert.Equal(t, second.TaskID, latest.TaskID)
+}
+
+func TestRetireUnsupportedSystemTasksPreservesSupportedAndHistory(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+
+	retiredPending, err := CreateSystemTask("channel_test", nil, nil)
+	require.NoError(t, err)
+	retiredRunning, err := CreateScopedSystemTask("proxy_health_check", "group-1", nil, nil)
+	require.NoError(t, err)
+	_, claimed, err := ClaimScopedSystemTask(retiredRunning.ID, retiredRunning.Type, "old-runner", now+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	supported, err := CreateSystemTask(SystemTaskTypeManagedInstanceProbe, nil, nil)
+	require.NoError(t, err)
+	history, err := CreateQueuedSystemTask("usage_log_export", nil, nil)
+	require.NoError(t, err)
+	_, claimed, err = ClaimSystemTask(history.ID, history.Type, "old-runner", now+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, FinishSystemTask(history.TaskID, "old-runner", SystemTaskStatusSucceeded, nil, ""))
+
+	count, err := RetireUnsupportedSystemTasks([]string{
+		SystemTaskTypeManagedInstanceProbe,
+		SystemTaskTypeManagedInstanceSync,
+	}, now+1)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count)
+
+	for _, taskID := range []string{retiredPending.TaskID, retiredRunning.TaskID} {
+		task, err := GetSystemTaskByTaskID(taskID)
+		require.NoError(t, err)
+		require.Equal(t, SystemTaskStatusFailed, task.Status)
+		require.Equal(t, "task_type_retired", task.Error)
+		require.Nil(t, task.ActiveKey)
+		require.Empty(t, task.LockedBy)
+	}
+	supportedTask, err := GetSystemTaskByTaskID(supported.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, SystemTaskStatusPending, supportedTask.Status)
+	historyTask, err := GetSystemTaskByTaskID(history.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, SystemTaskStatusSucceeded, historyTask.Status)
+
+	var scopeLocks int64
+	require.NoError(t, DB.Model(&SystemTaskScopeLock{}).Where("task_id = ?", retiredRunning.TaskID).Count(&scopeLocks).Error)
+	require.Zero(t, scopeLocks)
 }
 
 func TestGetLatestSystemTasks(t *testing.T) {

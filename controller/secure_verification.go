@@ -35,6 +35,16 @@ type VerificationStatusResponse struct {
 	ExpiresAt int64 `json:"expires_at,omitempty"`
 }
 
+func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
+	if cleanCode, err := common.ValidateNumericCode(code); err == nil {
+		if valid, _ := twoFA.ValidateTOTPAndUpdateUsage(cleanCode); valid {
+			return true
+		}
+	}
+	valid, err := twoFA.ValidateBackupCodeAndUpdateUsage(code)
+	return err == nil && valid
+}
+
 // UniversalVerify 通用验证接口
 // 支持 2FA 和 Passkey 验证，验证成功后在 session 中记录时间戳
 func UniversalVerify(c *gin.Context) {

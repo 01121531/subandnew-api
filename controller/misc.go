@@ -14,7 +14,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/middleware"
 	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/01121531/HUICHUAN-AI/oauth"
-	"github.com/01121531/HUICHUAN-AI/setting"
 	"github.com/01121531/HUICHUAN-AI/setting/console_setting"
 	"github.com/01121531/HUICHUAN-AI/setting/operation_setting"
 	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
@@ -78,22 +77,13 @@ func GetStatus(c *gin.Context) {
 		"quota_display_type":            operation_setting.GetQuotaDisplayType(),
 		"custom_currency_symbol":        operation_setting.GetGeneralSetting().CustomCurrencySymbol,
 		"custom_currency_exchange_rate": operation_setting.GetGeneralSetting().CustomCurrencyExchangeRate,
-		"enable_batch_update":           common.BatchUpdateEnabled,
-		"enable_drawing":                common.DrawingEnabled,
-		"enable_task":                   common.TaskEnabled,
-		"enable_data_export":            common.DataExportEnabled,
-		"data_export_default_time":      common.DataExportDefaultTime,
 		"default_collapse_sidebar":      common.DefaultCollapseSidebar,
-		"mj_notify_enabled":             setting.MjNotifyEnabled,
-		"chats":                         setting.Chats,
 		"demo_site_enabled":             operation_setting.DemoSiteEnabled,
 		"self_use_mode_enabled":         operation_setting.SelfUseModeEnabled,
 		"password_login_enabled":        common.PasswordLoginEnabled,
-		"default_use_auto_group":        setting.DefaultUseAutoGroup,
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,
 		"price":             operation_setting.Price,
-		"stripe_unit_price": setting.StripeUnitPrice,
 
 		// 面板启用开关
 		"api_info_enabled":      cs.ApiInfoEnabled,

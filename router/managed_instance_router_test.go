@@ -2,9 +2,11 @@ package router
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/01121531/HUICHUAN-AI/service/authz"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -33,4 +35,30 @@ func TestManagedInstancePermissionRoutes(t *testing.T) {
 		requireRoutes[route.method+" "+route.path] = route.permission
 	}
 	assert.Equal(t, want, requireRoutes)
+}
+
+func TestControlPlaneRouterExcludesLegacyBusinessRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	forbiddenPrefixes := []string{
+		"/v1",
+		"/api/channel",
+		"/api/token",
+		"/api/log",
+		"/api/subscription",
+		"/api/topup",
+		"/api/redemption",
+		"/api/deployments",
+		"/api/task",
+		"/api/mj",
+		"/api/proxy",
+		"/api/ratio",
+	}
+	for _, route := range engine.Routes() {
+		for _, prefix := range forbiddenPrefixes {
+			assert.Falsef(t, strings.HasPrefix(route.Path, prefix), "%s %s must not be registered", route.Method, route.Path)
+		}
+	}
 }

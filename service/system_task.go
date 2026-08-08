@@ -96,6 +96,17 @@ func StartSystemTaskRunner() {
 		if !common.IsMasterNode {
 			return
 		}
+		handlers := registeredSystemTaskHandlers()
+		supportedTypes := make([]string, 0, len(handlers))
+		for _, handler := range handlers {
+			supportedTypes = append(supportedTypes, handler.Type())
+		}
+		retired, err := model.RetireUnsupportedSystemTasks(supportedTypes, common.GetTimestamp())
+		if err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("retire unsupported system tasks failed: %v", err))
+		} else if retired > 0 {
+			logger.LogInfo(context.Background(), fmt.Sprintf("retired %d unsupported active system tasks", retired))
+		}
 
 		runnerID := fmt.Sprintf("%s-%s", common.NodeName, common.GetRandomString(8))
 		runnerCtx, cancel := context.WithCancel(context.Background())

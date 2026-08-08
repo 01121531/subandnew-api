@@ -709,13 +709,18 @@ router/
 - Dataset Capture 的 Controller、Middleware、模型、服务、权限资源、命令、运行时钩子和配置。
 - 旧日志清理任务的 API、任务处理器、调度入口和启动注册，以及用量日志中间件、用量队列等待、额度缓存落盘和独立日志库初始化链。
 - 旧 Relay 性能指标 Worker 的进程启动注册；控制平面启动后不再后台采集本地代理性能指标。
+- 未注册的旧业务独立 Controller 文件及专属测试，包括本地 Relay、渠道、Token、模型、计费、充值、订阅、兑换码、代理池、异步模型任务和用量日志导出；Router 增加禁止这些路径重新注册的回归测试。保留 Controller 文件中的旧用户字段分支随计费/订阅 Model 批次继续收缩。
+- `io.net` 本地模型部署 Controller、专用 SDK、审计映射、系统设置类型和中英文翻译；该供应商客户端不再进入控制平面构建产物。
+- 系统任务类型已收缩为实例巡检、实例同步和受控操作；升级时仍处于 `pending/running` 的旧任务会保留历史行并标记为 `failed + task_type_retired`，同时释放旧租约，避免任务中心永久显示活动状态。
+- 本地用量队列与用量导出的性能状态字段；控制平面性能接口只报告仍实际运行的缓存、内存、磁盘和系统监控状态。
+- 公共状态响应中的 Drawing、异步 Task、数据导出、Midjourney、Chat、渠道批量更新和自动分组开关，避免对外宣告已经下线的模型业务能力。
 - 未匹配的 `/v1`、`/api` 和 `/assets` 路径对旧 Relay 404 处理器的回退调用；现在统一返回控制平面 JSON 404。
 - Classic 主题切换配置、双前端嵌入、构建工作区和发布步骤。
 - 项目公开链接和在线升级 Release 来源已迁移到 `01121531/subandnew-api`。
 
 正在执行：
 
-- 删除已经下线路由背后的 Relay、渠道、Token、计费、订阅、数据快照和异步模型任务实现。
+- 按子代理审查结果继续删除已经没有 Controller 的 Service、Middleware、Model 和 Relay 实现；下一批优先处理异步模型任务与未注册的 Relay 中间件，再处理渠道/代理池，最后处理与管理员用户字段交叉的计费和订阅。
 - 清理仅由已删除模块使用的 Go/Bun 依赖、环境变量、翻译和静态资产。
 
 本节是实际仓库状态记录；后续每个删除批次只有在 Go 编译、前端类型检查和生产构建通过后才标记完成。
@@ -723,10 +728,13 @@ router/
 本轮验证记录：
 
 - `go test ./... -run '^$'`：全部 Go 包编译通过。
+- `go test ./controller ./router ./service/managedinstance -count=1`：控制平面 Controller、旧业务路由禁用门禁和实例管理服务测试通过。
+- `go test ./model -run 'TestSystemTask|MigrateDB|MigrateLogDB|CloseDB' -count=1`：控制平面迁移与系统任务测试通过，覆盖旧活动任务升级收口。
 - `go test ./service/managedinstance -count=1`：适配器、凭据、SSRF、六阶段预检、完整分页快照、告警、受控操作、ETag 冲突和任务租约提交保护测试通过。
 - `go test ./service -run 'TestManagedInstance|TestSystemTask|TestRunSystemTask|TestEnqueue|TestScoped|TestRunWithLease' -count=1`：超过 500 个实例的分批调度、作用域锁、任务租约与取消测试通过。
 - `go test ./model ./controller ./router -run 'MigrateDB|MigrateLogDB|CloseDB|ManagedInstance' -count=1`：控制平面迁移白名单、旧表保留、数据库关闭保护和权限路由测试通过。
 - `tsgo -b`、managed-instances 目录定向 `oxlint`、`rsbuild build`：通过。
+- 全新 SQLite 真实启动通过：`GET /api/status` 返回 `200 + success=true`，`GET /api/channel/` 返回 JSON `404`。
 - 全仓 `oxlint` 仍存在旧前端模块的历史告警，因此不作为本轮新增代码失败；这些告警随对应旧模块删除或保留模块整理逐批清零。
 
 ### Phase 0：契约验证

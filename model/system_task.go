@@ -19,15 +19,6 @@ const (
 	SystemTaskStatusSucceeded SystemTaskStatus = "succeeded"
 	SystemTaskStatusFailed    SystemTaskStatus = "failed"
 
-	SystemTaskTypeChannelTest          = "channel_test"
-	SystemTaskTypeModelUpdate          = "model_update"
-	SystemTaskTypeMidjourneyPoll       = "midjourney_poll"
-	SystemTaskTypeAsyncTaskPoll        = "async_task_poll"
-	SystemTaskTypeUsageLogExport       = "usage_log_export"
-	SystemTaskTypeProxyLogAnalyze      = "proxy_log_analyze"
-	SystemTaskTypeProxyHealthCheck     = "proxy_health_check"
-	SystemTaskTypeProxyDailyCheck      = "proxy_daily_health_check"
-	SystemTaskTypeProxyManualCheck     = "proxy_manual_health_check"
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
 )
@@ -307,6 +298,48 @@ func FindPendingSystemTasksByTypes(taskTypes []string, limit int) ([]*SystemTask
 		Limit(limit).
 		Find(&tasks).Error
 	return tasks, err
+}
+
+// RetireUnsupportedSystemTasks closes active rows whose handlers no longer
+// exist after an upgrade. Historical rows remain available for audit.
+func RetireUnsupportedSystemTasks(supportedTypes []string, now int64) (int64, error) {
+	if len(supportedTypes) == 0 {
+		return 0, errors.New("supported system task types are required")
+	}
+	var retired int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var tasks []SystemTask
+		if err := tx.Select("task_id").
+			Where("status IN ? AND type NOT IN ?", activeSystemTaskStatuses(), supportedTypes).
+			Find(&tasks).Error; err != nil {
+			return err
+		}
+		if len(tasks) == 0 {
+			return nil
+		}
+		taskIDs := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			taskIDs = append(taskIDs, task.TaskID)
+		}
+		result := tx.Model(&SystemTask{}).
+			Where("task_id IN ? AND status IN ?", taskIDs, activeSystemTaskStatuses()).
+			Updates(map[string]any{
+				"status":     SystemTaskStatusFailed,
+				"active_key": nil,
+				"locked_by":  "",
+				"error":      "task_type_retired",
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		retired = result.RowsAffected
+		if err := tx.Where("task_id IN ?", taskIDs).Delete(&SystemTaskLock{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("task_id IN ?", taskIDs).Delete(&SystemTaskScopeLock{}).Error
+	})
+	return retired, err
 }
 
 func ListSystemTasks(limit int) ([]*SystemTask, error) {
