@@ -15,7 +15,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/i18n"
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/model"
-	"github.com/01121531/HUICHUAN-AI/service"
 	"github.com/01121531/HUICHUAN-AI/service/authz"
 	"github.com/01121531/HUICHUAN-AI/setting"
 	"github.com/01121531/HUICHUAN-AI/setting/operation_setting"
@@ -552,8 +551,6 @@ func generateDefaultSidebarConfig(userRole int) string {
 		// 管理员可以访问管理员区域，但不能访问系统设置
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
-			"channel":    true,
-			"models":     true,
 			"redemption": true,
 			"user":       true,
 			"setting":    false, // 管理员不能访问系统设置
@@ -562,8 +559,6 @@ func generateDefaultSidebarConfig(userRole int) string {
 		// 超级管理员可以访问所有功能
 		defaultConfig["admin"] = map[string]interface{}{
 			"enabled":    true,
-			"channel":    true,
-			"models":     true,
 			"redemption": true,
 			"user":       true,
 			"setting":    true,
@@ -579,52 +574,6 @@ func generateDefaultSidebarConfig(userRole int) string {
 	}
 
 	return string(configBytes)
-}
-
-func GetUserModels(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		id = c.GetInt("id")
-	}
-	user, err := model.GetUserCache(id)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	groups := service.GetUserUsableGroups(user.Group)
-	group := c.Query("group")
-	if group != "" {
-		if _, ok := groups[group]; !ok {
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"message": "",
-				"data":    []string{},
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "",
-			"data":    model.GetGroupEnabledModels(group),
-		})
-		return
-	}
-
-	var models []string
-	for group := range groups {
-		for _, g := range model.GetGroupEnabledModels(group) {
-			if !common.StringsContains(models, g) {
-				models = append(models, g)
-			}
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    models,
-	})
-	return
 }
 
 func UpdateUser(c *gin.Context) {

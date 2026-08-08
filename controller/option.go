@@ -298,24 +298,6 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
-	case "AutomaticDisableStatusCodes":
-		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-	case "AutomaticRetryStatusCodes":
-		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
 	case "console_setting.api_info":
 		err = console_setting.ValidateConsoleSettings(option.Value.(string), "ApiInfo")
 		if err != nil {

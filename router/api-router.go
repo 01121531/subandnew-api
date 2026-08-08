@@ -18,7 +18,6 @@ func SetApiRouter(router *gin.Engine) {
 	api := router.Group("/api")
 	api.Use(middleware.RouteTag("api"))
 	api.Use(gzip.Gzip(gzip.DefaultCompression))
-	api.Use(middleware.BodyStorageCleanup())
 	api.Use(middleware.GlobalAPIRateLimit())
 	requestBodyLimit := middleware.AnonymousRequestBodyLimit()
 

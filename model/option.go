@@ -43,10 +43,6 @@ func InitOptionMap() {
 	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
 	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
-	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
-	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
-	common.OptionMap["ProxyDailyHealthCheckEnabled"] = "true"
-	common.OptionMap["ProxyDailyHealthCheckTime"] = "08:00"
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["UsageLogIPCaptureEnabled"] = strconv.FormatBool(common.UsageLogIPCaptureEnabled.Load())
 	common.OptionMap["TrustedProxyCIDRs"] = common.DefaultUsageLogTrustedProxyCIDRs
@@ -59,7 +55,6 @@ func InitOptionMap() {
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
-	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
 	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
 	common.OptionMap["EmailDomainWhitelist"] = strings.Join(common.EmailDomainWhitelist, ",")
@@ -172,9 +167,6 @@ func InitOptionMap() {
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
-	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
-	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
-	common.OptionMap["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
 
 	// 自动添加所有注册的模型配置
@@ -299,10 +291,6 @@ func updateOptionMap(key string, value string) (err error) {
 			common.EmailDomainRestrictionEnabled = boolValue
 		case "EmailAliasRestrictionEnabled":
 			common.EmailAliasRestrictionEnabled = boolValue
-		case "AutomaticDisableChannelEnabled":
-			common.AutomaticDisableChannelEnabled = boolValue
-		case "AutomaticEnableChannelEnabled":
-			common.AutomaticEnableChannelEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
 		case "UsageLogIPCaptureEnabled":
@@ -567,18 +555,10 @@ func updateOptionMap(key string, value string) (err error) {
 	//	common.ChatLink = value
 	//case "ChatLink2":
 	//	common.ChatLink2 = value
-	case "ChannelDisableThreshold":
-		common.ChannelDisableThreshold, _ = strconv.ParseFloat(value, 64)
 	case "QuotaPerUnit":
 		common.QuotaPerUnit, _ = strconv.ParseFloat(value, 64)
 	case "SensitiveWords":
 		setting.SensitiveWordsFromString(value)
-	case "AutomaticDisableKeywords":
-		operation_setting.AutomaticDisableKeywordsFromString(value)
-	case "AutomaticDisableStatusCodes":
-		err = operation_setting.AutomaticDisableStatusCodesFromString(value)
-	case "AutomaticRetryStatusCodes":
-		err = operation_setting.AutomaticRetryStatusCodesFromString(value)
 	case "StreamCacheQueueLength":
 		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
 	case "PayMethods":
@@ -618,9 +598,6 @@ func handleConfigUpdate(key, value string) bool {
 		performance_setting.UpdateAndSync()
 	} else if configName == "tool_price_setting" {
 		operation_setting.RebuildToolPriceIndex()
-	} else if configName == "billing_setting" {
-		InvalidatePricingCache()
-		ratio_setting.InvalidateExposedDataCache()
 	}
 
 	return true // 已处理

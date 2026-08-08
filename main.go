@@ -239,7 +239,6 @@ func InitResources() error {
 	logger.SetupLogger()
 
 	// Initialize the shared outbound client used by control-plane integrations.
-	service.InitHttpClient()
 
 	// Initialize SQL Database
 	err = model.InitDB()

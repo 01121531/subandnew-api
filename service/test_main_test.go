@@ -30,8 +30,6 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.Token{},
-		&model.Log{},
-		&model.Channel{},
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
@@ -43,12 +41,6 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{},
 		&model.ManagedInstanceAlert{},
-		&model.ProxyGroup{},
-		&model.Proxy{},
-		&model.ChannelProxyBinding{},
-		&model.ProxyLogAnalysis{},
-		&model.ProxyLogAnalysisCursor{},
-		&model.ProxyStateEvent{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -59,12 +51,11 @@ func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
-			"users", "tokens", "logs", "channels", "top_ups", "user_subscriptions",
+			"users", "tokens", "top_ups", "user_subscriptions",
 			"system_task_locks", "system_task_scope_locks", "system_tasks",
 			"managed_instance_operations", "managed_instance_credentials",
 			"managed_instance_audits", "managed_instance_snapshots",
-			"managed_instance_alerts", "managed_instances", "proxy_state_events",
-			"proxy_log_analyses", "proxy_log_analysis_cursors",
+			"managed_instance_alerts", "managed_instances",
 		} {
 			model.DB.Exec("DELETE FROM " + table)
 		}

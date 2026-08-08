@@ -24,7 +24,6 @@ export type AdminPermissionMatrix = Record<string, Record<string, boolean>>
 export type AdminCapabilities = AdminPermissionMatrix
 
 export const ADMIN_PERMISSION_RESOURCES = {
-  CHANNEL: 'channel',
   DATASET_CAPTURE: 'dataset_capture',
   MANAGED_INSTANCE: 'managed_instance',
 } as const

@@ -186,26 +186,6 @@ export async function getSelf() {
   return res.data
 }
 
-// Get user available models
-export async function getUserModels(): Promise<{
-  success: boolean
-  message?: string
-  data?: string[]
-}> {
-  const res = await api.get('/api/user/models')
-  return res.data
-}
-
-// Get user groups with descriptions and ratios
-export async function getUserGroups(): Promise<{
-  success: boolean
-  message?: string
-  data?: Record<string, { desc: string; ratio: number | string }>
-}> {
-  const res = await api.get('/api/user/self/groups')
-  return res.data
-}
-
 // ----------------------------------------------------------------------------
 // System APIs
 // ----------------------------------------------------------------------------

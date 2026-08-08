@@ -66,7 +66,6 @@ import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
   EMPTY_PERMISSION_CATALOG,
-  hasPermission,
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
@@ -547,21 +546,6 @@ export function UsersMutateDrawer({
                         )
                       }}
                     />
-                    {currentUser && (
-                      <p className='text-muted-foreground text-xs'>
-                        {hasPermission(
-                          currentUser,
-                          ADMIN_PERMISSION_RESOURCES.CHANNEL,
-                          ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
-                        )
-                          ? t(
-                              'Your account can edit sensitive channel settings.'
-                            )
-                          : t(
-                              'Your account cannot edit sensitive channel settings.'
-                            )}
-                      </p>
-                    )}
                   </SideDrawerSection>
                 )}
 

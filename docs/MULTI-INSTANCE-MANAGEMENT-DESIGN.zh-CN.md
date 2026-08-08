@@ -745,6 +745,27 @@ router/
 - 全仓 `oxlint` 仍存在旧前端模块的历史错误和告警；当前主要位于 Profile、通用表格/布局组件及设置页，本批类型检查和生产构建均通过，这些 Lint 基线随对应旧模块删除或保留模块整理逐批清零。
 - `go test ./model ./service ./controller ./router ./service/managedinstance -count=1` 中除 `service` 外均通过；`service` 仍有既存代理运行时测试失败：`proxy_state_events` 测试表缺少 `group_id`，以及暂停恢复测试期望 `recovering` 但得到 `available`。控制平面相关 Service 定向测试单独通过，本批未修改上述代理逻辑。
 
+### 14.6 2026-08-08 Relay、Channel 与代理池删除批次
+
+本批已经完成以下收口，并作为后续验收基线：
+
+- 删除本地通用 Relay、协议转换器、全部模型供应商适配器、Channel 选择与亲和逻辑、Codex 渠道认证、代理池、代理健康检查、代理日志分析和性能指标采集。
+- 删除对应 Model、DTO、Service、Middleware、测试、前端渠道亲和设置、侧栏入口、权限资源、翻译承载组件和旧 API 帮助函数。
+- 删除供应商类型/API 类型常量文件。历史编号不压缩、不重排，也不复用于新的控制平面实体。
+- 删除仅由上述模块使用的 AWS Bedrock、WebSocket、Tokenizer、音视频解析、Waffo 等 Go 依赖。
+- 控制平面不再初始化 Relay HTTP 客户端；实例管理继续使用独立 Connector，并保留禁止环境代理、DNS 后 IP 校验、同源重定向限制和响应体上限。
+- 通用安全审计改写到应用日志，不再创建或写入本地 `logs` 用量表。
+- 远端实例中的 `channels.list`、`channels.test`、`channels.toggle` 继续保留；它们是受管 NewAPI/Sub2API 的远端管理能力，不是本地 Channel 数据面。
+
+数据库兼容采用以下强制规则：
+
+1. 启动迁移不得执行 `DROP TABLE`，不得清空或重新解释旧业务表。
+2. `channels`、`abilities`、`proxies`、`proxy_groups`、`channel_proxy_bindings`、`logs` 等历史表和数据原样保留。
+3. 新数据库只创建控制平面白名单表；旧数据库升级只迁移控制平面表。
+4. 后续旧数据清理必须先归档，提供 `dry-run`，再由 Root 显式执行；代码删除本身不触发数据删除。
+
+本批由独立只读子代理复核注册点、依赖、前端入口和数据库风险；复核确认 Router 不再注册 Relay/Channel/Proxy 路由，系统任务只保留实例管理处理器。编译器、依赖整理、迁移测试和前端构建共同作为删除门禁。
+
 ### Phase 0：契约验证
 
 - 固定首批支持的 New API、HUICHUAN-AI、Sub2API 版本范围。
@@ -917,6 +938,6 @@ router/
 
 ## 21. 参考项目
 
-- [HUICHUAN-AI](https://github.com/01121531/HUICHUAN-AI)
+- [本项目](https://github.com/01121531/subandnew-api)
 - [New API](https://github.com/QuantumNous/new-api)
 - [Sub2API](https://github.com/Wei-Shaw/sub2api)
