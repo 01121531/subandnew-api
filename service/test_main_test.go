@@ -32,6 +32,8 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstance{},
 		&model.ManagedInstanceCredential{},
 		&model.ManagedInstanceOperation{},
+		&model.ManagedInstanceOperationBatch{},
+		&model.ManagedInstanceOperationBatchItem{},
 		&model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{},
 		&model.ManagedInstanceAlert{},
@@ -47,6 +49,7 @@ func truncate(t *testing.T) {
 		for _, table := range []string{
 			"users",
 			"system_task_locks", "system_task_scope_locks", "system_tasks",
+			"managed_instance_operation_batch_items", "managed_instance_operation_batches",
 			"managed_instance_operations", "managed_instance_credentials",
 			"managed_instance_audits", "managed_instance_snapshots",
 			"managed_instance_alerts", "managed_instances",

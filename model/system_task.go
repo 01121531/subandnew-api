@@ -669,8 +669,16 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 		if result.Error != nil {
 			return result.Error
 		}
+		operationStatus := ManagedInstanceOperationStatusFailed
+		errorCode := "task_lease_expired"
+		outcome := "failed"
+		if operation.Status == ManagedInstanceOperationStatusRunning && operation.WritesRemote {
+			operationStatus = ManagedInstanceOperationStatusUnknown
+			errorCode = "remote_result_unknown"
+			outcome = "unknown"
+		}
 		if err := tx.Model(&ManagedInstanceOperation{}).Where("id = ?", operation.Id).Updates(map[string]any{
-			"status": ManagedInstanceOperationStatusFailed, "error_code": "task_lease_expired",
+			"status": operationStatus, "error_code": errorCode,
 			"finished_at": now, "updated_at": now,
 		}).Error; err != nil {
 			return err
@@ -678,7 +686,7 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 		details, _ := json.Marshal(map[string]any{
 			"operation_id": operation.OperationId,
 			"action":       operation.Action,
-			"error_code":   "task_lease_expired",
+			"error_code":   errorCode,
 		})
 		actorID := operation.ExecutedBy
 		if actorID == 0 {
@@ -686,7 +694,7 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 		}
 		return tx.Create(&ManagedInstanceAudit{
 			InstanceId: operation.InstanceId, ActorId: actorID, Action: "operation_complete",
-			Outcome: "failed", Details: string(details), CreatedAt: now,
+			Outcome: outcome, Details: string(details), CreatedAt: now,
 		}).Error
 	})
 }

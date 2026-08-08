@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Plus, RefreshCw, Search } from 'lucide-react'
-import { useDeferredValue, useMemo, useState } from 'react'
+import { Plus, RefreshCw, Search, X } from 'lucide-react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -22,11 +22,14 @@ import {
   deleteManagedInstance,
   getManagedInstances,
 } from './api'
+import { BatchRefreshSheet } from './components/batch-refresh-sheet'
 import { CredentialSheet } from './components/credential-sheet'
 import { InstanceFormSheet } from './components/instance-form-sheet'
 import { InstancesTable } from './components/instances-table'
 import { statusCounts } from './lib'
 import type { ManagedInstance, ManagedInstanceFilters } from './types'
+
+const EMPTY_INSTANCES: ManagedInstance[] = []
 
 export function ManagedInstances() {
   const { t } = useTranslation()
@@ -42,6 +45,7 @@ export function ManagedInstances() {
   const [rotating, setRotating] = useState<ManagedInstance | null>(null)
   const [deleting, setDeleting] = useState<ManagedInstance | null>(null)
   const [checkingId, setCheckingId] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const deferredSearch = useDeferredValue(filters.search)
   const queryFilters = useMemo(
     () => ({ ...filters, search: deferredSearch.trim() }),
@@ -53,8 +57,12 @@ export function ManagedInstances() {
     queryFn: () => getManagedInstances(queryFilters),
     refetchInterval: 30_000,
   })
-  const instances = instancesQuery.data?.data.items ?? []
+  const instances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const counts = statusCounts(instances)
+  const selectedInstances = useMemo(
+    () => instances.filter((instance) => selectedIds.has(instance.id)),
+    [instances, selectedIds]
+  )
 
   const canCreate = hasPermission(
     user,
@@ -83,6 +91,19 @@ export function ManagedInstances() {
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
     ADMIN_PERMISSION_ACTIONS.SECRET_ROTATE
   )
+  const canBatchOperate = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
+    ADMIN_PERMISSION_ACTIONS.BATCH_OPERATE
+  )
+
+  useEffect(() => {
+    const visibleIds = new Set(instances.map((instance) => instance.id))
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => visibleIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [instances])
 
   const refresh = () => void instancesQuery.refetch()
 
@@ -104,6 +125,31 @@ export function ManagedInstances() {
       toast.success(t('Instance removed'))
       setDeleting(null)
       refresh()
+    }
+  }
+
+  const toggleSelection = (instance: ManagedInstance, selected: boolean) => {
+    setSelectedIds((current) => {
+      if (selected && !current.has(instance.id) && current.size >= 50) {
+        toast.error(t('You can select at most 50 instances.'))
+        return current
+      }
+      const next = new Set(current)
+      if (selected) next.add(instance.id)
+      else next.delete(instance.id)
+      return next
+    })
+  }
+
+  const toggleAll = (selected: boolean) => {
+    if (!selected) {
+      setSelectedIds(new Set())
+      return
+    }
+    const next = new Set(instances.slice(0, 50).map((instance) => instance.id))
+    setSelectedIds(next)
+    if (instances.length > 50) {
+      toast.info(t('The first 50 instances were selected.'))
     }
   }
 
@@ -231,13 +277,48 @@ export function ManagedInstances() {
               </NativeSelect>
             </div>
 
+            {canBatchOperate && (
+              <div className='flex min-h-10 flex-col gap-2 border-y py-2 sm:flex-row sm:items-center sm:justify-between'>
+                <div className='flex min-w-0 items-center gap-2'>
+                  <span className='text-sm font-medium tabular-nums'>
+                    {t('{{count}} selected', {
+                      count: selectedInstances.length,
+                    })}
+                  </span>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Select 2 to 50 instances for a batch operation.')}
+                  </span>
+                </div>
+                <div className='flex items-center justify-end gap-2'>
+                  {selectedInstances.length > 0 && (
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => setSelectedIds(new Set())}
+                    >
+                      <X />
+                      {t('Clear selection')}
+                    </Button>
+                  )}
+                  <BatchRefreshSheet
+                    instances={selectedInstances}
+                    onFinished={() => setSelectedIds(new Set())}
+                  />
+                </div>
+              </div>
+            )}
+
             <InstancesTable
               instances={instances}
               canUpdate={canUpdate}
               canCheck={canCheck}
               canRotate={canRotate}
               canDelete={canDelete}
+              selectable={canBatchOperate}
+              selectedIds={selectedIds}
               checkingId={checkingId}
+              onToggleSelection={toggleSelection}
+              onToggleAll={toggleAll}
               onEdit={(instance) => {
                 setEditing(instance)
                 setFormOpen(true)

@@ -106,6 +106,9 @@ go build ./...
 | `MANAGED_INSTANCE_SECRET_KEY_VERSION` | 当前凭据密钥版本 |
 | `MANAGED_INSTANCE_ALLOWED_CIDRS` | Connector 允许访问的私网 CIDR |
 | `MANAGED_INSTANCE_PROBE_MAX_CONCURRENCY` | 巡检全局并发上限，默认 `8` |
+| `MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY` | 受控操作全局并发上限，默认 `4` |
+| `MANAGED_INSTANCE_OPERATION_MAX_PER_HOST` | 同一远端主机的操作并发上限，默认 `2` |
+| `MANAGED_INSTANCE_BATCH_MAX_CONCURRENCY` | 同一批次的操作并发上限，默认 `2` |
 
 默认拒绝访问私网和回环地址。如控制平面需要连接内网实例，必须通过 `MANAGED_INSTANCE_ALLOWED_CIDRS` 显式放行精确网段。
 
@@ -133,9 +136,9 @@ bun run build
 
 ## 实施状态
 
-- 已完成：实例模型、凭据加密、RBAC、适配器、SSRF 防护、巡检、实例中心、详情页和首批受控操作。
+- 已完成：实例模型、凭据加密、RBAC、适配器、SSRF 防护、巡检、实例中心、详情页、单实例及批量受控操作。
 - 已完成：本地 Relay、Channel、代理池、Token、计费、订阅、注册及商业化配置的代码删除；新安装只创建控制平面表。
-- 后续：配置基线、漂移检测、批量编排、显式历史数据归档工具和完整端到端测试。
+- 后续：配置基线、漂移检测、显式历史数据归档工具和完整端到端测试。
 
 ## 上游与许可
 

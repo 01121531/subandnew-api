@@ -424,8 +424,9 @@ API 永不返回 `ciphertext`。凭据写入成功后的响应只包含认证类
 | `GET` | `/api/managed-instances/:id/metrics` | `view` | 查询聚合指标 |
 | `POST` | `/api/managed-instances/:id/actions/plan` | `operate` | 生成操作计划 |
 | `POST` | `/api/managed-instances/:id/actions` | `operate` | 确认并执行操作 |
-| `POST` | `/api/managed-instances/actions/batch-plan` | `batch_operate` | 生成批量计划 |
+| `POST` | `/api/managed-instances/actions/batch/plan` | `batch_operate` | 生成批量计划 |
 | `POST` | `/api/managed-instances/actions/batch` | `batch_operate` | 执行批量操作 |
+| `GET` | `/api/managed-instances/actions/batch/:batch_id` | `batch_operate` | 查询批次及逐实例结果 |
 | `GET` | `/api/managed-instance-operations` | `audit` | 查询操作记录 |
 
 统一响应包含 `success`、`data`、`message`、`request_id`。异步操作返回 `202 Accepted` 和操作 ID，前端轮询任务状态；后续如有需要再增加 SSE。
@@ -787,6 +788,19 @@ router/
 4. 将来清理历史数据必须通过独立归档与显式维护命令完成，并提供 `dry-run`、目标校验和审计记录。
 
 验收门禁覆盖全量 Go 测试与 Vet、控制平面迁移兼容测试、前端类型检查与生产构建、依赖整理、死翻译裁剪、工作流 YAML 解析和 `git diff --check`。本批再次由独立只读子代理检查删除边界；评审结论确认 Session-only 鉴权、控制平面模型白名单和“保留旧数据但不再加载”的迁移策略符合目标。
+
+### 15.0.3 批量受控操作批次
+
+本批按 Phase 2 的“批量计划与批量执行”继续实现：
+
+- 新增持久化批次父记录与逐实例子记录；批次上限为 50 个实例，目标按实例 ID 规范化排序，并拒绝重复实例。
+- 批量计划与执行继续复用单实例的能力校验、observe 写保护、库存 ETag 冲突检测和操作审计；父、子幂等键只存 SHA-256 摘要，重放不会重复创建任务。
+- 批量执行不声明跨实例事务。每个目标独立入队、独立完成，父状态由子状态聚合，可表达全部成功、部分失败、全部失败和需要人工对账。
+- Worker 增加全局、同主机和同批次三层并发上限。批次任务载荷包含 `batch_id`；系统调度器会续排执行中批次尚未入队的子操作，控制平面重启后不依赖浏览器保存幂等键即可恢复批次进度。
+- 远端写请求发出后若因租约丢失无法确认结果，子操作进入 `unknown`，父批次进入 `needs_reconcile`；系统不会自动重试此类写操作，避免重复变更。
+- 实例中心增加多选、批量刷新计划预览、显式确认、执行进度轮询和逐实例错误展示；无批量权限时不显示入口。
+
+本批继续执行“HUICHUAN-AI 中无关功能全部删除”的既定边界：不恢复本地 Relay、Channel、Token、商业数据面或旧前端，仅在精简控制平面内增加 NewAPI/Sub2API 多实例编排能力。
 
 ### Phase 0：契约验证
 

@@ -161,6 +161,12 @@ export function ControlledOperationsPanel({
     notifiedTerminalOperation.current = operation.operation_id
     if (operation.status === 'succeeded') {
       toast.success(t('Controlled operation completed'))
+    } else if (operation.status === 'unknown') {
+      toast.warning(
+        t(
+          'Operation outcome is unknown. Verify remote state manually; it will not be retried automatically.'
+        )
+      )
     } else {
       toast.error(
         t('Controlled operation failed: {{code}}', {
@@ -664,6 +670,8 @@ function OperationStatusBadge(props: {
           'border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
         props.status === 'failed' &&
           'border-red-600/20 bg-red-600/10 text-red-700 dark:text-red-400',
+        props.status === 'unknown' &&
+          'border-amber-600/30 bg-amber-600/10 text-amber-800 dark:text-amber-300',
         active &&
           'border-blue-600/20 bg-blue-600/10 text-blue-700 dark:text-blue-400'
       )}

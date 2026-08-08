@@ -41,6 +41,7 @@ export const ADMIN_PERMISSION_ACTIONS = {
   DELETE: 'delete',
   SECRET_ROTATE: 'secret_rotate',
   AUDIT: 'audit',
+  BATCH_OPERATE: 'batch_operate',
 } as const
 
 // The role whose baseline grants are used as defaults in the permission editor.

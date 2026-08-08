@@ -19,6 +19,8 @@ var expectedControlPlaneTables = []string{
 	"managed_instance_alerts",
 	"managed_instance_audits",
 	"managed_instance_credentials",
+	"managed_instance_operation_batch_items",
+	"managed_instance_operation_batches",
 	"managed_instance_operations",
 	"managed_instance_snapshots",
 	"managed_instances",
@@ -57,6 +59,8 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 
 	require.NoError(t, migrateDB())
 	require.Equal(t, expectedControlPlaneTables, sqliteUserTables(t, db))
+	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatch{}, "uidx_managed_instance_batch_idempotency"))
+	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatchItem{}, "uidx_managed_instance_batch_target"))
 	for _, table := range representativeLegacyTables {
 		require.Falsef(t, db.Migrator().HasTable(table), "legacy table %q must not be created", table)
 	}

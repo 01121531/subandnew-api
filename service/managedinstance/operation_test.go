@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -16,11 +17,15 @@ import (
 	"gorm.io/gorm"
 )
 
+var operationTestInstanceSequence atomic.Int64
+
 func setupManagedInstanceOperationTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := newManagedInstanceTestDB(t)
 	require.NoError(t, db.AutoMigrate(
 		&model.ManagedInstanceOperation{},
+		&model.ManagedInstanceOperationBatch{},
+		&model.ManagedInstanceOperationBatchItem{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 		&model.SystemTaskScopeLock{},
@@ -30,11 +35,12 @@ func setupManagedInstanceOperationTestDB(t *testing.T) *gorm.DB {
 
 func createOperationTestInstance(t *testing.T, mode string, capabilities ...string) *model.ManagedInstance {
 	t.Helper()
+	sequence := operationTestInstanceSequence.Add(1)
 	encodedCapabilities, err := json.Marshal(capabilities)
 	require.NoError(t, err)
 	instance := &model.ManagedInstance{
-		Name: "operation-instance", Kind: model.ManagedInstanceKindNewAPI,
-		BaseURL: "https://managed.example.com", Environment: "production",
+		Name: fmt.Sprintf("operation-instance-%d", sequence), Kind: model.ManagedInstanceKindNewAPI,
+		BaseURL: fmt.Sprintf("https://managed-%d.example.com", sequence), Environment: "production",
 		ManagementMode: mode, TLSVerify: true, Capabilities: string(encodedCapabilities),
 	}
 	require.NoError(t, model.DB.Create(instance).Error)
@@ -134,6 +140,7 @@ func TestExecuteOperationCreatesOneInstanceScopedTask(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, queued.OperationId, replayed.OperationId)
 	require.Equal(t, task.TaskID, replayedTask.TaskID)
+	require.True(t, replayed.IdempotentReplay)
 
 	var taskCount int64
 	require.NoError(t, db.Model(&model.SystemTask{}).Where("type = ?", model.SystemTaskTypeManagedInstanceOperation).Count(&taskCount).Error)
@@ -282,6 +289,14 @@ func TestRunOperationStoresSanitizedResultAndFailure(t *testing.T) {
 			require.NotContains(t, audit.Details, "remote leaked secret token")
 		}
 	})
+}
+
+func TestRemoteWriteResultAmbiguityClassification(t *testing.T) {
+	require.False(t, remoteWriteResultMayBeUnknown(true, &ProbeError{Code: ProbeErrorPermission, StatusCode: http.StatusForbidden}))
+	require.False(t, remoteWriteResultMayBeUnknown(true, &ProbeError{Code: ProbeErrorAuthentication}))
+	require.False(t, remoteWriteResultMayBeUnknown(false, errors.New("connector policy rejected request")))
+	require.True(t, remoteWriteResultMayBeUnknown(true, context.DeadlineExceeded))
+	require.True(t, remoteWriteResultMayBeUnknown(true, errors.New("connection reset after request write")))
 }
 
 func TestRunOperationRejectsRemoteWriteWhenInventoryChangedAfterPlan(t *testing.T) {

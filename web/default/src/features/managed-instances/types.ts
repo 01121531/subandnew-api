@@ -211,6 +211,7 @@ export type ManagedInstanceOperationStatus =
   | 'running'
   | 'succeeded'
   | 'failed'
+  | 'unknown'
 
 interface ManagedInstanceOperationPlan {
   action: ManagedInstanceOperationAction
@@ -279,6 +280,66 @@ export interface ManagedInstanceOperationExecuteInput {
 export interface ManagedInstanceOperationExecution {
   operation: ManagedInstanceOperation
   task?: ManagedInstanceTask
+}
+
+export type ManagedInstanceBatchStatus =
+  | 'planning'
+  | 'planned'
+  | 'partially_planned'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partially_failed'
+  | 'failed'
+  | 'needs_reconcile'
+
+interface ManagedInstanceBatchSummary {
+  total: number
+  planned: number
+  active: number
+  succeeded: number
+  failed: number
+  unknown: number
+}
+
+export interface ManagedInstanceBatchItem {
+  instance_id: number
+  position: number
+  status: ManagedInstanceOperationStatus
+  error_code?: string
+  parameters: ManagedInstanceOperationParameters
+  operation?: ManagedInstanceOperation
+}
+
+export interface ManagedInstanceBatchView {
+  batch_id: string
+  actor_id: number
+  executed_by: number
+  action: 'refresh_inventory'
+  status: ManagedInstanceBatchStatus
+  idempotency_fingerprint: string
+  planned_at: number
+  executed_at: number
+  finished_at: number
+  created_at: number
+  updated_at: number
+  idempotent_replay?: boolean
+  summary: ManagedInstanceBatchSummary
+  items: ManagedInstanceBatchItem[]
+}
+
+export interface ManagedInstanceBatchPlanInput {
+  action: 'refresh_inventory'
+  idempotency_key: string
+  targets: Array<{
+    instance_id: number
+    parameters: ManagedInstanceOperationParameters
+  }>
+}
+
+export interface ManagedInstanceBatchExecuteInput {
+  batch_id: string
+  idempotency_key: string
 }
 
 export interface ApiResponse<T> {

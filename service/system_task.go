@@ -332,6 +332,7 @@ func runSystemTaskScheduler() {
 	}
 	scheduleDueManagedInstanceProbes(now)
 	scheduleDueManagedInstanceSyncs(now)
+	resumeManagedInstanceOperationBatches()
 }
 
 // runWithLeaseHeartbeat renews the per-type lock on a background ticker while

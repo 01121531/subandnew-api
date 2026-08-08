@@ -189,6 +189,8 @@ func controlPlaneModels() []interface{} {
 		&ManagedInstanceAlert{},
 		&ManagedInstanceAudit{},
 		&ManagedInstanceOperation{},
+		&ManagedInstanceOperationBatch{},
+		&ManagedInstanceOperationBatchItem{},
 	}
 }
 

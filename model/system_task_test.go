@@ -253,6 +253,39 @@ func TestExpiredOperationTaskAlsoFailsBusinessOperation(t *testing.T) {
 	assert.NotContains(t, audit.Details, "digest")
 }
 
+func TestExpiredRunningRemoteWriteBecomesUnknown(t *testing.T) {
+	truncateTables(t)
+
+	task, err := CreateScopedSystemTask(SystemTaskTypeManagedInstanceOperation, "8", nil, nil)
+	require.NoError(t, err)
+	claimed, ok, err := ClaimScopedSystemTask(task.ID, task.Type, "runner-a", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, ok)
+	operation := &ManagedInstanceOperation{
+		OperationId: "miop_unknown_write", InstanceId: 8, TaskId: claimed.TaskID, ActorId: 21, ExecutedBy: 22,
+		Action: ManagedInstanceActionToggleResource, Status: ManagedInstanceOperationStatusRunning,
+		RiskLevel: "low", WritesRemote: true, RequiredCapability: "channels.toggle",
+		IdempotencyKey: "digest", IdempotencyFingerprint: "fingerprint",
+		PlanHash: "plan", Parameters: `{"resource_id":1,"enabled":false}`, Plan: "{}",
+	}
+	require.NoError(t, DB.Create(operation).Error)
+	require.NoError(t, DB.Model(&SystemTaskScopeLock{}).Where("task_id = ?", claimed.TaskID).
+		Update("locked_until", common.GetTimestamp()-1).Error)
+
+	require.NoError(t, ExpireStaleSystemTaskLocks(common.GetTimestamp()))
+
+	var reloaded ManagedInstanceOperation
+	require.NoError(t, DB.First(&reloaded, operation.Id).Error)
+	assert.Equal(t, ManagedInstanceOperationStatusUnknown, reloaded.Status)
+	assert.Equal(t, "remote_result_unknown", reloaded.ErrorCode)
+	assert.NotZero(t, reloaded.FinishedAt)
+	var audit ManagedInstanceAudit
+	require.NoError(t, DB.Where("instance_id = ? AND action = ?", 8, "operation_complete").First(&audit).Error)
+	assert.Equal(t, "unknown", audit.Outcome)
+	assert.Contains(t, audit.Details, "remote_result_unknown")
+	assert.NotContains(t, audit.Details, "digest")
+}
+
 func TestFindEarliestPendingSystemTasks(t *testing.T) {
 	truncateTables(t)
 

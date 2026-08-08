@@ -4,6 +4,9 @@ import type {
   ApiResponse,
   ManagedInstance,
   ManagedInstanceAuditList,
+  ManagedInstanceBatchExecuteInput,
+  ManagedInstanceBatchPlanInput,
+  ManagedInstanceBatchView,
   ManagedInstanceCredential,
   ManagedInstanceCredentialInput,
   ManagedInstanceFilters,
@@ -181,6 +184,33 @@ export async function getManagedInstanceOperation(
 ): Promise<ApiResponse<ManagedInstanceOperation>> {
   const response = await api.get(
     `/api/managed-instances/${id}/operations/${encodeURIComponent(operationId)}`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function planManagedInstanceBatch(
+  input: ManagedInstanceBatchPlanInput
+): Promise<ApiResponse<ManagedInstanceBatchView>> {
+  const response = await api.post(
+    '/api/managed-instances/actions/batch/plan',
+    input
+  )
+  return response.data
+}
+
+export async function executeManagedInstanceBatch(
+  input: ManagedInstanceBatchExecuteInput
+): Promise<ApiResponse<ManagedInstanceBatchView>> {
+  const response = await api.post('/api/managed-instances/actions/batch', input)
+  return response.data
+}
+
+export async function getManagedInstanceBatch(
+  batchId: string
+): Promise<ApiResponse<ManagedInstanceBatchView>> {
+  const response = await api.get(
+    `/api/managed-instances/actions/batch/${encodeURIComponent(batchId)}`,
     { disableDuplicate: true }
   )
   return response.data

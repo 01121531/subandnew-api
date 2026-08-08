@@ -15,6 +15,7 @@ const (
 	ManagedInstanceOperationStatusRunning   = "running"
 	ManagedInstanceOperationStatusSucceeded = "succeeded"
 	ManagedInstanceOperationStatusFailed    = "failed"
+	ManagedInstanceOperationStatusUnknown   = "unknown"
 
 	SystemTaskTypeManagedInstanceOperation = "managed_instance_operation"
 )

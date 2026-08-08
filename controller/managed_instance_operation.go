@@ -23,6 +23,22 @@ type managedInstanceOperationExecuteRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 
+type managedInstanceBatchTargetRequest struct {
+	InstanceID int64           `json:"instance_id"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+type managedInstanceBatchPlanRequest struct {
+	Action         string                              `json:"action"`
+	IdempotencyKey string                              `json:"idempotency_key"`
+	Targets        []managedInstanceBatchTargetRequest `json:"targets"`
+}
+
+type managedInstanceBatchExecuteRequest struct {
+	BatchID        string `json:"batch_id"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
 // Managed instance operation API draft (v1):
 //
 //	POST /api/managed-instances/:id/actions/plan
@@ -111,11 +127,74 @@ func GetManagedInstanceOperation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": operation})
 }
 
+func PlanManagedInstanceBatchOperation(c *gin.Context) {
+	var request managedInstanceBatchPlanRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid batch operation plan request"})
+		return
+	}
+	targets := make([]managedinstance.BatchOperationTargetInput, 0, len(request.Targets))
+	for _, target := range request.Targets {
+		targets = append(targets, managedinstance.BatchOperationTargetInput{
+			InstanceID: target.InstanceID, Parameters: target.Parameters,
+		})
+	}
+	batch, err := managedinstance.PlanBatchOperation(managedinstance.PlanBatchOperationInput{
+		Action: request.Action, IdempotencyKey: request.IdempotencyKey,
+		Targets: targets, ActorID: c.GetInt("id"),
+	})
+	if err != nil {
+		managedInstanceOperationError(c, err)
+		return
+	}
+	status := http.StatusCreated
+	if batch.IdempotentReplay {
+		status = http.StatusOK
+	}
+	c.JSON(status, gin.H{"success": true, "message": "", "data": batch})
+}
+
+func ExecuteManagedInstanceBatchOperation(c *gin.Context) {
+	var request managedInstanceBatchExecuteRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid batch operation execute request"})
+		return
+	}
+	batch, err := managedinstance.ExecuteBatchOperation(managedinstance.ExecuteBatchOperationInput{
+		BatchID: request.BatchID, IdempotencyKey: request.IdempotencyKey, ActorID: c.GetInt("id"),
+	})
+	if err != nil {
+		managedInstanceOperationError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": batch})
+}
+
+func GetManagedInstanceBatchOperation(c *gin.Context) {
+	batch, err := managedinstance.GetBatchOperation(c.Param("batch_id"))
+	if err != nil {
+		managedInstanceOperationError(c, err)
+		return
+	}
+	userID := c.GetInt("id")
+	canAudit := authz.Can(userID, c.GetInt("role"), authz.ManagedInstanceAudit)
+	if !canAudit && batch.ActorId != userID && batch.ExecutedBy != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": batch})
+}
+
 func managedInstanceOperationError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, managedinstance.ErrInvalidOperation):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
-	case errors.Is(err, managedinstance.ErrInstanceNotFound), errors.Is(err, managedinstance.ErrOperationNotFound):
+	case errors.Is(err, managedinstance.ErrInstanceNotFound),
+		errors.Is(err, managedinstance.ErrOperationNotFound),
+		errors.Is(err, managedinstance.ErrBatchOperationNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "managed instance operation not found"})
 	case errors.Is(err, managedinstance.ErrIdempotencyConflict),
 		errors.Is(err, managedinstance.ErrOperationNotExecutable),

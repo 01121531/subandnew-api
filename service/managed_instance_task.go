@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,9 +35,19 @@ type ManagedInstanceSyncPayload struct {
 
 type managedInstanceSyncHandler struct{}
 
+type managedInstanceOperationScopedSlot struct {
+	slots chan struct{}
+	users int
+}
+
 var (
-	managedInstanceProbeSlotsOnce sync.Once
-	managedInstanceProbeSlots     chan struct{}
+	managedInstanceProbeSlotsOnce      sync.Once
+	managedInstanceProbeSlots          chan struct{}
+	managedInstanceOperationSlotsOnce  sync.Once
+	managedInstanceOperationSlots      chan struct{}
+	managedInstanceOperationSlotsMu    sync.Mutex
+	managedInstanceOperationHostSlots  = map[string]*managedInstanceOperationScopedSlot{}
+	managedInstanceOperationBatchSlots = map[string]*managedInstanceOperationScopedSlot{}
 )
 
 func init() {
@@ -56,6 +68,7 @@ type ManagedInstanceOperationPayload struct {
 	OperationID string `json:"operation_id"`
 	InstanceID  int64  `json:"instance_id"`
 	ActorID     int    `json:"actor_id"`
+	BatchID     string `json:"batch_id,omitempty"`
 }
 
 type managedInstanceOperationHandler struct{}
@@ -70,6 +83,13 @@ func (managedInstanceOperationHandler) Run(ctx context.Context, task *model.Syst
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_operation_payload")
 		return
 	}
+	releaseSlots, err := acquireManagedInstanceOperationSlots(ctx, payload)
+	if err != nil {
+		_ = managedinstance.FailQueuedOperation(payload.OperationID, task.TaskID, payload.ActorID, "operation_cancelled")
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "operation_cancelled")
+		return
+	}
+	defer releaseSlots()
 	operation, err := managedinstance.RunOperationWithLease(ctx, payload.OperationID, task.TaskID, runnerID)
 	if err != nil {
 		errorCode := "managed_instance_operation_failed"
@@ -81,6 +101,116 @@ func (managedInstanceOperationHandler) Run(ctx context.Context, task *model.Syst
 		return
 	}
 	_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, operation, "")
+}
+
+func acquireManagedInstanceOperationSlots(ctx context.Context, payload ManagedInstanceOperationPayload) (func(), error) {
+	releases := make([]func(), 0, 3)
+	releaseAll := func() {
+		for index := len(releases) - 1; index >= 0; index-- {
+			releases[index]()
+		}
+	}
+
+	instance, err := managedinstance.Get(payload.InstanceID)
+	if err != nil {
+		releaseAll()
+		return nil, err
+	}
+	if payload.BatchID != "" {
+		batch := retainManagedInstanceOperationScopedSlot(
+			managedInstanceOperationBatchSlots,
+			payload.BatchID,
+			common.GetEnvOrDefault("MANAGED_INSTANCE_BATCH_MAX_CONCURRENCY", 2),
+		)
+		if err := acquireManagedInstanceOperationSlot(ctx, batch.slots); err != nil {
+			releaseManagedInstanceOperationScopedSlot(managedInstanceOperationBatchSlots, payload.BatchID, batch, false)
+			releaseAll()
+			return nil, err
+		}
+		releases = append(releases, func() {
+			releaseManagedInstanceOperationScopedSlot(managedInstanceOperationBatchSlots, payload.BatchID, batch, true)
+		})
+	}
+
+	hostKey := strconv.FormatInt(payload.InstanceID, 10)
+	if parsed, parseErr := url.Parse(instance.BaseURL); parseErr == nil && parsed.Hostname() != "" {
+		hostKey = strings.ToLower(parsed.Hostname())
+	}
+	host := retainManagedInstanceOperationScopedSlot(
+		managedInstanceOperationHostSlots,
+		hostKey,
+		common.GetEnvOrDefault("MANAGED_INSTANCE_OPERATION_MAX_PER_HOST", 2),
+	)
+	if err := acquireManagedInstanceOperationSlot(ctx, host.slots); err != nil {
+		releaseManagedInstanceOperationScopedSlot(managedInstanceOperationHostSlots, hostKey, host, false)
+		releaseAll()
+		return nil, err
+	}
+	releases = append(releases, func() {
+		releaseManagedInstanceOperationScopedSlot(managedInstanceOperationHostSlots, hostKey, host, true)
+	})
+
+	global := getManagedInstanceOperationSlots()
+	if err := acquireManagedInstanceOperationSlot(ctx, global); err != nil {
+		releaseAll()
+		return nil, err
+	}
+	releases = append(releases, func() { <-global })
+	return releaseAll, nil
+}
+
+func getManagedInstanceOperationSlots() chan struct{} {
+	managedInstanceOperationSlotsOnce.Do(func() {
+		limit := boundedManagedInstanceOperationConcurrency(
+			common.GetEnvOrDefault("MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY", 4),
+		)
+		managedInstanceOperationSlots = make(chan struct{}, limit)
+	})
+	return managedInstanceOperationSlots
+}
+
+func retainManagedInstanceOperationScopedSlot(store map[string]*managedInstanceOperationScopedSlot, key string, configured int) *managedInstanceOperationScopedSlot {
+	limit := boundedManagedInstanceOperationConcurrency(configured)
+	managedInstanceOperationSlotsMu.Lock()
+	defer managedInstanceOperationSlotsMu.Unlock()
+	entry := store[key]
+	if entry == nil {
+		entry = &managedInstanceOperationScopedSlot{slots: make(chan struct{}, limit)}
+		store[key] = entry
+	}
+	entry.users++
+	return entry
+}
+
+func releaseManagedInstanceOperationScopedSlot(store map[string]*managedInstanceOperationScopedSlot, key string, entry *managedInstanceOperationScopedSlot, acquired bool) {
+	if acquired {
+		<-entry.slots
+	}
+	managedInstanceOperationSlotsMu.Lock()
+	defer managedInstanceOperationSlotsMu.Unlock()
+	entry.users--
+	if entry.users == 0 && store[key] == entry {
+		delete(store, key)
+	}
+}
+
+func boundedManagedInstanceOperationConcurrency(limit int) int {
+	if limit < 1 {
+		return 1
+	}
+	if limit > 32 {
+		return 32
+	}
+	return limit
+}
+
+func acquireManagedInstanceOperationSlot(ctx context.Context, slots chan struct{}) error {
+	select {
+	case slots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (managedInstanceProbeHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
@@ -223,6 +353,24 @@ func scheduleDueManagedInstanceSyncs(now int64) {
 		}
 		return true
 	})
+}
+
+func resumeManagedInstanceOperationBatches() {
+	var batches []model.ManagedInstanceOperationBatch
+	if err := model.DB.Select("batch_id").
+		Where("executed_at > 0 AND status IN ?", []string{
+			model.ManagedInstanceBatchStatusQueued,
+			model.ManagedInstanceBatchStatusRunning,
+		}).
+		Order("updated_at asc").Limit(100).Find(&batches).Error; err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("managed instance batch recovery query failed: %v", err))
+		return
+	}
+	for _, batch := range batches {
+		if _, err := managedinstance.ResumeBatchOperation(batch.BatchId); err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed instance batch recovery failed: batch=%s err=%v", batch.BatchId, err))
+		}
+	}
 }
 
 func forEachManagedInstanceBatch(visit func([]*model.ManagedInstance) bool) {

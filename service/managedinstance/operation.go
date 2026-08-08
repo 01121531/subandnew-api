@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/01121531/HUICHUAN-AI/common"
 	"github.com/01121531/HUICHUAN-AI/model"
@@ -41,6 +43,7 @@ type ExecuteOperationInput struct {
 	OperationID    string
 	IdempotencyKey string
 	ActorID        int
+	BatchID        string
 }
 
 type OperationView struct {
@@ -87,6 +90,7 @@ type managedInstanceOperationTaskPayload struct {
 	OperationID string `json:"operation_id"`
 	InstanceID  int64  `json:"instance_id"`
 	ActorID     int    `json:"actor_id"`
+	BatchID     string `json:"batch_id,omitempty"`
 }
 
 type remoteOperationResult struct {
@@ -212,7 +216,9 @@ func ExecuteOperation(instanceID int64, input ExecuteOperationInput) (*Operation
 	}
 	if operation.Status != model.ManagedInstanceOperationStatusPlanned {
 		task, taskErr := operationTask(operation.TaskId)
-		return operationView(operation), task, taskErr
+		view := operationView(operation)
+		view.IdempotentReplay = true
+		return view, task, taskErr
 	}
 
 	taskID, err := model.GenerateSystemTaskID()
@@ -221,6 +227,7 @@ func ExecuteOperation(instanceID int64, input ExecuteOperationInput) (*Operation
 	}
 	payload, _ := json.Marshal(managedInstanceOperationTaskPayload{
 		OperationID: operation.OperationId, InstanceID: instanceID, ActorID: input.ActorID,
+		BatchID: strings.TrimSpace(input.BatchID),
 	})
 	scopeKey := strconv.FormatInt(instanceID, 10)
 	activeKey := model.SystemTaskTypeManagedInstanceOperation + ":" + scopeKey
@@ -262,7 +269,9 @@ func ExecuteOperation(instanceID int64, input ExecuteOperationInput) (*Operation
 		latest, lookupErr := getOperationModel(instanceID, input.OperationID)
 		if lookupErr == nil && latest.Status != model.ManagedInstanceOperationStatusPlanned {
 			existingTask, taskErr := operationTask(latest.TaskId)
-			return operationView(latest), existingTask, taskErr
+			view := operationView(latest)
+			view.IdempotentReplay = true
+			return view, existingTask, taskErr
 		}
 		return nil, nil, err
 	}
@@ -279,6 +288,32 @@ func GetOperation(instanceID int64, operationID string) (*OperationView, error) 
 		return nil, err
 	}
 	return operationView(operation), nil
+}
+
+func FailQueuedOperation(operationID string, taskID string, actorID int, errorCode string) error {
+	if strings.TrimSpace(operationID) == "" || strings.TrimSpace(taskID) == "" || actorID <= 0 || errorCode == "" {
+		return ErrInvalidOperation
+	}
+	now := common.GetTimestamp()
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		var operation model.ManagedInstanceOperation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("operation_id = ? AND task_id = ?", operationID, taskID).First(&operation).Error; err != nil {
+			return err
+		}
+		if operation.Status != model.ManagedInstanceOperationStatusQueued {
+			return nil
+		}
+		if err := tx.Model(&model.ManagedInstanceOperation{}).Where("id = ?", operation.Id).Updates(map[string]any{
+			"status": model.ManagedInstanceOperationStatusFailed, "error_code": errorCode,
+			"finished_at": now, "updated_at": now,
+		}).Error; err != nil {
+			return err
+		}
+		return writeAuditOutcome(tx, operation.InstanceId, actorID, "operation_complete", "failed", map[string]any{
+			"operation_id": operation.OperationId, "action": operation.Action, "error_code": errorCode,
+		})
+	})
 }
 
 func RunOperation(ctx context.Context, operationID string, taskID string) (*OperationView, error) {
@@ -325,6 +360,7 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 		}
 	}
 	var remoteResult *remoteOperationResult
+	var remoteWriteSent atomic.Bool
 	if err == nil {
 		var credential *CredentialMaterial
 		credential, err = loadCredential(operation.InstanceId)
@@ -337,12 +373,23 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 			err = requireOperationLease(taskID, runnerID)
 		}
 		if err == nil {
-			remoteResult, err = executeManagedInstanceRemoteOperation(ctx, instance, credential, operation.Action, json.RawMessage(operation.Parameters))
+			executionContext := ctx
+			if operation.WritesRemote {
+				executionContext = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+					WroteRequest: func(httptrace.WroteRequestInfo) { remoteWriteSent.Store(true) },
+				})
+			}
+			remoteResult, err = executeManagedInstanceRemoteOperation(executionContext, instance, credential, operation.Action, json.RawMessage(operation.Parameters))
 		}
 	}
 	if err != nil {
 		code := managedInstanceOperationErrorCode(err)
-		if finishErr := finishOperation(&operation, nil, code, taskID, runnerID); finishErr != nil {
+		status := model.ManagedInstanceOperationStatusFailed
+		if remoteWriteResultMayBeUnknown(remoteWriteSent.Load(), err) {
+			status = model.ManagedInstanceOperationStatusUnknown
+			code = "remote_result_unknown"
+		}
+		if finishErr := finishOperation(&operation, nil, code, status, taskID, runnerID); finishErr != nil {
 			return nil, finishErr
 		}
 		return operationView(&operation), &OperationExecutionError{Code: code}
@@ -351,19 +398,22 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 	if err != nil {
 		return nil, err
 	}
-	if err := finishOperation(&operation, encodedResult, "", taskID, runnerID); err != nil {
+	if err := finishOperation(&operation, encodedResult, "", model.ManagedInstanceOperationStatusSucceeded, taskID, runnerID); err != nil {
 		return nil, err
 	}
 	return operationView(&operation), nil
 }
 
-func finishOperation(operation *model.ManagedInstanceOperation, result json.RawMessage, errorCode string, taskID string, runnerID string) error {
+func remoteWriteResultMayBeUnknown(requestWritten bool, err error) bool {
+	var probeError *ProbeError
+	return requestWritten && err != nil && !errors.As(err, &probeError)
+}
+
+func finishOperation(operation *model.ManagedInstanceOperation, result json.RawMessage, errorCode string, status string, taskID string, runnerID string) error {
 	now := common.GetTimestamp()
-	status := model.ManagedInstanceOperationStatusSucceeded
-	outcome := "succeeded"
-	if errorCode != "" {
-		status = model.ManagedInstanceOperationStatusFailed
-		outcome = "failed"
+	outcome := status
+	if status == model.ManagedInstanceOperationStatusUnknown {
+		outcome = "unknown"
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
 		if runnerID != "" {
