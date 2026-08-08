@@ -24,19 +24,7 @@ import { updateSystemOption } from '../api'
 import type { UpdateOptionRequest } from '../types'
 
 // Configuration keys that require status refresh
-const STATUS_RELATED_KEYS = new Set([
-  'HeaderNavModules',
-  'SidebarModulesAdmin',
-  'Notice',
-  'LogConsumeEnabled',
-  'QuotaPerUnit',
-  'USDExchangeRate',
-  'DisplayInCurrencyEnabled',
-  'DisplayTokenStatEnabled',
-  'general_setting.quota_display_type',
-  'general_setting.custom_currency_symbol',
-  'general_setting.custom_currency_exchange_rate',
-])
+const STATUS_RELATED_KEYS = new Set(['Notice', 'SystemName', 'Logo', 'Footer'])
 
 export function useUpdateOption() {
   const queryClient = useQueryClient()

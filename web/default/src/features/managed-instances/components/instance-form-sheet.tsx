@@ -152,8 +152,8 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
   }, [form, props.instance, props.open])
 
   useEffect(() => {
-    const subscription = form.watch(() => setPreflight(null))
-    return () => subscription.unsubscribe()
+    const watcher = form.watch(() => setPreflight(null))
+    return () => watcher.unsubscribe()
   }, [form])
 
   const testConnection = async () => {

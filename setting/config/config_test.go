@@ -20,7 +20,7 @@ func TestUpdateConfigFromMap_MapReplacement(t *testing.T) {
 			"model-a": "p * 5 + c * 25",
 			"model-b": "p * 10 + c * 50",
 		},
-		Name: "billing",
+		Name: "control-plane",
 	}
 
 	// Simulate removing model-a: new value only has model-b

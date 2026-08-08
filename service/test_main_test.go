@@ -21,17 +21,11 @@ func TestMain(m *testing.M) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	model.DB = db
-	model.LOG_DB = db
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
-	common.BatchUpdateEnabled = false
-	common.LogConsumeEnabled = true
 
 	if err := db.AutoMigrate(
 		&model.User{},
-		&model.Token{},
-		&model.TopUp{},
-		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 		&model.SystemTaskScopeLock{},
@@ -51,7 +45,7 @@ func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
-			"users", "tokens", "top_ups", "user_subscriptions",
+			"users",
 			"system_task_locks", "system_task_scope_locks", "system_tasks",
 			"managed_instance_operations", "managed_instance_credentials",
 			"managed_instance_audits", "managed_instance_snapshots",

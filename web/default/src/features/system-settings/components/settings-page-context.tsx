@@ -84,9 +84,7 @@ type SettingsPageActionsPortalProps = {
   children: ReactNode
 }
 
-export function SettingsPageActionsPortal(
-  props: SettingsPageActionsPortalProps
-) {
+function SettingsPageActionsPortal(props: SettingsPageActionsPortalProps) {
   const { actionsContainer } = useContext(SettingsPageContext)
 
   if (!actionsContainer) return null

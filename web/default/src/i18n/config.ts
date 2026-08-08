@@ -29,7 +29,7 @@ import vi from './locales/vi.json'
 import zhTW from './locales/zh-TW.json'
 import zhCN from './locales/zh.json'
 
-export const resources = {
+const resources = {
   en,
   zhCN,
   fr,
@@ -71,5 +71,3 @@ i18n
       convertDetectedLanguage,
     },
   })
-
-export default i18n

@@ -76,26 +76,6 @@ export const MOTION_VARIANTS = {
   },
 } as const
 
-export const STAGGER_VARIANTS: Variants = {
-  initial: {},
-  animate: { transition: { staggerChildren: 0.04 } },
-}
-
-export const STAGGER_ITEM_VARIANTS: Variants = {
-  initial: { opacity: 0, y: 8 },
-  animate: { opacity: 1, y: 0, transition: MOTION_TRANSITION.default },
-}
-
-export const TABLE_STAGGER_VARIANTS: Variants = {
-  initial: {},
-  animate: { transition: { staggerChildren: 0.03 } },
-}
-
-export const TABLE_ROW_VARIANTS: Variants = {
-  initial: { opacity: 0, y: 4 },
-  animate: { opacity: 1, y: 0, transition: MOTION_TRANSITION.fast },
-}
-
 export const CARD_STAGGER_VARIANTS: Variants = {
   initial: {},
   animate: { transition: { staggerChildren: 0.05 } },
@@ -109,14 +89,4 @@ export const CARD_ITEM_VARIANTS: Variants = {
     scale: 1,
     transition: MOTION_TRANSITION.default,
   },
-}
-
-export const SIDEBAR_STAGGER_VARIANTS: Variants = {
-  initial: {},
-  animate: { transition: { staggerChildren: 0.03, delayChildren: 0.05 } },
-}
-
-export const SIDEBAR_ITEM_VARIANTS: Variants = {
-  initial: { opacity: 0, x: -8 },
-  animate: { opacity: 1, x: 0, transition: MOTION_TRANSITION.fast },
 }

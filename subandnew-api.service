@@ -1,0 +1,14 @@
+[Unit]
+Description=SubAndNew API control plane
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/subandnew-api
+ExecStart=/opt/subandnew-api/subandnew-api --port 3000 --log-dir /var/log/subandnew-api
+Restart=always
+RestartSec=5
+EnvironmentFile=-/opt/subandnew-api/.env
+
+[Install]
+WantedBy=multi-user.target

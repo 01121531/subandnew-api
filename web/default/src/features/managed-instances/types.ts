@@ -1,4 +1,4 @@
-export type ManagedInstanceKind = 'new_api' | 'huichuan' | 'sub2api' | 'generic'
+type ManagedInstanceKind = 'new_api' | 'huichuan' | 'sub2api' | 'generic'
 export type ManagedInstanceStatus =
   | 'unknown'
   | 'healthy'
@@ -120,7 +120,7 @@ export interface ManagedInstanceObservation<T> {
   data?: T
 }
 
-export interface ManagedInstanceInventoryItem {
+interface ManagedInstanceInventoryItem {
   id: number
   name: string
   type?: string
@@ -142,7 +142,7 @@ export interface ManagedInstanceMetricSample {
   collection_status: ManagedInstanceCollectionStatus
 }
 
-export interface ManagedInstanceResourceSummary {
+interface ManagedInstanceResourceSummary {
   resource_kind: string
   total: number
   enabled: number | null
@@ -178,7 +178,7 @@ export interface ManagedInstanceAlertList {
   page_size: number
 }
 
-export interface ManagedInstanceConnectionStage {
+interface ManagedInstanceConnectionStage {
   name: 'dns' | 'tcp' | 'tls' | 'http'
   status: 'not_run' | 'succeeded' | 'failed'
 }
@@ -212,7 +212,7 @@ export type ManagedInstanceOperationStatus =
   | 'succeeded'
   | 'failed'
 
-export interface ManagedInstanceOperationPlan {
+interface ManagedInstanceOperationPlan {
   action: ManagedInstanceOperationAction
   risk_level: 'low'
   writes_remote: boolean
@@ -227,13 +227,13 @@ export interface ManagedInstanceOperationParameters {
   enabled?: boolean
 }
 
-export interface ManagedInstanceOperationResultItem {
+interface ManagedInstanceOperationResultItem {
   resource_id: number
   succeeded: boolean
   enabled?: boolean
 }
 
-export interface ManagedInstanceOperationResult {
+interface ManagedInstanceOperationResult {
   action: ManagedInstanceOperationAction
   resource_kind: string
   count?: number

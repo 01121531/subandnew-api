@@ -23,7 +23,7 @@ RUN go mod download
 
 COPY . .
 COPY --from=builder /build/web/default/dist ./web/default/dist
-RUN go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$(cat VERSION)'" -o huichuan
+RUN go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$(cat VERSION)'" -o subandnew-api
 
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
@@ -32,8 +32,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && update-ca-certificates
 
-COPY --from=builder2 /build/huichuan /
+COPY --from=builder2 /build/subandnew-api /
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 EXPOSE 3000
 WORKDIR /data
-ENTRYPOINT ["/huichuan"]
+ENTRYPOINT ["/subandnew-api"]

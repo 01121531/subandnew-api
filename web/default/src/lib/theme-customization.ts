@@ -173,9 +173,7 @@ export const THEME_COOKIE_KEYS = {
  * experience; vivid color presets stay on the humanist sans so their
  * accents read clearly without competing with the body type.
  */
-export const PRESET_DEFAULT_FONT: Partial<
-  Record<ThemePreset, ResolvedThemeFont>
-> = {
+const PRESET_DEFAULT_FONT: Partial<Record<ThemePreset, ResolvedThemeFont>> = {
   default: 'sans',
   anthropic: 'serif',
 }

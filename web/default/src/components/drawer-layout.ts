@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createElement, type ReactNode } from 'react'
 
-import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { cn } from '@/lib/utils'
 
 export const sideDrawerContentClassName = (className?: string) =>
@@ -45,15 +44,9 @@ export const sideDrawerFooterClassName = (className?: string) =>
     className
   )
 
-export const sideDrawerSectionClassName = (className?: string) =>
+const sideDrawerSectionClassName = (className?: string) =>
   cn(
     'border-border/60 flex flex-col gap-4 border-b pb-6 last:border-b-0 last:pb-0',
-    className
-  )
-
-export const sideDrawerSwitchItemClassName = (className?: string) =>
-  cn(
-    'border-border/60 flex min-h-16 flex-row items-center justify-between gap-3 border-y py-3',
     className
   )
 
@@ -65,41 +58,5 @@ export function SideDrawerSection(props: {
     'section',
     { className: sideDrawerSectionClassName(props.className) },
     props.children
-  )
-}
-
-export function SideDrawerSectionHeader(props: {
-  title: ReactNode
-  description?: ReactNode
-  icon?: ReactNode
-  iconTone?: IconBadgeTone
-  className?: string
-}) {
-  return createElement(
-    'div',
-    { className: cn('flex items-start gap-3', props.className) },
-    props.icon
-      ? createElement(
-          IconBadge,
-          { tone: props.iconTone, size: 'md' },
-          props.icon
-        )
-      : null,
-    createElement(
-      'div',
-      { className: 'min-w-0 flex-1' },
-      createElement(
-        'h3',
-        { className: 'text-sm leading-none font-semibold tracking-tight' },
-        props.title
-      ),
-      props.description
-        ? createElement(
-            'p',
-            { className: 'text-muted-foreground mt-1 text-xs leading-5' },
-            props.description
-          )
-        : null
-    )
   )
 }

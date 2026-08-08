@@ -19,7 +19,7 @@ COPY . .
 RUN mkdir -p web/default/dist && \
     echo '<!doctype html><html><head><title>dev</title></head><body>use frontend dev server</body></html>' > web/default/dist/index.html
 
-RUN go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$(cat VERSION)'" -o huichuan
+RUN go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$(cat VERSION)'" -o subandnew-api
 
 FROM debian:bookworm-slim
 
@@ -28,8 +28,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && update-ca-certificates
 
-COPY --from=builder /build/huichuan /
+COPY --from=builder /build/subandnew-api /
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 EXPOSE 3000
 WORKDIR /data
-ENTRYPOINT ["/huichuan"]
+ENTRYPOINT ["/subandnew-api"]

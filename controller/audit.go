@@ -15,10 +15,6 @@ var auditContentTemplates = map[string]string{
 	"user.update":           "Updated user ${username} (ID: ${id})",
 	"user.delete":           "Deleted user ${username} (ID: ${id})",
 	"user.manage":           "Performed ${action} on user ${username} (ID: ${id})",
-	"user.quota_add":        "Increased user quota by ${quota}",
-	"user.quota_subtract":   "Decreased user quota by ${quota}",
-	"user.quota_override":   "Overrode user quota from ${from} to ${to}",
-	"user.binding_clear":    "Cleared ${bindingType} binding for user ${username}",
 	"user.2fa_disable":      "Force-disabled two-factor authentication for the user",
 	"user.passkey_register": "Registered a passkey",
 	"user.passkey_delete":   "Deleted a passkey",
@@ -45,9 +41,6 @@ func auditOperatorInfo(c *gin.Context) map[string]interface{} {
 }
 
 func auditAuthMethod(c *gin.Context) string {
-	if c.GetBool("use_access_token") {
-		return "access_token"
-	}
 	return "session"
 }
 

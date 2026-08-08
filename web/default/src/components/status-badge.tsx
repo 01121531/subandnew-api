@@ -24,7 +24,7 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { stringToColor } from '@/lib/colors'
 import { cn } from '@/lib/utils'
 
-export const dotColorMap = {
+const dotColorMap = {
   success: 'bg-success',
   warning: 'bg-warning',
   danger: 'bg-destructive',
@@ -48,7 +48,7 @@ export const dotColorMap = {
   yellow: 'bg-warning',
 } as const
 
-export const textColorMap = {
+const textColorMap = {
   success: 'text-success',
   warning: 'text-warning',
   danger: 'text-destructive',
@@ -72,7 +72,7 @@ export const textColorMap = {
   yellow: 'text-warning',
 } as const
 
-export type StatusVariant = keyof typeof dotColorMap
+type StatusVariant = keyof typeof dotColorMap
 
 /** Controls the visual style of the badge.
  * - `badge`    — default pill with background and padding (default)
@@ -195,86 +195,3 @@ export function StatusBadge({
     </span>
   )
 }
-
-export interface StatusBadgeListProps<T> extends Omit<
-  React.HTMLAttributes<HTMLDivElement>,
-  'children'
-> {
-  empty?: React.ReactNode
-  getKey?: (item: T, index: number) => React.Key
-  items: T[]
-  max?: number
-  moreLabel?: (remaining: number) => string
-  renderItem: (item: T, index: number) => React.ReactNode
-}
-
-export function StatusBadgeList<T>(props: StatusBadgeListProps<T>) {
-  const {
-    className,
-    empty = <span className='text-muted-foreground text-xs'>-</span>,
-    getKey,
-    items,
-    max = 2,
-    moreLabel,
-    renderItem,
-    ...domProps
-  } = props
-
-  if (items.length === 0) {
-    return empty
-  }
-
-  const displayed = items.slice(0, max)
-  const remaining = items.length - max
-
-  return (
-    <div
-      className={cn(
-        'flex max-w-full min-w-0 items-center gap-1 overflow-hidden',
-        className
-      )}
-      {...domProps}
-    >
-      {displayed.map((item, index) => (
-        <React.Fragment key={getKey?.(item, index) ?? index}>
-          {renderItem(item, index)}
-        </React.Fragment>
-      ))}
-      {remaining > 0 && (
-        <StatusBadge
-          label={moreLabel?.(remaining) ?? `+${remaining}`}
-          variant='neutral'
-          size='sm'
-          copyable={false}
-          className='shrink-0'
-        />
-      )}
-    </div>
-  )
-}
-
-export const statusPresets = {
-  active: {
-    variant: 'success' as const,
-    label: 'Active',
-  },
-  inactive: {
-    variant: 'neutral' as const,
-    label: 'Inactive',
-  },
-  invited: {
-    variant: 'info' as const,
-    label: 'Invited',
-  },
-  suspended: {
-    variant: 'danger' as const,
-    label: 'Suspended',
-  },
-  pending: {
-    variant: 'warning' as const,
-    label: 'Pending',
-    pulse: true,
-  },
-} as const
-
-export type StatusPreset = keyof typeof statusPresets

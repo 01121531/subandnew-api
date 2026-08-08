@@ -11,11 +11,11 @@ assignees: ''
 
 - Docs: https://github.com/01121531/subandnew-api
 - Usage questions first: https://deepwiki.com/01121531/subandnew-api
-- Issues about forwarding behavior after enabling pass-through mode are not accepted; pass-through mode forwards requests directly, so please verify upstream behavior yourself.
-- Technical support requests such as coding plans or reverse-engineering channels are not accepted as issues.
+- Features implemented by remote New API/Sub2API instances are outside this control plane's feature scope.
+- Technical support requests, deployment consulting, and reverse-engineering requests are not accepted as issues.
 - Warning: issues with this template removed, section headings deleted, or content cleared may be closed directly. Repeated abusive submissions may result in a block.
 
-**Your current huichuan version**
+**Your current SubAndNew API version**
 
 Please fill this in, for example: `v1.0.0`
 

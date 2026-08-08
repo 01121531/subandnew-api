@@ -1,4 +1,4 @@
-import type { ManagedInstance, ManagedInstanceStatus } from './types'
+import type { ManagedInstance } from './types'
 
 export const MANAGED_INSTANCE_KINDS = [
   { value: 'new_api', label: 'New API' },
@@ -6,14 +6,6 @@ export const MANAGED_INSTANCE_KINDS = [
   { value: 'sub2api', label: 'Sub2API' },
   { value: 'generic', label: 'Generic' },
 ] as const
-
-export const MANAGED_INSTANCE_STATUSES: ManagedInstanceStatus[] = [
-  'healthy',
-  'degraded',
-  'offline',
-  'auth_failed',
-  'unknown',
-]
 
 export function formatTimestamp(value: number): string {
   if (!value) return '-'

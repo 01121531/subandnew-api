@@ -30,7 +30,7 @@ declare module 'axios' {
   }
 }
 
-export type ApiRequestConfig = AxiosRequestConfig
+type ApiRequestConfig = AxiosRequestConfig
 
 // ============================================================================
 // Axios Instance Configuration
@@ -120,54 +120,6 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
-
-// ============================================================================
-// Common Headers Utility
-// ============================================================================
-
-/**
- * Get user ID from localStorage
- */
-function getUserId(): string | null {
-  try {
-    if (typeof window !== 'undefined') {
-      return window.localStorage.getItem('uid')
-    }
-  } catch {
-    /* empty */
-  }
-  return null
-}
-
-/**
- * Get common request headers (for both axios and SSE requests)
- */
-export function getCommonHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-
-  const uid = getUserId()
-  if (uid) {
-    headers['HUICHUAN-User'] = uid
-  }
-
-  return headers
-}
-
-// ============================================================================
-// Request Interceptor
-// ============================================================================
-
-// Attach user ID header for all requests
-api.interceptors.request.use((config) => {
-  const uid = getUserId()
-  if (uid) {
-    // Custom header for user identification
-    ;(config.headers as Record<string, string>)['HUICHUAN-User'] = uid
-  }
-  return config
-})
 
 // ============================================================================
 // Common API Functions

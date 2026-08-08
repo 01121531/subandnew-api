@@ -19,8 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ComponentProps, ReactNode } from 'react'
 
 import { FormItem } from '@/components/ui/form'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
 type SettingsFormGridProps = {
@@ -28,21 +26,8 @@ type SettingsFormGridProps = {
   className?: string
 }
 
-type SettingsFormGridItemProps = SettingsFormGridProps & {
-  span?: 'default' | 'full'
-}
-
 type SettingsSwitchItemProps = ComponentProps<typeof FormItem>
-type SettingsSwitchRowProps = ComponentProps<'div'>
 type SettingsControlGroupProps = ComponentProps<'div'>
-type SettingsControlChildrenProps = ComponentProps<'div'>
-type SettingsSwitchFieldProps = SettingsSwitchRowProps & {
-  checked: boolean
-  onCheckedChange: (checked: boolean) => void
-  label: ReactNode
-  description?: ReactNode
-  disabled?: boolean
-}
 
 const settingsSwitchRowClassName =
   'flex min-w-0 flex-row items-center justify-between gap-4 py-2.5'
@@ -65,21 +50,6 @@ export function SettingsFormGrid(props: SettingsFormGridProps) {
   )
 }
 
-export function SettingsFormGridItem(props: SettingsFormGridItemProps) {
-  return (
-    <div
-      data-settings-form-span={props.span === 'full' ? 'full' : undefined}
-      className={cn(
-        'min-w-0',
-        props.span === 'full' && 'lg:col-span-2',
-        props.className
-      )}
-    >
-      {props.children}
-    </div>
-  )
-}
-
 export function SettingsSwitchItem({
   className,
   ...props
@@ -90,45 +60,6 @@ export function SettingsSwitchItem({
       className={cn(settingsSwitchRowClassName, className)}
       {...props}
     />
-  )
-}
-
-export function SettingsSwitchRow({
-  className,
-  ...props
-}: SettingsSwitchRowProps) {
-  return (
-    <div
-      data-settings-form-span='full'
-      className={cn(settingsSwitchRowClassName, className)}
-      {...props}
-    />
-  )
-}
-
-export function SettingsSwitchField({
-  checked,
-  onCheckedChange,
-  label,
-  description,
-  disabled,
-  className,
-  ...props
-}: SettingsSwitchFieldProps) {
-  return (
-    <SettingsSwitchRow className={className} {...props}>
-      <SettingsSwitchContent>
-        <Label className='text-sm font-medium'>{label}</Label>
-        {description ? (
-          <p className='text-muted-foreground text-xs'>{description}</p>
-        ) : null}
-      </SettingsSwitchContent>
-      <Switch
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        disabled={disabled}
-      />
-    </SettingsSwitchRow>
   )
 }
 
@@ -151,18 +82,6 @@ export function SettingsControlGroup({
         'bg-muted/20 min-w-0 space-y-3 rounded-xl border px-3 py-2.5',
         className
       )}
-      {...props}
-    />
-  )
-}
-
-export function SettingsControlChildren({
-  className,
-  ...props
-}: SettingsControlChildrenProps) {
-  return (
-    <div
-      className={cn('border-border/70 ml-2 min-w-0 border-l pl-3', className)}
       {...props}
     />
   )

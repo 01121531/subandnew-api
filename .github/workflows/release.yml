@@ -1,177 +1,75 @@
-name: Release (Linux, macOS, Windows)
+name: Release binaries
+
+on:
+  push:
+    tags: ['v*.*.*']
+
 permissions:
   contents: write
 
-on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'SemVer build version (for example v1.0.1)'
-        required: true
-  push:
-    tags:
-      - 'v*.*.*'
-
 jobs:
-  linux:
-    name: Linux Release
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ''
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ''
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ''
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '>=1.25.1'
+      - name: Build frontend
+        shell: bash
+        run: |
+          cd web
+          bun install --frozen-lockfile
+          cd default
+          bun run build
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION='${{ github.ref_name }}'
+          OUTPUT="subandnew-api-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=${VERSION}'" -o "${OUTPUT}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: subandnew-api-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: subandnew-api-*
+
+  release:
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/download-artifact@v4
         with:
-          fetch-depth: 0
-      - name: Determine Version
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid SemVer: $VERSION"; exit 1; }
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+          pattern: subandnew-api-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          bun-version: latest
-      - name: Build Frontend (default)
-        env:
-          CI: ""
-        run: |
-          cd web
-          bun install --frozen-lockfile
-          cd default
-          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
-          cd ../..
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: '>=1.25.1'
-      - name: Build Backend (amd64)
-        run: |
-          go mod download
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$VERSION'" -o huichuan-ai-$VERSION-linux-amd64
-      - name: Build Backend (arm64)
-        run: |
-          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$VERSION'" -o huichuan-ai-$VERSION-linux-arm64
-      - name: Generate checksums
-        run: sha256sum huichuan-ai-$VERSION-linux-* > checksums-linux.txt
-
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            huichuan-ai-*-linux-*
-            checksums-linux.txt
+          files: subandnew-api-*
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  macos:
-    name: macOS Release
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-      - name: Determine Version
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid SemVer: $VERSION"; exit 1; }
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-      - name: Build Frontend (default)
-        env:
-          CI: ""
-          NODE_OPTIONS: "--max-old-space-size=4096"
-        run: |
-          cd web
-          bun install --frozen-lockfile
-          cd default
-          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
-          cd ../..
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: '>=1.25.1'
-      - name: Build Backend (amd64)
-        run: |
-          go mod download
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$VERSION'" -o huichuan-ai-$VERSION-macos-amd64
-      - name: Build Backend (arm64)
-        run: |
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$VERSION'" -o huichuan-ai-$VERSION-macos-arm64
-      - name: Generate checksums
-        run: shasum -a 256 huichuan-ai-$VERSION-macos-* > checksums-macos.txt
-
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            huichuan-ai-*-macos-*
-            checksums-macos.txt
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  windows:
-    name: Windows Release
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          fetch-depth: 0
-      - name: Determine Version
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-          else
-            VERSION="${{ inputs.version }}"
-          fi
-          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid SemVer: $VERSION"; exit 1; }
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-      - name: Build Frontend (default)
-        env:
-          CI: ""
-        run: |
-          cd web
-          bun install --frozen-lockfile
-          cd default
-          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$VERSION bun run build
-          cd ../..
-      - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: '>=1.25.1'
-      - name: Build Backend
-        run: |
-          go mod download
-          go build -ldflags "-s -w -X 'github.com/01121531/HUICHUAN-AI/common.Version=$VERSION'" -o huichuan-ai-$VERSION-windows-amd64.exe
-      - name: Generate checksums
-        run: sha256sum huichuan-ai-$VERSION-windows-amd64.exe > checksums-windows.txt
-
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            huichuan-ai-*-windows-amd64.exe
-            checksums-windows.txt
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -44,7 +44,6 @@ import { AdminStep } from './components/admin-step'
 import { CompleteStep } from './components/complete-step'
 import { DatabaseStep } from './components/database-step'
 import { StepNavigation } from './components/step-navigation'
-import { UsageModeStep } from './components/usage-mode-step'
 import type { SetupFormValues, SetupStatus } from './types'
 
 const STEPS = [
@@ -57,10 +56,6 @@ const STEPS = [
     descriptionKey: 'Create credentials for the root user',
   },
   {
-    titleKey: 'Usage mode',
-    descriptionKey: 'Choose how the platform will operate',
-  },
-  {
     titleKey: 'Review & initialize',
     descriptionKey: 'Confirm settings and finish setup',
   },
@@ -70,7 +65,6 @@ const DEFAULT_FORM_VALUES: SetupFormValues = {
   username: '',
   password: '',
   confirmPassword: '',
-  usageMode: 'external',
 }
 
 export function SetupWizard() {
@@ -139,27 +133,6 @@ export function SetupWizard() {
 
     setSetupStatus(status)
     setCurrentStep(0)
-
-    // Pre-fill usage mode if backend echoes it
-    if (status.SelfUseModeEnabled) {
-      form.setValue('usageMode', 'self', {
-        shouldDirty: false,
-        shouldTouch: false,
-        shouldValidate: false,
-      })
-    } else if (status.DemoSiteEnabled) {
-      form.setValue('usageMode', 'demo', {
-        shouldDirty: false,
-        shouldTouch: false,
-        shouldValidate: false,
-      })
-    } else {
-      form.setValue('usageMode', 'external', {
-        shouldDirty: false,
-        shouldTouch: false,
-        shouldValidate: false,
-      })
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusResponse, navigate, form])
 
@@ -197,9 +170,6 @@ export function SetupWizard() {
           rootInitialized={Boolean(setupStatus?.root_init)}
         />
       )
-    }
-    if (currentStep === 2) {
-      return <UsageModeStep form={form} />
     }
     return <CompleteStep status={setupStatus} values={watchedValues} />
   }, [currentStep, setupStatus, form, watchedValues])
@@ -241,22 +211,8 @@ export function SetupWizard() {
     return true
   }
 
-  const validateUsageModeStep = () => {
-    const usageMode = form.getValues('usageMode')
-    if (!usageMode) {
-      form.setError('usageMode', {
-        type: 'manual',
-        message: t('Select a usage mode to continue'),
-      })
-      toast.error(t('Select a usage mode to continue'))
-      return false
-    }
-    return true
-  }
-
   const handleNextStep = () => {
     if (currentStep === 1 && !validateAdminStep()) return
-    if (currentStep === 2 && !validateUsageModeStep()) return
 
     setCurrentStep((step) => Math.min(step + 1, STEPS.length - 1))
   }
@@ -266,9 +222,7 @@ export function SetupWizard() {
   }
 
   const handleSubmit = async () => {
-    const adminValid = validateAdminStep()
-    const usageValid = validateUsageModeStep()
-    if (!adminValid || !usageValid) return
+    if (!validateAdminStep()) return
 
     const payload = buildSetupPayload(
       form.getValues(),
@@ -321,7 +275,7 @@ export function SetupWizard() {
           </CardHeader>
 
           <CardContent className='space-y-6'>
-            <ol className='grid gap-3 sm:grid-cols-4'>
+            <ol className='grid gap-3 sm:grid-cols-3'>
               {STEPS.map((step, index) => {
                 const isActive = currentStep === index
                 const isCompleted = currentStep > index

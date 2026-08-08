@@ -41,54 +41,12 @@ func (w *auditResponseWriter) WriteString(s string) (int, error) {
 // 这些是未被 handler 手动埋点的写操作，由中间件兜底记录；前端依据 action 用 i18n 本地化展示。
 // 未命中的写操作回退为 action="generic"，前端展示 "METHOD route"。
 var auditRouteActions = map[string]string{
-	// 用户管理
-	"POST /api/user/topup/complete":                    "user.topup_complete",
-	"DELETE /api/user/:id/reset_passkey":               "user.reset_passkey",
-	"DELETE /api/user/:id/oauth/bindings/:provider_id": "user.oauth_unbind",
-
-	// 系统设置（root）
-	"POST /api/option/payment_compliance":       "option.payment_compliance",
-	"POST /api/option/rest_model_ratio":         "option.reset_ratio",
-	"DELETE /api/option/channel_affinity_cache": "option.clear_affinity_cache",
-
-	// 自定义 OAuth（root）
+	"DELETE /api/user/:id/reset_passkey":    "user.reset_passkey",
 	"POST /api/custom-oauth-provider/":      "custom_oauth.create",
 	"PUT /api/custom-oauth-provider/:id":    "custom_oauth.update",
 	"DELETE /api/custom-oauth-provider/:id": "custom_oauth.delete",
-
-	// 性能/缓存（root）
-	"DELETE /api/performance/disk_cache": "performance.clear_disk_cache",
-	"POST /api/performance/gc":           "performance.gc",
-	"DELETE /api/performance/logs":       "performance.clear_logs",
-
-	// 兑换码
-	"PUT /api/redemption/":           "redemption.update",
-	"DELETE /api/redemption/:id":     "redemption.delete",
-	"DELETE /api/redemption/invalid": "redemption.delete_invalid",
-
-	// 预填组
-	"POST /api/prefill_group/":      "prefill_group.create",
-	"PUT /api/prefill_group/":       "prefill_group.update",
-	"DELETE /api/prefill_group/:id": "prefill_group.delete",
-
-	// 供应商
-	"POST /api/vendors/":      "vendor.create",
-	"PUT /api/vendors/":       "vendor.update",
-	"DELETE /api/vendors/:id": "vendor.delete",
-
-	// 模型元数据
-	"POST /api/models/":              "model.create",
-	"PUT /api/models/":               "model.update",
-	"DELETE /api/models/:id":         "model.delete",
-	"POST /api/models/sync_upstream": "model.sync_upstream",
-
-	// 订阅（管理员）
-	"POST /api/subscription/admin/plans":    "subscription.plan_create",
-	"PUT /api/subscription/admin/plans/:id": "subscription.plan_update",
-	"POST /api/subscription/admin/bind":     "subscription.bind",
-
-	// 日志
-	"DELETE /api/log/": "log.clear",
+	"POST /api/performance/gc":              "performance.gc",
+	"DELETE /api/performance/logs":          "performance.clear_logs",
 }
 
 // beginAdminAudit 在管理/root 写操作进入 handler 前包装 ResponseWriter，
@@ -176,9 +134,6 @@ func finishAdminAudit(c *gin.Context, writer *auditResponseWriter) {
 }
 
 func auditAuthMethod(c *gin.Context) string {
-	if c.GetBool("use_access_token") {
-		return "access_token"
-	}
 	return "session"
 }
 

@@ -32,30 +32,6 @@ export interface TwoFAPayload {
   code: string
 }
 
-export interface RegisterPayload {
-  username: string
-  password: string
-  email?: string
-  verification_code?: string
-  aff_code?: string
-  turnstile?: string
-}
-
-export interface PasswordResetPayload {
-  email: string
-  turnstile?: string
-}
-
-export interface EmailVerificationPayload {
-  email: string
-  turnstile?: string
-}
-
-export interface BindEmailPayload {
-  email: string
-  code: string
-}
-
 // ============================================================================
 // API Responses
 // ============================================================================
@@ -113,21 +89,9 @@ export interface SystemStatus {
     turnstile_check?: boolean
     turnstile_site_key?: string
     email_verification?: boolean
-    self_use_mode_enabled?: boolean
-    display_in_currency?: boolean
-    display_token_stat_enabled?: boolean
-    quota_per_unit?: number
-    quota_display_type?: string
-    usd_exchange_rate?: number
-    custom_currency_symbol?: string
-    custom_currency_exchange_rate?: number
-    demo_site_enabled?: boolean
     user_agreement_enabled?: boolean
     privacy_policy_enabled?: boolean
-    oauth_register_enabled?: boolean
-    register_enabled?: boolean
     password_login_enabled?: boolean
-    password_register_enabled?: boolean
     custom_oauth_providers?: CustomOAuthProviderInfo[]
     [key: string]: unknown
   }
@@ -156,21 +120,9 @@ export interface SystemStatus {
   turnstile_check?: boolean
   turnstile_site_key?: string
   email_verification?: boolean
-  self_use_mode_enabled?: boolean
-  display_in_currency?: boolean
-  display_token_stat_enabled?: boolean
-  quota_per_unit?: number
-  quota_display_type?: string
-  usd_exchange_rate?: number
-  custom_currency_symbol?: string
-  custom_currency_exchange_rate?: number
-  demo_site_enabled?: boolean
   user_agreement_enabled?: boolean
   privacy_policy_enabled?: boolean
-  oauth_register_enabled?: boolean
-  register_enabled?: boolean
   password_login_enabled?: boolean
-  password_register_enabled?: boolean
   custom_oauth_providers?: CustomOAuthProviderInfo[]
   [key: string]: unknown
 }
@@ -178,14 +130,6 @@ export interface SystemStatus {
 // ============================================================================
 // OAuth
 // ============================================================================
-
-export interface OAuthProvider {
-  name: string
-  type: 'github' | 'discord' | 'oidc' | 'linuxdo' | 'telegram' | 'wechat'
-  enabled: boolean
-  clientId?: string
-  authEndpoint?: string
-}
 
 export interface CustomOAuthProviderInfo {
   id: number

@@ -1,16 +1,14 @@
 package model
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/setting"
 	"github.com/01121531/HUICHUAN-AI/setting/config"
-	"github.com/01121531/HUICHUAN-AI/setting/operation_setting"
 	"github.com/01121531/HUICHUAN-AI/setting/performance_setting"
-	"github.com/01121531/HUICHUAN-AI/setting/ratio_setting"
 	"github.com/01121531/HUICHUAN-AI/setting/system_setting"
 	"gorm.io/gorm"
 )
@@ -20,171 +18,100 @@ type Option struct {
 	Value string `json:"value"`
 }
 
+var controlPlaneOptionKeys = map[string]struct{}{
+	"PasswordLoginEnabled": {}, "EmailVerificationEnabled": {},
+	"GitHubOAuthEnabled": {}, "LinuxDOOAuthEnabled": {}, "TelegramOAuthEnabled": {}, "WeChatAuthEnabled": {},
+	"TurnstileCheckEnabled": {}, "EmailDomainRestrictionEnabled": {}, "EmailAliasRestrictionEnabled": {},
+	"EmailDomainWhitelist": {}, "SMTPServer": {}, "SMTPFrom": {}, "SMTPPort": {}, "SMTPAccount": {}, "SMTPToken": {},
+	"SMTPSSLEnabled": {}, "SMTPStartTLSEnabled": {}, "SMTPInsecureSkipVerify": {}, "SMTPForceAuthLogin": {},
+	"Notice": {}, "About": {}, "Footer": {}, "SystemName": {}, "Logo": {}, "ServerAddress": {},
+	"GitHubClientId": {}, "GitHubClientSecret": {}, "LinuxDOClientId": {}, "LinuxDOClientSecret": {}, "LinuxDOMinimumTrustLevel": {},
+	"TelegramBotToken": {}, "TelegramBotName": {}, "WeChatServerAddress": {}, "WeChatServerToken": {},
+	"WeChatAccountQRCodeImageURL": {}, "TurnstileSiteKey": {}, "TurnstileSecretKey": {},
+}
+
+var controlPlaneConfigPrefixes = []string{
+	"console_setting.", "discord.", "legal.", "oidc.", "passkey.", "performance_setting.",
+}
+
+func IsControlPlaneOptionKey(key string) bool {
+	if _, ok := controlPlaneOptionKeys[key]; ok {
+		return true
+	}
+	for _, prefix := range controlPlaneConfigPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return config.GlobalConfig.Get(strings.TrimSuffix(prefix, ".")) != nil
+		}
+	}
+	return false
+}
+
 func AllOption() ([]*Option, error) {
-	var options []*Option
-	var err error
-	err = DB.Find(&options).Error
-	return options, err
+	var stored []*Option
+	if err := DB.Find(&stored).Error; err != nil {
+		return nil, err
+	}
+	options := make([]*Option, 0, len(stored))
+	for _, option := range stored {
+		if IsControlPlaneOptionKey(option.Key) {
+			options = append(options, option)
+		}
+	}
+	return options, nil
+}
+
+func controlPlaneOptionDefaults() map[string]string {
+	defaults := map[string]string{
+		"PasswordLoginEnabled":          strconv.FormatBool(common.PasswordLoginEnabled),
+		"EmailVerificationEnabled":      strconv.FormatBool(common.EmailVerificationEnabled),
+		"GitHubOAuthEnabled":            strconv.FormatBool(common.GitHubOAuthEnabled),
+		"LinuxDOOAuthEnabled":           strconv.FormatBool(common.LinuxDOOAuthEnabled),
+		"TelegramOAuthEnabled":          strconv.FormatBool(common.TelegramOAuthEnabled),
+		"WeChatAuthEnabled":             strconv.FormatBool(common.WeChatAuthEnabled),
+		"TurnstileCheckEnabled":         strconv.FormatBool(common.TurnstileCheckEnabled),
+		"EmailDomainRestrictionEnabled": strconv.FormatBool(common.EmailDomainRestrictionEnabled),
+		"EmailAliasRestrictionEnabled":  strconv.FormatBool(common.EmailAliasRestrictionEnabled),
+		"EmailDomainWhitelist":          strings.Join(common.EmailDomainWhitelist, ","),
+		"SMTPServer":                    common.SMTPServer, "SMTPFrom": common.SMTPFrom, "SMTPPort": strconv.Itoa(common.SMTPPort),
+		"SMTPAccount": common.SMTPAccount, "SMTPToken": common.SMTPToken,
+		"SMTPSSLEnabled":         strconv.FormatBool(common.SMTPSSLEnabled),
+		"SMTPStartTLSEnabled":    strconv.FormatBool(common.SMTPStartTLSEnabled),
+		"SMTPInsecureSkipVerify": strconv.FormatBool(common.SMTPInsecureSkipVerify),
+		"SMTPForceAuthLogin":     strconv.FormatBool(common.SMTPForceAuthLogin),
+		"Notice":                 "", "About": "", "Footer": common.Footer, "SystemName": common.SystemName, "Logo": common.Logo,
+		"ServerAddress":  system_setting.ServerAddress,
+		"GitHubClientId": common.GitHubClientId, "GitHubClientSecret": common.GitHubClientSecret,
+		"LinuxDOClientId": common.LinuxDOClientId, "LinuxDOClientSecret": common.LinuxDOClientSecret,
+		"LinuxDOMinimumTrustLevel": strconv.Itoa(common.LinuxDOMinimumTrustLevel),
+		"TelegramBotToken":         common.TelegramBotToken, "TelegramBotName": common.TelegramBotName,
+		"WeChatServerAddress": common.WeChatServerAddress, "WeChatServerToken": common.WeChatServerToken,
+		"WeChatAccountQRCodeImageURL": common.WeChatAccountQRCodeImageURL,
+		"TurnstileSiteKey":            common.TurnstileSiteKey, "TurnstileSecretKey": common.TurnstileSecretKey,
+	}
+	for key, value := range config.GlobalConfig.ExportAllConfigs() {
+		if IsControlPlaneOptionKey(key) {
+			defaults[key] = value
+		}
+	}
+	return defaults
 }
 
 func InitOptionMap() {
 	common.OptionMapRWMutex.Lock()
-	common.OptionMap = make(map[string]string)
-
-	// 添加原有的系统配置
-	common.OptionMap["FileUploadPermission"] = strconv.Itoa(common.FileUploadPermission)
-	common.OptionMap["FileDownloadPermission"] = strconv.Itoa(common.FileDownloadPermission)
-	common.OptionMap["ImageUploadPermission"] = strconv.Itoa(common.ImageUploadPermission)
-	common.OptionMap["ImageDownloadPermission"] = strconv.Itoa(common.ImageDownloadPermission)
-	common.OptionMap["PasswordLoginEnabled"] = strconv.FormatBool(common.PasswordLoginEnabled)
-	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(common.EmailVerificationEnabled)
-	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(common.GitHubOAuthEnabled)
-	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
-	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
-	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
-	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
-	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
-	common.OptionMap["UsageLogIPCaptureEnabled"] = strconv.FormatBool(common.UsageLogIPCaptureEnabled.Load())
-	common.OptionMap["TrustedProxyCIDRs"] = common.DefaultUsageLogTrustedProxyCIDRs
-	common.OptionMap["UsageLogExportDirectLimit"] = strconv.Itoa(common.UsageLogExportDirectLimit())
-	common.OptionMap["UsageLogExportMaxRows"] = strconv.FormatInt(common.UsageLogExportMaxRows(), 10)
-	common.OptionMap["UsageLogExportBatchSize"] = strconv.Itoa(common.UsageLogExportBatchSize())
-	common.OptionMap["UsageLogExportRetentionHours"] = strconv.Itoa(common.UsageLogExportRetentionHours())
-	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
-	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
-	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
-	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
-	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
-	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
-	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
-	common.OptionMap["EmailDomainWhitelist"] = strings.Join(common.EmailDomainWhitelist, ",")
-	common.OptionMap["SMTPServer"] = ""
-	common.OptionMap["SMTPFrom"] = ""
-	common.OptionMap["SMTPPort"] = strconv.Itoa(common.SMTPPort)
-	common.OptionMap["SMTPAccount"] = ""
-	common.OptionMap["SMTPToken"] = ""
-	common.OptionMap["SMTPSSLEnabled"] = strconv.FormatBool(common.SMTPSSLEnabled)
-	common.OptionMap["SMTPStartTLSEnabled"] = strconv.FormatBool(common.SMTPStartTLSEnabled)
-	common.OptionMap["SMTPInsecureSkipVerify"] = strconv.FormatBool(common.SMTPInsecureSkipVerify)
-	common.OptionMap["SMTPForceAuthLogin"] = strconv.FormatBool(common.SMTPForceAuthLogin)
-	common.OptionMap["Notice"] = ""
-	common.OptionMap["About"] = ""
-	common.OptionMap["HomePageContent"] = ""
-	common.OptionMap["Footer"] = common.Footer
-	common.OptionMap["SystemName"] = common.SystemName
-	common.OptionMap["Logo"] = common.Logo
-	common.OptionMap["ServerAddress"] = ""
-	common.OptionMap["WorkerUrl"] = system_setting.WorkerUrl
-	common.OptionMap["WorkerValidKey"] = system_setting.WorkerValidKey
-	common.OptionMap["WorkerAllowHttpImageRequestEnabled"] = strconv.FormatBool(system_setting.WorkerAllowHttpImageRequestEnabled)
-	common.OptionMap["PayAddress"] = ""
-	common.OptionMap["CustomCallbackAddress"] = ""
-	common.OptionMap["EpayId"] = ""
-	common.OptionMap["EpayKey"] = ""
-	common.OptionMap["Price"] = strconv.FormatFloat(operation_setting.Price, 'f', -1, 64)
-	common.OptionMap["USDExchangeRate"] = strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64)
-	common.OptionMap["MinTopUp"] = strconv.Itoa(operation_setting.MinTopUp)
-	common.OptionMap["StripeMinTopUp"] = strconv.Itoa(setting.StripeMinTopUp)
-	common.OptionMap["StripeApiSecret"] = setting.StripeApiSecret
-	common.OptionMap["StripeWebhookSecret"] = setting.StripeWebhookSecret
-	common.OptionMap["StripePriceId"] = setting.StripePriceId
-	common.OptionMap["StripeUnitPrice"] = strconv.FormatFloat(setting.StripeUnitPrice, 'f', -1, 64)
-	common.OptionMap["StripePromotionCodesEnabled"] = strconv.FormatBool(setting.StripePromotionCodesEnabled)
-	common.OptionMap["CreemApiKey"] = setting.CreemApiKey
-	common.OptionMap["CreemProducts"] = setting.CreemProducts
-	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
-	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
-	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
-	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
-	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
-	common.OptionMap["WaffoPublicCert"] = setting.WaffoPublicCert
-	common.OptionMap["WaffoSandboxPublicCert"] = setting.WaffoSandboxPublicCert
-	common.OptionMap["WaffoSandboxApiKey"] = setting.WaffoSandboxApiKey
-	common.OptionMap["WaffoSandboxPrivateKey"] = setting.WaffoSandboxPrivateKey
-	common.OptionMap["WaffoSandbox"] = strconv.FormatBool(setting.WaffoSandbox)
-	common.OptionMap["WaffoMerchantId"] = setting.WaffoMerchantId
-	common.OptionMap["WaffoNotifyUrl"] = setting.WaffoNotifyUrl
-	common.OptionMap["WaffoReturnUrl"] = setting.WaffoReturnUrl
-	common.OptionMap["WaffoSubscriptionReturnUrl"] = setting.WaffoSubscriptionReturnUrl
-	common.OptionMap["WaffoCurrency"] = setting.WaffoCurrency
-	common.OptionMap["WaffoUnitPrice"] = strconv.FormatFloat(setting.WaffoUnitPrice, 'f', -1, 64)
-	common.OptionMap["WaffoMinTopUp"] = strconv.Itoa(setting.WaffoMinTopUp)
-	common.OptionMap["WaffoPayMethods"] = setting.WaffoPayMethods2JsonString()
-	common.OptionMap["WaffoPancakeMerchantID"] = setting.WaffoPancakeMerchantID
-	common.OptionMap["WaffoPancakePrivateKey"] = setting.WaffoPancakePrivateKey
-	common.OptionMap["WaffoPancakeReturnURL"] = setting.WaffoPancakeReturnURL
-	common.OptionMap["WaffoPancakeUnitPrice"] = strconv.FormatFloat(setting.WaffoPancakeUnitPrice, 'f', -1, 64)
-	common.OptionMap["WaffoPancakeMinTopUp"] = strconv.Itoa(setting.WaffoPancakeMinTopUp)
-	common.OptionMap["WaffoPancakeStoreID"] = setting.WaffoPancakeStoreID
-	common.OptionMap["WaffoPancakeProductID"] = setting.WaffoPancakeProductID
-	common.OptionMap["TopupGroupRatio"] = common.TopupGroupRatio2JSONString()
-	common.OptionMap["Chats"] = setting.Chats2JsonString()
-	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
-	common.OptionMap["DefaultUseAutoGroup"] = strconv.FormatBool(setting.DefaultUseAutoGroup)
-	common.OptionMap["PayMethods"] = operation_setting.PayMethods2JsonString()
-	common.OptionMap["GitHubClientId"] = ""
-	common.OptionMap["GitHubClientSecret"] = ""
-	common.OptionMap["TelegramBotToken"] = ""
-	common.OptionMap["TelegramBotName"] = ""
-	common.OptionMap["WeChatServerAddress"] = ""
-	common.OptionMap["WeChatServerToken"] = ""
-	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
-	common.OptionMap["TurnstileSiteKey"] = ""
-	common.OptionMap["TurnstileSecretKey"] = ""
-	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
-	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
-	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
-	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
-	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
-	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
-	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
-	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
-	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
-	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
-	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
-	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
-	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
-	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
-	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
-	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
-	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
-	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
-	common.OptionMap["AudioRatio"] = ratio_setting.AudioRatio2JSONString()
-	common.OptionMap["AudioCompletionRatio"] = ratio_setting.AudioCompletionRatio2JSONString()
-	common.OptionMap["TopUpLink"] = common.TopUpLink
-	//common.OptionMap["ChatLink"] = common.ChatLink
-	//common.OptionMap["ChatLink2"] = common.ChatLink2
-	common.OptionMap["QuotaPerUnit"] = strconv.FormatFloat(common.QuotaPerUnit, 'f', -1, 64)
-	common.OptionMap["RetryTimes"] = strconv.Itoa(common.RetryTimes)
-	common.OptionMap["DataExportInterval"] = strconv.Itoa(common.DataExportInterval)
-	common.OptionMap["DataExportDefaultTime"] = common.DataExportDefaultTime
-	common.OptionMap["DefaultCollapseSidebar"] = strconv.FormatBool(common.DefaultCollapseSidebar)
-	common.OptionMap["CheckSensitiveEnabled"] = strconv.FormatBool(setting.CheckSensitiveEnabled)
-	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
-	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
-	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
-	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
-	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
-	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
-	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
-	common.OptionMap["ExposeRatioEnabled"] = strconv.FormatBool(ratio_setting.IsExposeRatioEnabled())
-
-	// 自动添加所有注册的模型配置
-	modelConfigs := config.GlobalConfig.ExportAllConfigs()
-	for k, v := range modelConfigs {
-		common.OptionMap[k] = v
-	}
-
+	common.OptionMap = controlPlaneOptionDefaults()
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
 }
 
 func loadOptionsFromDatabase() {
-	options, _ := AllOption()
+	options, err := AllOption()
+	if err != nil {
+		common.SysLog("failed to load options: " + err.Error())
+		return
+	}
 	for _, option := range options {
-		err := updateOptionMap(option.Key, option.Value)
-		if err != nil {
-			common.SysLog("failed to update option map: " + err.Error())
+		if err := updateOptionMap(option.Key, option.Value); err != nil {
+			common.SysLog("failed to apply option " + option.Key + ": " + err.Error())
 		}
 	}
 }
@@ -192,287 +119,98 @@ func loadOptionsFromDatabase() {
 func SyncOptions(frequency int) {
 	for {
 		time.Sleep(time.Duration(frequency) * time.Second)
-		common.SysLog("syncing options from database")
 		loadOptionsFromDatabase()
 	}
 }
 
-func UpdateOption(key string, value string) error {
-	// Save to database first
-	option := Option{
-		Key: key,
+func UpdateOption(key, value string) error {
+	if !IsControlPlaneOptionKey(key) {
+		return errors.New("unsupported control-plane option")
 	}
-	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
-	option.Value = value
-	// Save is a combination function.
-	// If save value does not contain primary key, it will execute Create,
-	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
-	// Update OptionMap
-	return updateOptionMap(key, value)
-}
-
-// UpdateOptionsBulk persists multiple key/value pairs in a single database
-// transaction, then dispatches them through updateOptionMap in one pass. If
-// any DB write fails the whole transaction rolls back and no in-memory state
-// is touched — safe for callers that must commit a set of related options
-// atomically (e.g. payment gateway binding).
-func UpdateOptionsBulk(values map[string]string) error {
-	if len(values) == 0 {
-		return nil
-	}
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
-			option := Option{Key: k}
-			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
-				return err
-			}
-			option.Value = v
-			if err := tx.Save(&option).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for k, v := range values {
-		if err := updateOptionMap(k, v); err != nil {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		option := Option{Key: key}
+		if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
 			return err
 		}
-	}
-	return nil
+		option.Value = value
+		if err := tx.Save(&option).Error; err != nil {
+			return err
+		}
+		return updateOptionMap(key, value)
+	})
 }
 
-func updateOptionMap(key string, value string) (err error) {
+func updateOptionMap(key, value string) error {
+	if !IsControlPlaneOptionKey(key) {
+		return errors.New("unsupported control-plane option")
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
 
-	// 检查是否是模型配置 - 使用更规范的方式处理
-	if handleConfigUpdate(key, value) {
-		return nil // 已由配置系统处理
+	if strings.Contains(key, ".") {
+		parts := strings.SplitN(key, ".", 2)
+		cfg := config.GlobalConfig.Get(parts[0])
+		if cfg == nil {
+			return errors.New("unknown control-plane configuration")
+		}
+		if err := config.UpdateConfigFromMap(cfg, map[string]string{parts[1]: value}); err != nil {
+			return err
+		}
+		if parts[0] == "performance_setting" {
+			performance_setting.UpdateAndSync()
+		}
+		return nil
 	}
 
-	// 处理传统配置项...
-	if strings.HasSuffix(key, "Permission") {
-		intValue, _ := strconv.Atoi(value)
-		switch key {
-		case "FileUploadPermission":
-			common.FileUploadPermission = intValue
-		case "FileDownloadPermission":
-			common.FileDownloadPermission = intValue
-		case "ImageUploadPermission":
-			common.ImageUploadPermission = intValue
-		case "ImageDownloadPermission":
-			common.ImageDownloadPermission = intValue
-		}
-	}
-	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" {
-		boolValue := value == "true"
-		switch key {
-		case "PasswordLoginEnabled":
-			common.PasswordLoginEnabled = boolValue
-		case "EmailVerificationEnabled":
-			common.EmailVerificationEnabled = boolValue
-		case "GitHubOAuthEnabled":
-			common.GitHubOAuthEnabled = boolValue
-		case "LinuxDOOAuthEnabled":
-			common.LinuxDOOAuthEnabled = boolValue
-		case "WeChatAuthEnabled":
-			common.WeChatAuthEnabled = boolValue
-		case "TelegramOAuthEnabled":
-			common.TelegramOAuthEnabled = boolValue
-		case "TurnstileCheckEnabled":
-			common.TurnstileCheckEnabled = boolValue
-		case "EmailDomainRestrictionEnabled":
-			common.EmailDomainRestrictionEnabled = boolValue
-		case "EmailAliasRestrictionEnabled":
-			common.EmailAliasRestrictionEnabled = boolValue
-		case "LogConsumeEnabled":
-			common.LogConsumeEnabled = boolValue
-		case "UsageLogIPCaptureEnabled":
-			common.UsageLogIPCaptureEnabled.Store(boolValue)
-		case "DisplayInCurrencyEnabled":
-			// 兼容旧字段：同步到新配置 general_setting.quota_display_type（运行时生效）
-			// true -> USD, false -> TOKENS
-			newVal := "USD"
-			if !boolValue {
-				newVal = "TOKENS"
-			}
-			if cfg := config.GlobalConfig.Get("general_setting"); cfg != nil {
-				_ = config.UpdateConfigFromMap(cfg, map[string]string{"quota_display_type": newVal})
-			}
-		case "DisplayTokenStatEnabled":
-			common.DisplayTokenStatEnabled = boolValue
-		case "DrawingEnabled":
-			common.DrawingEnabled = boolValue
-		case "TaskEnabled":
-			common.TaskEnabled = boolValue
-		case "DataExportEnabled":
-			common.DataExportEnabled = boolValue
-		case "DefaultCollapseSidebar":
-			common.DefaultCollapseSidebar = boolValue
-		case "CheckSensitiveEnabled":
-			setting.CheckSensitiveEnabled = boolValue
-		case "DemoSiteEnabled":
-			operation_setting.DemoSiteEnabled = boolValue
-		case "SelfUseModeEnabled":
-			operation_setting.SelfUseModeEnabled = boolValue
-		case "CheckSensitiveOnPromptEnabled":
-			setting.CheckSensitiveOnPromptEnabled = boolValue
-		case "ModelRequestRateLimitEnabled":
-			setting.ModelRequestRateLimitEnabled = boolValue
-		case "StopOnSensitiveEnabled":
-			setting.StopOnSensitiveEnabled = boolValue
-		case "SMTPSSLEnabled":
-			common.SMTPSSLEnabled = boolValue
-		case "SMTPStartTLSEnabled":
-			common.SMTPStartTLSEnabled = boolValue
-		case "SMTPInsecureSkipVerify":
-			common.SMTPInsecureSkipVerify = boolValue
-		case "SMTPForceAuthLogin":
-			common.SMTPForceAuthLogin = boolValue
-		case "WorkerAllowHttpImageRequestEnabled":
-			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
-		case "DefaultUseAutoGroup":
-			setting.DefaultUseAutoGroup = boolValue
-		case "ExposeRatioEnabled":
-			ratio_setting.SetExposeRatioEnabled(boolValue)
-		}
-	}
+	boolValue := value == "true"
 	switch key {
+	case "PasswordLoginEnabled":
+		common.PasswordLoginEnabled = boolValue
+	case "EmailVerificationEnabled":
+		common.EmailVerificationEnabled = boolValue
+	case "GitHubOAuthEnabled":
+		common.GitHubOAuthEnabled = boolValue
+	case "LinuxDOOAuthEnabled":
+		common.LinuxDOOAuthEnabled = boolValue
+	case "TelegramOAuthEnabled":
+		common.TelegramOAuthEnabled = boolValue
+	case "WeChatAuthEnabled":
+		common.WeChatAuthEnabled = boolValue
+	case "TurnstileCheckEnabled":
+		common.TurnstileCheckEnabled = boolValue
+	case "EmailDomainRestrictionEnabled":
+		common.EmailDomainRestrictionEnabled = boolValue
+	case "EmailAliasRestrictionEnabled":
+		common.EmailAliasRestrictionEnabled = boolValue
+	case "SMTPSSLEnabled":
+		common.SMTPSSLEnabled = boolValue
+	case "SMTPStartTLSEnabled":
+		common.SMTPStartTLSEnabled = boolValue
+	case "SMTPInsecureSkipVerify":
+		common.SMTPInsecureSkipVerify = boolValue
+	case "SMTPForceAuthLogin":
+		common.SMTPForceAuthLogin = boolValue
 	case "EmailDomainWhitelist":
 		common.EmailDomainWhitelist = strings.Split(value, ",")
-	case "TrustedProxyCIDRs":
-		if strings.TrimSpace(value) == "" {
-			value = common.DefaultUsageLogTrustedProxyCIDRs
-			common.OptionMap[key] = value
-		}
-		common.SetUsageLogTrustedProxyCIDRs(value)
-	case "UsageLogExportDirectLimit":
-		intValue, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || !common.SetUsageLogExportDirectLimit(intValue) {
-			return gorm.ErrInvalidValue
-		}
-	case "UsageLogExportMaxRows":
-		intValue, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || !common.SetUsageLogExportMaxRows(intValue) {
-			return gorm.ErrInvalidValue
-		}
-	case "UsageLogExportBatchSize":
-		intValue, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || !common.SetUsageLogExportBatchSize(intValue) {
-			return gorm.ErrInvalidValue
-		}
-	case "UsageLogExportRetentionHours":
-		intValue, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || !common.SetUsageLogExportRetentionHours(intValue) {
-			return gorm.ErrInvalidValue
-		}
 	case "SMTPServer":
 		common.SMTPServer = value
-	case "SMTPPort":
-		intValue, _ := strconv.Atoi(value)
-		common.SMTPPort = intValue
-	case "SMTPAccount":
-		common.SMTPAccount = value
 	case "SMTPFrom":
 		common.SMTPFrom = value
+	case "SMTPAccount":
+		common.SMTPAccount = value
 	case "SMTPToken":
 		common.SMTPToken = value
+	case "SMTPPort":
+		common.SMTPPort, _ = strconv.Atoi(value)
+	case "Footer":
+		common.Footer = value
+	case "SystemName":
+		common.SystemName = value
+	case "Logo":
+		common.Logo = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
-	case "WorkerUrl":
-		system_setting.WorkerUrl = value
-	case "WorkerValidKey":
-		system_setting.WorkerValidKey = value
-	case "PayAddress":
-		operation_setting.PayAddress = value
-	case "Chats":
-		err = setting.UpdateChatsByJsonString(value)
-	case "AutoGroups":
-		err = setting.UpdateAutoGroupsByJsonString(value)
-	case "CustomCallbackAddress":
-		operation_setting.CustomCallbackAddress = value
-	case "EpayId":
-		operation_setting.EpayId = value
-	case "EpayKey":
-		operation_setting.EpayKey = value
-	case "Price":
-		operation_setting.Price, _ = strconv.ParseFloat(value, 64)
-	case "USDExchangeRate":
-		operation_setting.USDExchangeRate, _ = strconv.ParseFloat(value, 64)
-	case "MinTopUp":
-		operation_setting.MinTopUp, _ = strconv.Atoi(value)
-	case "StripeApiSecret":
-		setting.StripeApiSecret = value
-	case "StripeWebhookSecret":
-		setting.StripeWebhookSecret = value
-	case "StripePriceId":
-		setting.StripePriceId = value
-	case "StripeUnitPrice":
-		setting.StripeUnitPrice, _ = strconv.ParseFloat(value, 64)
-	case "StripeMinTopUp":
-		setting.StripeMinTopUp, _ = strconv.Atoi(value)
-	case "StripePromotionCodesEnabled":
-		setting.StripePromotionCodesEnabled = value == "true"
-	case "CreemApiKey":
-		setting.CreemApiKey = value
-	case "CreemProducts":
-		setting.CreemProducts = value
-	case "CreemTestMode":
-		setting.CreemTestMode = value == "true"
-	case "CreemWebhookSecret":
-		setting.CreemWebhookSecret = value
-	case "WaffoEnabled":
-		setting.WaffoEnabled = value == "true"
-	case "WaffoApiKey":
-		setting.WaffoApiKey = value
-	case "WaffoPrivateKey":
-		setting.WaffoPrivateKey = value
-	case "WaffoPublicCert":
-		setting.WaffoPublicCert = value
-	case "WaffoSandboxPublicCert":
-		setting.WaffoSandboxPublicCert = value
-	case "WaffoSandboxApiKey":
-		setting.WaffoSandboxApiKey = value
-	case "WaffoSandboxPrivateKey":
-		setting.WaffoSandboxPrivateKey = value
-	case "WaffoSandbox":
-		setting.WaffoSandbox = value == "true"
-	case "WaffoMerchantId":
-		setting.WaffoMerchantId = value
-	case "WaffoNotifyUrl":
-		setting.WaffoNotifyUrl = value
-	case "WaffoReturnUrl":
-		setting.WaffoReturnUrl = value
-	case "WaffoSubscriptionReturnUrl":
-		setting.WaffoSubscriptionReturnUrl = value
-	case "WaffoCurrency":
-		setting.WaffoCurrency = value
-	case "WaffoUnitPrice":
-		setting.WaffoUnitPrice, _ = strconv.ParseFloat(value, 64)
-	case "WaffoMinTopUp":
-		setting.WaffoMinTopUp, _ = strconv.Atoi(value)
-	case "WaffoPancakeMerchantID":
-		setting.WaffoPancakeMerchantID = value
-	case "WaffoPancakePrivateKey":
-		setting.WaffoPancakePrivateKey = value
-	case "WaffoPancakeReturnURL":
-		setting.WaffoPancakeReturnURL = value
-	case "WaffoPancakeStoreID":
-		setting.WaffoPancakeStoreID = value
-	case "WaffoPancakeProductID":
-		setting.WaffoPancakeProductID = value
-	case "WaffoPancakeUnitPrice":
-		setting.WaffoPancakeUnitPrice, _ = strconv.ParseFloat(value, 64)
-	case "WaffoPancakeMinTopUp":
-		setting.WaffoPancakeMinTopUp, _ = strconv.Atoi(value)
-	case "TopupGroupRatio":
-		err = common.UpdateTopupGroupRatioByJSONString(value)
 	case "GitHubClientId":
 		common.GitHubClientId = value
 	case "GitHubClientSecret":
@@ -483,122 +221,20 @@ func updateOptionMap(key string, value string) (err error) {
 		common.LinuxDOClientSecret = value
 	case "LinuxDOMinimumTrustLevel":
 		common.LinuxDOMinimumTrustLevel, _ = strconv.Atoi(value)
-	case "Footer":
-		common.Footer = value
-	case "SystemName":
-		common.SystemName = value
-	case "Logo":
-		common.Logo = value
+	case "TelegramBotToken":
+		common.TelegramBotToken = value
+	case "TelegramBotName":
+		common.TelegramBotName = value
 	case "WeChatServerAddress":
 		common.WeChatServerAddress = value
 	case "WeChatServerToken":
 		common.WeChatServerToken = value
 	case "WeChatAccountQRCodeImageURL":
 		common.WeChatAccountQRCodeImageURL = value
-	case "TelegramBotToken":
-		common.TelegramBotToken = value
-	case "TelegramBotName":
-		common.TelegramBotName = value
 	case "TurnstileSiteKey":
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
-	case "QuotaForNewUser":
-		common.QuotaForNewUser, _ = strconv.Atoi(value)
-	case "QuotaForInviter":
-		common.QuotaForInviter, _ = strconv.Atoi(value)
-	case "QuotaForInvitee":
-		common.QuotaForInvitee, _ = strconv.Atoi(value)
-	case "QuotaRemindThreshold":
-		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
-	case "PreConsumedQuota":
-		common.PreConsumedQuota, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitCount":
-		setting.ModelRequestRateLimitCount, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitDurationMinutes":
-		setting.ModelRequestRateLimitDurationMinutes, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitSuccessCount":
-		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitGroup":
-		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
-	case "RetryTimes":
-		common.RetryTimes, _ = strconv.Atoi(value)
-	case "DataExportInterval":
-		common.DataExportInterval, _ = strconv.Atoi(value)
-	case "DataExportDefaultTime":
-		common.DataExportDefaultTime = value
-	case "ModelRatio":
-		err = ratio_setting.UpdateModelRatioByJSONString(value)
-	case "GroupRatio":
-		err = ratio_setting.UpdateGroupRatioByJSONString(value)
-	case "GroupGroupRatio":
-		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
-	case "UserUsableGroups":
-		err = setting.UpdateUserUsableGroupsByJSONString(value)
-	case "CompletionRatio":
-		err = ratio_setting.UpdateCompletionRatioByJSONString(value)
-	case "ModelPrice":
-		err = ratio_setting.UpdateModelPriceByJSONString(value)
-	case "CacheRatio":
-		err = ratio_setting.UpdateCacheRatioByJSONString(value)
-	case "CreateCacheRatio":
-		err = ratio_setting.UpdateCreateCacheRatioByJSONString(value)
-	case "ImageRatio":
-		err = ratio_setting.UpdateImageRatioByJSONString(value)
-	case "AudioRatio":
-		err = ratio_setting.UpdateAudioRatioByJSONString(value)
-	case "AudioCompletionRatio":
-		err = ratio_setting.UpdateAudioCompletionRatioByJSONString(value)
-	case "TopUpLink":
-		common.TopUpLink = value
-	//case "ChatLink":
-	//	common.ChatLink = value
-	//case "ChatLink2":
-	//	common.ChatLink2 = value
-	case "QuotaPerUnit":
-		common.QuotaPerUnit, _ = strconv.ParseFloat(value, 64)
-	case "SensitiveWords":
-		setting.SensitiveWordsFromString(value)
-	case "StreamCacheQueueLength":
-		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
-	case "PayMethods":
-		err = operation_setting.UpdatePayMethodsByJsonString(value)
-	case "WaffoPayMethods":
-		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
-		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
-		// No additional in-memory variable to update.
 	}
-	return err
-}
-
-// handleConfigUpdate 处理分层配置更新，返回是否已处理
-func handleConfigUpdate(key, value string) bool {
-	parts := strings.SplitN(key, ".", 2)
-	if len(parts) != 2 {
-		return false // 不是分层配置
-	}
-
-	configName := parts[0]
-	configKey := parts[1]
-
-	// 获取配置对象
-	cfg := config.GlobalConfig.Get(configName)
-	if cfg == nil {
-		return false // 未注册的配置
-	}
-
-	// 更新配置
-	configMap := map[string]string{
-		configKey: value,
-	}
-	config.UpdateConfigFromMap(cfg, configMap)
-
-	// 特定配置的后处理
-	if configName == "performance_setting" {
-		performance_setting.UpdateAndSync()
-	} else if configName == "tool_price_setting" {
-		operation_setting.RebuildToolPriceIndex()
-	}
-
-	return true // 已处理
+	return nil
 }

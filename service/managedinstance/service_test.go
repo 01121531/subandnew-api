@@ -3,6 +3,7 @@ package managedinstance
 import (
 	"encoding/base64"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,9 +13,11 @@ import (
 	"gorm.io/gorm"
 )
 
+var managedInstanceTestDBSequence atomic.Uint64
+
 func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:managed-instance-%d?mode=memory&cache=shared", time.Now().UnixNano())
+	dsn := fmt.Sprintf("file:managed-instance-%d?mode=memory&cache=shared", managedInstanceTestDBSequence.Add(1))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(

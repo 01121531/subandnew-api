@@ -6,7 +6,7 @@
 #   3. Open http://localhost:3001 (Rsbuild dev server, API auto-proxied to :3000)
 #
 # Rebuild backend after Go code changes:
-#   docker compose -f docker-compose.dev.yml up -d --build huichuan
+#   docker compose -f docker-compose.dev.yml up -d --build control-plane
 #
 # Stop:
 #   docker compose -f docker-compose.dev.yml down
@@ -15,19 +15,19 @@
 #   docker compose -f docker-compose.dev.yml down -v
 
 services:
-  huichuan:
+  control-plane:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    image: huichuan-dev:local
-    container_name: huichuan-dev
+    image: subandnew-api-dev:local
+    container_name: subandnew-api-dev
     restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
       - dev_data:/data
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/huichuan
+      - SQL_DSN=postgresql://root:123456@postgres:5432/subandnew_api
       - REDIS_CONN_STRING=redis://redis
       - TZ=Asia/Shanghai
       # Required before adding credentials to managed instances.
@@ -46,25 +46,25 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: huichuan-dev-redis
+    container_name: subandnew-api-dev-redis
     restart: unless-stopped
     networks:
       - dev-network
 
   postgres:
     image: postgres:15-alpine
-    container_name: huichuan-dev-pg
+    container_name: subandnew-api-dev-pg
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: 123456
-      POSTGRES_DB: huichuan
+      POSTGRES_DB: subandnew_api
     volumes:
       - dev_pg_data:/var/lib/postgresql/data
     networks:
       - dev-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U root -d huichuan"]
+      test: ["CMD-SHELL", "pg_isready -U root -d subandnew_api"]
       interval: 5s
       timeout: 3s
       retries: 5

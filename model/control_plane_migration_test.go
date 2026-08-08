@@ -86,12 +86,52 @@ func TestMigrateDBPreservesExistingLegacyTablesAndRows(t *testing.T) {
 	}
 }
 
-func TestMigrateLogDBDoesNotCreateLegacyLogTable(t *testing.T) {
+func TestMigrateDBPreservesLegacyUserColumnsAndValues(t *testing.T) {
 	db := useControlPlaneMigrationTestDB(t)
+	require.NoError(t, migrateDB())
+	require.NoError(t, db.Exec(`ALTER TABLE users ADD COLUMN access_token TEXT`).Error)
+	require.NoError(t, db.Exec(`ALTER TABLE users ADD COLUMN quota INTEGER`).Error)
+	require.NoError(t, db.Exec(`ALTER TABLE users ADD COLUMN user_group TEXT`).Error)
+	require.NoError(t, db.Exec(`INSERT INTO users
+		(id, username, password, display_name, access_token, quota, user_group)
+		VALUES (1, 'legacy-admin', 'legacy-password', 'Legacy Admin', 'legacy-token', 123456, 'legacy-group')`).Error)
 
-	require.NoError(t, migrateLOGDB())
-	require.Empty(t, sqliteUserTables(t, db))
-	require.False(t, db.Migrator().HasTable("logs"))
+	require.NoError(t, migrateDB())
+	for _, column := range []string{"access_token", "quota", "user_group"} {
+		require.Truef(t, db.Migrator().HasColumn("users", column), "legacy users.%s must be preserved", column)
+	}
+	var row struct {
+		AccessToken string `gorm:"column:access_token"`
+		Quota       int    `gorm:"column:quota"`
+		Group       string `gorm:"column:user_group"`
+	}
+	require.NoError(t, db.Raw(`SELECT access_token, quota, user_group FROM users WHERE id = 1`).Scan(&row).Error)
+	require.Equal(t, "legacy-token", row.AccessToken)
+	require.Equal(t, 123456, row.Quota)
+	require.Equal(t, "legacy-group", row.Group)
+}
+
+func TestLegacyCommercialOptionsArePreservedButIgnored(t *testing.T) {
+	db := useControlPlaneMigrationTestDB(t)
+	require.NoError(t, migrateDB())
+	require.NoError(t, db.Create(&Option{Key: "ModelRatio", Value: `{"gpt-4":30}`}).Error)
+
+	InitOptionMap()
+	common.OptionMapRWMutex.RLock()
+	_, loaded := common.OptionMap["ModelRatio"]
+	common.OptionMapRWMutex.RUnlock()
+	require.False(t, loaded)
+
+	options, err := AllOption()
+	require.NoError(t, err)
+	for _, option := range options {
+		require.NotEqual(t, "ModelRatio", option.Key)
+	}
+	require.Error(t, UpdateOption("ModelRatio", "{}"))
+
+	var stored Option
+	require.NoError(t, db.First(&stored, "key = ?", "ModelRatio").Error)
+	require.Equal(t, `{"gpt-4":30}`, stored.Value)
 }
 
 func TestCloseDBIgnoresUninitializedLogDatabase(t *testing.T) {
@@ -105,20 +145,14 @@ func useControlPlaneMigrationTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 
 	previousDB := DB
-	previousLogDB := LOG_DB
 	previousMainType := common.MainDatabaseType()
-	previousLogType := common.LogDatabaseType()
 	DB = db
-	LOG_DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
-	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 	initCol()
 
 	t.Cleanup(func() {
 		DB = previousDB
-		LOG_DB = previousLogDB
 		common.SetMainDatabaseType(previousMainType)
-		common.SetLogDatabaseType(previousLogType)
 		initCol()
 		sqlDB, closeErr := db.DB()
 		if closeErr == nil {

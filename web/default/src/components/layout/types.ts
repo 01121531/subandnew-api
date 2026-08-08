@@ -57,7 +57,7 @@ export type NavCollapsible = BaseNavItem & {
 /**
  * Dynamic chat presets type - dynamically loaded chat preset list from API
  */
-export type NavChatPresets = BaseNavItem & {
+type NavChatPresets = BaseNavItem & {
   type: 'chat-presets'
   url?: never
   items?: never
@@ -102,7 +102,7 @@ export type TopNavLink = {
 /**
  * Back-navigation descriptor for a nested sidebar view
  */
-export type SidebarViewParent = {
+type SidebarViewParent = {
   /** Destination URL for the back button */
   to: LinkProps['to'] | (string & {})
   /** Visible label, e.g. "Back to Dashboard" — already localized */

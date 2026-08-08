@@ -41,19 +41,5 @@ export function buildSetupPayload(
   values: SetupFormValues,
   rootInitialized: boolean
 ) {
-  const { usageMode, ...rest } = values
-
-  const basePayload = {
-    SelfUseModeEnabled: usageMode === 'self',
-    DemoSiteEnabled: usageMode === 'demo',
-  }
-
-  if (rootInitialized) {
-    return basePayload
-  }
-
-  return {
-    ...rest,
-    ...basePayload,
-  }
+  return rootInitialized ? {} : values
 }

@@ -46,7 +46,7 @@ function setStoredPageSize(size: number) {
   }
 }
 
-export type NavigateFn = (opts: {
+type NavigateFn = (opts: {
   search:
     | true
     | SearchRecord

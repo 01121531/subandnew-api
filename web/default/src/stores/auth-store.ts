@@ -20,9 +20,7 @@ import { create } from 'zustand'
 
 import type { AdminCapabilities } from '@/lib/admin-permissions'
 
-export type UserPermissions = {
-  sidebar_settings?: boolean
-  sidebar_modules?: Record<string, unknown>
+type UserPermissions = {
   admin_permissions?: AdminCapabilities
 }
 
@@ -33,23 +31,13 @@ export interface AuthUser {
   email?: string
   role: number
   status?: number
-  group?: string
-  quota?: number
-  used_quota?: number
-  request_count?: number
-  aff_code?: string
-  aff_count?: number
-  aff_quota?: number
-  aff_history_quota?: number
-  inviter_id?: number
   github_id?: string
+  discord_id?: string
   oidc_id?: string
   wechat_id?: string
   telegram_id?: string
   linux_do_id?: string
   setting?: Record<string, unknown> | string
-  stripe_customer?: string
-  sidebar_modules?: string
   permissions?: UserPermissions
 }
 

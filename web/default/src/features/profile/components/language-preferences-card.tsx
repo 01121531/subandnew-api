@@ -34,10 +34,8 @@ import {
   INTERFACE_LANGUAGE_OPTIONS,
   normalizeInterfaceLanguage,
 } from '@/i18n/languages'
-import { useAuthStore } from '@/stores/auth-store'
 
 import { updateUserLanguage } from '../api'
-import { parseUserSettings } from '../lib'
 import type { UserProfile } from '../types'
 
 type LanguagePreferencesCardProps = {
@@ -47,13 +45,11 @@ type LanguagePreferencesCardProps = {
 
 export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
   const { t, i18n } = useTranslation()
-  const { auth } = useAuthStore()
   const [saving, setSaving] = useState(false)
 
   const savedLanguage = useMemo(() => {
-    const settings = parseUserSettings(props.profile?.setting)
-    return normalizeInterfaceLanguage(settings.language || i18n.language)
-  }, [props.profile?.setting, i18n.language])
+    return normalizeInterfaceLanguage(props.profile?.language || i18n.language)
+  }, [props.profile?.language, i18n.language])
 
   const [currentLanguage, setCurrentLanguage] = useState(savedLanguage)
 
@@ -75,20 +71,6 @@ export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
       const response = await updateUserLanguage(nextLanguage)
       if (!response.success) {
         throw new Error(response.message || t('Failed to update settings'))
-      }
-
-      if (auth.user) {
-        const existingSetting =
-          typeof auth.user.setting === 'string'
-            ? parseUserSettings(auth.user.setting)
-            : (auth.user.setting ?? {})
-        auth.setUser({
-          ...auth.user,
-          setting: JSON.stringify({
-            ...existingSetting,
-            language: nextLanguage,
-          }),
-        })
       }
 
       props.onProfileUpdate()

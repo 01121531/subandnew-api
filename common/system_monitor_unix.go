@@ -10,10 +10,7 @@ import (
 
 // GetDiskSpaceInfo 获取缓存目录所在磁盘的空间信息 (Unix/Linux/macOS)
 func GetDiskSpaceInfo() DiskSpaceInfo {
-	cachePath := GetDiskCachePath()
-	if cachePath == "" {
-		cachePath = os.TempDir()
-	}
+	cachePath := os.TempDir()
 
 	info := DiskSpaceInfo{}
 

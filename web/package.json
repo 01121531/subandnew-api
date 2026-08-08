@@ -1,5 +1,5 @@
 {
-  "name": "huichuan-web-workspace",
+  "name": "subandnew-web-workspace",
   "private": true,
   "workspaces": ["default"],
   "devDependencies": {

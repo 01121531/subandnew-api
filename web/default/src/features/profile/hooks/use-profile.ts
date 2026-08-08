@@ -20,12 +20,8 @@ import i18next from 'i18next'
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 
-import { getUserProfile, updateUserProfile, updateUserSettings } from '../api'
-import type {
-  UserProfile,
-  UpdateUserRequest,
-  UpdateUserSettingsRequest,
-} from '../types'
+import { getUserProfile, updateUserProfile } from '../api'
+import type { UserProfile, UpdateUserRequest } from '../types'
 
 // ============================================================================
 // Profile Hook
@@ -92,33 +88,6 @@ export function useProfile() {
     [refreshProfile]
   )
 
-  // Update user settings
-  const updateSettings = useCallback(
-    async (data: UpdateUserSettingsRequest): Promise<boolean> => {
-      try {
-        setUpdating(true)
-        const response = await updateUserSettings(data)
-
-        if (response.success) {
-          toast.success(i18next.t('Settings updated successfully'))
-          await refreshProfile() // Refresh profile silently
-          return true
-        }
-
-        toast.error(response.message || i18next.t('Failed to update settings'))
-        return false
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to update settings:', error)
-        toast.error(i18next.t('Failed to update settings'))
-        return false
-      } finally {
-        setUpdating(false)
-      }
-    },
-    [refreshProfile]
-  )
-
   // Initial fetch
   useEffect(() => {
     fetchProfile()
@@ -131,6 +100,5 @@ export function useProfile() {
     fetchProfile,
     refreshProfile,
     updateProfile,
-    updateSettings,
   }
 }

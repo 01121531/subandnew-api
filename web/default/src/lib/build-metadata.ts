@@ -161,11 +161,3 @@ export function installBuildMetadata(): void {
     // console may be replaced by a noop shim.
   }
 }
-
-/**
- * Return the canonical build revision string. Useful for support bundles
- * and for asserting the metadata layer is installed.
- */
-export function getBuildRevision(): string {
-  return computeBuildRevision()
-}

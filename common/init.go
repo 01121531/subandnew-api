@@ -7,9 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/01121531/HUICHUAN-AI/constant"
 )
@@ -22,149 +19,77 @@ var (
 )
 
 func printHelp() {
-	fmt.Println("HUICHUAN(Based OneAPI) " + Version + " - The next-generation LLM gateway and AI asset management system supports multiple languages.")
-	fmt.Println("Original Project: OneAPI by JustSong - https://github.com/songquanpeng/one-api")
+	fmt.Println("SubAndNew API " + Version + " - multi-instance New API and Sub2API control plane")
 	fmt.Println("Repository: https://github.com/01121531/subandnew-api")
-	fmt.Println("Usage: huichuan [--port <port>] [--log-dir <log directory>] [--version] [--help]")
+	fmt.Println("Usage: subandnew-api [--port <port>] [--log-dir <directory>] [--version] [--help]")
 }
 
 func InitEnv() {
 	flag.Parse()
-
-	envVersion := os.Getenv("VERSION")
-	if envVersion != "" {
-		Version = envVersion
+	if value := os.Getenv("VERSION"); value != "" {
+		Version = value
 	}
-
 	if *PrintVersion {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
-
 	if *PrintHelp {
 		printHelp()
 		os.Exit(0)
 	}
 
-	if os.Getenv("SESSION_SECRET") != "" {
-		ss := os.Getenv("SESSION_SECRET")
-		if ss == "random_string" {
-			log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
-			log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
-			log.Fatal("Please set SESSION_SECRET to a random string.")
-		} else {
-			SessionSecret = ss
+	if value := os.Getenv("SESSION_SECRET"); value != "" {
+		if value == "random_string" {
+			log.Fatal("SESSION_SECRET must not use the default random_string value")
 		}
+		SessionSecret = value
 	}
-	if os.Getenv("CRYPTO_SECRET") != "" {
-		CryptoSecret = os.Getenv("CRYPTO_SECRET")
+	if value := os.Getenv("CRYPTO_SECRET"); value != "" {
+		CryptoSecret = value
 	} else {
 		CryptoSecret = SessionSecret
 	}
 	if err := InitSessionCookieSettings(); err != nil {
 		log.Fatal(err)
 	}
-	if os.Getenv("SQLITE_PATH") != "" {
-		SQLitePath = os.Getenv("SQLITE_PATH")
+	if value := os.Getenv("SQLITE_PATH"); value != "" {
+		SQLitePath = value
 	}
 	if *LogDir != "" {
-		var err error
-		*LogDir, err = filepath.Abs(*LogDir)
+		absolute, err := filepath.Abs(*LogDir)
 		if err != nil {
 			log.Fatal(err)
 		}
-		if _, err := os.Stat(*LogDir); os.IsNotExist(err) {
-			err = os.Mkdir(*LogDir, 0777)
-			if err != nil {
-				log.Fatal(err)
-			}
+		*LogDir = absolute
+		if err := os.MkdirAll(*LogDir, 0o755); err != nil {
+			log.Fatal(err)
 		}
 	}
 
-	// Initialize variables from constants.go that were using environment variables
 	DebugEnabled = os.Getenv("DEBUG") == "true"
-	MemoryCacheEnabled = os.Getenv("MEMORY_CACHE_ENABLED") == "true"
 	IsMasterNode = os.Getenv("NODE_TYPE") != "slave"
 	initNodeNameIdentity()
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)
 	if TLSInsecureSkipVerify {
-		if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
-			if tr.TLSClientConfig != nil {
-				tr.TLSClientConfig.InsecureSkipVerify = true
+		if transport, ok := http.DefaultTransport.(*http.Transport); ok && transport != nil {
+			if transport.TLSClientConfig != nil {
+				transport.TLSClientConfig.InsecureSkipVerify = true
 			} else {
-				tr.TLSClientConfig = InsecureTLSConfig
+				transport.TLSClientConfig = InsecureTLSConfig
 			}
 		}
 	}
 	SMTPStartTLSEnabled = GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLE", GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLED", false))
 	SMTPInsecureSkipVerify = GetEnvOrDefaultBool("SMTP_INSECURE_SKIP_VERIFY", GetEnvOrDefaultBool("SMTP_TLS_INSECURE_SKIP_VERIFY", false))
-
-	// Parse requestInterval and set RequestInterval
-	requestInterval, _ = strconv.Atoi(os.Getenv("POLLING_INTERVAL"))
-	RequestInterval = time.Duration(requestInterval) * time.Second
-
-	// Initialize variables with GetEnvOrDefault
 	SyncFrequency = GetEnvOrDefault("SYNC_FREQUENCY", 60)
-	BatchUpdateInterval = GetEnvOrDefault("BATCH_UPDATE_INTERVAL", 5)
-	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
-	RelayIdleConnTimeout = GetEnvOrDefault("RELAY_IDLE_CONN_TIMEOUT", 90)
-	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)
-	RelayMaxIdleConnsPerHost = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS_PER_HOST", 100)
-
-	// Initialize string variables with GetEnvOrDefaultString
-	GeminiSafetySetting = GetEnvOrDefaultString("GEMINI_SAFETY_SETTING", "BLOCK_NONE")
-	CohereSafetySetting = GetEnvOrDefaultString("COHERE_SAFETY_SETTING", "NONE")
-
-	// Initialize rate limit variables
 	GlobalApiRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_API_RATE_LIMIT_ENABLE", true)
 	GlobalApiRateLimitNum = GetEnvOrDefault("GLOBAL_API_RATE_LIMIT", 360)
 	GlobalApiRateLimitDuration = int64(GetEnvOrDefault("GLOBAL_API_RATE_LIMIT_DURATION", 180))
-
 	GlobalWebRateLimitEnable = GetEnvOrDefaultBool("GLOBAL_WEB_RATE_LIMIT_ENABLE", true)
 	GlobalWebRateLimitNum = GetEnvOrDefault("GLOBAL_WEB_RATE_LIMIT", 120)
 	GlobalWebRateLimitDuration = int64(GetEnvOrDefault("GLOBAL_WEB_RATE_LIMIT_DURATION", 180))
-
 	CriticalRateLimitEnable = GetEnvOrDefaultBool("CRITICAL_RATE_LIMIT_ENABLE", true)
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
-
-	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
-	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
-	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
-	initConstantEnv()
-}
-
-func initConstantEnv() {
-	constant.StreamingTimeout = GetEnvOrDefault("STREAMING_TIMEOUT", 300)
-	constant.DifyDebug = GetEnvOrDefaultBool("DIFY_DEBUG", true)
-	constant.MaxFileDownloadMB = GetEnvOrDefault("MAX_FILE_DOWNLOAD_MB", 64)
-	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)
-	// MaxRequestBodyMB 请求体最大大小（解压后），用于防止超大请求/zip bomb导致内存暴涨
-	constant.MaxRequestBodyMB = GetEnvOrDefault("MAX_REQUEST_BODY_MB", 128)
 	constant.AnonymousRequestBodyLimitKB = GetEnvOrDefault("ANONYMOUS_REQUEST_BODY_LIMIT_KB", 512)
-	// ForceStreamOption 覆盖请求参数，强制返回usage信息
-	constant.ForceStreamOption = GetEnvOrDefaultBool("FORCE_STREAM_OPTION", true)
-	constant.CountToken = GetEnvOrDefaultBool("CountToken", true)
-	constant.GetMediaToken = GetEnvOrDefaultBool("GET_MEDIA_TOKEN", true)
-	constant.GetMediaTokenNotStream = GetEnvOrDefaultBool("GET_MEDIA_TOKEN_NOT_STREAM", false)
-	constant.AzureDefaultAPIVersion = GetEnvOrDefaultString("AZURE_DEFAULT_API_VERSION", "2025-04-01-preview")
-	constant.NotifyLimitCount = GetEnvOrDefault("NOTIFY_LIMIT_COUNT", 2)
-	constant.NotificationLimitDurationMinute = GetEnvOrDefault("NOTIFICATION_LIMIT_DURATION_MINUTE", 10)
-	// GenerateDefaultToken 是否生成初始令牌，默认关闭。
-	constant.GenerateDefaultToken = GetEnvOrDefaultBool("GENERATE_DEFAULT_TOKEN", false)
-	// 是否启用错误日志
-	constant.ErrorLogEnabled = GetEnvOrDefaultBool("ERROR_LOG_ENABLED", false)
-
-	// Initialize trusted redirect domains for URL validation
-	trustedDomainsStr := GetEnvOrDefaultString("TRUSTED_REDIRECT_DOMAINS", "")
-	var trustedDomains []string
-	domains := strings.Split(trustedDomainsStr, ",")
-	for _, domain := range domains {
-		trimmedDomain := strings.TrimSpace(domain)
-		if trimmedDomain != "" {
-			// Normalize domain to lowercase
-			trustedDomains = append(trustedDomains, strings.ToLower(trimmedDomain))
-		}
-	}
-	constant.TrustedRedirectDomains = trustedDomains
 }

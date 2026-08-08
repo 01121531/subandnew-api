@@ -11,11 +11,11 @@ assignees: ''
 
 - Docs: https://github.com/01121531/subandnew-api
 - Usage questions first: https://deepwiki.com/01121531/subandnew-api
-- Issues about forwarding behavior after enabling pass-through mode are not accepted; pass-through mode forwards requests directly, so please verify upstream behavior yourself.
-- Technical support requests such as coding plans or reverse-engineering channels are not accepted as issues.
+- For remote New API/Sub2API behavior, verify the managed instance directly before reporting a control-plane issue.
+- Technical support requests, deployment consulting, and reverse-engineering requests are not accepted as issues.
 - Warning: issues with this template removed, section headings deleted, or content cleared may be closed directly. Repeated abusive submissions may result in a block.
 
-**Your current huichuan version**
+**Your current SubAndNew API version**
 
 Please fill this in, for example: `v1.0.0`
 
@@ -31,8 +31,8 @@ Please fill this in, for example: `v1.0.0`
 
 Describe the symptom, impact scope, and why you believe this is an application issue rather than upstream behavior or a usage question with as much detail as possible.
 
-- For forwarding issues, include the channel type, conversion format, upstream native-support evidence, and server logs when possible.
-- For billing issues, include an example of the returned `usage` when possible.
+- For connectivity issues, include the managed instance type, management mode, redacted base URL, probe result, and control-plane logs.
+- Never include management credentials, session cookies, API keys, or unredacted secrets.
 
 **Steps to Reproduce**
 

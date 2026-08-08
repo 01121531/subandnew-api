@@ -105,8 +105,6 @@ func registerControlPlaneOperationsRoutes(api *gin.RouterGroup) {
 	performance.Use(middleware.RootAuth())
 	{
 		performance.GET("/stats", controller.GetPerformanceStats)
-		performance.DELETE("/disk_cache", controller.ClearDiskCache)
-		performance.POST("/reset_stats", controller.ResetPerformanceStats)
 		performance.POST("/gc", controller.ForceGC)
 		performance.GET("/logs", controller.GetLogFiles)
 		performance.DELETE("/logs", controller.CleanupLogFiles)

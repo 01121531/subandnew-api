@@ -26,7 +26,6 @@ import {
   ArrowDown,
   KeyRound,
   ShieldAlert,
-  Link2,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -55,7 +54,6 @@ import {
 } from '../constants'
 import { getUserActionMessage } from '../lib'
 import type { User, ManageUserAction } from '../types'
-import { UserBindingDialog } from './dialogs/user-binding-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -68,7 +66,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
-  const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -198,20 +195,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         <DropdownMenuItem
           onSelect={(event) => {
             event.preventDefault()
-            setBindingDialogOpen(true)
-          }}
-        >
-          {t('Manage Bindings')}
-          <DropdownMenuShortcut>
-            <Link2 size={16} />
-          </DropdownMenuShortcut>
-        </DropdownMenuItem>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuItem
-          onSelect={(event) => {
-            event.preventDefault()
             setResetPasskeyOpen(true)
           }}
           disabled={isRoot}
@@ -272,14 +255,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         confirmText={t('Reset 2FA')}
         handleConfirm={handleResetTwoFA}
       />
-
-      <UserBindingDialog
-        open={bindingDialogOpen}
-        onOpenChange={setBindingDialogOpen}
-        userId={user.id}
-        onUnbindSuccess={triggerRefresh}
-      />
-
     </div>
   )
 }

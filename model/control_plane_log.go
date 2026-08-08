@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	LogTypeTopup  = 1
 	LogTypeSystem = 4
 	LogTypeLogin  = 7
 )
@@ -29,17 +28,6 @@ func RecordLoginLog(userID int, username string, content string, ip string, acti
 		"extra":    extra,
 	})
 	logger.LogInfo(context.Background(), fmt.Sprintf("control-plane audit user=%d type=%d content=%s metadata=%s", userID, LogTypeLogin, content, metadata))
-}
-
-// RecordTopupLog keeps dormant legacy billing code independent from the
-// removed usage-log database until that billing module is deleted.
-func RecordTopupLog(userID int, content, callerIP, paymentMethod, callbackPaymentMethod string) {
-	metadata, _ := common.Marshal(map[string]string{
-		"caller_ip":               callerIP,
-		"payment_method":          paymentMethod,
-		"callback_payment_method": callbackPaymentMethod,
-	})
-	logger.LogInfo(context.Background(), fmt.Sprintf("control-plane audit user=%d type=%d content=%s metadata=%s", userID, LogTypeTopup, content, metadata))
 }
 
 func RecordOperationAuditLog(userID int, content, ip, action string, params, adminInfo, auditInfo map[string]interface{}) {
