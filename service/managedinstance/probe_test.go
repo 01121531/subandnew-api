@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/01121531/HUICHUAN-AI/model"
@@ -121,6 +122,60 @@ func TestProbeAuthenticationFailureUpdatesStateAndRedactedAudit(t *testing.T) {
 	require.Equal(t, "failed", audit.Outcome)
 	require.Contains(t, audit.Details, ProbeErrorAuthentication)
 	require.NotContains(t, audit.Details, "never-log-this")
+	var alert model.ManagedInstanceAlert
+	require.NoError(t, db.Where("instance_id = ? AND status = ?", instance.Id, model.ManagedInstanceAlertStatusOpen).First(&alert).Error)
+	require.Equal(t, model.ManagedInstanceAlertTypeCredential, alert.AlertType)
+	require.Equal(t, ProbeErrorAuthentication, alert.ErrorCode)
+}
+
+func TestProbeAvailabilityAlertThresholdDeduplicatesAndResolves(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var healthy atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if !healthy.Load() {
+			response.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		switch request.URL.Path {
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"version":"v1","system_name":"New API","start_time":10}}`)
+		case "/api/status/test":
+			writeProbeJSON(response, `{"success":true}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "token"})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		_, err := Probe(context.Background(), instance.Id, 7)
+		require.Error(t, err)
+		var count int64
+		require.NoError(t, db.Model(&model.ManagedInstanceAlert{}).Where("instance_id = ?", instance.Id).Count(&count).Error)
+		require.Zero(t, count)
+	}
+	_, err := Probe(context.Background(), instance.Id, 7)
+	require.Error(t, err)
+	_, err = Probe(context.Background(), instance.Id, 7)
+	require.Error(t, err)
+	var alert model.ManagedInstanceAlert
+	require.NoError(t, db.Where("instance_id = ?", instance.Id).First(&alert).Error)
+	require.Equal(t, model.ManagedInstanceAlertStatusOpen, alert.Status)
+	require.Equal(t, model.ManagedInstanceAlertTypeAvailability, alert.AlertType)
+	require.Equal(t, 2, alert.Occurrences)
+
+	healthy.Store(true)
+	_, err = Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.NoError(t, db.First(&alert, alert.Id).Error)
+	require.Equal(t, model.ManagedInstanceAlertStatusResolved, alert.Status)
+	require.NotZero(t, alert.ResolvedAt)
+
+	alerts, err := ListAlerts(AlertListFilter{InstanceID: instance.Id, Status: model.ManagedInstanceAlertStatusResolved})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), alerts.Total)
 }
 
 func createProbeInstance(t *testing.T, baseURL string, kind string, credential CredentialInput) *InstanceView {

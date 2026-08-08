@@ -5,6 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/01121531/HUICHUAN-AI/common"
+	"github.com/01121531/HUICHUAN-AI/i18n"
+	"github.com/01121531/HUICHUAN-AI/service/authz"
 	"github.com/01121531/HUICHUAN-AI/service/managedinstance"
 	"github.com/gin-gonic/gin"
 )
@@ -94,6 +97,15 @@ func GetManagedInstanceOperation(c *gin.Context) {
 	operation, err := managedinstance.GetOperation(instanceID, c.Param("operation_id"))
 	if err != nil {
 		managedInstanceOperationError(c, err)
+		return
+	}
+	userID := c.GetInt("id")
+	canAudit := authz.Can(userID, c.GetInt("role"), authz.ManagedInstanceAudit)
+	if !canAudit && operation.ActorId != userID && operation.ExecutedBy != userID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": operation})

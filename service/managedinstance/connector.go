@@ -21,6 +21,8 @@ import (
 
 const (
 	managedInstanceAllowedCIDRsEnv = "MANAGED_INSTANCE_ALLOWED_CIDRS"
+	managedInstanceAllowedHostsEnv = "MANAGED_INSTANCE_ALLOWED_HOSTS"
+	managedInstanceAllowedPortsEnv = "MANAGED_INSTANCE_ALLOWED_PORTS"
 	defaultConnectorMaxBodyBytes   = int64(2 * 1024 * 1024)
 )
 
@@ -50,6 +52,8 @@ type connectorResolver interface {
 
 type ConnectorPolicy struct {
 	AllowedCIDRs []*net.IPNet
+	AllowedHosts []string
+	AllowedPorts map[string]struct{}
 	Resolver     connectorResolver
 	MaxBodyBytes int64
 }
@@ -71,7 +75,14 @@ func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
 	if err != nil {
 		return ConnectorPolicy{}, err
 	}
-	return ConnectorPolicy{AllowedCIDRs: allowed, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes}, nil
+	ports, err := parseAllowedPorts(os.Getenv(managedInstanceAllowedPortsEnv))
+	if err != nil {
+		return ConnectorPolicy{}, err
+	}
+	return ConnectorPolicy{
+		AllowedCIDRs: allowed, AllowedHosts: parseAllowedHosts(os.Getenv(managedInstanceAllowedHostsEnv)),
+		AllowedPorts: ports, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
+	}, nil
 }
 
 func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Connector, error) {
@@ -81,6 +92,9 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 	baseURL, err := url.Parse(instance.BaseURL)
 	if err != nil || baseURL.Host == "" {
 		return nil, ErrInvalidInstance
+	}
+	if !connectorHostAllowed(baseURL.Hostname(), policy.AllowedHosts) || !connectorPortAllowed(effectivePort(baseURL), policy.AllowedPorts) {
+		return nil, ErrConnectorTargetBlocked
 	}
 	if policy.Resolver == nil {
 		policy.Resolver = net.DefaultResolver
@@ -142,8 +156,13 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 	if c == nil || c.client == nil || c.baseURL == nil {
 		return nil, errors.New("managed instance connector is nil")
 	}
+	relativeURL, err := url.Parse(path)
+	if err != nil || relativeURL.IsAbs() || relativeURL.Host != "" {
+		return nil, errors.New("managed instance connector path is invalid")
+	}
 	requestURL := *c.baseURL
-	requestURL.Path = strings.TrimRight(c.baseURL.Path, "/") + "/" + strings.TrimLeft(path, "/")
+	requestURL.Path = strings.TrimRight(c.baseURL.Path, "/") + "/" + strings.TrimLeft(relativeURL.Path, "/")
+	requestURL.RawQuery = relativeURL.RawQuery
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -203,6 +222,63 @@ func parseAllowedCIDRs(raw string) ([]*net.IPNet, error) {
 		allowed = append(allowed, network)
 	}
 	return allowed, nil
+}
+
+func parseAllowedHosts(raw string) []string {
+	hosts := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(part, ".")))
+		if part != "" {
+			hosts = append(hosts, part)
+		}
+	}
+	return hosts
+}
+
+func parseAllowedPorts(raw string) (map[string]struct{}, error) {
+	if strings.TrimSpace(raw) == "" {
+		raw = "80,443"
+	}
+	if strings.TrimSpace(raw) == "*" {
+		return nil, nil
+	}
+	ports := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		port, err := strconv.Atoi(part)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, fmt.Errorf("invalid managed instance allowed port %q", part)
+		}
+		ports[strconv.Itoa(port)] = struct{}{}
+	}
+	return ports, nil
+}
+
+func connectorHostAllowed(host string, allowedHosts []string) bool {
+	if len(allowedHosts) == 0 {
+		return true
+	}
+	host = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(host, ".")))
+	for _, allowed := range allowedHosts {
+		if host == allowed {
+			return true
+		}
+		if strings.HasPrefix(allowed, "*.") {
+			suffix := strings.TrimPrefix(allowed, "*")
+			if strings.HasSuffix(host, suffix) && host != strings.TrimPrefix(suffix, ".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func connectorPortAllowed(port string, allowedPorts map[string]struct{}) bool {
+	if allowedPorts == nil {
+		return true
+	}
+	_, allowed := allowedPorts[port]
+	return allowed
 }
 
 func resolveAllowedIPs(ctx context.Context, resolver connectorResolver, host string, allowedCIDRs []*net.IPNet) ([]net.IP, error) {

@@ -17,6 +17,7 @@ var (
 	ErrInvalidInstance           = errors.New("invalid managed instance")
 	ErrInstanceNotFound          = errors.New("managed instance not found")
 	ErrConnectionChangeForbidden = errors.New("managed instance connection change requires secret rotation permission")
+	ErrWriteModeForbidden        = errors.New("managed instance write mode requires root permission")
 )
 
 type CredentialInput struct {
@@ -37,7 +38,9 @@ type CreateInput struct {
 	RequestTimeoutSeconds int
 	CheckIntervalSeconds  int
 	Credential            *CredentialInput
+	Preflight             *ProbeResult
 	ActorID               int
+	AllowWriteMode        bool
 }
 
 type UpdateInput struct {
@@ -52,15 +55,17 @@ type UpdateInput struct {
 	CheckIntervalSeconds  int
 	ActorID               int
 	AllowConnectionChange bool
+	AllowWriteMode        bool
 }
 
 type ListFilter struct {
-	Kind        string
-	Environment string
-	Status      string
-	Search      string
-	Page        int
-	PageSize    int
+	Kind             string
+	Environment      string
+	Status           string
+	Search           string
+	Page             int
+	PageSize         int
+	SearchConnection bool
 }
 
 type InstanceView struct {
@@ -116,6 +121,24 @@ func Create(input CreateInput) (*InstanceView, error) {
 	if err != nil {
 		return nil, err
 	}
+	if instance.ManagementMode != model.ManagedInstanceModeObserve && !input.AllowWriteMode {
+		return nil, ErrWriteModeForbidden
+	}
+	if input.Preflight != nil {
+		if input.Preflight.Status != model.ManagedInstanceStatusHealthy || !validKind(input.Preflight.Kind) {
+			return nil, ErrInvalidInstance
+		}
+		capabilities, err := json.Marshal(input.Preflight.Capabilities)
+		if err != nil {
+			return nil, err
+		}
+		instance.Kind = input.Preflight.Kind
+		instance.Version = input.Preflight.Version
+		instance.Capabilities = string(capabilities)
+		instance.Status = model.ManagedInstanceStatusHealthy
+		instance.LastSeenAt = input.Preflight.CheckedAt
+		instance.LastCheckedAt = input.Preflight.CheckedAt
+	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(instance).Error; err != nil {
 			return err
@@ -127,6 +150,11 @@ func Create(input CreateInput) (*InstanceView, error) {
 			}
 			if err := tx.Create(credential).Error; err != nil {
 				return err
+			}
+			if input.Preflight != nil {
+				if err := tx.Model(credential).Update("last_verified_at", input.Preflight.CheckedAt).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return writeAudit(tx, instance.Id, input.ActorID, "create", map[string]any{"name": instance.Name, "kind": instance.Kind})
@@ -177,7 +205,11 @@ func List(filter ListFilter) (*ListResult, error) {
 		query = query.Where("status = ?", filter.Status)
 	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
-		query = query.Where("name LIKE ? OR base_url LIKE ?", "%"+search+"%", "%"+search+"%")
+		if filter.SearchConnection {
+			query = query.Where("name LIKE ? OR base_url LIKE ?", "%"+search+"%", "%"+search+"%")
+		} else {
+			query = query.Where("name LIKE ?", "%"+search+"%")
+		}
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -260,6 +292,9 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 		if connectionChanged && !input.AllowConnectionChange {
 			return ErrConnectionChangeForbidden
 		}
+		if current.ManagementMode != instance.ManagementMode && instance.ManagementMode != model.ManagedInstanceModeObserve && !input.AllowWriteMode {
+			return ErrWriteModeForbidden
+		}
 		result := tx.Model(&model.ManagedInstance{}).Where("id = ?", id).Updates(updates)
 		if result.Error != nil {
 			return result.Error
@@ -317,6 +352,12 @@ func Delete(id int64, actorID int) error {
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceCredential{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceSnapshot{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceAlert{}).Error; err != nil {
 			return err
 		}
 		result := tx.Delete(&model.ManagedInstance{}, id)

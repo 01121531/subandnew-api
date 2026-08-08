@@ -1032,6 +1032,11 @@ func selectChannelsForAutomaticTest(channels []*model.Channel, mode string) []*m
 // TestAllChannels enqueues a channel_test system task instead of running the
 // test loop inline. If any channel_test task is already active, the manual run is
 // rejected so the caller does not mistake a scheduled run for this manual one.
+type channelTestTaskPayload struct {
+	Mode   string `json:"mode"`
+	Notify bool   `json:"notify"`
+}
+
 func TestAllChannels(c *gin.Context) {
 	task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeChannelTest, channelTestTaskPayload{
 		Mode:   operation_setting.ChannelTestModeScheduledAll,

@@ -49,6 +49,8 @@ type ProbeResult struct {
 type InstanceAdapter interface {
 	Kind() string
 	Probe(ctx context.Context, connector *Connector, credential *CredentialMaterial) (*ProbeResult, error)
+	Summary(ctx context.Context, connector *Connector, credential *CredentialMaterial, window TimeWindow) (*SummaryResult, error)
+	Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error)
 }
 
 func adapterForKind(kind string) (InstanceAdapter, error) {
@@ -122,7 +124,7 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 		if !adminStatus.Success {
 			return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: adminResponse.StatusCode}
 		}
-		capabilities = append(capabilities, "channels.list", "channels.test")
+		capabilities = append(capabilities, "channels.list", "channels.test", "channels.toggle")
 	}
 	return &ProbeResult{
 		Kind: detectedKind, Version: status.Data.Version, SystemName: status.Data.SystemName,
@@ -191,7 +193,7 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: versionResponse.StatusCode}
 	}
 	result.Version = version.Data.Version
-	result.Capabilities = append(result.Capabilities, "version.read", "accounts.list", "accounts.test")
+	result.Capabilities = append(result.Capabilities, "version.read", "accounts.list", "accounts.test", "accounts.toggle")
 	return result, nil
 }
 

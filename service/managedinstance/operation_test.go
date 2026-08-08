@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/stretchr/testify/require"
@@ -103,6 +105,9 @@ func TestPlanOperationEnforcesObserveCapabilitiesAndIdempotency(t *testing.T) {
 func TestExecuteOperationCreatesOneInstanceScopedTask(t *testing.T) {
 	db := setupManagedInstanceOperationTestDB(t)
 	instance := createOperationTestInstance(t, model.ManagedInstanceModeOperate, "channels.toggle")
+	_, err := persistObservation(instance.Id, model.ManagedInstanceSnapshotTypeInventory, "channel", 100,
+		&InventoryPage{ResourceKind: "channel", Items: []InventoryItem{{ID: 42, Name: "resource"}}, Total: 1}, nil)
+	require.NoError(t, err)
 	key := "toggle-operation-key"
 	planned, err := PlanOperation(instance.Id, PlanOperationInput{
 		Action: model.ManagedInstanceActionToggleResource, IdempotencyKey: key,
@@ -142,6 +147,7 @@ func TestExecuteOperationCreatesOneInstanceScopedTask(t *testing.T) {
 
 func TestExecuteRemoteOperationContracts(t *testing.T) {
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	t.Setenv(managedInstanceAllowedPortsEnv, "*")
 
 	t.Run("new api", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -277,3 +283,86 @@ func TestRunOperationStoresSanitizedResultAndFailure(t *testing.T) {
 		}
 	})
 }
+
+func TestRunOperationRejectsRemoteWriteWhenInventoryChangedAfterPlan(t *testing.T) {
+	setupManagedInstanceOperationTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var writeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/channel/":
+			writeProbeJSON(response, `{"success":true,"data":[{"id":7,"name":"changed","status":1}]}`)
+		case "/api/channel/7/status":
+			writeCalls.Add(1)
+			writeProbeJSON(response, `{"success":true}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createOperationTestInstance(t, model.ManagedInstanceModeOperate, "channels.list", "channels.toggle")
+	require.NoError(t, model.DB.Model(instance).Updates(map[string]any{
+		"base_url": server.URL, "environment": "development", "request_timeout_seconds": 5,
+	}).Error)
+	instance.BaseURL = server.URL
+	instance.Environment = "development"
+	instance.RequestTimeoutSeconds = 5
+	_, err := RotateCredential(instance.Id, CredentialInput{AuthType: "bearer_pat", Secret: "write-secret"}, 1)
+	require.NoError(t, err)
+	_, err = persistObservation(instance.Id, model.ManagedInstanceSnapshotTypeInventory, "channel", 100,
+		&InventoryPage{ResourceKind: "channel", Items: []InventoryItem{{ID: 7, Name: "before", Enabled: boolPointer(true)}}, Total: 1}, nil)
+	require.NoError(t, err)
+
+	planned, err := PlanOperation(instance.Id, PlanOperationInput{
+		Action: model.ManagedInstanceActionToggleResource, IdempotencyKey: "conflict-operation-key",
+		Parameters: json.RawMessage(`{"resource_id":7,"enabled":false}`), ActorID: 1,
+	})
+	require.NoError(t, err)
+	queued, task, err := ExecuteOperation(instance.Id, ExecuteOperationInput{
+		OperationID: planned.OperationId, IdempotencyKey: "conflict-operation-key", ActorID: 1,
+	})
+	require.NoError(t, err)
+
+	failed, err := RunOperation(context.Background(), queued.OperationId, task.TaskID)
+	var executionError *OperationExecutionError
+	require.ErrorAs(t, err, &executionError)
+	require.Equal(t, "remote_conflict", executionError.Code)
+	require.Equal(t, model.ManagedInstanceOperationStatusFailed, failed.Status)
+	require.Equal(t, int32(0), writeCalls.Load())
+}
+
+func TestRunOperationCannotCommitAfterLeaseLoss(t *testing.T) {
+	db := setupManagedInstanceOperationTestDB(t)
+	instance := createOperationTestInstance(t, model.ManagedInstanceModeObserve, "channels.list")
+	planned, err := PlanOperation(instance.Id, PlanOperationInput{
+		Action: model.ManagedInstanceActionRefreshInventory, IdempotencyKey: "lease-loss-operation-key",
+		Parameters: json.RawMessage(`{}`), ActorID: 1,
+	})
+	require.NoError(t, err)
+	queued, task, err := ExecuteOperation(instance.Id, ExecuteOperationInput{
+		OperationID: planned.OperationId, IdempotencyKey: "lease-loss-operation-key", ActorID: 1,
+	})
+	require.NoError(t, err)
+	const runnerID = "lease-runner"
+	_, claimed, err := model.ClaimScopedSystemTask(task.ID, task.Type, runnerID, time.Now().Unix()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	previousExecutor := executeManagedInstanceRemoteOperation
+	executeManagedInstanceRemoteOperation = func(context.Context, *model.ManagedInstance, *CredentialMaterial, string, json.RawMessage) (*remoteOperationResult, error) {
+		require.NoError(t, db.Where("task_id = ? AND locked_by = ?", task.TaskID, runnerID).Delete(&model.SystemTaskScopeLock{}).Error)
+		return &remoteOperationResult{Action: model.ManagedInstanceActionRefreshInventory, Count: 1}, nil
+	}
+	t.Cleanup(func() { executeManagedInstanceRemoteOperation = previousExecutor })
+
+	_, err = RunOperationWithLease(context.Background(), queued.OperationId, task.TaskID, runnerID)
+	require.ErrorIs(t, err, model.ErrSystemTaskLockLost)
+	require.NoError(t, model.MarkSystemTaskLeaseExpired(task.TaskID))
+
+	var operation model.ManagedInstanceOperation
+	require.NoError(t, db.Where("operation_id = ?", queued.OperationId).First(&operation).Error)
+	require.Equal(t, model.ManagedInstanceOperationStatusFailed, operation.Status)
+	require.Equal(t, "task_lease_expired", operation.ErrorCode)
+}
+
+func boolPointer(value bool) *bool { return &value }

@@ -7,9 +7,18 @@ import type {
   ManagedInstanceCredential,
   ManagedInstanceCredentialInput,
   ManagedInstanceFilters,
+  ManagedInstanceAlertList,
+  ManagedInstanceInventoryPage,
   ManagedInstanceInput,
   ManagedInstanceList,
+  ManagedInstanceObservation,
+  ManagedInstanceOperation,
+  ManagedInstanceOperationExecuteInput,
+  ManagedInstanceOperationExecution,
+  ManagedInstanceOperationPlanInput,
+  ManagedInstancePreflight,
   ManagedInstanceTask,
+  ManagedInstanceSummary,
 } from './types'
 
 export async function getManagedInstances(
@@ -24,7 +33,9 @@ export async function getManagedInstances(
     `/api/managed-instances?${params.toString()}`
   )
   const first = firstResponse.data
-  if (!first.success || first.data.items.length >= first.data.total) return first
+  if (!first.success || first.data.items.length >= first.data.total) {
+    return first
+  }
 
   const pageCount = Math.ceil(first.data.total / pageSize)
   const remaining = await Promise.all(
@@ -77,6 +88,13 @@ export async function createManagedInstance(
   return response.data
 }
 
+export async function probeManagedInstance(
+  input: ManagedInstanceInput
+): Promise<ApiResponse<ManagedInstancePreflight>> {
+  const response = await api.post('/api/managed-instances/probe', input)
+  return response.data
+}
+
 export async function updateManagedInstance(
   id: number,
   input: ManagedInstanceInput
@@ -100,6 +118,71 @@ export async function checkManagedInstance(
   id: number
 ): Promise<ApiResponse<ManagedInstanceTask>> {
   const response = await api.post(`/api/managed-instances/${id}/check`)
+  return response.data
+}
+
+export async function getManagedInstanceInventory(
+  id: number,
+  resource = 'auto',
+  cursor = ''
+): Promise<
+  ApiResponse<ManagedInstanceObservation<ManagedInstanceInventoryPage>>
+> {
+  const params = new URLSearchParams({ resource })
+  if (cursor) params.set('cursor', cursor)
+  const response = await api.get(
+    `/api/managed-instances/${id}/inventory?${params.toString()}`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function getManagedInstanceMetrics(
+  id: number
+): Promise<ApiResponse<ManagedInstanceObservation<ManagedInstanceSummary>>> {
+  const response = await api.get(`/api/managed-instances/${id}/metrics`, {
+    disableDuplicate: true,
+  })
+  return response.data
+}
+
+export async function getManagedInstanceAlerts(
+  id: number
+): Promise<ApiResponse<ManagedInstanceAlertList>> {
+  const response = await api.get(
+    `/api/managed-instances/${id}/alerts?page=1&page_size=100`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function planManagedInstanceOperation(
+  id: number,
+  input: ManagedInstanceOperationPlanInput
+): Promise<ApiResponse<ManagedInstanceOperation>> {
+  const response = await api.post(
+    `/api/managed-instances/${id}/actions/plan`,
+    input
+  )
+  return response.data
+}
+
+export async function executeManagedInstanceOperation(
+  id: number,
+  input: ManagedInstanceOperationExecuteInput
+): Promise<ApiResponse<ManagedInstanceOperationExecution>> {
+  const response = await api.post(`/api/managed-instances/${id}/actions`, input)
+  return response.data
+}
+
+export async function getManagedInstanceOperation(
+  id: number,
+  operationId: string
+): Promise<ApiResponse<ManagedInstanceOperation>> {
+  const response = await api.get(
+    `/api/managed-instances/${id}/operations/${encodeURIComponent(operationId)}`,
+    { disableDuplicate: true }
+  )
   return response.data
 }
 

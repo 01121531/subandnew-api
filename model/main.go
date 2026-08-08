@@ -293,174 +293,45 @@ func configureConnectionPool(sqlDB *sql.DB, databaseType common.DatabaseType) er
 }
 
 func migrateDB() error {
-	// Migrate price_amount column from float/double to decimal for existing tables
-	migrateSubscriptionPlanPriceAmount()
-	// Migrate model_limits column from varchar to text for existing tables
-	if err := migrateTokenModelLimitsToText(); err != nil {
-		return err
-	}
+	return DB.AutoMigrate(controlPlaneModels()...)
+}
 
-	err := DB.AutoMigrate(
-		&Channel{},
-		&Token{},
+// controlPlaneModels is the ordinary-startup migration allowlist. Legacy
+// gateway and commercial tables are preserved when present, but never created
+// or altered by this migration path.
+func controlPlaneModels() []interface{} {
+	return []interface{}{
 		&User{},
 		&PasskeyCredential{},
 		&Option{},
-		&Redemption{},
-		&Ability{},
-		&Log{},
-		&Midjourney{},
-		&TopUp{},
-		&QuotaData{},
-		&Task{},
-		&Model{},
-		&Vendor{},
-		&PrefillGroup{},
 		&Setup{},
 		&TwoFA{},
 		&TwoFABackupCode{},
-		&Checkin{},
-		&SubscriptionOrder{},
-		&UserSubscription{},
-		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
-		&PerfMetric{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
 		&SystemTaskScopeLock{},
 		&CasbinRule{},
 		&AuthzRole{},
-		&ProxyGroup{},
-		&Proxy{},
-		&ChannelProxyBinding{},
-		&ProxyLogAnalysis{},
-		&ProxyLogAnalysisCursor{},
-		&ProxyStateEvent{},
-		&ProxyUpstreamAttempt{},
-		&ProxyGroupWaiter{},
 		&ManagedInstance{},
 		&ManagedInstanceCredential{},
+		&ManagedInstanceSnapshot{},
+		&ManagedInstanceAlert{},
 		&ManagedInstanceAudit{},
 		&ManagedInstanceOperation{},
-	)
-	if err != nil {
-		return err
 	}
-	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-	}
-	if err := migrateLegacyChannelProxies(); err != nil {
-		return err
-	}
-	_, err = DeduplicateProxies()
-	return err
 }
 
 func migrateDBFast() error {
-
-	var wg sync.WaitGroup
-
-	migrations := []struct {
-		model interface{}
-		name  string
-	}{
-		{&Channel{}, "Channel"},
-		{&Token{}, "Token"},
-		{&User{}, "User"},
-		{&PasskeyCredential{}, "PasskeyCredential"},
-		{&Option{}, "Option"},
-		{&Redemption{}, "Redemption"},
-		{&Ability{}, "Ability"},
-		{&Log{}, "Log"},
-		{&Midjourney{}, "Midjourney"},
-		{&TopUp{}, "TopUp"},
-		{&QuotaData{}, "QuotaData"},
-		{&Task{}, "Task"},
-		{&Model{}, "Model"},
-		{&Vendor{}, "Vendor"},
-		{&PrefillGroup{}, "PrefillGroup"},
-		{&Setup{}, "Setup"},
-		{&TwoFA{}, "TwoFA"},
-		{&TwoFABackupCode{}, "TwoFABackupCode"},
-		{&Checkin{}, "Checkin"},
-		{&SubscriptionOrder{}, "SubscriptionOrder"},
-		{&UserSubscription{}, "UserSubscription"},
-		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
-		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
-		{&UserOAuthBinding{}, "UserOAuthBinding"},
-		{&PerfMetric{}, "PerfMetric"},
-		{&SystemInstance{}, "SystemInstance"},
-		{&SystemTask{}, "SystemTask"},
-		{&SystemTaskLock{}, "SystemTaskLock"},
-		{&SystemTaskScopeLock{}, "SystemTaskScopeLock"},
-		{&ProxyGroup{}, "ProxyGroup"},
-		{&Proxy{}, "Proxy"},
-		{&ChannelProxyBinding{}, "ChannelProxyBinding"},
-		{&ProxyLogAnalysis{}, "ProxyLogAnalysis"},
-		{&ProxyLogAnalysisCursor{}, "ProxyLogAnalysisCursor"},
-		{&ProxyStateEvent{}, "ProxyStateEvent"},
-		{&ProxyUpstreamAttempt{}, "ProxyUpstreamAttempt"},
-		{&ProxyGroupWaiter{}, "ProxyGroupWaiter"},
-		{&ManagedInstance{}, "ManagedInstance"},
-		{&ManagedInstanceCredential{}, "ManagedInstanceCredential"},
-		{&ManagedInstanceAudit{}, "ManagedInstanceAudit"},
-		{&ManagedInstanceOperation{}, "ManagedInstanceOperation"},
-	}
-	// 动态计算migration数量，确保errChan缓冲区足够大
-	errChan := make(chan error, len(migrations))
-
-	for _, m := range migrations {
-		wg.Add(1)
-		go func(model interface{}, name string) {
-			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
-				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
-			}
-		}(m.model, m.name)
-	}
-
-	// Wait for all migrations to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	for err := range errChan {
-		if err != nil {
-			return err
-		}
-	}
-	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-	}
-	if err := migrateLegacyChannelProxies(); err != nil {
-		return err
-	}
-	if _, err := DeduplicateProxies(); err != nil {
-		return err
-	}
-	common.SysLog("database migrated")
-	return nil
+	return migrateDB()
 }
 
 func migrateLOGDB() error {
-	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		return migrateClickHouseLogDB()
-	}
-	return LOG_DB.AutoMigrate(&Log{})
+	// The control plane does not own a local usage-log schema. Existing log
+	// tables remain untouched and can be archived explicitly by operators.
+	return nil
 }
 
 func migrateClickHouseLogDB() error {
@@ -768,6 +639,9 @@ func migrateSubscriptionPlanPriceAmount() {
 }
 
 func closeDB(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		return err
@@ -777,7 +651,7 @@ func closeDB(db *gorm.DB) error {
 }
 
 func CloseDB() error {
-	if LOG_DB != DB {
+	if LOG_DB != nil && LOG_DB != DB {
 		err := closeDB(LOG_DB)
 		if err != nil {
 			return err

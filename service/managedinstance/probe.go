@@ -12,6 +12,14 @@ import (
 )
 
 func Probe(ctx context.Context, instanceID int64, actorID int) (*ProbeResult, error) {
+	return probe(ctx, instanceID, actorID, nil)
+}
+
+func ProbeWithCommitGuard(ctx context.Context, instanceID int64, actorID int, guard CommitGuard) (*ProbeResult, error) {
+	return probe(ctx, instanceID, actorID, guard)
+}
+
+func probe(ctx context.Context, instanceID int64, actorID int, guard CommitGuard) (*ProbeResult, error) {
 	if instanceID <= 0 {
 		return nil, ErrInvalidInstance
 	}
@@ -26,7 +34,7 @@ func Probe(ctx context.Context, instanceID int64, actorID int) (*ProbeResult, er
 	if err != nil {
 		var probeError *ProbeError
 		if errors.As(err, &probeError) {
-			if recordErr := recordProbeFailure(&instance, actorID, probeError, common.GetTimestamp()); recordErr != nil {
+			if recordErr := recordProbeFailure(&instance, actorID, probeError, common.GetTimestamp(), guard); recordErr != nil {
 				return nil, recordErr
 			}
 		}
@@ -48,7 +56,7 @@ func Probe(ctx context.Context, instanceID int64, actorID int) (*ProbeResult, er
 	result, probeErr := adapter.Probe(ctx, connector, credential)
 	checkedAt := common.GetTimestamp()
 	if probeErr != nil {
-		if err := recordProbeFailure(&instance, actorID, probeErr, checkedAt); err != nil {
+		if err := recordProbeFailure(&instance, actorID, probeErr, checkedAt, guard); err != nil {
 			return nil, err
 		}
 		return nil, probeErr
@@ -60,6 +68,14 @@ func Probe(ctx context.Context, instanceID int64, actorID int) (*ProbeResult, er
 		return nil, err
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
+		if err := resolveProbeAlerts(tx, &instance, checkedAt); err != nil {
+			return err
+		}
 		updates := map[string]any{
 			"kind": result.Kind, "version": result.Version, "capabilities": string(capabilities),
 			"status": model.ManagedInstanceStatusHealthy, "last_seen_at": checkedAt,
@@ -104,7 +120,7 @@ func loadCredential(instanceID int64) (*CredentialMaterial, error) {
 	return &CredentialMaterial{AuthType: credential.AuthType, Secret: payload.Secret, UserID: payload.UserID}, nil
 }
 
-func recordProbeFailure(instance *model.ManagedInstance, actorID int, probeErr error, checkedAt int64) error {
+func recordProbeFailure(instance *model.ManagedInstance, actorID int, probeErr error, checkedAt int64, guard CommitGuard) error {
 	status := model.ManagedInstanceStatusOffline
 	errorCode := "connector_failed"
 	var typedError *ProbeError
@@ -118,10 +134,19 @@ func recordProbeFailure(instance *model.ManagedInstance, actorID int, probeErr e
 		}
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
+		if guard != nil {
+			if err := guard(tx); err != nil {
+				return err
+			}
+		}
+		nextFailures := instance.ConsecutiveFailures + 1
 		if err := tx.Model(&model.ManagedInstance{}).Where("id = ?", instance.Id).Updates(map[string]any{
 			"status": status, "last_checked_at": checkedAt,
 			"consecutive_failures": gorm.Expr("consecutive_failures + ?", 1), "updated_at": checkedAt,
 		}).Error; err != nil {
+			return err
+		}
+		if err := reconcileProbeFailureAlert(tx, instance, status, errorCode, checkedAt, nextFailures); err != nil {
 			return err
 		}
 		return writeAuditOutcome(tx, instance.Id, actorID, "check", "failed", map[string]any{"error_code": errorCode})

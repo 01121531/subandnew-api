@@ -27,6 +27,7 @@ var (
 	ErrIdempotencyConflict    = errors.New("managed instance operation idempotency conflict")
 	ErrOperationNotExecutable = errors.New("managed instance operation is not executable")
 	ErrOperationBusy          = errors.New("managed instance already has an active operation")
+	ErrRemoteConflict         = errors.New("managed instance remote state changed after planning")
 )
 
 type PlanOperationInput struct {
@@ -68,6 +69,7 @@ type operationPlan struct {
 	RequiredCapability string `json:"required_capability"`
 	TargetCount        int    `json:"target_count"`
 	Summary            string `json:"summary"`
+	ExpectedETag       string `json:"expected_etag,omitempty"`
 }
 
 type refreshInventoryParameters struct{}
@@ -133,6 +135,12 @@ func PlanOperation(instanceID int64, input PlanOperationInput) (*OperationView, 
 		Action: input.Action, RiskLevel: "low", WritesRemote: definition.writes,
 		RequiredCapability: definition.capability, TargetCount: targetCount,
 		Summary: operationSummary(input.Action, targetCount),
+	}
+	if definition.writes {
+		plan.ExpectedETag, err = latestInventoryETag(instanceID, defaultResourceKind(instance.Kind))
+		if err != nil {
+			return nil, err
+		}
 	}
 	planJSON, _ := json.Marshal(plan)
 	planHash := operationPlanHash(input.Action, parameters)
@@ -274,6 +282,14 @@ func GetOperation(instanceID int64, operationID string) (*OperationView, error) 
 }
 
 func RunOperation(ctx context.Context, operationID string, taskID string) (*OperationView, error) {
+	return runOperation(ctx, operationID, taskID, "")
+}
+
+func RunOperationWithLease(ctx context.Context, operationID string, taskID string, runnerID string) (*OperationView, error) {
+	return runOperation(ctx, operationID, taskID, runnerID)
+}
+
+func runOperation(ctx context.Context, operationID string, taskID string, runnerID string) (*OperationView, error) {
 	var operation model.ManagedInstanceOperation
 	if err := model.DB.Where("operation_id = ? AND task_id = ?", operationID, taskID).First(&operation).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -283,6 +299,9 @@ func RunOperation(ctx context.Context, operationID string, taskID string) (*Oper
 	}
 	if operation.Status != model.ManagedInstanceOperationStatusQueued {
 		return nil, ErrOperationNotExecutable
+	}
+	if err := requireOperationLease(taskID, runnerID); err != nil {
+		return nil, err
 	}
 	now := common.GetTimestamp()
 	result := model.DB.Model(&model.ManagedInstanceOperation{}).
@@ -310,12 +329,20 @@ func RunOperation(ctx context.Context, operationID string, taskID string) (*Oper
 		var credential *CredentialMaterial
 		credential, err = loadCredential(operation.InstanceId)
 		if err == nil {
+			if operation.WritesRemote {
+				err = verifyOperationInventoryETag(ctx, &operation, instance)
+			}
+		}
+		if err == nil {
+			err = requireOperationLease(taskID, runnerID)
+		}
+		if err == nil {
 			remoteResult, err = executeManagedInstanceRemoteOperation(ctx, instance, credential, operation.Action, json.RawMessage(operation.Parameters))
 		}
 	}
 	if err != nil {
 		code := managedInstanceOperationErrorCode(err)
-		if finishErr := finishOperation(&operation, nil, code); finishErr != nil {
+		if finishErr := finishOperation(&operation, nil, code, taskID, runnerID); finishErr != nil {
 			return nil, finishErr
 		}
 		return operationView(&operation), &OperationExecutionError{Code: code}
@@ -324,13 +351,13 @@ func RunOperation(ctx context.Context, operationID string, taskID string) (*Oper
 	if err != nil {
 		return nil, err
 	}
-	if err := finishOperation(&operation, encodedResult, ""); err != nil {
+	if err := finishOperation(&operation, encodedResult, "", taskID, runnerID); err != nil {
 		return nil, err
 	}
 	return operationView(&operation), nil
 }
 
-func finishOperation(operation *model.ManagedInstanceOperation, result json.RawMessage, errorCode string) error {
+func finishOperation(operation *model.ManagedInstanceOperation, result json.RawMessage, errorCode string, taskID string, runnerID string) error {
 	now := common.GetTimestamp()
 	status := model.ManagedInstanceOperationStatusSucceeded
 	outcome := "succeeded"
@@ -339,12 +366,23 @@ func finishOperation(operation *model.ManagedInstanceOperation, result json.RawM
 		outcome = "failed"
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
+		if runnerID != "" {
+			if err := model.RequireValidSystemTaskLease(tx, taskID, runnerID, now); err != nil {
+				return err
+			}
+		}
 		updates := map[string]any{
 			"status": status, "result": string(result), "error_code": errorCode,
 			"finished_at": now, "updated_at": now,
 		}
-		if err := tx.Model(&model.ManagedInstanceOperation{}).Where("id = ?", operation.Id).Updates(updates).Error; err != nil {
-			return err
+		update := tx.Model(&model.ManagedInstanceOperation{}).
+			Where("id = ? AND task_id = ? AND status = ?", operation.Id, taskID, model.ManagedInstanceOperationStatusRunning).
+			Updates(updates)
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return model.ErrSystemTaskLockLost
 		}
 		operation.Status = status
 		operation.Result = string(result)
@@ -359,6 +397,15 @@ func finishOperation(operation *model.ManagedInstanceOperation, result json.RawM
 			actorID = operation.ActorId
 		}
 		return writeAuditOutcome(tx, operation.InstanceId, actorID, "operation_complete", outcome, details)
+	})
+}
+
+func requireOperationLease(taskID string, runnerID string) error {
+	if runnerID == "" {
+		return nil
+	}
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		return model.RequireValidSystemTaskLease(tx, taskID, runnerID, common.GetTimestamp())
 	})
 }
 
@@ -770,6 +817,10 @@ func operationSummary(action string, targetCount int) string {
 }
 
 func managedInstanceOperationErrorCode(err error) string {
+	var executionError *OperationExecutionError
+	if errors.As(err, &executionError) && executionError.Code != "" {
+		return executionError.Code
+	}
 	var probeError *ProbeError
 	if errors.As(err, &probeError) {
 		return probeError.Code
@@ -779,6 +830,8 @@ func managedInstanceOperationErrorCode(err error) string {
 		return "observe_mode_write_forbidden"
 	case errors.Is(err, ErrUnsupportedCapability):
 		return "unsupported_capability"
+	case errors.Is(err, ErrRemoteConflict):
+		return "remote_conflict"
 	case errors.Is(err, ErrCredentialKeyNotConfigured):
 		return "credential_key_not_configured"
 	case errors.Is(err, ErrConnectorTargetBlocked):
@@ -790,4 +843,40 @@ func managedInstanceOperationErrorCode(err error) string {
 	default:
 		return "remote_operation_failed"
 	}
+}
+
+func latestInventoryETag(instanceID int64, resourceKind string) (string, error) {
+	var snapshot model.ManagedInstanceSnapshot
+	err := model.DB.Where(
+		"instance_id = ? AND snapshot_type = ? AND resource_kind = ? AND collection_status = ?",
+		instanceID, model.ManagedInstanceSnapshotTypeInventory, resourceKind, model.ManagedInstanceCollectionSucceeded,
+	).Order("observed_at desc, id desc").First(&snapshot).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", fmt.Errorf("%w: refresh inventory before planning a remote write", ErrOperationNotExecutable)
+	}
+	if err != nil {
+		return "", err
+	}
+	if snapshot.ETag == "" {
+		return "", ErrOperationNotExecutable
+	}
+	return snapshot.ETag, nil
+}
+
+func verifyOperationInventoryETag(ctx context.Context, operation *model.ManagedInstanceOperation, instance *model.ManagedInstance) error {
+	var plan operationPlan
+	if err := json.Unmarshal([]byte(operation.Plan), &plan); err != nil || plan.ExpectedETag == "" {
+		return ErrOperationNotExecutable
+	}
+	observation, err := CollectInventory(ctx, instance.Id, defaultResourceKind(instance.Kind), "")
+	if err != nil {
+		return err
+	}
+	if observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+		return &OperationExecutionError{Code: observation.ErrorCode}
+	}
+	if observation.ETag != plan.ExpectedETag {
+		return ErrRemoteConflict
+	}
+	return nil
 }

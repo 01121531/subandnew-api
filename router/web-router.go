@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/01121531/HUICHUAN-AI/common"
-	"github.com/01121531/HUICHUAN-AI/controller"
 	"github.com/01121531/HUICHUAN-AI/middleware"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/static"
@@ -29,7 +28,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
 		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
-			controller.RelayNotFound(c)
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "route not found"})
 			return
 		}
 		c.Header("Cache-Control", "no-cache")

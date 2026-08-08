@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { CheckCircle2, LoaderCircle, XCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -32,14 +33,24 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
-import { createManagedInstance, updateManagedInstance } from '../api'
+import {
+  createManagedInstance,
+  probeManagedInstance,
+  updateManagedInstance,
+} from '../api'
 import {
   managedInstanceFormSchema,
   type ManagedInstanceFormValues,
 } from '../form-schema'
 import { MANAGED_INSTANCE_KINDS } from '../lib'
-import type { ManagedInstance, ManagedInstanceInput } from '../types'
+import type {
+  ManagedInstance,
+  ManagedInstanceInput,
+  ManagedInstancePreflight,
+} from '../types'
 
 type InstanceFormSheetProps = {
   open: boolean
@@ -105,7 +116,13 @@ function toInput(values: ManagedInstanceFormValues): ManagedInstanceInput {
 
 export function InstanceFormSheet(props: InstanceFormSheetProps) {
   const { t } = useTranslation()
+  const isRoot =
+    useAuthStore((state) => state.auth.user?.role) === ROLE.SUPER_ADMIN
   const [submitting, setSubmitting] = useState(false)
+  const [probing, setProbing] = useState(false)
+  const [preflight, setPreflight] = useState<ManagedInstancePreflight | null>(
+    null
+  )
   const form = useForm<ManagedInstanceFormValues>({
     resolver: zodResolver(managedInstanceFormSchema),
     defaultValues,
@@ -134,6 +151,28 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
     })
   }, [form, props.instance, props.open])
 
+  useEffect(() => {
+    const subscription = form.watch(() => setPreflight(null))
+    return () => subscription.unsubscribe()
+  }, [form])
+
+  const testConnection = async () => {
+    if (!(await form.trigger())) return
+    setProbing(true)
+    let result: ManagedInstancePreflight | null = null
+    try {
+      const response = await probeManagedInstance(toInput(form.getValues()))
+      if (!response.success) return
+      result = response.data
+      if (response.data.success) toast.success(t('Connection test succeeded'))
+      else toast.error(t('Connection test failed'))
+    } finally {
+      form.setValue('secret', '', { shouldDirty: false })
+      setPreflight(result)
+      setProbing(false)
+    }
+  }
+
   const onSubmit = async (values: ManagedInstanceFormValues) => {
     setSubmitting(true)
     try {
@@ -142,11 +181,11 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
         ? await updateManagedInstance(props.instance.id, input)
         : await createManagedInstance(input)
       if (!response.success) return
-      form.setValue('secret', '')
       toast.success(t(props.instance ? 'Instance updated' : 'Instance added'))
       props.onOpenChange(false)
       props.onSaved()
     } finally {
+      form.setValue('secret', '', { shouldDirty: false })
       setSubmitting(false)
     }
   }
@@ -225,6 +264,35 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
                   )}
                 />
               </div>
+              <FormField
+                control={form.control}
+                name='management_mode'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Management mode')}</FormLabel>
+                    <NativeSelect
+                      className='w-full'
+                      {...field}
+                      disabled={!isRoot}
+                    >
+                      <NativeSelectOption value='observe'>
+                        {t('Observe')}
+                      </NativeSelectOption>
+                      {isRoot && (
+                        <>
+                          <NativeSelectOption value='operate'>
+                            {t('Operate')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='enforce'>
+                            {t('Enforce')}
+                          </NativeSelectOption>
+                        </>
+                      )}
+                    </NativeSelect>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name='base_url'
@@ -383,19 +451,79 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
                 />
               </SideDrawerSection>
             )}
+
+            {!props.instance && preflight && (
+              <SideDrawerSection>
+                <div className='flex items-center justify-between gap-3'>
+                  <h3 className='text-sm font-medium'>
+                    {t('Connection test')}
+                  </h3>
+                  <span className='flex items-center gap-1 text-xs font-medium'>
+                    {preflight.success ? (
+                      <CheckCircle2 className='size-4 text-emerald-600' />
+                    ) : (
+                      <XCircle className='text-destructive size-4' />
+                    )}
+                    {t(preflight.success ? 'Succeeded' : 'Failed')}
+                  </span>
+                </div>
+                <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
+                  {preflight.stages.map((stage) => (
+                    <div
+                      key={stage.name}
+                      className='rounded-md border px-2 py-2'
+                    >
+                      <div className='text-muted-foreground text-xs uppercase'>
+                        {stage.name}
+                      </div>
+                      <div className='mt-1 text-xs font-medium'>
+                        {t(stage.status)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {preflight.probe && (
+                  <p className='text-muted-foreground text-xs'>
+                    {preflight.probe.kind} · {preflight.probe.version || '-'} ·{' '}
+                    {preflight.probe.latency_ms} ms
+                  </p>
+                )}
+                {preflight.error_code && (
+                  <p className='text-destructive font-mono text-xs break-all'>
+                    {preflight.error_code}
+                  </p>
+                )}
+                {preflight.advice && (
+                  <p className='text-muted-foreground text-xs'>
+                    {t(preflight.advice)}
+                  </p>
+                )}
+              </SideDrawerSection>
+            )}
           </form>
         </Form>
         <SheetFooter className={sideDrawerFooterClassName()}>
           <SheetClose
             render={<Button variant='outline' />}
-            disabled={submitting}
+            disabled={submitting || probing}
           >
             {t('Cancel')}
           </SheetClose>
+          {!props.instance && (
+            <Button
+              type='button'
+              variant='outline'
+              disabled={submitting || probing}
+              onClick={() => void testConnection()}
+            >
+              {probing && <LoaderCircle className='animate-spin' />}
+              {t(probing ? 'Testing...' : 'Test connection')}
+            </Button>
+          )}
           <Button
             form='managed-instance-form'
             type='submit'
-            disabled={submitting}
+            disabled={submitting || probing}
           >
             {submitting ? t('Saving...') : t('Save')}
           </Button>

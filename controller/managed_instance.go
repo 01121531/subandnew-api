@@ -8,7 +8,6 @@ import (
 	"github.com/01121531/HUICHUAN-AI/common"
 	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/01121531/HUICHUAN-AI/service"
-	"github.com/01121531/HUICHUAN-AI/service/authz"
 	"github.com/01121531/HUICHUAN-AI/service/managedinstance"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -39,7 +38,7 @@ func ListManagedInstances(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	result, err := managedinstance.List(managedinstance.ListFilter{
 		Kind: c.Query("kind"), Environment: c.Query("environment"), Status: c.Query("status"),
-		Search: c.Query("search"), Page: page, PageSize: pageSize,
+		Search: c.Query("search"), Page: page, PageSize: pageSize, SearchConnection: c.GetInt("role") >= common.RoleRootUser,
 	})
 	if err != nil {
 		managedInstanceError(c, err)
@@ -69,6 +68,47 @@ func GetManagedInstance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": instance})
 }
 
+func ProbeManagedInstance(c *gin.Context) {
+	var request managedInstanceRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	result, err := managedinstance.ProbeConnection(c.Request.Context(), managedInstanceCreateInput(request, c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedInstanceInventory(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	result, err := managedinstance.CollectInventory(c.Request.Context(), id, c.DefaultQuery("resource", "auto"), c.Query("cursor"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedInstanceMetrics(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	window := managedInstanceTimeWindow(c)
+	result, err := managedinstance.CollectSummary(c.Request.Context(), id, window)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func ListManagedInstanceAudits(c *gin.Context) {
 	id, ok := managedInstanceID(c)
 	if !ok {
@@ -77,6 +117,37 @@ func ListManagedInstanceAudits(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	result, err := managedinstance.ListAudits(id, page, pageSize)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func ListManagedInstanceAlerts(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	instanceID, _ := strconv.ParseInt(c.Query("instance_id"), 10, 64)
+	result, err := managedinstance.ListAlerts(managedinstance.AlertListFilter{
+		InstanceID: instanceID, Status: c.Query("status"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func ListManagedInstanceAlertsForInstance(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	result, err := managedinstance.ListAlerts(managedinstance.AlertListFilter{
+		InstanceID: id, Status: c.Query("status"), Page: page, PageSize: pageSize,
+	})
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -111,12 +182,21 @@ func CreateManagedInstance(c *gin.Context) {
 	if request.TLSVerify != nil {
 		tlsVerify = *request.TLSVerify
 	}
-	instance, err := managedinstance.Create(managedinstance.CreateInput{
-		Name: request.Name, Kind: request.Kind, BaseURL: request.BaseURL, Environment: request.Environment,
-		Labels: request.Labels, ManagementMode: request.ManagementMode, TLSVerify: tlsVerify,
-		RequestTimeoutSeconds: request.RequestTimeoutSeconds, CheckIntervalSeconds: request.CheckIntervalSeconds,
-		Credential: credentialInput(request.Credential), ActorID: c.GetInt("id"),
-	})
+	input := managedInstanceCreateInput(request, c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	input.TLSVerify = tlsVerify
+	preflight, err := managedinstance.ProbeConnection(c.Request.Context(), input)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if !preflight.Success || preflight.Probe == nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"success": false, "message": preflight.ErrorCode, "data": preflight,
+		})
+		return
+	}
+	input.Preflight = preflight.Probe
+	instance, err := managedinstance.Create(input)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -146,7 +226,8 @@ func UpdateManagedInstance(c *gin.Context) {
 		Labels: request.Labels, ManagementMode: request.ManagementMode, TLSVerify: tlsVerify,
 		RequestTimeoutSeconds: request.RequestTimeoutSeconds, CheckIntervalSeconds: request.CheckIntervalSeconds,
 		ActorID:               c.GetInt("id"),
-		AllowConnectionChange: authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ManagedInstanceSecretRotate),
+		AllowConnectionChange: c.GetInt("role") >= common.RoleRootUser,
+		AllowWriteMode:        c.GetInt("role") >= common.RoleRootUser,
 	})
 	if err != nil {
 		managedInstanceError(c, err)
@@ -159,6 +240,10 @@ func UpdateManagedInstance(c *gin.Context) {
 }
 
 func RotateManagedInstanceCredential(c *gin.Context) {
+	if c.GetInt("role") < common.RoleRootUser {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "root access is required to rotate managed instance credentials"})
+		return
+	}
 	id, ok := managedInstanceID(c)
 	if !ok {
 		return
@@ -224,6 +309,25 @@ func credentialInput(request *managedInstanceCredentialRequest) *managedinstance
 	}
 }
 
+func managedInstanceCreateInput(request managedInstanceRequest, actorID int, allowWriteMode bool) managedinstance.CreateInput {
+	tlsVerify := true
+	if request.TLSVerify != nil {
+		tlsVerify = *request.TLSVerify
+	}
+	return managedinstance.CreateInput{
+		Name: request.Name, Kind: request.Kind, BaseURL: request.BaseURL, Environment: request.Environment,
+		Labels: request.Labels, ManagementMode: request.ManagementMode, TLSVerify: tlsVerify,
+		RequestTimeoutSeconds: request.RequestTimeoutSeconds, CheckIntervalSeconds: request.CheckIntervalSeconds,
+		Credential: credentialInput(request.Credential), ActorID: actorID, AllowWriteMode: allowWriteMode,
+	}
+}
+
+func managedInstanceTimeWindow(c *gin.Context) managedinstance.TimeWindow {
+	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
+	return managedinstance.TimeWindow{Start: start, End: end}
+}
+
 func managedInstanceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, managedinstance.ErrInvalidInstance):
@@ -231,6 +335,8 @@ func managedInstanceError(c *gin.Context, err error) {
 	case errors.Is(err, managedinstance.ErrInstanceNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": managedinstance.ErrInstanceNotFound.Error()})
 	case errors.Is(err, managedinstance.ErrConnectionChangeForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
+	case errors.Is(err, managedinstance.ErrWriteModeForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrCredentialKeyNotConfigured):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "managed instance credential encryption is not configured"})

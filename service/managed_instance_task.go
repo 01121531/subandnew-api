@@ -12,9 +12,12 @@ import (
 	"github.com/01121531/HUICHUAN-AI/logger"
 	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/01121531/HUICHUAN-AI/service/managedinstance"
+	"gorm.io/gorm"
 )
 
 const maxManagedInstanceProbeBackoff = 30 * time.Minute
+
+const managedInstanceSyncInterval = 5 * time.Minute
 
 type ManagedInstanceProbePayload struct {
 	InstanceID int64 `json:"instance_id"`
@@ -23,6 +26,13 @@ type ManagedInstanceProbePayload struct {
 
 type managedInstanceProbeHandler struct{}
 
+type ManagedInstanceSyncPayload struct {
+	InstanceID int64 `json:"instance_id"`
+	ActorID    int   `json:"actor_id,omitempty"`
+}
+
+type managedInstanceSyncHandler struct{}
+
 var (
 	managedInstanceProbeSlotsOnce sync.Once
 	managedInstanceProbeSlots     chan struct{}
@@ -30,11 +40,16 @@ var (
 
 func init() {
 	RegisterSystemTaskHandler(managedInstanceProbeHandler{})
+	RegisterSystemTaskHandler(managedInstanceSyncHandler{})
 	RegisterSystemTaskHandler(managedInstanceOperationHandler{})
 }
 
 func (managedInstanceProbeHandler) Type() string {
 	return model.SystemTaskTypeManagedInstanceProbe
+}
+
+func (managedInstanceSyncHandler) Type() string {
+	return model.SystemTaskTypeManagedInstanceSync
 }
 
 type ManagedInstanceOperationPayload struct {
@@ -55,7 +70,7 @@ func (managedInstanceOperationHandler) Run(ctx context.Context, task *model.Syst
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_operation_payload")
 		return
 	}
-	operation, err := managedinstance.RunOperation(ctx, payload.OperationID, task.TaskID)
+	operation, err := managedinstance.RunOperationWithLease(ctx, payload.OperationID, task.TaskID, runnerID)
 	if err != nil {
 		errorCode := "managed_instance_operation_failed"
 		var executionError *managedinstance.OperationExecutionError
@@ -87,12 +102,58 @@ func (managedInstanceProbeHandler) Run(ctx context.Context, task *model.SystemTa
 		return
 	}
 
-	result, err := managedinstance.Probe(ctx, payload.InstanceID, payload.ActorID)
+	guard := managedInstanceTaskCommitGuard(task.TaskID, runnerID)
+	result, err := managedinstance.ProbeWithCommitGuard(ctx, payload.InstanceID, payload.ActorID, guard)
 	if err != nil {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedInstanceProbeErrorCode(err))
 		return
 	}
 	_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, "")
+}
+
+func (managedInstanceSyncHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := ManagedInstanceSyncPayload{}
+	if err := task.DecodePayload(&payload); err != nil || payload.InstanceID <= 0 || task.ScopeKey != strconv.FormatInt(payload.InstanceID, 10) {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_sync_payload")
+		return
+	}
+
+	slots := getManagedInstanceProbeSlots()
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-ctx.Done():
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "sync_cancelled")
+		return
+	}
+
+	guard := managedInstanceTaskCommitGuard(task.TaskID, runnerID)
+	inventory, err := managedinstance.CollectInventoryWithCommitGuard(ctx, payload.InstanceID, "auto", "", guard)
+	if err != nil {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedInstanceProbeErrorCode(err))
+		return
+	}
+	summary, err := managedinstance.CollectSummaryWithCommitGuard(ctx, payload.InstanceID, managedinstance.TimeWindow{}, guard)
+	if err != nil {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedInstanceProbeErrorCode(err))
+		return
+	}
+	result := map[string]any{"inventory": inventory, "summary": summary}
+	if inventory.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, result, inventory.ErrorCode)
+		return
+	}
+	if summary.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, result, summary.ErrorCode)
+		return
+	}
+	_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, "")
+}
+
+func managedInstanceTaskCommitGuard(taskID string, runnerID string) managedinstance.CommitGuard {
+	return func(tx *gorm.DB) error {
+		return model.RequireValidSystemTaskLease(tx, taskID, runnerID, common.GetTimestamp())
+	}
 }
 
 func getManagedInstanceProbeSlots() chan struct{} {
@@ -110,22 +171,78 @@ func getManagedInstanceProbeSlots() chan struct{} {
 }
 
 func scheduleDueManagedInstanceProbes(now int64) {
-	var instances []*model.ManagedInstance
-	if err := model.DB.Order("last_checked_at asc, id asc").Limit(500).Find(&instances).Error; err != nil {
-		logger.LogWarn(context.Background(), fmt.Sprintf("managed instance probe scheduler query failed: %v", err))
-		return
-	}
-	for _, instance := range instances {
-		if !managedInstanceProbeDue(instance, now) {
-			continue
+	forEachManagedInstanceBatch(func(instances []*model.ManagedInstance) bool {
+		for _, instance := range instances {
+			if !managedInstanceProbeDue(instance, now) {
+				continue
+			}
+			if _, _, err := EnqueueScopedSystemTask(
+				model.SystemTaskTypeManagedInstanceProbe,
+				strconv.FormatInt(instance.Id, 10),
+				ManagedInstanceProbePayload{InstanceID: instance.Id},
+				nil,
+			); err != nil {
+				logger.LogWarn(context.Background(), fmt.Sprintf("managed instance probe scheduler enqueue failed: instance=%d err=%v", instance.Id, err))
+			}
 		}
-		if _, _, err := EnqueueScopedSystemTask(
-			model.SystemTaskTypeManagedInstanceProbe,
-			strconv.FormatInt(instance.Id, 10),
-			ManagedInstanceProbePayload{InstanceID: instance.Id},
-			nil,
-		); err != nil {
-			logger.LogWarn(context.Background(), fmt.Sprintf("managed instance probe scheduler enqueue failed: instance=%d err=%v", instance.Id, err))
+		return true
+	})
+}
+
+func scheduleDueManagedInstanceSyncs(now int64) {
+	forEachManagedInstanceBatch(func(instances []*model.ManagedInstance) bool {
+		latest := make(map[int64]int64, len(instances))
+		ids := make([]int64, 0, len(instances))
+		for _, instance := range instances {
+			ids = append(ids, instance.Id)
+		}
+		var snapshots []model.ManagedInstanceSnapshot
+		if err := model.DB.Select("instance_id", "MAX(observed_at) AS observed_at").
+			Where("instance_id IN ? AND snapshot_type = ?", ids, model.ManagedInstanceSnapshotTypeSummary).
+			Group("instance_id").Find(&snapshots).Error; err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed instance sync snapshot query failed: %v", err))
+			return false
+		}
+		for _, snapshot := range snapshots {
+			latest[snapshot.InstanceId] = snapshot.ObservedAt
+		}
+		intervalSeconds := int64(managedInstanceSyncInterval / time.Second)
+		for _, instance := range instances {
+			jitter := instance.Id % (intervalSeconds/5 + 1)
+			if observedAt := latest[instance.Id]; observedAt > 0 && now < observedAt+intervalSeconds+jitter {
+				continue
+			}
+			if _, _, err := EnqueueScopedSystemTask(
+				model.SystemTaskTypeManagedInstanceSync,
+				strconv.FormatInt(instance.Id, 10),
+				ManagedInstanceSyncPayload{InstanceID: instance.Id},
+				nil,
+			); err != nil {
+				logger.LogWarn(context.Background(), fmt.Sprintf("managed instance sync scheduler enqueue failed: instance=%d err=%v", instance.Id, err))
+			}
+		}
+		return true
+	})
+}
+
+func forEachManagedInstanceBatch(visit func([]*model.ManagedInstance) bool) {
+	const batchSize = 500
+	var lastID int64
+	for {
+		var instances []*model.ManagedInstance
+		if err := model.DB.Where("id > ?", lastID).Order("id asc").Limit(batchSize).Find(&instances).Error; err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed instance scheduler query failed: %v", err))
+			return
+		}
+		if len(instances) == 0 {
+			return
+		}
+		if !visit(instances) {
+			return
+		}
+		lastID = instances[len(instances)-1].Id
+		if len(instances) < batchSize {
+			return
 		}
 	}
 }

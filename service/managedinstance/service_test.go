@@ -17,7 +17,10 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:managed-instance-%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceAudit{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceAudit{},
+		&model.ManagedInstanceSnapshot{}, &model.ManagedInstanceAlert{},
+	))
 	previousDB := model.DB
 	model.DB = db
 	t.Cleanup(func() { model.DB = previousDB })
@@ -27,6 +30,7 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	}
 	t.Setenv(managedInstanceSecretKeyEnv, base64.StdEncoding.EncodeToString(key))
 	t.Setenv(managedInstanceSecretKeyVersionEnv, "test-v1")
+	t.Setenv(managedInstanceAllowedPortsEnv, "*")
 	return db
 }
 
@@ -60,6 +64,7 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 		Name: "Production Gateway", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://api.example.com/root/",
 		Environment: "staging", Labels: map[string]string{"region": "cn-north"}, ManagementMode: model.ManagedInstanceModeOperate,
 		TLSVerify: true, RequestTimeoutSeconds: 15, CheckIntervalSeconds: 120, ActorID: 2, AllowConnectionChange: true,
+		AllowWriteMode: true,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "https://api.example.com/root", updated.BaseURL)
@@ -88,6 +93,63 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 	require.Equal(t, int64(4), auditPage.Total)
 	require.Len(t, auditPage.Items, 2)
 	require.Equal(t, "delete", auditPage.Items[0].Action)
+}
+
+func TestManagedInstanceWriteModeRequiresExplicitRootAuthorization(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	_, err := Create(CreateInput{
+		Name: "forbidden-operate", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://api.example.com",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeOperate, TLSVerify: true, ActorID: 2,
+	})
+	require.ErrorIs(t, err, ErrWriteModeForbidden)
+
+	created, err := Create(CreateInput{
+		Name: "observe", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://observe.example.com",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+	})
+	require.NoError(t, err)
+	_, err = Update(created.Id, UpdateInput{
+		Name: created.Name, Kind: created.Kind, BaseURL: created.BaseURL, Environment: created.Environment,
+		Labels: created.Labels, ManagementMode: model.ManagedInstanceModeEnforce, TLSVerify: true,
+		RequestTimeoutSeconds: 10, CheckIntervalSeconds: 60, ActorID: 2,
+	})
+	require.ErrorIs(t, err, ErrWriteModeForbidden)
+}
+
+func TestManagedInstanceListDoesNotSearchHiddenConnectionByDefault(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	_, err := Create(CreateInput{
+		Name: "edge", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://hidden-control.example.com/private",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+	})
+	require.NoError(t, err)
+
+	redactedSearch, err := List(ListFilter{Search: "hidden-control", Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Zero(t, redactedSearch.Total)
+	rootSearch, err := List(ListFilter{Search: "hidden-control", Page: 1, PageSize: 20, SearchConnection: true})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), rootSearch.Total)
+}
+
+func TestCreatePersistsSuccessfulPreflightIdentityAndCapabilities(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	created, err := Create(CreateInput{
+		Name: "detected", Kind: model.ManagedInstanceKindGeneric, BaseURL: "https://detected.example.com",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+		Credential: &CredentialInput{AuthType: "admin_token", Secret: "verified-secret"},
+		Preflight: &ProbeResult{
+			Kind: model.ManagedInstanceKindSub2API, Version: "v2", Status: model.ManagedInstanceStatusHealthy,
+			Capabilities: []string{"health.read", "accounts.list"}, CheckedAt: 12345,
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindSub2API, created.Kind)
+	require.Equal(t, "v2", created.Version)
+	require.Equal(t, model.ManagedInstanceStatusHealthy, created.Status)
+	require.Equal(t, int64(12345), created.LastSeenAt)
+	require.Contains(t, created.Capabilities, "accounts.list")
+	require.Equal(t, int64(12345), created.Credential.LastVerifiedAt)
 }
 
 func TestUpdateRejectsConnectionChangeWithoutSecretPermission(t *testing.T) {

@@ -956,6 +956,10 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 // history as the scheduled scan. If any model_update task is already active, the
 // manual run is rejected so the caller does not mistake a scheduled run for this
 // manual one.
+type modelUpdateTaskPayload struct {
+	Manual bool `json:"manual"`
+}
+
 func DetectAllChannelUpstreamModelUpdates(c *gin.Context) {
 	task, created, err := service.EnqueueSystemTask(model.SystemTaskTypeModelUpdate, modelUpdateTaskPayload{Manual: true})
 	if err != nil {

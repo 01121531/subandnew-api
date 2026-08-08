@@ -21,13 +21,11 @@ import (
 	"github.com/01121531/HUICHUAN-AI/middleware"
 	"github.com/01121531/HUICHUAN-AI/model"
 	"github.com/01121531/HUICHUAN-AI/oauth"
-	perfmetrics "github.com/01121531/HUICHUAN-AI/pkg/perf_metrics"
 	"github.com/01121531/HUICHUAN-AI/pkg/systemupdate"
 	"github.com/01121531/HUICHUAN-AI/router"
 	"github.com/01121531/HUICHUAN-AI/service"
 	"github.com/01121531/HUICHUAN-AI/service/authz"
 	_ "github.com/01121531/HUICHUAN-AI/setting/performance_setting"
-	"github.com/01121531/HUICHUAN-AI/setting/ratio_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-contrib/sessions"
@@ -48,7 +46,6 @@ func main() {
 	if systemupdate.RunHelperIfRequested() {
 		return
 	}
-	closeSharedResourcesOnExit := true
 	startTime := time.Now()
 
 	err := InitResources()
@@ -65,16 +62,6 @@ func main() {
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
 	}
-
-	defer func() {
-		if !closeSharedResourcesOnExit {
-			return
-		}
-		err := model.CloseDB()
-		if err != nil {
-			common.FatalLog("failed to close database: " + err.Error())
-		}
-	}()
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
@@ -116,8 +103,6 @@ func main() {
 	// This will cause SSE not to work!!!
 	//server.Use(gzip.Gzip(gzip.DefaultCompression))
 	server.Use(middleware.RequestId())
-	server.Use(middleware.UsageLogClientIP())
-	server.Use(middleware.UsageLogAfterResponse())
 	server.Use(middleware.Version())
 	server.Use(middleware.I18n())
 	middleware.SetUpLogger(server)
@@ -182,17 +167,15 @@ func main() {
 		// their connections, but keep shared database and snapshot resources open
 		// until process exit so remaining goroutines cannot observe
 		// "sql: database is closed" during forced upgrade termination.
-		closeSharedResourcesOnExit = false
 		if closeErr := srv.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
 			common.SysError(fmt.Sprintf("failed to close active server connections: %v", closeErr))
 		}
 	}
-	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
-	if !model.WaitForUsageLogQueue(5 * time.Second) {
-		common.SysLog("usage log queue did not drain before shutdown timeout")
+	if err := service.StopSystemTaskRunner(ctx); err != nil {
+		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())
 	}
-	if common.DataExportEnabled {
-		model.SaveQuotaDataCache()
+	if err := service.StopSystemInstanceReporter(ctx); err != nil {
+		common.SysError("system instance reporter did not stop before shutdown deadline: " + err.Error())
 	}
 	common.SysLog("server exited")
 }
@@ -255,12 +238,8 @@ func InitResources() error {
 
 	logger.SetupLogger()
 
-	// Initialize model settings
-	ratio_setting.InitRatioSettings()
-
+	// Initialize the shared outbound client used by control-plane integrations.
 	service.InitHttpClient()
-
-	service.InitTokenEncoders()
 
 	// Initialize SQL Database
 	err = model.InitDB()
@@ -280,19 +259,11 @@ func InitResources() error {
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()
 
-	// Initialize SQL Database
-	err = model.InitLogDB()
-	if err != nil {
-		return err
-	}
-
 	// Initialize Redis
 	err = common.InitRedisClient()
 	if err != nil {
 		return err
 	}
-
-	perfmetrics.Init()
 
 	// 启动系统监控
 	common.StartSystemMonitor()

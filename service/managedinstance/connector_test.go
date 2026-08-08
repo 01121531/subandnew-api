@@ -88,7 +88,59 @@ func TestConnectorBlocksCrossOriginRedirect(t *testing.T) {
 	require.True(t, errors.Is(err, ErrConnectorRedirect))
 }
 
+func TestConnectorPreservesRelativeQueryAndRejectsAbsolutePath(t *testing.T) {
+	var requestPath string
+	var requestCursor string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestPath = request.URL.Path
+		requestCursor = request.URL.Query().Get("cursor")
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	allowed, err := parseAllowedCIDRs("127.0.0.0/8")
+	require.NoError(t, err)
+	connector, err := NewConnector(&model.ManagedInstance{BaseURL: server.URL + "/base", RequestTimeoutSeconds: 2, TLSVerify: true}, ConnectorPolicy{AllowedCIDRs: allowed})
+	require.NoError(t, err)
+
+	_, err = connector.DoJSON(context.Background(), http.MethodGet, "/resources?cursor=next%2Fpage", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "/base/resources", requestPath)
+	require.Equal(t, "next/page", requestCursor)
+
+	_, err = connector.DoJSON(context.Background(), http.MethodGet, "https://example.com/resources", nil, nil)
+	require.Error(t, err)
+}
+
 func TestParseAllowedCIDRsRejectsInvalidValue(t *testing.T) {
 	_, err := parseAllowedCIDRs("not-a-cidr")
 	require.Error(t, err)
+}
+
+func TestConnectorPolicyEnforcesHostAndPortAllowlist(t *testing.T) {
+	ports, err := parseAllowedPorts("443,8443")
+	require.NoError(t, err)
+	require.True(t, connectorHostAllowed("api.example.com", []string{"*.example.com"}))
+	require.False(t, connectorHostAllowed("example.com", []string{"*.example.com"}))
+	require.False(t, connectorHostAllowed("api.example.com.attacker.test", []string{"*.example.com"}))
+	require.True(t, connectorPortAllowed("8443", ports))
+	require.False(t, connectorPortAllowed("22", ports))
+
+	_, err = NewConnector(&model.ManagedInstance{
+		BaseURL: "https://api.example.com:22", RequestTimeoutSeconds: 2, TLSVerify: true,
+	}, ConnectorPolicy{AllowedHosts: []string{"*.example.com"}, AllowedPorts: ports})
+	require.ErrorIs(t, err, ErrConnectorTargetBlocked)
+
+	_, err = parseAllowedPorts("0,not-a-port")
+	require.Error(t, err)
+
+	t.Setenv(managedInstanceAllowedPortsEnv, "")
+	t.Setenv(managedInstanceAllowedHostsEnv, "api.example.com")
+	policy, err := ConnectorPolicyFromEnvironment()
+	require.NoError(t, err)
+	require.True(t, connectorPortAllowed("443", policy.AllowedPorts))
+	require.False(t, connectorPortAllowed("8443", policy.AllowedPorts))
+	require.True(t, connectorHostAllowed("api.example.com", policy.AllowedHosts))
+	require.False(t, connectorHostAllowed("other.example.com", policy.AllowedHosts))
 }

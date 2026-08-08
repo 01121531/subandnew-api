@@ -53,6 +53,8 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstance{},
 		&model.ManagedInstanceCredential{},
 		&model.ManagedInstanceAudit{},
+		&model.ManagedInstanceSnapshot{},
+		&model.ManagedInstanceAlert{},
 		&model.ProxyGroup{},
 		&model.Proxy{},
 		&model.ChannelProxyBinding{},
@@ -84,6 +86,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM system_task_scope_locks")
 		model.DB.Exec("DELETE FROM managed_instance_credentials")
 		model.DB.Exec("DELETE FROM managed_instance_audits")
+		model.DB.Exec("DELETE FROM managed_instance_snapshots")
+		model.DB.Exec("DELETE FROM managed_instance_alerts")
 		model.DB.Exec("DELETE FROM managed_instances")
 		model.DB.Exec("DELETE FROM system_tasks")
 		model.DB.Exec("DELETE FROM proxy_state_events")

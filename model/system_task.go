@@ -8,6 +8,7 @@ import (
 	"github.com/01121531/HUICHUAN-AI/common"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SystemTaskStatus string
@@ -18,7 +19,6 @@ const (
 	SystemTaskStatusSucceeded SystemTaskStatus = "succeeded"
 	SystemTaskStatusFailed    SystemTaskStatus = "failed"
 
-	SystemTaskTypeLogCleanup           = "log_cleanup"
 	SystemTaskTypeChannelTest          = "channel_test"
 	SystemTaskTypeModelUpdate          = "model_update"
 	SystemTaskTypeMidjourneyPoll       = "midjourney_poll"
@@ -29,6 +29,7 @@ const (
 	SystemTaskTypeProxyDailyCheck      = "proxy_daily_health_check"
 	SystemTaskTypeProxyManualCheck     = "proxy_manual_health_check"
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
+	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
@@ -554,6 +555,48 @@ func RenewSystemTaskLock(taskID string, lockedBy string, lockUntil int64) error 
 		if result.RowsAffected == 0 {
 			return ErrSystemTaskLockLost
 		}
+	}
+	return nil
+}
+
+// RequireValidSystemTaskLease locks and validates the task lease inside the
+// caller's transaction so stale workers cannot commit business results.
+func RequireValidSystemTaskLease(tx *gorm.DB, taskID string, lockedBy string, now int64) error {
+	if tx == nil || taskID == "" || lockedBy == "" {
+		return ErrSystemTaskLockLost
+	}
+	var task SystemTask
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("task_id", "scope_key", "status", "locked_by").
+		Where("task_id = ?", taskID).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSystemTaskLockLost
+		}
+		return err
+	}
+	if task.Status != SystemTaskStatusRunning || task.LockedBy != lockedBy {
+		return ErrSystemTaskLockLost
+	}
+	if task.ScopeKey == "" {
+		var lock SystemTaskLock
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("task_id = ? AND locked_by = ? AND locked_until >= ?", taskID, lockedBy, now).
+			First(&lock).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrSystemTaskLockLost
+			}
+			return err
+		}
+		return nil
+	}
+	var lock SystemTaskScopeLock
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("task_id = ? AND locked_by = ? AND locked_until >= ?", taskID, lockedBy, now).
+		First(&lock).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrSystemTaskLockLost
+		}
+		return err
 	}
 	return nil
 }

@@ -86,6 +86,45 @@ func TestManagedInstanceProbeSchedulerUsesScopedTasksAndBackoff(t *testing.T) {
 	require.Equal(t, fmt.Sprintf("%d", due.Id), tasks[0].ScopeKey)
 }
 
+func TestManagedInstanceSchedulerScansBeyondFirstBatch(t *testing.T) {
+	truncate(t)
+	instances := make([]model.ManagedInstance, 0, 501)
+	for index := 0; index < 501; index++ {
+		instances = append(instances, model.ManagedInstance{
+			Name: fmt.Sprintf("instance-%03d", index), Kind: model.ManagedInstanceKindNewAPI,
+			BaseURL: fmt.Sprintf("https://instance-%03d.example.com", index), Environment: "production", TLSVerify: true,
+		})
+	}
+	require.NoError(t, model.DB.CreateInBatches(&instances, 100).Error)
+
+	visited := 0
+	batchCount := 0
+	forEachManagedInstanceBatch(func(batch []*model.ManagedInstance) bool {
+		batchCount++
+		visited += len(batch)
+		return true
+	})
+	require.Equal(t, 2, batchCount)
+	require.Equal(t, 501, visited)
+}
+
+func TestRunWithLeaseHeartbeatHonorsParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	returned := make(chan struct{})
+	go func() {
+		runWithLeaseHeartbeat(ctx, &model.SystemTask{TaskID: "cancelled-task"}, "runner", func(taskCtx context.Context) {
+			<-taskCtx.Done()
+		})
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(time.Second):
+		t.Fatal("lease heartbeat did not return after parent cancellation")
+	}
+}
+
 func TestManagedInstanceProbeDueAppliesFailureBackoff(t *testing.T) {
 	now := int64(10_000)
 	instance := &model.ManagedInstance{
@@ -94,6 +133,33 @@ func TestManagedInstanceProbeDueAppliesFailureBackoff(t *testing.T) {
 	require.False(t, managedInstanceProbeDue(instance, now))
 	instance.LastCheckedAt = now - 300
 	require.True(t, managedInstanceProbeDue(instance, now))
+}
+
+func TestManagedInstanceSyncSchedulerUsesLatestSummaryAndScopedTasks(t *testing.T) {
+	truncate(t)
+	now := common.GetTimestamp()
+	due := &model.ManagedInstance{
+		Name: "sync-due", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://sync-due.example.com",
+		Environment: "production", TLSVerify: true,
+	}
+	notDue := &model.ManagedInstance{
+		Name: "sync-not-due", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sync-not-due.example.com",
+		Environment: "production", TLSVerify: true,
+	}
+	require.NoError(t, model.DB.Create(due).Error)
+	require.NoError(t, model.DB.Create(notDue).Error)
+	require.NoError(t, model.DB.Create(&model.ManagedInstanceSnapshot{
+		InstanceId: notDue.Id, SnapshotType: model.ManagedInstanceSnapshotTypeSummary,
+		ResourceKind: "", ObservedAt: now, Payload: "null", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+
+	scheduleDueManagedInstanceSyncs(now)
+	scheduleDueManagedInstanceSyncs(now)
+
+	var tasks []*model.SystemTask
+	require.NoError(t, model.DB.Where("type = ?", model.SystemTaskTypeManagedInstanceSync).Find(&tasks).Error)
+	require.Len(t, tasks, 1)
+	require.Equal(t, fmt.Sprintf("%d", due.Id), tasks[0].ScopeKey)
 }
 
 func TestSystemTaskSchedulerCreatesWhenDueAndDedups(t *testing.T) {
@@ -161,7 +227,7 @@ func TestSystemTaskClaimPassDispatchesByType(t *testing.T) {
 	_, err := model.CreateSystemTask(handler.taskType, nil, nil)
 	require.NoError(t, err)
 
-	runSystemTaskClaimPass("runner-dispatch")
+	runSystemTaskClaimPass(context.Background(), "runner-dispatch")
 
 	select {
 	case got := <-ran:
@@ -218,7 +284,7 @@ func TestSystemTaskClaimPassDispatchesEarliestPendingByType(t *testing.T) {
 	firstB, err := model.CreateSystemTask(handlerB.taskType, nil, nil)
 	require.NoError(t, err)
 
-	runSystemTaskClaimPass("runner-dispatch")
+	runSystemTaskClaimPass(context.Background(), "runner-dispatch")
 
 	got := map[string]bool{}
 	for range 2 {

@@ -20,8 +20,8 @@ import {
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
-import { cn } from '@/lib/utils'
 import { ROLE } from '@/lib/roles'
+import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -30,8 +30,10 @@ import {
   getManagedInstanceAudits,
   getManagedInstanceTask,
 } from './api'
+import { ControlledOperationsPanel } from './components/controlled-operations-panel'
 import { CredentialSheet } from './components/credential-sheet'
 import { InstanceFormSheet } from './components/instance-form-sheet'
+import { ObservabilityPanel } from './components/observability-panel'
 import { StatusBadge } from './components/status-badge'
 import { formatTimestamp, MANAGED_INSTANCE_KINDS } from './lib'
 import type {
@@ -76,11 +78,13 @@ export function ManagedInstanceDetail({
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
     ADMIN_PERMISSION_ACTIONS.OPERATE
   )
-  const canRotate = hasPermission(
-    user,
-    ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
-    ADMIN_PERMISSION_ACTIONS.SECRET_ROTATE
-  )
+  const canRotate =
+    isRoot &&
+    hasPermission(
+      user,
+      ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
+      ADMIN_PERMISSION_ACTIONS.SECRET_ROTATE
+    )
   const canAudit = hasPermission(
     user,
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
@@ -90,13 +94,13 @@ export function ManagedInstanceDetail({
   const instanceQuery = useQuery({
     queryKey: ['managed-instance', instanceId],
     queryFn: () => getManagedInstance(instanceId),
-    enabled: validInstanceId && canAudit,
+    enabled: validInstanceId,
     refetchInterval: 30_000,
   })
   const auditsQuery = useQuery({
     queryKey: ['managed-instance-audits', instanceId],
     queryFn: () => getManagedInstanceAudits(instanceId),
-    enabled: validInstanceId,
+    enabled: validInstanceId && canAudit,
   })
   const taskQuery = useQuery({
     queryKey: ['managed-instance-task', instanceId, taskId],
@@ -277,6 +281,14 @@ export function ManagedInstanceDetail({
               />
               {isRoot && <CredentialSection instance={instance} />}
             </div>
+            <div className='min-w-0 xl:col-span-2'>
+              <ObservabilityPanel instance={instance} />
+            </div>
+            {canCheck && (
+              <div className='min-w-0 xl:col-span-2'>
+                <ControlledOperationsPanel instance={instance} />
+              </div>
+            )}
             {canAudit && (
               <div className='min-w-0 xl:col-span-2'>
                 <AuditSection audits={audits} loading={auditsQuery.isPending} />

@@ -18,7 +18,12 @@ import (
 
 const systemInstanceReportInterval = 30 * time.Second
 
-var systemInstanceReporterOnce sync.Once
+var (
+	systemInstanceReporterOnce sync.Once
+	systemInstanceReporterMu   sync.Mutex
+	systemInstanceReporterStop context.CancelFunc
+	systemInstanceReporterWG   sync.WaitGroup
+)
 
 type SystemInstanceInfo struct {
 	SchemaVersion int                       `json:"schema_version"`
@@ -64,16 +69,48 @@ type SystemInstanceStorageMetrics struct {
 
 func StartSystemInstanceReporter() {
 	systemInstanceReporterOnce.Do(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		systemInstanceReporterMu.Lock()
+		systemInstanceReporterStop = cancel
+		systemInstanceReporterMu.Unlock()
+		systemInstanceReporterWG.Add(1)
 		gopool.Go(func() {
+			defer systemInstanceReporterWG.Done()
 			reportSystemInstanceWithLog()
 
 			ticker := time.NewTicker(systemInstanceReportInterval)
 			defer ticker.Stop()
-			for range ticker.C {
-				reportSystemInstanceWithLog()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					reportSystemInstanceWithLog()
+				}
 			}
 		})
 	})
+}
+
+func StopSystemInstanceReporter(ctx context.Context) error {
+	systemInstanceReporterMu.Lock()
+	cancel := systemInstanceReporterStop
+	systemInstanceReporterMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		systemInstanceReporterWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func ReportCurrentSystemInstance() error {
