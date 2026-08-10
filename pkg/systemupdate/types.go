@@ -3,10 +3,11 @@ package systemupdate
 import "time"
 
 const (
-	RepositoryOwner  = "01121531"
-	RepositoryName   = "subandnew-api"
-	RepositoryURL    = "https://github.com/01121531/subandnew-api"
-	LatestReleaseURL = "https://api.github.com/repos/01121531/subandnew-api/releases/latest"
+	RepositoryOwner      = "01121531"
+	RepositoryName       = "subandnew-api"
+	RepositoryURL        = "https://github.com/01121531/subandnew-api"
+	LatestReleaseURL     = "https://api.github.com/repos/01121531/subandnew-api/releases/latest"
+	LatestReleasePageURL = RepositoryURL + "/releases/latest"
 
 	helperCommand = "__subandnew_apply_update"
 )

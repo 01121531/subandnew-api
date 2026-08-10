@@ -397,6 +397,18 @@ func prepareUpdate(release githubRelease, binaryAsset githubAsset, checksumAsset
 }
 
 func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
+	release, apiErr := fetchLatestReleaseAPI(ctx)
+	if apiErr == nil {
+		return release, nil
+	}
+	fallback, fallbackErr := fetchLatestReleasePage(ctx)
+	if fallbackErr == nil {
+		return fallback, nil
+	}
+	return githubRelease{}, fmt.Errorf("%v; GitHub release page fallback failed: %w", apiErr, fallbackErr)
+}
+
+func fetchLatestReleaseAPI(ctx context.Context) (githubRelease, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, LatestReleaseURL, nil)
 	if err != nil {
 		return githubRelease{}, err
@@ -427,7 +439,94 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 	if release.ID <= 0 || release.TagName == "" {
 		return githubRelease{}, errors.New("GitHub release payload is incomplete")
 	}
+	release.ID = releaseIDForTag(release.TagName)
 	return release, nil
+}
+
+func fetchLatestReleasePage(ctx context.Context) (githubRelease, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, LatestReleasePageURL, nil)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	request.Header.Set("User-Agent", "SubAndNew-API-system-updater")
+	response, err := restrictedHTTPClient(20 * time.Second).Do(request)
+	if err != nil {
+		return githubRelease{}, fmt.Errorf("contact GitHub release page: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return githubRelease{}, fmt.Errorf("GitHub release page returned status %d", response.StatusCode)
+	}
+	tag, err := latestReleaseTag(response.Request.URL)
+	if err != nil {
+		return githubRelease{}, err
+	}
+
+	binaryName := releaseBinaryName(tag, runtime.GOOS, runtime.GOARCH)
+	checksumName := fmt.Sprintf("checksums-%s.txt", releaseArtifactPlatform(runtime.GOOS))
+	binary, err := fetchReleaseAssetMetadata(ctx, tag, binaryName, maxBinaryBytes, 1)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	checksum, err := fetchReleaseAssetMetadata(ctx, tag, checksumName, maxChecksumBytes, 2)
+	if err != nil {
+		return githubRelease{}, err
+	}
+	return githubRelease{
+		ID:      releaseIDForTag(tag),
+		TagName: tag,
+		Name:    tag,
+		HTMLURL: RepositoryURL + "/releases/tag/" + url.PathEscape(tag),
+		Assets:  []githubAsset{binary, checksum},
+	}, nil
+}
+
+func latestReleaseTag(releaseURL *url.URL) (string, error) {
+	if releaseURL == nil || !strings.EqualFold(releaseURL.Hostname(), "github.com") {
+		return "", errors.New("GitHub latest release redirect is invalid")
+	}
+	prefix := "/" + RepositoryOwner + "/" + RepositoryName + "/releases/tag/"
+	if !strings.HasPrefix(releaseURL.EscapedPath(), prefix) {
+		return "", errors.New("no GitHub release has been published")
+	}
+	tag, err := url.PathUnescape(strings.TrimPrefix(releaseURL.EscapedPath(), prefix))
+	if err != nil || tag == "" || strings.Contains(tag, "/") {
+		return "", errors.New("GitHub latest release tag is invalid")
+	}
+	return tag, nil
+}
+
+func fetchReleaseAssetMetadata(ctx context.Context, tag string, name string, limit int64, id int64) (githubAsset, error) {
+	downloadURL := RepositoryURL + "/releases/download/" + url.PathEscape(tag) + "/" + url.PathEscape(name)
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadURL, nil)
+	if err != nil {
+		return githubAsset{}, err
+	}
+	request.Header.Set("User-Agent", "SubAndNew-API-system-updater")
+	response, err := restrictedHTTPClient(20 * time.Second).Do(request)
+	if err != nil {
+		return githubAsset{}, fmt.Errorf("inspect release asset %s: %w", name, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return githubAsset{}, fmt.Errorf("release asset %s returned status %d", name, response.StatusCode)
+	}
+	if response.ContentLength <= 0 || response.ContentLength > limit {
+		return githubAsset{}, fmt.Errorf("release asset %s has invalid size %d", name, response.ContentLength)
+	}
+	return githubAsset{ID: id, Name: name, Size: response.ContentLength, BrowserDownloadURL: downloadURL}, nil
+}
+
+func releaseIDForTag(tag string) int64 {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(tag)))
+	var id int64
+	for _, value := range digest[:7] {
+		id = id<<8 | int64(value)
+	}
+	if id == 0 {
+		return 1
+	}
+	return id
 }
 
 func publicReleaseInfo(release githubRelease, currentVersion string) ReleaseInfo {

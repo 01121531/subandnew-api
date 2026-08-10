@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,6 +76,26 @@ func TestPublicReleaseInfoShowsInvalidDifferentTag(t *testing.T) {
 	info := publicReleaseInfo(githubRelease{ID: 1, TagName: "api"}, "v1.0.0")
 	require.True(t, info.UpdateAvailable)
 	require.False(t, info.Installable)
+}
+
+func TestLatestReleaseTag(t *testing.T) {
+	releaseURL, err := url.Parse("https://github.com/01121531/subandnew-api/releases/tag/v1.2.3")
+	require.NoError(t, err)
+	tag, err := latestReleaseTag(releaseURL)
+	require.NoError(t, err)
+	require.Equal(t, "v1.2.3", tag)
+	require.Positive(t, releaseIDForTag(tag))
+	require.NotEqual(t, releaseIDForTag(tag), releaseIDForTag("v1.2.4"))
+
+	wrongRepository, err := url.Parse("https://github.com/other/repo/releases/tag/v1.2.3")
+	require.NoError(t, err)
+	_, err = latestReleaseTag(wrongRepository)
+	require.Error(t, err)
+
+	noRelease, err := url.Parse("https://github.com/01121531/subandnew-api/releases")
+	require.NoError(t, err)
+	_, err = latestReleaseTag(noRelease)
+	require.ErrorContains(t, err, "no GitHub release")
 }
 
 func TestChecksumForFile(t *testing.T) {
