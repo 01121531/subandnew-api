@@ -20,7 +20,7 @@ export const FLEET_TIME_PRESETS = [
   { days: 1, label: '1 Day' },
   { days: 7, label: '7 Days' },
   { days: 14, label: '14 Days' },
-  { days: 29, label: '29 Days' },
+  { days: 30, label: '30 Days' },
 ] as const
 
 export type FleetPresetDays = (typeof FLEET_TIME_PRESETS)[number]['days']

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Calendar, Filter, RotateCcw } from 'lucide-react'
+import { Calendar, CalendarDays, ChevronDown, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -86,7 +86,7 @@ export function FleetTimeRangeFilter(props: {
   }
 
   const reset = () => {
-    const nextRange = createFleetPresetRange(1)
+    const nextRange = createFleetPresetRange(7)
     setDraft(nextRange)
     props.onChange(nextRange)
     setOpen(false)
@@ -100,15 +100,16 @@ export function FleetTimeRangeFilter(props: {
             type='button'
             variant='outline'
             size='sm'
-            className='max-w-64 min-w-0'
+            className='max-w-72 min-w-32 justify-start sm:min-w-40'
+            aria-label={`${t('Time Range')}: ${appliedLabel}`}
           />
         }
       >
-        <Filter />
-        <span>{t('Filter')}</span>
-        <span className='text-muted-foreground hidden truncate font-normal tabular-nums lg:inline'>
+        <CalendarDays className='text-muted-foreground' />
+        <span className='min-w-0 flex-1 truncate text-left font-normal tabular-nums'>
           {appliedLabel}
         </span>
+        <ChevronDown className='text-muted-foreground ml-auto size-3.5' />
       </DialogTrigger>
       <DialogContent className='max-sm:h-dvh max-sm:w-screen max-sm:max-w-none max-sm:rounded-none sm:max-w-lg'>
         <DialogHeader>

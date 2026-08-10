@@ -33,7 +33,7 @@ import {
   ServerOff,
   Waypoints,
 } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
@@ -87,7 +87,13 @@ import type {
   ManagedInstanceAlert,
   ManagedInstanceSummary,
 } from '../managed-instances/types'
-import { createFleetPresetRange, resolveFleetTimeRange } from './time-range'
+import {
+  createFleetPresetRange,
+  FLEET_TIME_PRESETS,
+  resolveFleetTimeRange,
+  type FleetPresetDays,
+  type FleetTimeRange,
+} from './time-range'
 import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
@@ -124,6 +130,7 @@ type HealthData = {
 const LIVE_REFRESH_MS = 15_000
 const FLEET_FAMILIES: readonly FleetFamily[] = ['new_api', 'sub2api']
 const ALL_SITES_VALUE = 'all'
+const DASHBOARD_PREFERENCES_KEY = 'fleet-dashboard-preferences-v1'
 const PANEL_CARD_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
 const PANEL_HEADER_CLASS = 'border-border/70 border-b py-3.5'
 
@@ -173,6 +180,85 @@ const HEALTH_CHART_CONFIG = {
   unknown: { label: 'Unknown', color: 'var(--color-muted-foreground)' },
 } satisfies ChartConfig
 
+type FleetDashboardPreferences = {
+  family: FleetFamily
+  selectedInstances: Record<FleetFamily, string>
+  timeRange: FleetTimeRange
+  metric: MetricKey
+}
+
+function defaultDashboardPreferences(): FleetDashboardPreferences {
+  return {
+    family: 'new_api',
+    selectedInstances: {
+      new_api: ALL_SITES_VALUE,
+      sub2api: ALL_SITES_VALUE,
+    },
+    timeRange: createFleetPresetRange(7),
+    metric: 'requests',
+  }
+}
+
+function isFleetFamily(value: unknown): value is FleetFamily {
+  return value === 'new_api' || value === 'sub2api'
+}
+
+function isMetricKey(value: unknown): value is MetricKey {
+  return value === 'requests' || value === 'tokens' || value === 'quota'
+}
+
+function isFleetPresetDays(value: unknown): value is FleetPresetDays {
+  return FLEET_TIME_PRESETS.some((preset) => preset.days === value)
+}
+
+function readDashboardPreferences(): FleetDashboardPreferences {
+  const fallback = defaultDashboardPreferences()
+  if (typeof window === 'undefined') return fallback
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(DASHBOARD_PREFERENCES_KEY) ?? '{}'
+    ) as {
+      family?: unknown
+      selectedInstances?: Record<string, unknown>
+      timeRange?: { start?: unknown; end?: unknown; presetDays?: unknown }
+      metric?: unknown
+    }
+    const presetDays = isFleetPresetDays(parsed.timeRange?.presetDays)
+      ? parsed.timeRange.presetDays
+      : null
+    const start = new Date(String(parsed.timeRange?.start ?? ''))
+    const end = new Date(String(parsed.timeRange?.end ?? ''))
+    const validCustomRange =
+      !Number.isNaN(start.getTime()) &&
+      !Number.isNaN(end.getTime()) &&
+      start.getTime() <= end.getTime()
+    let timeRange = fallback.timeRange
+    if (presetDays) {
+      timeRange = createFleetPresetRange(presetDays)
+    } else if (validCustomRange) {
+      timeRange = { start, end, presetDays: null }
+    }
+
+    return {
+      family: isFleetFamily(parsed.family) ? parsed.family : fallback.family,
+      selectedInstances: {
+        new_api:
+          typeof parsed.selectedInstances?.new_api === 'string'
+            ? parsed.selectedInstances.new_api
+            : ALL_SITES_VALUE,
+        sub2api:
+          typeof parsed.selectedInstances?.sub2api === 'string'
+            ? parsed.selectedInstances.sub2api
+            : ALL_SITES_VALUE,
+      },
+      timeRange,
+      metric: isMetricKey(parsed.metric) ? parsed.metric : fallback.metric,
+    }
+  } catch {
+    return fallback
+  }
+}
+
 function formatMetric(value: number | null, compact = true) {
   if (value == null) return '--'
   return (compact ? compactNumber : exactNumber).format(value)
@@ -221,10 +307,13 @@ function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
 
 export function FleetDashboard() {
   const { t } = useTranslation()
-  const [family, setFamily] = useState<FleetFamily>('new_api')
-  const [selectedInstanceID, setSelectedInstanceID] = useState(ALL_SITES_VALUE)
-  const [timeRange, setTimeRange] = useState(() => createFleetPresetRange(1))
-  const [metric, setMetric] = useState<MetricKey>('requests')
+  const initialPreferences = useMemo(readDashboardPreferences, [])
+  const [family, setFamily] = useState<FleetFamily>(initialPreferences.family)
+  const [selectedInstances, setSelectedInstances] = useState(
+    initialPreferences.selectedInstances
+  )
+  const [timeRange, setTimeRange] = useState(initialPreferences.timeRange)
+  const [metric, setMetric] = useState<MetricKey>(initialPreferences.metric)
 
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
@@ -241,6 +330,7 @@ export function FleetDashboard() {
     () => allInstances.filter((instance) => belongsToFamily(instance, family)),
     [allInstances, family]
   )
+  const selectedInstanceID = selectedInstances[family]
   const selectedInstance = useMemo(
     () =>
       familyInstances.find(
@@ -413,6 +503,46 @@ export function FleetDashboard() {
     }),
     [allInstances]
   )
+
+  useEffect(() => {
+    if (!instancesQuery.isSuccess || familyCounts[family] > 0) return
+    const nextFamily = family === 'new_api' ? 'sub2api' : 'new_api'
+    if (familyCounts[nextFamily] > 0) setFamily(nextFamily)
+  }, [family, familyCounts, instancesQuery.isSuccess])
+
+  useEffect(() => {
+    if (
+      !instancesQuery.isSuccess ||
+      selectedInstanceID === ALL_SITES_VALUE ||
+      familyInstances.some(
+        (instance) => String(instance.id) === selectedInstanceID
+      )
+    ) {
+      return
+    }
+    setSelectedInstances((current) => ({
+      ...current,
+      [family]: ALL_SITES_VALUE,
+    }))
+  }, [family, familyInstances, instancesQuery.isSuccess, selectedInstanceID])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(
+      DASHBOARD_PREFERENCES_KEY,
+      JSON.stringify({
+        family,
+        selectedInstances,
+        timeRange: {
+          start: timeRange.start.toISOString(),
+          end: timeRange.end.toISOString(),
+          presetDays: timeRange.presetDays,
+        },
+        metric,
+      })
+    )
+  }, [family, metric, selectedInstances, timeRange])
+
   const lastObservedAt = Math.max(0, ...rows.map((row) => row.observedAt))
 
   const refresh = () => {
@@ -423,7 +553,6 @@ export function FleetDashboard() {
 
   const handleFamilyChange = (nextFamily: FleetFamily) => {
     setFamily(nextFamily)
-    setSelectedInstanceID(ALL_SITES_VALUE)
   }
 
   let content: ReactNode
@@ -494,7 +623,12 @@ export function FleetDashboard() {
                 ]}
                 value={effectiveInstanceID}
                 onValueChange={(value) => {
-                  if (value) setSelectedInstanceID(value)
+                  if (value) {
+                    setSelectedInstances((current) => ({
+                      ...current,
+                      [family]: value,
+                    }))
+                  }
                 }}
               >
                 <SelectTrigger
