@@ -3,7 +3,9 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
@@ -107,6 +109,76 @@ func GetManagedInstanceMetrics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedInstanceUsageRecords(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	result, err := managedinstance.ListUsageRecords(c.Request.Context(), id, c.Request.URL.Query())
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	result, err := managedinstance.GetUsageRecordSummary(c.Request.Context(), id, c.Request.URL.Query())
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func ExportManagedInstanceUsageRecords(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	export, err := managedinstance.PrepareUsageRecordsCSV(c.Request.Context(), id, c.Request.URL.Query())
+	if err != nil {
+		managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), 0, err)
+		managedInstanceError(c, err)
+		return
+	}
+	temporary, err := os.CreateTemp("", "managed-usage-*.csv")
+	if err != nil {
+		managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), 0, err)
+		managedInstanceError(c, err)
+		return
+	}
+	defer os.Remove(temporary.Name())
+	defer temporary.Close()
+	count, exportErr := export.Write(c.Request.Context(), temporary)
+	if exportErr != nil {
+		managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), count, exportErr)
+		managedInstanceError(c, exportErr)
+		return
+	}
+	if _, err = temporary.Seek(0, 0); err != nil {
+		managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), count, err)
+		managedInstanceError(c, err)
+		return
+	}
+	info, err := temporary.Stat()
+	if err != nil {
+		managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), count, err)
+		managedInstanceError(c, err)
+		return
+	}
+	filename := "usage-records-" + strconv.FormatInt(id, 10) + "-" + time.Now().Format("20060102-150405") + ".csv"
+	c.DataFromReader(http.StatusOK, info.Size(), "text/csv; charset=utf-8", temporary, map[string]string{
+		"Content-Disposition":    `attachment; filename="` + filename + `"`,
+		"X-Content-Type-Options": "nosniff",
+	})
+	managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), count, nil)
 }
 
 func ListManagedInstanceAudits(c *gin.Context) {
@@ -340,6 +412,8 @@ func managedInstanceError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrConfigOperationActive):
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
+	case errors.Is(err, managedinstance.ErrUsageExportTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrCredentialKeyNotConfigured):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "managed instance credential encryption is not configured"})
 	default:

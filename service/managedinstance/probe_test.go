@@ -2,6 +2,7 @@ package managedinstance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -65,6 +66,42 @@ func TestProbeHuichuanUsesLegacyUserHeader(t *testing.T) {
 	require.Equal(t, model.ManagedInstanceKindHuichuan, result.Kind)
 }
 
+func TestProbeGenericDetectsNewAPIAndLogsInWithAccountPassword(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"version":"v1.2.3","system_name":"New API","start_time":10}}`)
+		case "/api/user/login":
+			require.Equal(t, http.MethodPost, request.Method)
+			var input map[string]string
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			require.Equal(t, "admin", input["username"])
+			require.Equal(t, "password", input["password"])
+			http.SetCookie(response, &http.Cookie{Name: "session", Value: "remote-session", Path: "/"})
+			writeProbeJSON(response, `{"success":true,"data":{"id":7,"username":"admin"}}`)
+		case "/api/status/test":
+			cookie, err := request.Cookie("session")
+			require.NoError(t, err)
+			require.Equal(t, "remote-session", cookie.Value)
+			require.Equal(t, "7", request.Header.Get("New-Api-User"))
+			writeProbeJSON(response, `{"success":true}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindNewAPI, result.Kind)
+	require.Equal(t, "v1.2.3", result.Version)
+}
+
 func TestProbeGenericDetectsSub2APIAndUsesAPIKey(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
@@ -93,6 +130,39 @@ func TestProbeGenericDetectsSub2APIAndUsesAPIKey(t *testing.T) {
 	stored, err := Get(instance.Id)
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceKindSub2API, stored.Kind)
+}
+
+func TestProbeGenericDetectsSub2APIAndLogsInWithAccountPassword(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			http.NotFound(response, request)
+		case "/health":
+			writeProbeJSON(response, `{"status":"ok"}`)
+		case "/api/v1/auth/login":
+			var input map[string]string
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			require.Equal(t, "admin@example.com", input["email"])
+			require.Equal(t, "password", input["password"])
+			writeProbeJSON(response, `{"code":0,"message":"success","data":{"access_token":"account-token"}}`)
+		case "/api/v1/admin/system/version":
+			require.Equal(t, "Bearer account-token", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"code":0,"message":"success","data":{"version":"0.1.125"}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin@example.com",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindSub2API, result.Kind)
+	require.Equal(t, "0.1.125", result.Version)
 }
 
 func TestProbeAuthenticationFailureUpdatesStateAndRedactedAudit(t *testing.T) {

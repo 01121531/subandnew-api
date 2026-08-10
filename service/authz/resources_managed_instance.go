@@ -11,6 +11,7 @@ const (
 	ManagedInstanceActionBatchOperate = "batch_operate"
 	ManagedInstanceActionSecretRotate = "secret_rotate"
 	ManagedInstanceActionAudit        = "audit"
+	ManagedInstanceActionUsageView    = "usage_view"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 	ManagedInstanceBatchOperate = Permission{Resource: ResourceManagedInstance, Action: ManagedInstanceActionBatchOperate}
 	ManagedInstanceSecretRotate = Permission{Resource: ResourceManagedInstance, Action: ManagedInstanceActionSecretRotate}
 	ManagedInstanceAudit        = Permission{Resource: ResourceManagedInstance, Action: ManagedInstanceActionAudit}
+	ManagedInstanceUsageView    = Permission{Resource: ResourceManagedInstance, Action: ManagedInstanceActionUsageView}
 )
 
 func init() {
@@ -69,6 +71,12 @@ func init() {
 				Action:         ManagedInstanceActionAudit,
 				LabelKey:       "Audit managed instance operations",
 				DescriptionKey: "View managed instance operation and credential audit details.",
+			},
+			{
+				Action:         ManagedInstanceActionUsageView,
+				LabelKey:       "View managed instance usage",
+				DescriptionKey: "View and export remote usage records and billing details.",
+				DefaultRoles:   []string{BuiltInRoleAdmin},
 			},
 		},
 	})

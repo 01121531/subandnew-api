@@ -10,7 +10,5 @@ export function saveUserId(userId: number | string): void {
   if (typeof window === 'undefined') return
   try {
     window.localStorage.setItem('uid', String(userId))
-  } catch (error) {
-    console.error('Failed to save user ID:', error)
-  }
+  } catch {}
 }

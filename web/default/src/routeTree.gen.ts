@@ -24,10 +24,12 @@ import { Route as authOtpRouteImport } from './routes/(auth)/otp'
 import { Route as authOauthRouteImport } from './routes/(auth)/oauth'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
+import { Route as AuthenticatedUsageRecordsIndexRouteImport } from './routes/_authenticated/usage-records/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
+import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedSystemSettingsSiteIndexRouteImport } from './routes/_authenticated/system-settings/site/index'
@@ -109,6 +111,12 @@ const AuthenticatedUsersIndexRoute = AuthenticatedUsersIndexRouteImport.update({
   path: '/users/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedUsageRecordsIndexRoute =
+  AuthenticatedUsageRecordsIndexRouteImport.update({
+    id: '/usage-records/',
+    path: '/usage-records/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsIndexRoute =
   AuthenticatedSystemSettingsIndexRouteImport.update({
     id: '/',
@@ -131,6 +139,12 @@ const AuthenticatedInstancesIndexRoute =
   AuthenticatedInstancesIndexRouteImport.update({
     id: '/instances/',
     path: '/instances/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedDashboardIndexRoute =
+  AuthenticatedDashboardIndexRouteImport.update({
+    id: '/dashboard/',
+    path: '/dashboard/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedInstancesIdRoute =
@@ -185,10 +199,12 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/usage-records/': typeof AuthenticatedUsageRecordsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
@@ -209,10 +225,12 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
+  '/usage-records': typeof AuthenticatedUsageRecordsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
   '/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
@@ -237,10 +255,12 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/_authenticated/usage-records/': typeof AuthenticatedUsageRecordsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
   '/_authenticated/system-settings/auth/$section': typeof AuthenticatedSystemSettingsAuthSectionRoute
   '/_authenticated/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
@@ -264,10 +284,12 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/errors/$error'
     | '/instances/$id'
+    | '/dashboard/'
     | '/instances/'
     | '/profile/'
     | '/system-info/'
     | '/system-settings/'
+    | '/usage-records/'
     | '/users/'
     | '/system-settings/auth/$section'
     | '/system-settings/site/$section'
@@ -288,10 +310,12 @@ export interface FileRouteTypes {
     | '/setup'
     | '/errors/$error'
     | '/instances/$id'
+    | '/dashboard'
     | '/instances'
     | '/profile'
     | '/system-info'
     | '/system-settings'
+    | '/usage-records'
     | '/users'
     | '/system-settings/auth/$section'
     | '/system-settings/site/$section'
@@ -315,10 +339,12 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/_authenticated/errors/$error'
     | '/_authenticated/instances/$id'
+    | '/_authenticated/dashboard/'
     | '/_authenticated/instances/'
     | '/_authenticated/profile/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
+    | '/_authenticated/usage-records/'
     | '/_authenticated/users/'
     | '/_authenticated/system-settings/auth/$section'
     | '/_authenticated/system-settings/site/$section'
@@ -446,6 +472,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsersIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/usage-records/': {
+      id: '/_authenticated/usage-records/'
+      path: '/usage-records'
+      fullPath: '/usage-records/'
+      preLoaderRoute: typeof AuthenticatedUsageRecordsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/system-settings/': {
       id: '/_authenticated/system-settings/'
       path: '/'
@@ -472,6 +505,13 @@ declare module '@tanstack/react-router' {
       path: '/instances'
       fullPath: '/instances/'
       preLoaderRoute: typeof AuthenticatedInstancesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/dashboard/': {
+      id: '/_authenticated/dashboard/'
+      path: '/dashboard'
+      fullPath: '/dashboard/'
+      preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/instances/$id': {
@@ -566,9 +606,11 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
+  AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
+  AuthenticatedUsageRecordsIndexRoute: typeof AuthenticatedUsageRecordsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
 }
 
@@ -577,9 +619,11 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedInstancesIdRoute: AuthenticatedInstancesIdRoute,
+  AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
+  AuthenticatedUsageRecordsIndexRoute: AuthenticatedUsageRecordsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
 }
 

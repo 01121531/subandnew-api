@@ -61,15 +61,18 @@ export function Turnstile({
       return
     }
     const scriptId = 'cf-turnstile'
-    if (document.getElementById(scriptId)) return
-    const s = document.createElement('script')
-    s.id = scriptId
-    s.src =
-      'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
-    s.async = true
-    s.defer = true
-    s.onload = () => render()
-    document.head.appendChild(s)
+    let script = document.querySelector<HTMLScriptElement>(`#${scriptId}`)
+    if (!script) {
+      script = document.createElement('script')
+      script.id = scriptId
+      script.src =
+        'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      script.async = true
+      script.defer = true
+      document.head.appendChild(script)
+    }
+    script.addEventListener('load', render)
+    return () => script.removeEventListener('load', render)
   }, [siteKey, onVerify, onExpire])
 
   return <div ref={ref} className={className} />

@@ -16,13 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
-
-
-
-
-
-
 export { DataTableBulkActions } from './toolbar/bulk-actions'
 
 export { DataTablePage } from './layout/data-table-page'

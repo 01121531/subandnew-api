@@ -48,6 +48,28 @@ export const api = axios.create({
   },
 })
 
+export function isControlPlaneRequest(
+  config: Pick<AxiosRequestConfig, 'baseURL' | 'url'>
+) {
+  const requestURL = config.url ?? ''
+  const requestBaseURL = config.baseURL ?? ''
+  return (
+    requestBaseURL === '' &&
+    (requestURL === '/api' || requestURL.startsWith('/api/'))
+  )
+}
+
+api.interceptors.request.use((config) => {
+  if (!isControlPlaneRequest(config)) {
+    return Promise.reject(
+      new Error(
+        'Browser API requests must use same-origin control-plane /api paths.'
+      )
+    )
+  }
+  return config
+})
+
 // ============================================================================
 // Request Deduplication
 // ============================================================================

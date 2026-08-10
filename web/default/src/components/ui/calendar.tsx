@@ -200,6 +200,7 @@ function Calendar({
         DayButton: ({ ...props }) => (
           <CalendarDayButton locale={locale} {...props} />
         ),
+        Select: CalendarSelect,
         WeekNumber: ({ children, ...props }) => {
           return (
             <td {...props}>
@@ -214,6 +215,17 @@ function Calendar({
       {...props}
     />
   )
+}
+
+function CalendarSelect({
+  id,
+  name,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  const generatedId = React.useId()
+  const fieldId = id ?? `calendar-select-${generatedId.replaceAll(':', '')}`
+
+  return <select id={fieldId} name={name ?? fieldId} {...props} />
 }
 
 function CalendarDayButton({

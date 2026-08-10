@@ -373,9 +373,9 @@ func readRemoteConfig(ctx context.Context, instance *model.ManagedInstance, desi
 	var headers http.Header
 	switch instance.Kind {
 	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
-		headers, err = newAPIAuthHeaders(instance.Kind, credential)
+		headers, err = newAPIAuthHeaders(ctx, connector, instance.Kind, credential)
 	case model.ManagedInstanceKindSub2API:
-		headers, err = sub2APIAuthHeaders(credential)
+		headers, err = sub2APIAuthHeaders(ctx, connector, credential)
 	default:
 		return nil, ErrUnsupportedCapability
 	}

@@ -41,8 +41,9 @@ function OAuthCallback() {
           success?: boolean
           data?: AuthUser | null
         }
-        if (!self.success || !self.data)
+        if (!self.success || !self.data) {
           throw new Error('OAuth session not found')
+        }
 
         useAuthStore.getState().auth.setUser(self.data)
         window.localStorage.setItem('uid', String(self.data.id))

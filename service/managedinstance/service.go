@@ -498,7 +498,7 @@ func validEnvironment(environment string) bool {
 
 func validAuthType(authType string) bool {
 	switch authType {
-	case "bearer_pat", "admin_token", "legacy_access_token":
+	case "bearer_pat", "admin_token", "legacy_access_token", "account_password":
 		return true
 	default:
 		return false

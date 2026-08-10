@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/01121531/subandnew-api/model"
@@ -18,6 +19,7 @@ const (
 	ProbeErrorInvalidResponse   = "invalid_response"
 	ProbeErrorRemoteHTTP        = "remote_http"
 	ProbeErrorCredentialExpired = "credential_expired"
+	ProbeErrorTwoFactorRequired = "two_factor_required"
 )
 
 type ProbeError struct {
@@ -104,7 +106,7 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 	}
 	capabilities := []string{"health.read", "version.read"}
 	if credential != nil {
-		headers, err := newAPIAuthHeaders(detectedKind, credential)
+		headers, err := newAPIAuthHeaders(ctx, connector, detectedKind, credential)
 		if err != nil {
 			return nil, err
 		}
@@ -135,21 +137,64 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 	}, nil
 }
 
-func newAPIAuthHeaders(kind string, credential *CredentialMaterial) (http.Header, error) {
+func newAPIAuthHeaders(ctx context.Context, connector *Connector, kind string, credential *CredentialMaterial) (http.Header, error) {
 	if credential == nil || strings.TrimSpace(credential.Secret) == "" {
 		return nil, &ProbeError{Code: ProbeErrorAuthentication}
 	}
+	if credential.AuthType == "account_password" {
+		return loginNewAPI(ctx, connector, kind, credential)
+	}
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+credential.Secret)
-	if kind == model.ManagedInstanceKindHuichuan || credential.AuthType == "legacy_access_token" {
-		if strings.TrimSpace(credential.UserID) == "" {
-			return nil, &ProbeError{Code: ProbeErrorAuthentication}
-		}
+	if strings.TrimSpace(credential.UserID) != "" {
 		if kind == model.ManagedInstanceKindHuichuan {
 			headers.Set("HUICHUAN-User", credential.UserID)
 		} else {
 			headers.Set("New-Api-User", credential.UserID)
 		}
+	} else if kind == model.ManagedInstanceKindHuichuan || credential.AuthType == "legacy_access_token" {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication}
+	}
+	return headers, nil
+}
+
+func loginNewAPI(ctx context.Context, connector *Connector, kind string, credential *CredentialMaterial) (http.Header, error) {
+	username := strings.TrimSpace(credential.UserID)
+	if username == "" {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication}
+	}
+	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/user/login", nil, map[string]string{
+		"username": username,
+		"password": credential.Secret,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, probeHTTPError(response.StatusCode)
+	}
+	var envelope struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			RequireTwoFactor bool `json:"require_2fa"`
+			ID               int  `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &envelope); err != nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	if envelope.Data.RequireTwoFactor {
+		return nil, &ProbeError{Code: ProbeErrorTwoFactorRequired, StatusCode: response.StatusCode}
+	}
+	if !envelope.Success || envelope.Data.ID <= 0 {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: response.StatusCode}
+	}
+	headers := make(http.Header)
+	if kind == model.ManagedInstanceKindHuichuan {
+		headers.Set("HUICHUAN-User", strconv.Itoa(envelope.Data.ID))
+	} else {
+		headers.Set("New-Api-User", strconv.Itoa(envelope.Data.ID))
 	}
 	return headers, nil
 }
@@ -179,7 +224,7 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	if credential == nil {
 		return result, nil
 	}
-	headers, err := sub2APIAuthHeaders(credential)
+	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -229,9 +274,12 @@ func probeConfigEndpoint(ctx context.Context, connector *Connector, kind string,
 	return json.Unmarshal(response.Body, &envelope) == nil && envelope.Success && envelope.Data != nil
 }
 
-func sub2APIAuthHeaders(credential *CredentialMaterial) (http.Header, error) {
+func sub2APIAuthHeaders(ctx context.Context, connector *Connector, credential *CredentialMaterial) (http.Header, error) {
 	if credential == nil || strings.TrimSpace(credential.Secret) == "" {
 		return nil, &ProbeError{Code: ProbeErrorAuthentication}
+	}
+	if credential.AuthType == "account_password" {
+		return loginSub2API(ctx, connector, credential)
 	}
 	headers := make(http.Header)
 	switch credential.AuthType {
@@ -242,6 +290,42 @@ func sub2APIAuthHeaders(credential *CredentialMaterial) (http.Header, error) {
 	default:
 		return nil, &ProbeError{Code: ProbeErrorAuthentication}
 	}
+	return headers, nil
+}
+
+func loginSub2API(ctx context.Context, connector *Connector, credential *CredentialMaterial) (http.Header, error) {
+	email := strings.TrimSpace(credential.UserID)
+	if email == "" {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication}
+	}
+	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/v1/auth/login", nil, map[string]string{
+		"email":    email,
+		"password": credential.Secret,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, probeHTTPError(response.StatusCode)
+	}
+	var envelope struct {
+		Code any `json:"code"`
+		Data struct {
+			AccessToken       string `json:"access_token"`
+			RequiresTwoFactor bool   `json:"requires_2fa"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &envelope); err != nil || !sub2SuccessCode(envelope.Code) {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: response.StatusCode}
+	}
+	if envelope.Data.RequiresTwoFactor {
+		return nil, &ProbeError{Code: ProbeErrorTwoFactorRequired, StatusCode: response.StatusCode}
+	}
+	if strings.TrimSpace(envelope.Data.AccessToken) == "" {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	headers := make(http.Header)
+	headers.Set("Authorization", "Bearer "+envelope.Data.AccessToken)
 	return headers, nil
 }
 

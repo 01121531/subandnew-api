@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -99,6 +100,70 @@ func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {
 	encoded, err := json.Marshal(summary)
 	require.NoError(t, err)
 	require.Contains(t, string(encoded), `"value":null`)
+}
+
+func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	start := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.UTC).Unix()
+	end := start + 24*60*60
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "admin-secret", request.Header.Get("x-api-key"))
+		switch request.URL.Path {
+		case "/api/v1/admin/accounts":
+			writeProbeJSON(response, `{"code":0,"data":[{"id":9,"name":"upstream-a","status":"active"}]}`)
+		case "/api/v1/admin/dashboard/snapshot-v2":
+			require.Equal(t, "2026-08-08", request.URL.Query().Get("start_date"))
+			require.Equal(t, "2026-08-09", request.URL.Query().Get("end_date"))
+			require.Equal(t, "UTC", request.URL.Query().Get("timezone"))
+			require.Equal(t, "hour", request.URL.Query().Get("granularity"))
+			require.Equal(t, "false", request.URL.Query().Get("include_stats"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"requests":7,"total_tokens":1250,"actual_cost":1.25},{"requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: end})
+	require.NoError(t, err)
+	summary := view.Data.(*SummaryResult)
+	require.Equal(t, 12.0, *summary.Requests.Value)
+	require.Equal(t, 2000.0, *summary.Tokens.Value)
+	require.Equal(t, 2.0, *summary.Cost.Value)
+	require.Equal(t, "usd", summary.Cost.Unit)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
+}
+
+func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "Bearer metrics-secret", request.Header.Get("Authorization"))
+		require.Equal(t, "1", request.Header.Get("New-Api-User"))
+		switch request.URL.Path {
+		case "/api/channel/":
+			writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":1,"name":"primary","status":1}],"total":1}}`)
+		case "/api/data/":
+			require.Equal(t, "100", request.URL.Query().Get("start_timestamp"))
+			require.Equal(t, "200", request.URL.Query().Get("end_timestamp"))
+			writeProbeJSON(response, `{"success":true,"data":[{"token_used":1200,"count":8,"quota":45.5},{"token_used":800,"count":5,"quota":24.5}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "metrics-secret", UserID: "1"})
+
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: 100, End: 200})
+	require.NoError(t, err)
+	summary := view.Data.(*SummaryResult)
+	require.Equal(t, 13.0, *summary.Requests.Value)
+	require.Equal(t, 2000.0, *summary.Tokens.Value)
+	require.Equal(t, 70.0, *summary.Cost.Value)
+	require.Equal(t, "quota", summary.Cost.Unit)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
 }
 
 func TestCollectInventoryPersistsFailureWithoutSyntheticCounts(t *testing.T) {

@@ -1,16 +1,29 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import {
-  ArrowLeft,
-  ExternalLink,
-  KeyRound,
-  Pencil,
-  RefreshCw,
-} from 'lucide-react'
+import { ArrowLeft, KeyRound, Pencil, RefreshCw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { CopyButton } from '@/components/copy-button'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -411,15 +424,18 @@ function ConnectionSection({ instance }: { instance: ManagedInstance }) {
     <DetailSection title={t('Connection information')}>
       <dl className='grid min-w-0 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
         <Info label={t('Base URL')}>
-          <a
-            className='text-primary inline-flex max-w-full items-start gap-1 hover:underline'
-            href={instance.base_url}
-            target='_blank'
-            rel='noreferrer'
-          >
-            <span className='min-w-0 break-all'>{instance.base_url}</span>
-            <ExternalLink className='mt-0.5 size-3.5 shrink-0' />
-          </a>
+          <div className='flex max-w-full items-start gap-1'>
+            <span className='text-primary min-w-0 break-all'>
+              {instance.base_url}
+            </span>
+            <CopyButton
+              value={instance.base_url}
+              className='-my-1 size-7'
+              iconClassName='size-3.5'
+              tooltip={t('Copy to clipboard')}
+              successTooltip={t('Copied!')}
+            />
+          </div>
         </Info>
         <Info label={t('Product')} value={product} />
         <Info

@@ -109,7 +109,7 @@ func failedConnectionStages(err error) []ConnectionStage {
 		failedIndex = 0
 	case errors.As(err, &tlsError), errors.As(err, &tlsVerificationError), errors.As(err, &unknownAuthorityError), errors.As(err, &hostnameError), errors.As(err, &certificateInvalidError):
 		failedIndex = 2
-	case code == ProbeErrorAuthentication, code == ProbeErrorPermission, code == ProbeErrorCredentialExpired:
+	case code == ProbeErrorAuthentication, code == ProbeErrorPermission, code == ProbeErrorCredentialExpired, code == ProbeErrorTwoFactorRequired:
 		failedIndex = 4
 	case errors.Is(err, ErrUnsupportedCapability):
 		failedIndex = 5
@@ -132,7 +132,9 @@ func failedConnectionStages(err error) []ConnectionStage {
 func preflightAdvice(code string) string {
 	switch code {
 	case ProbeErrorAuthentication, ProbeErrorCredentialExpired:
-		return "Verify the credential type, token value, user identifier, and expiry."
+		return "Verify the account name and password."
+	case ProbeErrorTwoFactorRequired:
+		return "This account requires two-factor authentication. Use an account without 2FA or connect with an administrator token."
 	case ProbeErrorPermission:
 		return "Grant the management credential the required read permissions."
 	case "target_blocked":

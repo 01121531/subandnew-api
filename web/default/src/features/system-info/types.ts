@@ -85,3 +85,57 @@ export type SystemInstanceDeleteResponse = {
     deleted_count: number
   }
 }
+
+export type SystemUpdateCapability = {
+  supported: boolean
+  reason?: string
+  platform: string
+  arch: string
+}
+
+export type SystemUpdateRelease = {
+  id: number
+  tag_name: string
+  name?: string
+  body?: string
+  html_url?: string
+  published_at?: string
+  current_version: string
+  update_available: boolean
+  installable: boolean
+  reason?: string
+  asset_name?: string
+}
+
+export type SystemUpdatePhase =
+  | 'idle'
+  | 'downloading'
+  | 'verifying'
+  | 'staged'
+  | 'restarting'
+  | 'validating'
+  | 'succeeded'
+  | 'failed'
+  | 'rolling_back'
+  | 'rolled_back'
+
+export type SystemUpdateState = {
+  task_id?: string
+  phase: SystemUpdatePhase
+  progress: number
+  current_version?: string
+  target_version?: string
+  release_id?: number
+  message_code?: string
+  error_code?: string
+  started_at?: number
+  updated_at?: number
+  completed_at?: number
+  restart_required: boolean
+}
+
+export type SystemUpdateResponse<T> = {
+  success: boolean
+  message: string
+  data: T
+}

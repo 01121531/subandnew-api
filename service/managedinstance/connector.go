@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"strconv"
@@ -149,6 +150,11 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 			return nil
 		},
 	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	client.Jar = jar
 	return &Connector{baseURL: baseURL, client: client, maxBodyBytes: policy.MaxBodyBytes}, nil
 }
 

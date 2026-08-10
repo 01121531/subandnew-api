@@ -35,13 +35,17 @@ export function formatTimestampRelative(
   const formatter = new Intl.RelativeTimeFormat(locales, { numeric: 'always' })
 
   if (absoluteSeconds < 60) return formatter.format(seconds, 'second')
-  if (absoluteSeconds < 3600)
+  if (absoluteSeconds < 3600) {
     return formatter.format(Math.round(seconds / 60), 'minute')
-  if (absoluteSeconds < 86400)
+  }
+  if (absoluteSeconds < 86400) {
     return formatter.format(Math.round(seconds / 3600), 'hour')
-  if (absoluteSeconds < 2592000)
+  }
+  if (absoluteSeconds < 2592000) {
     return formatter.format(Math.round(seconds / 86400), 'day')
-  if (absoluteSeconds < 31536000)
+  }
+  if (absoluteSeconds < 31536000) {
     return formatter.format(Math.round(seconds / 2592000), 'month')
+  }
   return formatter.format(Math.round(seconds / 31536000), 'year')
 }

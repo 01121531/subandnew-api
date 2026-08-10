@@ -21,6 +21,10 @@ import { api } from '@/lib/api'
 import type {
   SystemInstanceDeleteResponse,
   SystemInstanceListResponse,
+  SystemUpdateCapability,
+  SystemUpdateRelease,
+  SystemUpdateResponse,
+  SystemUpdateState,
 } from './types'
 
 export async function listSystemInstances() {
@@ -42,4 +46,37 @@ export async function deleteStaleSystemInstance(nodeName: string) {
     `/api/system-info/instances/${encodeURIComponent(nodeName)}`
   )
   return res.data
+}
+
+export async function getSystemUpdateCapability() {
+  const res = await api.get<SystemUpdateResponse<SystemUpdateCapability>>(
+    '/api/system-update/capability',
+    { skipErrorHandler: true }
+  )
+  return res.data.data
+}
+
+export async function getLatestSystemUpdate() {
+  const res = await api.get<SystemUpdateResponse<SystemUpdateRelease>>(
+    '/api/system-update/latest',
+    { disableDuplicate: true, skipErrorHandler: true }
+  )
+  return res.data.data
+}
+
+export async function getSystemUpdateStatus() {
+  const res = await api.get<SystemUpdateResponse<SystemUpdateState>>(
+    '/api/system-update/status',
+    { disableDuplicate: true, skipErrorHandler: true }
+  )
+  return res.data.data
+}
+
+export async function startSystemUpdate(releaseId: number) {
+  const res = await api.post<SystemUpdateResponse<SystemUpdateState>>(
+    '/api/system-update',
+    { release_id: releaseId },
+    { skipErrorHandler: true }
+  )
+  return res.data.data
 }

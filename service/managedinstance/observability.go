@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
@@ -86,7 +87,7 @@ func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector
 	if resourceKind != "channel" {
 		return nil, ErrUnsupportedCapability
 	}
-	headers, err := newAPIAuthHeaders(adapter.configuredKind, credential)
+	headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,48 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	if err != nil {
 		return nil, err
 	}
-	return summaryFromInventory(window, page), nil
+	summary := summaryFromInventory(window, page)
+
+	headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
+	if err != nil {
+		return summary, nil
+	}
+	query := url.Values{}
+	query.Set("start_timestamp", strconv.FormatInt(window.Start, 10))
+	query.Set("end_timestamp", strconv.FormatInt(window.End, 10))
+	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/data/?"+query.Encode(), headers, nil)
+	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return summary, nil
+	}
+
+	var payload struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			TokenUsed float64 `json:"token_used"`
+			Count     float64 `json:"count"`
+			Quota     float64 `json:"quota"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil || !payload.Success {
+		return summary, nil
+	}
+
+	requests := 0.0
+	tokens := 0.0
+	quota := 0.0
+	for _, item := range payload.Data {
+		requests += item.Count
+		tokens += item.TokenUsed
+		quota += item.Quota
+	}
+	summary.Requests = supportedMetric(requests, "request")
+	summary.Tokens = supportedMetric(tokens, "token")
+	summary.Cost = supportedMetric(quota, "quota")
+	return summary, nil
+}
+
+func supportedMetric(value float64, unit string) MetricSample {
+	return MetricSample{Value: &value, Unit: unit, CollectionStatus: model.ManagedInstanceCollectionSucceeded}
 }
 
 func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
@@ -126,7 +168,7 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 	if resourceKind != "account" {
 		return nil, ErrUnsupportedCapability
 	}
-	headers, err := sub2APIAuthHeaders(credential)
+	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +188,58 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 	if err != nil {
 		return nil, err
 	}
-	return summaryFromInventory(window, page), nil
+	summary := summaryFromInventory(window, page)
+
+	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return summary, nil
+	}
+	query := url.Values{}
+	query.Set("start_date", time.Unix(window.Start, 0).UTC().Format("2006-01-02"))
+	query.Set("end_date", time.Unix(window.End, 0).UTC().Format("2006-01-02"))
+	query.Set("timezone", "UTC")
+	query.Set("granularity", sub2DashboardGranularity(window))
+	query.Set("include_stats", "false")
+	query.Set("include_model_stats", "false")
+	query.Set("include_group_stats", "false")
+	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/dashboard/snapshot-v2?"+query.Encode(), headers, nil)
+	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return summary, nil
+	}
+
+	var payload struct {
+		Code any `json:"code"`
+		Data struct {
+			Trend *[]struct {
+				Requests    float64 `json:"requests"`
+				TotalTokens float64 `json:"total_tokens"`
+				ActualCost  float64 `json:"actual_cost"`
+			} `json:"trend"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil || !sub2SuccessCode(payload.Code) || payload.Data.Trend == nil {
+		return summary, nil
+	}
+
+	requests := 0.0
+	tokens := 0.0
+	cost := 0.0
+	for _, item := range *payload.Data.Trend {
+		requests += item.Requests
+		tokens += item.TotalTokens
+		cost += item.ActualCost
+	}
+	summary.Requests = supportedMetric(requests, "request")
+	summary.Tokens = supportedMetric(tokens, "token")
+	summary.Cost = supportedMetric(cost, "usd")
+	return summary, nil
+}
+
+func sub2DashboardGranularity(window TimeWindow) string {
+	if window.End-window.Start <= 7*24*60*60 {
+		return "hour"
+	}
+	return "day"
 }
 
 func (genericAdapter) Inventory(context.Context, *Connector, *CredentialMaterial, string, string) (*InventoryPage, error) {

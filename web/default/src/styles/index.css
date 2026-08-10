@@ -16,19 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-@import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
-@import "@fontsource-variable/public-sans";
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/public-sans';
 /* Editorial serif (Lora) backing the `serif` font axis and the Anthropic
  * preset's default typography. See `--font-serif` in theme.css for the
  * full Latin + CJK fallback stack and `theme-presets.css` for the cascade
  * that activates it. Loaded globally so font-switching is instantaneous
  * with no FOUT once the variable is fetched. */
-@import "@fontsource-variable/lora";
+@import '@fontsource-variable/lora';
 
-@import "./theme.css";
-@import "./theme-presets.css";
+@import './theme.css';
+@import './theme-presets.css';
 
 :root {
   --brand-indigo: #4f46e5;
@@ -86,7 +86,7 @@ For commercial licensing, please contact support@quantumnous.com
 
   /* Cursor pointer for buttons */
   button:not(:disabled),
-  [role="button"]:not(:disabled) {
+  [role='button']:not(:disabled) {
     cursor: pointer;
   }
 
@@ -101,15 +101,15 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 @layer components {
-  .auth-form-card [data-slot="input"] {
+  .auth-form-card [data-slot='input'] {
     @apply h-11 px-3 transition-[border-color,background-color,box-shadow] duration-200;
   }
 
-  .auth-form-card [data-slot="input"]:focus-visible {
+  .auth-form-card [data-slot='input']:focus-visible {
     background-color: color-mix(in oklch, var(--brand-violet) 2%, transparent);
   }
 
-  .auth-form-card button[type="submit"] {
+  .auth-form-card button[type='submit'] {
     @apply h-11 rounded-xl text-white shadow-lg shadow-violet-500/15;
     background-image: var(--brand-gradient);
     transition:
@@ -119,13 +119,13 @@ For commercial licensing, please contact support@quantumnous.com
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .auth-form-card button[type="submit"]:not(:disabled):hover {
+    .auth-form-card button[type='submit']:not(:disabled):hover {
       transform: translateY(-1px);
       box-shadow: 0 14px 32px -18px rgb(124 58 237 / 0.55);
     }
   }
 
-  .auth-form-card button[type="submit"]:not(:disabled):active {
+  .auth-form-card button[type='submit']:not(:disabled):active {
     transform: scale(0.985);
   }
 }
@@ -154,7 +154,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* Override auto-skeleton-react inline styles with Vercel shimmer */
-.auto-skeleton-fade [class^="skeleton-"] {
+.auto-skeleton-fade [class^='skeleton-'] {
   background: linear-gradient(
     90deg,
     var(--skeleton-base) 0%,
@@ -169,7 +169,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
-  .auto-skeleton-fade [class^="skeleton-"] {
+  .auto-skeleton-fade [class^='skeleton-'] {
     animation: none !important;
     background: var(--skeleton-base) !important;
   }
@@ -199,14 +199,14 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* Tooltip content can still scroll, but should not show a distracting axis. */
-[data-slot="tooltip-content"],
-[data-slot="tooltip-content"] * {
+[data-slot='tooltip-content'],
+[data-slot='tooltip-content'] * {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
 
-[data-slot="tooltip-content"]::-webkit-scrollbar,
-[data-slot="tooltip-content"] *::-webkit-scrollbar {
+[data-slot='tooltip-content']::-webkit-scrollbar,
+[data-slot='tooltip-content'] *::-webkit-scrollbar {
   display: none;
 }
 
@@ -442,7 +442,7 @@ For commercial licensing, please contact support@quantumnous.com
   .animate-appear-zoom,
   .animate-scroll-up,
   .animate-scroll-down,
-  [data-slot="table"] tbody tr {
+  [data-slot='table'] tbody tr {
     animation: none !important;
     opacity: 1;
     transform: none;
@@ -983,7 +983,7 @@ For commercial licensing, please contact support@quantumnous.com
   max-width: 100%;
   margin-inline: auto;
   font-family:
-    STKaiti, KaiTi, "Noto Serif SC", "Source Han Serif SC", var(--font-serif);
+    STKaiti, KaiTi, 'Noto Serif SC', 'Source Han Serif SC', var(--font-serif);
   font-weight: 780;
   line-height: 1.08;
   letter-spacing: -0.065em;
@@ -1011,7 +1011,7 @@ For commercial licensing, please contact support@quantumnous.com
   left: 7%;
   height: 0.12em;
   min-height: 5px;
-  content: "";
+  content: '';
   border-radius: 9999px 35% 9999px 45%;
   opacity: 0.58;
   background: linear-gradient(
@@ -1040,7 +1040,7 @@ For commercial licensing, please contact support@quantumnous.com
   position: absolute;
   inset: -2px auto -2px -45%;
   width: 34%;
-  content: "";
+  content: '';
   pointer-events: none;
   background: linear-gradient(
     100deg,
@@ -1150,64 +1150,64 @@ For commercial licensing, please contact support@quantumnous.com
 
 /* Micro-interactions — Vercel-style subtle hover/active feedback */
 @media (prefers-reduced-motion: no-preference) {
-  [data-slot="card"]:not([data-card-hover="false"]) {
+  [data-slot='card']:not([data-card-hover='false']) {
     transition:
       transform 150ms ease,
       box-shadow 150ms ease;
   }
 
   @media (min-width: 641px) {
-    [data-slot="card"]:not([data-card-hover="false"]):hover {
+    [data-slot='card']:not([data-card-hover='false']):hover {
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgb(0 0 0 / 0.06);
     }
 
-    .dark [data-slot="card"]:not([data-card-hover="false"]):hover {
+    .dark [data-slot='card']:not([data-card-hover='false']):hover {
       box-shadow: 0 4px 12px rgb(0 0 0 / 0.3);
     }
   }
 
   button:not(:disabled):active,
-  [role="button"]:not(:disabled):active {
+  [role='button']:not(:disabled):active {
     transform: scale(0.98);
   }
 
-  [data-slot="table"] tr {
+  [data-slot='table'] tr {
     transition: background-color 120ms ease;
   }
 
   /* Table row stagger-in animation */
-  [data-slot="table"] tbody tr {
+  [data-slot='table'] tbody tr {
     animation: tableRowEnter 0.2s cubic-bezier(0.33, 1, 0.68, 1) both;
   }
-  [data-slot="table"] tbody tr:nth-child(2) {
+  [data-slot='table'] tbody tr:nth-child(2) {
     animation-delay: 25ms;
   }
-  [data-slot="table"] tbody tr:nth-child(3) {
+  [data-slot='table'] tbody tr:nth-child(3) {
     animation-delay: 50ms;
   }
-  [data-slot="table"] tbody tr:nth-child(4) {
+  [data-slot='table'] tbody tr:nth-child(4) {
     animation-delay: 75ms;
   }
-  [data-slot="table"] tbody tr:nth-child(5) {
+  [data-slot='table'] tbody tr:nth-child(5) {
     animation-delay: 100ms;
   }
-  [data-slot="table"] tbody tr:nth-child(6) {
+  [data-slot='table'] tbody tr:nth-child(6) {
     animation-delay: 125ms;
   }
-  [data-slot="table"] tbody tr:nth-child(7) {
+  [data-slot='table'] tbody tr:nth-child(7) {
     animation-delay: 150ms;
   }
-  [data-slot="table"] tbody tr:nth-child(8) {
+  [data-slot='table'] tbody tr:nth-child(8) {
     animation-delay: 175ms;
   }
-  [data-slot="table"] tbody tr:nth-child(9) {
+  [data-slot='table'] tbody tr:nth-child(9) {
     animation-delay: 200ms;
   }
-  [data-slot="table"] tbody tr:nth-child(10) {
+  [data-slot='table'] tbody tr:nth-child(10) {
     animation-delay: 225ms;
   }
-  [data-slot="table"] tbody tr:nth-child(n + 11) {
+  [data-slot='table'] tbody tr:nth-child(n + 11) {
     animation-delay: 250ms;
   }
 }
@@ -1224,7 +1224,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 /* Tabular numbers for data-heavy contexts */
-[data-slot="table"] td,
+[data-slot='table'] td,
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }

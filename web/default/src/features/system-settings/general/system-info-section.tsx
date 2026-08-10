@@ -16,10 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { zodResolver } from "@hookform/resolvers/zod";
-import type { Resolver } from "react-hook-form";
-import { useTranslation } from "react-i18next";
-import * as z from "zod";
+import { zodResolver } from '@hookform/resolvers/zod'
+import type { Resolver } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
+import * as z from 'zod'
 
 import {
   Form,
@@ -29,58 +29,58 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+} from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
-import { FormDirtyIndicator } from "../components/form-dirty-indicator";
-import { FormNavigationGuard } from "../components/form-navigation-guard";
+import { FormDirtyIndicator } from '../components/form-dirty-indicator'
+import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
   SettingsForm,
   SettingsFormGrid,
-} from "../components/settings-form-layout";
-import { SettingsPageFormActions } from "../components/settings-page-context";
-import { SettingsSection } from "../components/settings-section";
-import { useSettingsForm } from "../hooks/use-settings-form";
-import { useUpdateOption } from "../hooks/use-update-option";
+} from '../components/settings-form-layout'
+import { SettingsPageFormActions } from '../components/settings-page-context'
+import { SettingsSection } from '../components/settings-section'
+import { useSettingsForm } from '../hooks/use-settings-form'
+import { useUpdateOption } from '../hooks/use-update-option'
 
 const _systemInfoSchema = z.object({
   SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
-  Logo: z.string().url().optional().or(z.literal("")),
+  Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
-});
+})
 
-type SystemInfoFormValues = z.infer<typeof _systemInfoSchema>;
+type SystemInfoFormValues = z.infer<typeof _systemInfoSchema>
 
 type SystemInfoSectionProps = {
-  defaultValues: SystemInfoFormValues;
-};
+  defaultValues: SystemInfoFormValues
+}
 
 function normalizeValue(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  return typeof value === "string" ? value : String(value);
+  if (value === undefined || value === null) return ''
+  return typeof value === 'string' ? value : String(value)
 }
 
 export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
-  const { t } = useTranslation();
-  const updateOption = useUpdateOption();
+  const { t } = useTranslation()
+  const updateOption = useUpdateOption()
 
   const normalizedDefaults: SystemInfoFormValues = {
     SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
     Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
-  };
+  }
 
   const systemInfoSchemaWithI18n = z.object({
     SystemName: z.string().min(1, {
-      error: () => t("System name is required"),
+      error: () => t('System name is required'),
     }),
     ServerAddress: z.string().optional(),
-    Logo: z.string().url().optional().or(z.literal("")),
+    Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
-  });
+  })
 
   const { form, handleSubmit, handleReset, isDirty, isSubmitting } =
     useSettingsForm<SystemInfoFormValues>({
@@ -92,23 +92,23 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       defaultValues: normalizedDefaults,
       onSubmit: async (_data, changedFields) => {
         for (const [key, value] of Object.entries(changedFields)) {
-          let v = normalizeValue(value);
-          if (key === "ServerAddress") {
-            v = v.replace(/\/+$/, "");
+          let v = normalizeValue(value)
+          if (key === 'ServerAddress') {
+            v = v.replace(/\/+$/, '')
           }
           await updateOption.mutateAsync({
             key,
             value: v,
-          });
+          })
         }
       },
-    });
+    })
 
   return (
     <>
       <FormNavigationGuard when={isDirty} />
 
-      <SettingsSection title={t("System Information")}>
+      <SettingsSection title={t('System Information')}>
         <Form {...form}>
           <SettingsForm onSubmit={handleSubmit}>
             <SettingsPageFormActions
@@ -121,15 +121,15 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
             <SettingsFormGrid>
               <FormField
                 control={form.control}
-                name="SystemName"
+                name='SystemName'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t("System Name")}</FormLabel>
+                    <FormLabel>{t('System Name')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="SubAndNew API" {...field} />
+                      <Input placeholder='SubAndNew API' {...field} />
                     </FormControl>
                     <FormDescription>
-                      {t("The name displayed across the application")}
+                      {t('The name displayed across the application')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -138,16 +138,16 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
 
               <FormField
                 control={form.control}
-                name="ServerAddress"
+                name='ServerAddress'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t("Server Address")}</FormLabel>
+                    <FormLabel>{t('Server Address')}</FormLabel>
                     <FormControl>
-                      <Input placeholder="https://yourdomain.com" {...field} />
+                      <Input placeholder='https://yourdomain.com' {...field} />
                     </FormControl>
                     <FormDescription>
                       {t(
-                        "The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations",
+                        'The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations'
                       )}
                     </FormDescription>
                     <FormMessage />
@@ -157,18 +157,18 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
 
               <FormField
                 control={form.control}
-                name="Logo"
+                name='Logo'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t("Logo URL")}</FormLabel>
+                    <FormLabel>{t('Logo URL')}</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder={t("https://example.com/logo.png")}
+                        placeholder={t('https://example.com/logo.png')}
                         {...field}
                       />
                     </FormControl>
                     <FormDescription>
-                      {t("URL to your logo image (optional)")}
+                      {t('URL to your logo image (optional)')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -177,31 +177,30 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
 
               <FormField
                 control={form.control}
-                name="Footer"
+                name='Footer'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t("Footer")}</FormLabel>
+                    <FormLabel>{t('Footer')}</FormLabel>
                     <FormControl>
                       <Textarea
                         placeholder={t(
-                          "© 2025 Your Company. All rights reserved.",
+                          '© 2025 Your Company. All rights reserved.'
                         )}
                         rows={4}
                         {...field}
                       />
                     </FormControl>
                     <FormDescription>
-                      {t("Footer text displayed at the bottom of pages")}
+                      {t('Footer text displayed at the bottom of pages')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-
             </SettingsFormGrid>
           </SettingsForm>
         </Form>
       </SettingsSection>
     </>
-  );
+  )
 }

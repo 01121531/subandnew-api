@@ -6,7 +6,13 @@ it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
-import { Server, ServerCog, Settings } from 'lucide-react'
+import {
+  LayoutDashboard,
+  ScrollText,
+  Server,
+  ServerCog,
+  Settings,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
@@ -26,6 +32,11 @@ export function useSidebarData(): SidebarData {
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
     ADMIN_PERMISSION_ACTIONS.VIEW
   )
+  const canViewUsageRecords = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
+    ADMIN_PERMISSION_ACTIONS.USAGE_VIEW
+  )
 
   return {
     navGroups: [
@@ -36,9 +47,23 @@ export function useSidebarData(): SidebarData {
           ...(canViewManagedInstances
             ? [
                 {
+                  title: t('Fleet overview'),
+                  url: '/dashboard',
+                  icon: LayoutDashboard,
+                },
+                {
                   title: t('Instance center'),
                   url: '/instances',
                   icon: Server,
+                },
+              ]
+            : []),
+          ...(canViewManagedInstances && canViewUsageRecords
+            ? [
+                {
+                  title: t('Usage records'),
+                  url: '/usage-records',
+                  icon: ScrollText,
                 },
               ]
             : []),

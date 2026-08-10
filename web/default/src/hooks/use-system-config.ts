@@ -49,12 +49,12 @@ function preloadImage(
   onError: () => void
 ): () => void {
   const image = new Image()
-  image.onload = onLoad
-  image.onerror = onError
+  image.addEventListener('load', onLoad)
+  image.addEventListener('error', onError)
   image.src = src
   return () => {
-    image.onload = null
-    image.onerror = null
+    image.removeEventListener('load', onLoad)
+    image.removeEventListener('error', onError)
   }
 }
 
@@ -72,8 +72,8 @@ export function useSystemConfig({ autoLoad = false } = {}) {
     try {
       setLoading(true)
       setConfig(await fetchSystemConfig())
-    } catch (error) {
-      console.error('Failed to load system config:', error)
+    } catch {
+      setConfig({})
     } finally {
       setLoading(false)
     }

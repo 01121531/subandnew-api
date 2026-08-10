@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { api } from '@/lib/api'
 
 import type {
@@ -94,7 +112,9 @@ export async function getManagedInstanceTask(
 export async function createManagedInstance(
   input: ManagedInstanceInput
 ): Promise<ApiResponse<ManagedInstance>> {
-  const response = await api.post('/api/managed-instances', input)
+  const response = await api.post('/api/managed-instances', input, {
+    skipErrorHandler: true,
+  })
   return response.data
 }
 
@@ -148,11 +168,34 @@ export async function getManagedInstanceInventory(
 }
 
 export async function getManagedInstanceMetrics(
-  id: number
+  id: number,
+  window?: { start: number; end: number },
+  options?: { silent?: boolean }
 ): Promise<ApiResponse<ManagedInstanceObservation<ManagedInstanceSummary>>> {
-  const response = await api.get(`/api/managed-instances/${id}/metrics`, {
-    disableDuplicate: true,
-  })
+  const params = window
+    ? new URLSearchParams({
+        start: String(window.start),
+        end: String(window.end),
+      })
+    : null
+  const response = await api.get(
+    `/api/managed-instances/${id}/metrics${params ? `?${params.toString()}` : ''}`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function getManagedAlerts(): Promise<
+  ApiResponse<ManagedInstanceAlertList>
+> {
+  const response = await api.get(
+    '/api/managed-instances/alerts?page=1&page_size=100',
+    { disableDuplicate: true }
+  )
   return response.data
 }
 

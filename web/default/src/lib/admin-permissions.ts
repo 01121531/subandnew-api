@@ -37,6 +37,7 @@ export const ADMIN_PERMISSION_ACTIONS = {
   DELETE: 'delete',
   SECRET_ROTATE: 'secret_rotate',
   AUDIT: 'audit',
+  USAGE_VIEW: 'usage_view',
   BATCH_OPERATE: 'batch_operate',
 } as const
 

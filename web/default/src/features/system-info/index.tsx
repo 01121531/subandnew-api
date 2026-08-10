@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge'
 
 import { SystemInstancesPanel } from './components/system-instances-panel'
 import { SystemTasksPanel } from './components/system-tasks-panel'
+import { SystemUpdatePanel } from './components/system-update-panel'
 
 export function SystemInfo() {
   const { t } = useTranslation()
@@ -39,6 +40,7 @@ export function SystemInfo() {
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='space-y-4'>
+          <SystemUpdatePanel />
           <SystemInstancesPanel />
           <SystemTasksPanel />
         </div>

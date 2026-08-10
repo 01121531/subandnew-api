@@ -9,7 +9,7 @@
     "@rsbuild/core": "^2.1.4",
     "@rsbuild/plugin-react": "^2.1.0",
     "@rsbuild/plugin-tailwindcss": "^2.0.3",
-    "axios": "^1.18.1",
+    "axios": "^1.19.0",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
     "oxfmt": "^0.57.0",
@@ -19,5 +19,24 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-icons": "^5.7.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.0",
+    "body-parser": "2.3.0",
+    "brace-expansion": "5.0.9",
+    "dompurify": "3.4.13",
+    "fast-uri": "3.1.5",
+    "form-data": "4.0.6",
+    "hono": "4.12.34",
+    "ip-address": "10.4.0",
+    "js-cookie": "3.0.7",
+    "js-yaml": "4.3.1",
+    "mermaid": "11.15.0",
+    "minimist": "1.2.8",
+    "nanoid": "3.3.17",
+    "postcss": "8.5.26",
+    "qs": "6.15.2",
+    "undici": "7.29.0",
+    "uuid": "14.0.0"
   }
 }

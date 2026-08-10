@@ -2,7 +2,9 @@ package managedinstance
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,6 +55,10 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 	require.NotNil(t, created.Credential)
 	require.Equal(t, "bearer_pat", created.Credential.AuthType)
 	require.Len(t, created.Credential.Fingerprint, 8)
+	encodedView, err := json.Marshal(created)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedView), "remote-admin-token")
+	require.NotContains(t, strings.ToLower(string(encodedView)), "ciphertext")
 
 	var stored model.ManagedInstanceCredential
 	require.NoError(t, db.Where("instance_id = ?", created.Id).First(&stored).Error)

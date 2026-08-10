@@ -656,6 +656,7 @@ export function SystemInstancesPanel() {
                 type='button'
                 variant='destructive'
                 size='sm'
+                className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
                 onClick={() => setDeleteAllConfirmOpen(true)}
                 disabled={
                   isMutatingInstance || deleteStaleInstancesMutation.isPending

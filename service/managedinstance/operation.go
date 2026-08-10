@@ -535,13 +535,13 @@ func executeRemoteOperation(ctx context.Context, instance *model.ManagedInstance
 	}
 	switch instance.Kind {
 	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
-		headers, err := newAPIAuthHeaders(instance.Kind, credential)
+		headers, err := newAPIAuthHeaders(ctx, connector, instance.Kind, credential)
 		if err != nil {
 			return nil, err
 		}
 		return executeNewAPIOperation(ctx, connector, instance, headers, action, parameters)
 	case model.ManagedInstanceKindSub2API:
-		headers, err := sub2APIAuthHeaders(credential)
+		headers, err := sub2APIAuthHeaders(ctx, connector, credential)
 		if err != nil {
 			return nil, err
 		}
