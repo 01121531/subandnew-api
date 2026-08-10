@@ -55,6 +55,18 @@ func TestConnectorBlocksSpecialPurposeNetworksUnlessAllowed(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestConnectorAllowsFakeIPRangeOnlyWhenActiveOnLocalInterface(t *testing.T) {
+	active := connectorLocalProxyCIDRsFromAddresses([]net.Addr{
+		&net.IPNet{IP: net.ParseIP("198.18.0.1"), Mask: net.CIDRMask(30, 32)},
+	})
+	require.True(t, connectorIPAllowed(net.ParseIP("198.18.42.10"), active))
+
+	inactive := connectorLocalProxyCIDRsFromAddresses([]net.Addr{
+		&net.IPNet{IP: net.ParseIP("192.168.1.10"), Mask: net.CIDRMask(24, 32)},
+	})
+	require.False(t, connectorIPAllowed(net.ParseIP("198.18.42.10"), inactive))
+}
+
 func TestConnectorLimitsResponsesAndAllowsExplicitLoopback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		_, _ = response.Write([]byte("123456"))

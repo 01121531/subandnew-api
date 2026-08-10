@@ -76,6 +76,7 @@ func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
 	if err != nil {
 		return ConnectorPolicy{}, err
 	}
+	allowed = append(allowed, connectorLocalProxyCIDRs()...)
 	ports, err := parseAllowedPorts(os.Getenv(managedInstanceAllowedPortsEnv))
 	if err != nil {
 		return ConnectorPolicy{}, err
@@ -84,6 +85,29 @@ func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
 		AllowedCIDRs: allowed, AllowedHosts: parseAllowedHosts(os.Getenv(managedInstanceAllowedHostsEnv)),
 		AllowedPorts: ports, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
 	}, nil
+}
+
+func connectorLocalProxyCIDRs() []*net.IPNet {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	return connectorLocalProxyCIDRsFromAddresses(addresses)
+}
+
+func connectorLocalProxyCIDRsFromAddresses(addresses []net.Addr) []*net.IPNet {
+	benchmarkNetwork := mustConnectorNetwork("198.18.0.0/15")
+	for _, address := range addresses {
+		value := address.String()
+		ip, _, err := net.ParseCIDR(value)
+		if err != nil {
+			ip = net.ParseIP(strings.Trim(value, "[]"))
+		}
+		if ip != nil && benchmarkNetwork.Contains(ip) {
+			return []*net.IPNet{benchmarkNetwork}
+		}
+	}
+	return nil
 }
 
 func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Connector, error) {
