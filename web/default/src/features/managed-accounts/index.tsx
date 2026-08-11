@@ -201,7 +201,6 @@ export function ManagedAccounts() {
     retry: 1,
     retryDelay: FAILED_REFRESH_RETRY_MS,
     refetchInterval: INVENTORY_REFRESH_MS,
-    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -254,7 +253,6 @@ export function ManagedAccounts() {
       retryDelay: FAILED_REFRESH_RETRY_MS,
       staleTime: INVENTORY_REFRESH_MS / 2,
       refetchInterval: INVENTORY_REFRESH_MS,
-      refetchIntervalInBackground: true,
     })),
   })
   const rows = useMemo<ResourceRow[]>(

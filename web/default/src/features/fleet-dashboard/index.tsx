@@ -348,13 +348,11 @@ export function FleetDashboard() {
     queryKey: ['fleet-dashboard-instances'],
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
     refetchInterval: DASHBOARD_REFRESH_MS,
-    refetchIntervalInBackground: true,
   })
   const alertsQuery = useQuery({
     queryKey: ['fleet-dashboard-alerts'],
     queryFn: getManagedAlerts,
     refetchInterval: DASHBOARD_REFRESH_MS,
-    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -400,7 +398,6 @@ export function FleetDashboard() {
       retry: false,
       staleTime: DASHBOARD_REFRESH_MS / 2,
       refetchInterval: DASHBOARD_REFRESH_MS,
-      refetchIntervalInBackground: true,
     })),
   })
   const rows = useMemo<InstanceMetricRow[]>(
