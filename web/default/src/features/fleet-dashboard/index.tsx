@@ -384,9 +384,9 @@ export function FleetDashboard() {
         timeRange.presetDays ? null : timeRange.start.getTime(),
         timeRange.presetDays ? null : timeRange.end.getTime(),
       ],
-      queryFn: () => {
+      queryFn: async () => {
         const resolvedRange = resolveFleetTimeRange(timeRange)
-        return getManagedInstanceMetrics(
+        const response = await getManagedInstanceMetrics(
           instance.id,
           {
             start: Math.floor(resolvedRange.start.getTime() / 1000),
@@ -394,8 +394,27 @@ export function FleetDashboard() {
           },
           { silent: true }
         )
+        const observation = response.data
+        const summary = observation.data
+        const hasMetricData = [
+          summary?.requests,
+          summary?.tokens,
+          summary?.cost,
+        ].some(
+          (sample) =>
+            sample?.collection_status === 'succeeded' && sample.value != null
+        )
+        if (
+          observation.collection_status !== 'succeeded' ||
+          !summary ||
+          (!hasMetricData && summary.trend.length === 0)
+        ) {
+          throw new Error(observation.error_code || 'metrics_unavailable')
+        }
+        return response
       },
-      retry: false,
+      retry: 1,
+      retryDelay: DASHBOARD_REFRESH_MS,
       staleTime: DASHBOARD_REFRESH_MS / 2,
       refetchInterval: DASHBOARD_REFRESH_MS,
     })),
@@ -491,6 +510,14 @@ export function FleetDashboard() {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, value]) => ({ date, value }))
   }, [metric, rows])
+  const dailyUsageLoading =
+    metricQueries.some((query) => query.isPending) ||
+    (dailyUsageData.length === 0 &&
+      metricQueries.some((query) => query.isFetching))
+  const dailyUsageError =
+    !dailyUsageLoading &&
+    dailyUsageData.length === 0 &&
+    metricQueries.some((query) => query.isError)
   const isRefreshing =
     instancesQuery.isFetching ||
     alertsQuery.isFetching ||
@@ -591,7 +618,8 @@ export function FleetDashboard() {
         healthData={healthData}
         chartData={chartData}
         dailyUsageData={dailyUsageData}
-        dailyUsageLoading={metricQueries.some((query) => query.isPending)}
+        dailyUsageLoading={dailyUsageLoading}
+        dailyUsageError={dailyUsageError}
         healthRate={healthRate}
         coverage={coverage}
         metricCoverage={metricCoverage}
@@ -699,7 +727,9 @@ export function FleetDashboard() {
                 <Radio
                   className={cn('size-3.5', isRefreshing && 'animate-pulse')}
                 />
-                {t('Auto-refreshing every {{seconds}}s', { seconds: 15 })}
+                {t('Auto-refreshing every {{seconds}}s', {
+                  seconds: DASHBOARD_REFRESH_MS / 1000,
+                })}
               </span>
               {lastObservedAt > 0 && (
                 <span className='text-muted-foreground hidden tabular-nums sm:inline'>
@@ -739,6 +769,7 @@ type DashboardContentProps = {
   chartData: { name: string; value: number }[]
   dailyUsageData: DailyUsageData[]
   dailyUsageLoading: boolean
+  dailyUsageError: boolean
   healthRate: number
   coverage: number
   metricCoverage: number
@@ -755,6 +786,7 @@ function DashboardContent(props: DashboardContentProps) {
         metric={props.metric}
         data={props.dailyUsageData}
         loading={props.dailyUsageLoading}
+        error={props.dailyUsageError}
         onMetricChange={props.onMetricChange}
       />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
@@ -781,6 +813,7 @@ function DailyUsagePanel(props: {
   metric: MetricKey
   data: DailyUsageData[]
   loading: boolean
+  error: boolean
   onMetricChange: (metric: MetricKey) => void
 }) {
   const { t } = useTranslation()
@@ -872,7 +905,10 @@ function DailyUsagePanel(props: {
             </LineChart>
           </ChartContainer>
         )}
-        {!props.loading && props.data.length === 0 && (
+        {!props.loading && props.error && (
+          <PanelEmpty text={t('Failed to load')} />
+        )}
+        {!props.loading && !props.error && props.data.length === 0 && (
           <PanelEmpty text={t('No daily usage data for this period')} />
         )}
       </CardContent>
