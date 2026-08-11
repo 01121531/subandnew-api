@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import type { TFunction } from 'i18next'
 import {
   CheckCircle2,
   CircleHelp,
@@ -149,6 +150,33 @@ function formatTimestamp(value?: number) {
   if (!value) return '--'
   const date = new Date(value * 1000)
   return Number.isNaN(date.getTime()) ? '--' : accountDateTime.format(date)
+}
+
+function getSurvivalSeconds(item: ManagedInstanceInventoryItem) {
+  if (!item.created_at) return null
+
+  let end: number | undefined
+  if (item.enabled === true) {
+    end = Math.floor(Date.now() / 1000)
+  } else if (item.enabled === false) {
+    end = item.last_activity_at
+  }
+  if (!end || end < item.created_at) return null
+  return end - item.created_at
+}
+
+function formatSurvivalDuration(seconds: number | null, t: TFunction) {
+  if (seconds == null) return '--'
+
+  const days = Math.floor(seconds / 86_400)
+  const hours = Math.floor((seconds % 86_400) / 3_600)
+  const minutes = Math.floor((seconds % 3_600) / 60)
+  if (days > 0) return t('{{days}} days {{hours}} hours', { days, hours })
+  if (hours > 0) {
+    return t('{{hours}} hours {{minutes}} minutes', { hours, minutes })
+  }
+  if (minutes > 0) return t('{{minutes}} minutes', { minutes })
+  return t('Less than 1 minute')
 }
 
 function formatCost(item: ManagedInstanceInventoryItem) {
@@ -522,12 +550,12 @@ function AccountTable(props: {
   if (props.error) emptyText = t('Account data could not be loaded')
   let content: ReactNode
   if (props.loading && props.total === 0) {
-    content = <TableSkeleton />
+    content = <TableSkeleton wide={!isChannel} />
   } else if (props.rows.length === 0) {
     content = <PanelEmpty text={emptyText} />
   } else {
     content = (
-      <Table className='min-w-[980px]'>
+      <Table className={cn(isChannel ? 'min-w-[980px]' : 'min-w-[1140px]')}>
         <TableHeader className='bg-muted/35'>
           <TableRow>
             <TableHead className='ps-6'>
@@ -542,6 +570,7 @@ function AccountTable(props: {
               {t(isChannel ? 'Used quota' : '7-day consumption')}
             </TableHead>
             <TableHead>{t('Last activity')}</TableHead>
+            {!isChannel && <TableHead>{t('Survival time')}</TableHead>}
             <TableHead className='pe-6 text-right'>{t('Available')}</TableHead>
           </TableRow>
         </TableHeader>
@@ -551,6 +580,7 @@ function AccountTable(props: {
               (value, index, values): value is string =>
                 Boolean(value) && values.indexOf(value) === index
             )
+            const survivalSeconds = isChannel ? null : getSurvivalSeconds(item)
             return (
               <TableRow key={`${instance.id}:${item.id}`}>
                 <TableCell className='ps-6'>
@@ -605,6 +635,22 @@ function AccountTable(props: {
                     </p>
                   )}
                 </TableCell>
+                {!isChannel && (
+                  <TableCell className='whitespace-nowrap'>
+                    <p className='text-sm font-medium tabular-nums'>
+                      {formatSurvivalDuration(survivalSeconds, t)}
+                    </p>
+                    {survivalSeconds != null && (
+                      <p className='text-muted-foreground text-xs'>
+                        {t(
+                          item.enabled === false
+                            ? 'Until last call'
+                            : 'Still active'
+                        )}
+                      </p>
+                    )}
+                  </TableCell>
+                )}
                 <TableCell className='pe-6 text-right'>
                   <AvailabilityBadge enabled={item.enabled} />
                   {item.error_message && (
@@ -703,9 +749,14 @@ function SegmentedControl<T extends string>(props: {
   )
 }
 
-function TableSkeleton() {
+function TableSkeleton(props: { wide: boolean }) {
   return (
-    <div className='grid min-w-[980px] gap-px'>
+    <div
+      className={cn(
+        'grid gap-px',
+        props.wide ? 'min-w-[1140px]' : 'min-w-[980px]'
+      )}
+    >
       {['first', 'second', 'third', 'fourth'].map((key) => (
         <div key={key} className='flex h-16 items-center gap-8 px-6'>
           <Skeleton className='h-4 w-36' />
