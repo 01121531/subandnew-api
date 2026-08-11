@@ -1295,6 +1295,7 @@
     "Fleet health": "实例健康分布",
     "Current instance status distribution": "当前所有实例的状态分布",
     "Resource inventory": "资源盘点",
+    "Account management": "账号管理",
     "Collection coverage": "采集覆盖率",
     "No inventory data": "暂无资源盘点数据",
     "Version distribution": "版本分布",

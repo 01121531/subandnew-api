@@ -21,7 +21,6 @@ import { Link } from '@tanstack/react-router'
 import {
   Activity,
   AlertTriangle,
-  Boxes,
   Building2,
   CheckCircle2,
   CircleDollarSign,
@@ -31,7 +30,7 @@ import {
   RefreshCw,
   Server,
   ServerOff,
-  Waypoints,
+  Users,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -117,11 +116,6 @@ type ResourceData = {
   enabled: number
 }
 
-type VersionData = {
-  version: string
-  count: number
-}
-
 type DailyUsageData = {
   date: string
   value: number
@@ -155,7 +149,7 @@ const KPI_SKELETON_KEYS = [
   'alerts',
   'coverage',
 ]
-const PANEL_SKELETON_KEYS = ['resources', 'versions', 'alerts']
+const PANEL_SKELETON_KEYS = ['accounts', 'alerts']
 
 const compactNumber = new Intl.NumberFormat(undefined, {
   notation: 'compact',
@@ -525,18 +519,6 @@ export function FleetDashboard() {
       .map(([kind, value]) => ({ kind, ...value }))
       .sort((a, b) => b.total - a.total)
   }, [rows])
-  const versionData = useMemo<VersionData[]>(() => {
-    const counts = new Map<string, number>()
-    for (const instance of instances) {
-      const version = instance.version || t('Unknown')
-      counts.set(version, (counts.get(version) ?? 0) + 1)
-    }
-    return [...counts.entries()]
-      .map(([version, count]) => ({ version, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6)
-  }, [instances, t])
-
   const isRefreshing =
     instancesQuery.isFetching ||
     alertsQuery.isFetching ||
@@ -638,7 +620,6 @@ export function FleetDashboard() {
         chartData={chartData}
         dailyUsageData={dailyUsageData}
         resourceData={resourceData}
-        versionData={versionData}
         healthRate={healthRate}
         coverage={coverage}
         metricCoverage={metricCoverage}
@@ -786,7 +767,6 @@ type DashboardContentProps = {
   chartData: { name: string; value: number }[]
   dailyUsageData: DailyUsageData[]
   resourceData: ResourceData[]
-  versionData: VersionData[]
   healthRate: number
   coverage: number
   metricCoverage: number
@@ -813,9 +793,11 @@ function DashboardContent(props: DashboardContentProps) {
         />
         <HealthPanel data={props.healthData} total={props.instances.length} />
       </section>
-      <section className='grid gap-4 lg:grid-cols-3'>
-        <ResourcePanel data={props.resourceData} coverage={props.coverage} />
-        <VersionPanel data={props.versionData} total={props.instances.length} />
+      <section className='grid gap-4 lg:grid-cols-2'>
+        <AccountManagementPanel
+          data={props.resourceData}
+          coverage={props.coverage}
+        />
         <AlertsPanel
           alerts={props.openAlerts}
           instances={props.instances}
@@ -1163,14 +1145,17 @@ function HealthPanel({ data, total }: { data: HealthData[]; total: number }) {
   )
 }
 
-function ResourcePanel(props: { data: ResourceData[]; coverage: number }) {
+function AccountManagementPanel(props: {
+  data: ResourceData[]
+  coverage: number
+}) {
   const { t } = useTranslation()
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader className={PANEL_HEADER_CLASS}>
         <CardTitle className='flex items-center gap-2'>
-          <Boxes className='text-muted-foreground size-4' />
-          {t('Resource inventory')}
+          <Users className='text-muted-foreground size-4' />
+          {t('Account management')}
         </CardTitle>
       </CardHeader>
       <CardContent className='grid gap-4 py-4'>
@@ -1206,42 +1191,6 @@ function ResourcePanel(props: { data: ResourceData[]; coverage: number }) {
           </span>
           <span className='font-medium tabular-nums'>{props.coverage}%</span>
         </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function VersionPanel(props: { data: VersionData[]; total: number }) {
-  const { t } = useTranslation()
-  return (
-    <Card className={PANEL_CARD_CLASS}>
-      <CardHeader className={PANEL_HEADER_CLASS}>
-        <CardTitle className='flex items-center gap-2'>
-          <Waypoints className='text-muted-foreground size-4' />
-          {t('Version distribution')}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className='grid gap-3 py-4'>
-        {props.data.map((item) => {
-          const percent = Math.round((item.count / props.total) * 100)
-          return (
-            <div key={item.version} className='grid gap-1.5'>
-              <div className='flex items-center justify-between gap-3 text-sm'>
-                <span className='truncate font-mono text-xs'>
-                  {item.version}
-                </span>
-                <span className='text-muted-foreground shrink-0 tabular-nums'>
-                  {item.count} · {percent}%
-                </span>
-              </div>
-              <Progress
-                value={percent}
-                aria-label={`${item.version}: ${percent}%`}
-                className='h-1.5'
-              />
-            </div>
-          )
-        })}
       </CardContent>
     </Card>
   )
@@ -1561,7 +1510,7 @@ function DashboardSkeleton() {
         <Skeleton className='h-[380px] rounded-lg' />
         <Skeleton className='h-[380px] rounded-lg' />
       </div>
-      <div className='grid gap-4 lg:grid-cols-3'>
+      <div className='grid gap-4 lg:grid-cols-2'>
         {PANEL_SKELETON_KEYS.map((key) => (
           <Skeleton key={key} className='h-64 rounded-lg' />
         ))}
