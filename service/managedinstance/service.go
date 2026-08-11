@@ -16,6 +16,7 @@ import (
 var (
 	ErrInvalidInstance           = errors.New("invalid managed instance")
 	ErrInstanceNotFound          = errors.New("managed instance not found")
+	ErrInstanceAlreadyExists     = errors.New("managed instance already exists")
 	ErrConnectionChangeForbidden = errors.New("managed instance connection change requires secret rotation permission")
 	ErrWriteModeForbidden        = errors.New("managed instance write mode requires root permission")
 )
@@ -140,6 +141,15 @@ func Create(input CreateInput) (*InstanceView, error) {
 		instance.LastCheckedAt = input.Preflight.CheckedAt
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		var duplicateCount int64
+		if err := tx.Model(&model.ManagedInstance{}).
+			Where("name = ? OR base_url = ?", instance.Name, instance.BaseURL).
+			Count(&duplicateCount).Error; err != nil {
+			return err
+		}
+		if duplicateCount > 0 {
+			return ErrInstanceAlreadyExists
+		}
 		if err := tx.Create(instance).Error; err != nil {
 			return err
 		}

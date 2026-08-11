@@ -129,6 +129,30 @@ func TestManagedInstanceWriteModeRequiresExplicitRootAuthorization(t *testing.T)
 	require.ErrorIs(t, err, ErrWriteModeForbidden)
 }
 
+func TestCreateRejectsDuplicateNameOrBaseURL(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	_, err := Create(CreateInput{
+		Name: "primary", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://api.example.com",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+	})
+	require.NoError(t, err)
+
+	tests := []CreateInput{
+		{
+			Name: "primary", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://other.example.com",
+			Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+		},
+		{
+			Name: "secondary", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://api.example.com/",
+			Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, ActorID: 1,
+		},
+	}
+	for _, input := range tests {
+		_, err := Create(input)
+		require.ErrorIs(t, err, ErrInstanceAlreadyExists)
+	}
+}
+
 func TestManagedInstanceListDoesNotSearchHiddenConnectionByDefault(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	_, err := Create(CreateInput{

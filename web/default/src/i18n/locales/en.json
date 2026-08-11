@@ -1341,6 +1341,7 @@
     "Invalid administrator account or password.": "Invalid administrator account or password.",
     "This administrator account requires two-factor authentication.": "This administrator account requires two-factor authentication.",
     "The target did not return a supported New API or Sub2API response.": "The target did not return a supported New API or Sub2API response.",
-    "Failed to add instance": "Failed to add instance"
+    "Failed to add instance": "Failed to add instance",
+    "This instance already exists. Refresh the instance list.": "This instance already exists. Refresh the instance list."
   }
 }

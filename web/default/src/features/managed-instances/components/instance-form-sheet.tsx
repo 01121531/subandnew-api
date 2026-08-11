@@ -124,6 +124,8 @@ function createInstanceErrorMessage(error: unknown) {
   const message = (error as { response?: { data?: { message?: string } } })
     .response?.data?.message
   switch (message) {
+    case 'managed instance already exists':
+      return 'This instance already exists. Refresh the instance list.'
     case 'target_blocked':
       return 'The target address is blocked by the outbound security policy.'
     case 'authentication_failed':

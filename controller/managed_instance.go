@@ -406,6 +406,8 @@ func managedInstanceError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrInstanceNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": managedinstance.ErrInstanceNotFound.Error()})
+	case errors.Is(err, managedinstance.ErrInstanceAlreadyExists):
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrConnectionChangeForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrWriteModeForbidden):

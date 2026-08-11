@@ -1342,6 +1342,7 @@
     "Invalid administrator account or password.": "管理员账号或密码不正确。",
     "This administrator account requires two-factor authentication.": "该管理员账号已启用两步验证，暂时无法自动接入。",
     "The target did not return a supported New API or Sub2API response.": "目标站点未返回受支持的 New API 或 Sub2API 响应。",
-    "Failed to add instance": "添加实例失败"
+    "Failed to add instance": "添加实例失败",
+    "This instance already exists. Refresh the instance list.": "该实例已存在，请刷新实例列表。"
   }
 }
