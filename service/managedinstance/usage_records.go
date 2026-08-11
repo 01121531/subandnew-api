@@ -179,25 +179,25 @@ func newUsageRecordClient(instanceID int64) (*usageRecordClient, error) {
 
 func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*UsageRecordPage, error) {
 	var endpoint string
-	var headers http.Header
+	var response *ConnectorResponse
 	var err error
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
 		endpoint = "/api/v1/admin/usage?" + query.Encode()
 		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
 			endpoint = "/api/v1/usage?" + query.Encode()
 		}
-		headers, err = sub2APIAuthHeaders(ctx, client.connector, client.credential)
+		response, err = sub2APIDoJSON(ctx, client.connector, client.credential, http.MethodGet, endpoint, nil)
 	} else {
 		endpoint = "/api/log/?" + query.Encode()
 		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
 			endpoint = "/api/log/self?" + query.Encode()
 		}
+		var headers http.Header
 		headers, err = newAPIAuthHeaders(ctx, client.connector, client.instance.Kind, client.credential)
+		if err == nil {
+			response, err = client.connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
+		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	response, err := client.connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -284,10 +284,6 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 }
 
 func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
-	headers, err := sub2APIAuthHeaders(ctx, client.connector, client.credential)
-	if err != nil {
-		return nil, err
-	}
 	summaryQuery := url.Values{}
 	for _, key := range []string{"start_date", "end_date", "timezone"} {
 		if value := query.Get(key); value != "" {
@@ -310,7 +306,7 @@ func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Valu
 		summaryQuery.Del("include_stats")
 		summaryQuery.Set("include_trend", "true")
 	}
-	response, err := client.connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), headers, nil)
+	response, err := sub2APIDoJSON(ctx, client.connector, client.credential, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

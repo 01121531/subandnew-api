@@ -2,6 +2,7 @@ package managedinstance
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 )
@@ -228,6 +231,16 @@ func loginNewAPI(ctx context.Context, connector *Connector, kind string, credent
 
 type sub2APIAdapter struct{}
 
+type sub2APISession struct {
+	mu          sync.Mutex
+	accessToken string
+	expiresAt   time.Time
+}
+
+const sub2APISessionTTL = 5 * time.Minute
+
+var sub2APISessions sync.Map
+
 func (sub2APIAdapter) Kind() string { return model.ManagedInstanceKindSub2API }
 
 func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credential *CredentialMaterial) (*ProbeResult, error) {
@@ -374,6 +387,14 @@ func loginSub2API(ctx context.Context, connector *Connector, credential *Credent
 	if email == "" {
 		return nil, &ProbeError{Code: ProbeErrorAuthentication}
 	}
+	key := sub2APISessionKey(connector, credential)
+	stateValue, _ := sub2APISessions.LoadOrStore(key, &sub2APISession{})
+	state := stateValue.(*sub2APISession)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.accessToken != "" && time.Now().Before(state.expiresAt) {
+		return sub2APIBearerHeaders(state.accessToken), nil
+	}
 	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/v1/auth/login", nil, map[string]string{
 		"email":    email,
 		"password": credential.Secret,
@@ -400,9 +421,56 @@ func loginSub2API(ctx context.Context, connector *Connector, credential *Credent
 	if strings.TrimSpace(envelope.Data.AccessToken) == "" {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
+	state.accessToken = strings.TrimSpace(envelope.Data.AccessToken)
+	state.expiresAt = time.Now().Add(sub2APISessionTTL)
+	return sub2APIBearerHeaders(state.accessToken), nil
+}
+
+func sub2APIBearerHeaders(accessToken string) http.Header {
 	headers := make(http.Header)
-	headers.Set("Authorization", "Bearer "+envelope.Data.AccessToken)
-	return headers, nil
+	headers.Set("Authorization", "Bearer "+accessToken)
+	return headers
+}
+
+func sub2APISessionKey(connector *Connector, credential *CredentialMaterial) string {
+	baseURL := ""
+	if connector != nil && connector.baseURL != nil {
+		baseURL = connector.baseURL.String()
+	}
+	fingerprint := sha256.Sum256([]byte(credential.Secret))
+	return baseURL + "\x00" + strings.ToLower(strings.TrimSpace(credential.UserID)) + "\x00" + fmt.Sprintf("%x", fingerprint)
+}
+
+func invalidateSub2APISession(connector *Connector, credential *CredentialMaterial, accessToken string) {
+	stateValue, ok := sub2APISessions.Load(sub2APISessionKey(connector, credential))
+	if !ok {
+		return
+	}
+	state := stateValue.(*sub2APISession)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.accessToken == accessToken {
+		state.accessToken = ""
+		state.expiresAt = time.Time{}
+	}
+}
+
+func sub2APIDoJSON(ctx context.Context, connector *Connector, credential *CredentialMaterial, method string, path string, requestBody any) (*ConnectorResponse, error) {
+	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return nil, err
+	}
+	response, err := connector.DoJSON(ctx, method, path, headers, requestBody)
+	if err != nil || credential.AuthType != "account_password" || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+		return response, err
+	}
+	accessToken := strings.TrimPrefix(headers.Get("Authorization"), "Bearer ")
+	invalidateSub2APISession(connector, credential, accessToken)
+	headers, err = sub2APIAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return nil, err
+	}
+	return connector.DoJSON(ctx, method, path, headers, requestBody)
 }
 
 type genericAdapter struct{}

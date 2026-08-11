@@ -3,9 +3,12 @@ package managedinstance
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/01121531/subandnew-api/model"
@@ -118,6 +121,70 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 30.0, summary.TotalTokens)
 	require.Equal(t, 0.5, summary.Amount)
+}
+
+func TestSub2AccountPasswordReusesAndRefreshesConcurrentSession(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	var currentToken atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			token := loginCount.Add(1)
+			currentToken.Store(token)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"access_token":"token-%d"}}`, token))
+		case "/api/v1/admin/usage", "/api/v1/admin/dashboard/snapshot-v2":
+			expected := fmt.Sprintf("Bearer token-%d", currentToken.Load())
+			if request.Header.Get("Authorization") != expected {
+				response.WriteHeader(http.StatusUnauthorized)
+				writeProbeJSON(response, `{"code":401,"message":"token expired"}`)
+				return
+			}
+			if request.URL.Path == "/api/v1/admin/usage" {
+				writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":0,"page":1,"page_size":20}}`)
+				return
+			}
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[]}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{
+		AuthType: "account_password", AccessScope: model.ManagedInstanceAccessAdmin,
+		Secret: "password", UserID: "channel@example.com",
+	})
+
+	const requestCount = 12
+	errors := make(chan error, requestCount)
+	var requests sync.WaitGroup
+	for index := range requestCount {
+		requests.Add(1)
+		go func() {
+			defer requests.Done()
+			if index%2 == 0 {
+				_, err := ListUsageRecords(context.Background(), instance.Id, nil)
+				errors <- err
+				return
+			}
+			_, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+				"start_date": {"2026-08-10"}, "end_date": {"2026-08-11"}, "timezone": {"Asia/Shanghai"},
+			})
+			errors <- err
+		}()
+	}
+	requests.Wait()
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(1), loginCount.Load())
+
+	currentToken.Store(99)
+	_, err := ListUsageRecords(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), loginCount.Load())
 }
 
 func TestGetUsageRecordSummaryUsesNativeNewAPIData(t *testing.T) {
