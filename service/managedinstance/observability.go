@@ -172,7 +172,11 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 	if err != nil {
 		return nil, err
 	}
-	response, err := connector.DoJSON(ctx, http.MethodGet, inventoryEndpoint("/api/v1/admin/accounts", cursor), headers, nil)
+	endpoint, pageNumber, err := sub2InventoryEndpoint(cursor)
+	if err != nil {
+		return nil, err
+	}
+	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +184,14 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 	if err != nil {
 		return nil, err
 	}
-	return normalizeInventoryPage("account", data)
+	page, err := normalizeInventoryPage("account", data)
+	if err != nil {
+		return nil, err
+	}
+	if page.NextCursor == "" {
+		page.NextCursor = sub2NextPageCursor(data, pageNumber)
+	}
+	return page, nil
 }
 
 func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector, credential *CredentialMaterial, window TimeWindow) (*SummaryResult, error) {
@@ -344,14 +355,55 @@ func newAPIInventoryEndpoint(page int) string {
 	return "/api/channel/?" + query.Encode()
 }
 
-func inventoryEndpoint(path string, cursor string) string {
-	cursor = strings.TrimSpace(cursor)
-	if cursor == "" {
-		return path
+func sub2InventoryEndpoint(cursor string) (string, int, error) {
+	page, err := sub2PageNumber(cursor)
+	if err != nil {
+		return "", 0, err
 	}
 	query := url.Values{}
-	query.Set("cursor", cursor)
-	return path + "?" + query.Encode()
+	query.Set("page", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(managedInstanceInventoryPageSize))
+	return "/api/v1/admin/accounts?" + query.Encode(), page, nil
+}
+
+func sub2PageNumber(cursor string) (int, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return 1, nil
+	}
+	const prefix = "sub2api:"
+	if !strings.HasPrefix(cursor, prefix) {
+		return 0, ErrInvalidInstance
+	}
+	page, err := strconv.Atoi(strings.TrimPrefix(cursor, prefix))
+	if err != nil || page < 2 || page > managedInstanceInventoryMaxPages {
+		return 0, ErrInvalidInstance
+	}
+	return page, nil
+}
+
+func sub2NextPageCursor(data json.RawMessage, requestedPage int) string {
+	var page struct {
+		Page     int `json:"page"`
+		PageSize int `json:"page_size"`
+		Pages    int `json:"pages"`
+		Total    int `json:"total"`
+	}
+	if json.Unmarshal(data, &page) != nil {
+		return ""
+	}
+	currentPage := page.Page
+	if currentPage <= 0 {
+		currentPage = requestedPage
+	}
+	totalPages := page.Pages
+	if totalPages <= 0 && page.PageSize > 0 && page.Total > 0 {
+		totalPages = (page.Total + page.PageSize - 1) / page.PageSize
+	}
+	if currentPage < totalPages {
+		return fmt.Sprintf("sub2api:%d", currentPage+1)
+	}
+	return ""
 }
 
 func CollectSummary(ctx context.Context, instanceID int64, window TimeWindow) (*ObservationView, error) {

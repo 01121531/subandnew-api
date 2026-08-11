@@ -78,6 +78,39 @@ func TestCollectInventoryAggregatesNewAPIPagesIntoConflictBaseline(t *testing.T)
 	require.Contains(t, snapshot.Payload, `"id":101`)
 }
 
+func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	requestedPages := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/accounts", request.URL.Path)
+		require.Equal(t, "100", request.URL.Query().Get("page_size"))
+		page := request.URL.Query().Get("page")
+		requestedPages = append(requestedPages, page)
+		switch page {
+		case "1":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"name":"first"}],"total":3,"page":1,"page_size":1,"pages":3}}`)
+		case "2":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":2,"name":"second"}],"total":3,"page":2,"page_size":1,"pages":3}}`)
+		case "3":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":3,"name":"third"}],"total":3,"page":3,"page_size":1,"pages":3}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "account", "")
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, view.CollectionStatus)
+	require.Equal(t, []string{"1", "2", "3"}, requestedPages)
+	page := view.Data.(*InventoryPage)
+	require.Equal(t, 3, page.Total)
+	require.Len(t, page.Items, 3)
+	require.Empty(t, page.NextCursor)
+}
+
 func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
