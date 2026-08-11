@@ -12,6 +12,7 @@ import {
   Server,
   ServerCog,
   Settings,
+  Users,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -55,6 +56,11 @@ export function useSidebarData(): SidebarData {
                   title: t('Instance center'),
                   url: '/instances',
                   icon: Server,
+                },
+                {
+                  title: t('Account management'),
+                  url: '/account-management',
+                  icon: Users,
                 },
               ]
             : []),

@@ -30,6 +30,7 @@ import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
+import { Route as AuthenticatedAccountManagementIndexRouteImport } from './routes/_authenticated/account-management/index'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedSystemSettingsSiteIndexRouteImport } from './routes/_authenticated/system-settings/site/index'
@@ -147,6 +148,12 @@ const AuthenticatedDashboardIndexRoute =
     path: '/dashboard/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAccountManagementIndexRoute =
+  AuthenticatedAccountManagementIndexRouteImport.update({
+    id: '/account-management/',
+    path: '/account-management/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedInstancesIdRoute =
   AuthenticatedInstancesIdRouteImport.update({
     id: '/instances/$id',
@@ -199,6 +206,7 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
@@ -225,6 +233,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/account-management': typeof AuthenticatedAccountManagementIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
@@ -255,6 +264,7 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/_authenticated/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
@@ -284,6 +294,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/errors/$error'
     | '/instances/$id'
+    | '/account-management/'
     | '/dashboard/'
     | '/instances/'
     | '/profile/'
@@ -310,6 +321,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/errors/$error'
     | '/instances/$id'
+    | '/account-management'
     | '/dashboard'
     | '/instances'
     | '/profile'
@@ -339,6 +351,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/_authenticated/errors/$error'
     | '/_authenticated/instances/$id'
+    | '/_authenticated/account-management/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/instances/'
     | '/_authenticated/profile/'
@@ -514,6 +527,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/account-management/': {
+      id: '/_authenticated/account-management/'
+      path: '/account-management'
+      fullPath: '/account-management/'
+      preLoaderRoute: typeof AuthenticatedAccountManagementIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/instances/$id': {
       id: '/_authenticated/instances/$id'
       path: '/instances/$id'
@@ -606,6 +626,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
+  AuthenticatedAccountManagementIndexRoute: typeof AuthenticatedAccountManagementIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
@@ -619,6 +640,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedInstancesIdRoute: AuthenticatedInstancesIdRoute,
+  AuthenticatedAccountManagementIndexRoute:
+    AuthenticatedAccountManagementIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
