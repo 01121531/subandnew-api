@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-type ManagedInstanceKind = 'new_api' | 'huichuan' | 'sub2api' | 'generic'
+type ManagedInstanceKind =
+  | 'new_api'
+  | 'huichuan'
+  | 'sub2api'
+  | 'conductor'
+  | 'generic'
 export type ManagedInstanceStatus =
   | 'unknown'
   | 'healthy'

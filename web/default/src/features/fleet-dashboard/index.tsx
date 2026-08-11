@@ -97,7 +97,7 @@ import {
 import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
-type FleetFamily = 'new_api' | 'sub2api'
+type FleetFamily = 'new_api' | 'sub2api' | 'conductor'
 
 type InstanceMetricRow = {
   instance: ManagedInstance
@@ -128,7 +128,11 @@ type HealthData = {
 }
 
 const LIVE_REFRESH_MS = 15_000
-const FLEET_FAMILIES: readonly FleetFamily[] = ['new_api', 'sub2api']
+const FLEET_FAMILIES: readonly FleetFamily[] = [
+  'new_api',
+  'sub2api',
+  'conductor',
+]
 const ALL_SITES_VALUE = 'all'
 const DASHBOARD_PREFERENCES_KEY = 'fleet-dashboard-preferences-v1'
 const PANEL_CARD_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
@@ -193,6 +197,7 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
     selectedInstances: {
       new_api: ALL_SITES_VALUE,
       sub2api: ALL_SITES_VALUE,
+      conductor: ALL_SITES_VALUE,
     },
     timeRange: createFleetPresetRange(7),
     metric: 'requests',
@@ -200,7 +205,7 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
 }
 
 function isFleetFamily(value: unknown): value is FleetFamily {
-  return value === 'new_api' || value === 'sub2api'
+  return FLEET_FAMILIES.some((family) => family === value)
 }
 
 function isMetricKey(value: unknown): value is MetricKey {
@@ -250,6 +255,10 @@ function readDashboardPreferences(): FleetDashboardPreferences {
           typeof parsed.selectedInstances?.sub2api === 'string'
             ? parsed.selectedInstances.sub2api
             : ALL_SITES_VALUE,
+        conductor:
+          typeof parsed.selectedInstances?.conductor === 'string'
+            ? parsed.selectedInstances.conductor
+            : ALL_SITES_VALUE,
       },
       timeRange,
       metric: isMetricKey(parsed.metric) ? parsed.metric : fallback.metric,
@@ -297,11 +306,14 @@ function metricLabel(metric: MetricKey, family: FleetFamily) {
 }
 
 function familyLabel(family: FleetFamily) {
-  return family === 'sub2api' ? 'Sub2API' : 'New API'
+  if (family === 'sub2api') return 'Sub2API'
+  if (family === 'conductor') return 'Conductor'
+  return 'New API'
 }
 
 function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
   if (family === 'sub2api') return instance.kind === 'sub2api'
+  if (family === 'conductor') return instance.kind === 'conductor'
   return instance.kind === 'new_api' || instance.kind === 'huichuan'
 }
 
@@ -500,14 +512,19 @@ export function FleetDashboard() {
       sub2api: allInstances.filter((instance) =>
         belongsToFamily(instance, 'sub2api')
       ).length,
+      conductor: allInstances.filter((instance) =>
+        belongsToFamily(instance, 'conductor')
+      ).length,
     }),
     [allInstances]
   )
 
   useEffect(() => {
     if (!instancesQuery.isSuccess || familyCounts[family] > 0) return
-    const nextFamily = family === 'new_api' ? 'sub2api' : 'new_api'
-    if (familyCounts[nextFamily] > 0) setFamily(nextFamily)
+    const nextFamily = FLEET_FAMILIES.find(
+      (candidate) => familyCounts[candidate] > 0
+    )
+    if (nextFamily) setFamily(nextFamily)
   }, [family, familyCounts, instancesQuery.isSuccess])
 
   useEffect(() => {

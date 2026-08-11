@@ -260,6 +260,9 @@ export function ManagedInstances() {
                   HUICHUAN-AI
                 </NativeSelectOption>
                 <NativeSelectOption value='sub2api'>Sub2API</NativeSelectOption>
+                <NativeSelectOption value='conductor'>
+                  Conductor
+                </NativeSelectOption>
                 <NativeSelectOption value='generic'>
                   {t('Generic')}
                 </NativeSelectOption>

@@ -165,6 +165,39 @@ func TestProbeGenericDetectsSub2APIAndLogsInWithAccountPassword(t *testing.T) {
 	require.Equal(t, "0.1.125", result.Version)
 }
 
+func TestProbeGenericDetectsConductorAndLogsInWithAccountPassword(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status", "/health":
+			response.Header().Set("Content-Type", "text/html")
+			_, _ = response.Write([]byte("<html>Conductor</html>"))
+		case "/api/v1/auth/login":
+			var input map[string]string
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			require.Equal(t, "Cli@mini", input["username"])
+			require.Equal(t, "password", input["password"])
+			writeProbeJSON(response, `{"code":200,"message":"success","data":{"token":"conductor-token","user_id":1}}`)
+		case "/api/v1/system/health":
+			require.Equal(t, "Bearer conductor-token", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"code":200,"message":"success","data":{"status":"ok","accounts_total":2,"accounts_available":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "Cli@mini",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindConductor, result.Kind)
+	require.Equal(t, "Conductor", result.SystemName)
+	require.Contains(t, result.Capabilities, "accounts.list")
+}
+
 func TestProbeAuthenticationFailureUpdatesStateAndRedactedAudit(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

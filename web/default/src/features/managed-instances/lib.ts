@@ -22,6 +22,7 @@ export const MANAGED_INSTANCE_KINDS = [
   { value: 'new_api', label: 'New API' },
   { value: 'huichuan', label: 'HUICHUAN-AI' },
   { value: 'sub2api', label: 'Sub2API' },
+  { value: 'conductor', label: 'Conductor' },
   { value: 'generic', label: 'Generic' },
 ] as const
 

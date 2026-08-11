@@ -199,6 +199,47 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
 }
 
+func TestConductorInventoryAndSummary(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":200,"data":{"token":"conductor-token"}}`)
+		case "/api/v1/accounts":
+			require.Equal(t, "Bearer conductor-token", request.Header.Get("Authorization"))
+			require.Equal(t, "0", request.URL.Query().Get("offset"))
+			require.Equal(t, "100", request.URL.Query().Get("limit"))
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"101","email":"one@example.com","label":"Primary","auth_type":"oauth","health":"Healthy","available":true},{"account_id":"102","email":"two@example.com","auth_type":"oauth","status":"Paused","available":false}],"total":2}}`)
+		case "/api/v1/system/health":
+			writeProbeJSON(response, `{"code":200,"data":{"status":"ok","accounts_total":2,"accounts_available":1,"accounts_paused":1,"accounts_rejected":0}}`)
+		case "/api/v1/system/stats":
+			writeProbeJSON(response, `{"code":200,"data":{"usage":{"recorded":7}}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "Cli@mini",
+	})
+
+	inventoryView, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	inventory := inventoryView.Data.(*InventoryPage)
+	require.Equal(t, 2, inventory.Total)
+	require.Equal(t, "Primary", inventory.Items[0].Name)
+	require.True(t, *inventory.Items[0].Enabled)
+
+	summaryView, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: 100, End: 200})
+	require.NoError(t, err)
+	summary := summaryView.Data.(*SummaryResult)
+	require.Equal(t, 2, summary.Resources[0].Total)
+	require.Equal(t, 1, *summary.Resources[0].Enabled)
+	require.Equal(t, 1, *summary.Resources[0].Unhealthy)
+	require.Equal(t, 7.0, *summary.Requests.Value)
+}
+
 func TestCollectInventoryPersistsFailureWithoutSyntheticCounts(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

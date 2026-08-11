@@ -63,6 +63,8 @@ func adapterForKind(kind string) (InstanceAdapter, error) {
 		return newAPIAdapter{configuredKind: kind}, nil
 	case model.ManagedInstanceKindSub2API:
 		return sub2APIAdapter{}, nil
+	case model.ManagedInstanceKindConductor:
+		return conductorAdapter{}, nil
 	case model.ManagedInstanceKindGeneric:
 		return genericAdapter{}, nil
 	default:
@@ -338,11 +340,23 @@ func (genericAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	if newAPIErr == nil {
 		return result, nil
 	}
-	var probeErr *ProbeError
-	if !errors.As(newAPIErr, &probeErr) || (probeErr.StatusCode != http.StatusNotFound && probeErr.Code != ProbeErrorInvalidResponse) {
+	if !canTryNextGenericAdapter(newAPIErr) {
 		return nil, newAPIErr
 	}
-	return (sub2APIAdapter{}).Probe(ctx, connector, credential)
+	result, sub2APIErr := (sub2APIAdapter{}).Probe(ctx, connector, credential)
+	if sub2APIErr == nil {
+		return result, nil
+	}
+	if !canTryNextGenericAdapter(sub2APIErr) {
+		return nil, sub2APIErr
+	}
+	return (conductorAdapter{}).Probe(ctx, connector, credential)
+}
+
+func canTryNextGenericAdapter(err error) bool {
+	var probeErr *ProbeError
+	return errors.As(err, &probeErr) &&
+		(probeErr.StatusCode == http.StatusNotFound || probeErr.Code == ProbeErrorInvalidResponse)
 }
 
 func probeHTTPError(statusCode int) error {
