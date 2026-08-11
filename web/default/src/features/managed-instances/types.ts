@@ -145,13 +145,23 @@ export interface ManagedInstanceObservation<T> {
   data?: T
 }
 
-interface ManagedInstanceInventoryItem {
+export interface ManagedInstanceInventoryItem {
   id: number
   name: string
   type?: string
+  platform?: string
   group?: string
   status?: string
   enabled?: boolean
+  created_at?: number
+  last_activity_at?: number
+  requests?: number
+  tokens?: number
+  cost?: number
+  cost_unit?: 'usd' | 'quota'
+  balance?: number
+  response_time_ms?: number
+  error_message?: string
 }
 
 export interface ManagedInstanceInventoryPage {

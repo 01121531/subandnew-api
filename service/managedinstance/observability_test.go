@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,7 @@ func TestCollectInventoryNormalizesAndRedactsRemoteRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/api/channel/", request.URL.Path)
 		require.Equal(t, "Bearer inventory-secret", request.Header.Get("Authorization"))
-		writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":7,"name":"primary","type":"openai","group":"default","status":1,"key":"must-not-leak","password":"must-not-leak"}],"total":1}}`)
+		writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":7,"name":"primary","type":1,"group":"default","status":1,"created_time":1723100000,"test_time":1723100300,"response_time":245,"balance":12.5,"used_quota":4096,"key":"must-not-leak","password":"must-not-leak"}],"total":1}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "inventory-secret"})
@@ -33,6 +34,13 @@ func TestCollectInventoryNormalizesAndRedactsRemoteRows(t *testing.T) {
 	require.Len(t, page.Items, 1)
 	require.Equal(t, int64(7), page.Items[0].ID)
 	require.Equal(t, "primary", page.Items[0].Name)
+	require.Equal(t, "1", page.Items[0].Type)
+	require.Equal(t, int64(1723100000), page.Items[0].CreatedAt)
+	require.Equal(t, int64(1723100300), page.Items[0].LastActivityAt)
+	require.Equal(t, int64(245), *page.Items[0].ResponseTimeMS)
+	require.Equal(t, 12.5, *page.Items[0].Balance)
+	require.Equal(t, 4096.0, *page.Items[0].Cost)
+	require.Equal(t, "quota", page.Items[0].CostUnit)
 	require.NotNil(t, page.Items[0].Enabled)
 	require.True(t, *page.Items[0].Enabled)
 
@@ -83,15 +91,25 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	requestedPages := make([]string, 0, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/admin/accounts/today-stats/batch" {
+			var input struct {
+				AccountIDs []int64 `json:"account_ids"`
+			}
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			require.Len(t, input.AccountIDs, 1)
+			id := input.AccountIDs[0]
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"stats":{"%d":{"requests":%d,"tokens":%d,"cost":%.2f}}}}`, id, id*10, id*1000, float64(id)/10))
+			return
+		}
 		require.Equal(t, "/api/v1/admin/accounts", request.URL.Path)
 		require.Equal(t, "100", request.URL.Query().Get("page_size"))
 		page := request.URL.Query().Get("page")
 		requestedPages = append(requestedPages, page)
 		switch page {
 		case "1":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"name":"first"}],"total":3,"page":1,"page_size":1,"pages":3}}`)
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"name":"first","platform":"claude","type":"oauth","status":"active","schedulable":true,"created_at":"2026-08-01T10:00:00Z","last_used_at":"2026-08-10T12:30:00Z"}],"total":3,"page":1,"page_size":1,"pages":3}}`)
 		case "2":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":2,"name":"second"}],"total":3,"page":2,"page_size":1,"pages":3}}`)
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":2,"name":"second","platform":"openai","type":"apikey","status":"active","schedulable":false,"created_at":"2026-08-02T10:00:00Z","error_message":"rate limited"}],"total":3,"page":2,"page_size":1,"pages":3}}`)
 		case "3":
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":3,"name":"third"}],"total":3,"page":3,"page_size":1,"pages":3}}`)
 		default:
@@ -109,6 +127,17 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	require.Equal(t, 3, page.Total)
 	require.Len(t, page.Items, 3)
 	require.Empty(t, page.NextCursor)
+	require.Equal(t, "claude", page.Items[0].Platform)
+	require.Equal(t, "oauth", page.Items[0].Type)
+	require.Equal(t, time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC).Unix(), page.Items[0].CreatedAt)
+	require.Equal(t, time.Date(2026, time.August, 10, 12, 30, 0, 0, time.UTC).Unix(), page.Items[0].LastActivityAt)
+	require.True(t, *page.Items[0].Enabled)
+	require.Equal(t, 10.0, *page.Items[0].Requests)
+	require.Equal(t, 1000.0, *page.Items[0].Tokens)
+	require.Equal(t, 0.1, *page.Items[0].Cost)
+	require.Equal(t, "usd", page.Items[0].CostUnit)
+	require.False(t, *page.Items[1].Enabled)
+	require.Equal(t, "rate limited", page.Items[1].ErrorMessage)
 }
 
 func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {

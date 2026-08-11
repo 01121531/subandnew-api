@@ -79,6 +79,7 @@ import { cn } from '@/lib/utils'
 
 import {
   getManagedAlerts,
+  getManagedInstanceInventory,
   getManagedInstanceMetrics,
   getManagedInstances,
 } from '../managed-instances/api'
@@ -86,6 +87,7 @@ import { StatusBadge } from '../managed-instances/components/status-badge'
 import type {
   ManagedInstance,
   ManagedInstanceAlert,
+  ManagedInstanceInventoryItem,
   ManagedInstanceSummary,
 } from '../managed-instances/types'
 import {
@@ -116,6 +118,11 @@ type ResourceData = {
   enabled: number
 }
 
+type AccountResourceRow = {
+  instance: ManagedInstance
+  item: ManagedInstanceInventoryItem
+}
+
 type DailyUsageData = {
   date: string
   value: number
@@ -129,6 +136,7 @@ type HealthData = {
 }
 
 const LIVE_REFRESH_MS = 15_000
+const INVENTORY_REFRESH_MS = 60_000
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
@@ -179,6 +187,10 @@ const trendTooltipDate = new Intl.DateTimeFormat(undefined, {
   month: '2-digit',
   day: '2-digit',
   timeZone: 'UTC',
+})
+const inventoryDateTime = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
 })
 
 const CONSUMPTION_CHART_CONFIG = {
@@ -320,6 +332,18 @@ function formatTrendDate(value: string, full = false) {
   return (full ? trendTooltipDate : trendAxisDate).format(date)
 }
 
+function formatInventoryTimestamp(value?: number) {
+  if (!value) return '--'
+  const date = new Date(value * 1000)
+  return Number.isNaN(date.getTime()) ? '--' : inventoryDateTime.format(date)
+}
+
+function formatInventoryCost(item: ManagedInstanceInventoryItem) {
+  if (item.cost == null) return '--'
+  if (item.cost_unit === 'usd') return exactCurrency.format(item.cost)
+  return exactNumber.format(item.cost)
+}
+
 function metricLabel(metric: MetricKey, family: FleetFamily) {
   switch (metric) {
     case 'requests':
@@ -407,6 +431,16 @@ export function FleetDashboard() {
       retry: false,
       staleTime: LIVE_REFRESH_MS / 2,
       refetchInterval: LIVE_REFRESH_MS,
+      refetchIntervalInBackground: true,
+    })),
+  })
+  const inventoryQueries = useQueries({
+    queries: instances.map((instance) => ({
+      queryKey: ['fleet-dashboard-inventory', instance.id],
+      queryFn: () => getManagedInstanceInventory(instance.id, 'auto', ''),
+      retry: false,
+      staleTime: INVENTORY_REFRESH_MS / 2,
+      refetchInterval: INVENTORY_REFRESH_MS,
       refetchIntervalInBackground: true,
     })),
   })
@@ -519,10 +553,33 @@ export function FleetDashboard() {
       .map(([kind, value]) => ({ kind, ...value }))
       .sort((a, b) => b.total - a.total)
   }, [rows])
+  const accountRows = useMemo<AccountResourceRow[]>(
+    () =>
+      instances.flatMap((instance, index) => {
+        const observation = inventoryQueries[index]?.data?.data
+        if (
+          observation?.collection_status !== 'succeeded' ||
+          !observation.data
+        ) {
+          return []
+        }
+        return observation.data.items.map((item) => ({ instance, item }))
+      }),
+    [instances, inventoryQueries]
+  )
+  const accountLoading = inventoryQueries.some((query) => query.isPending)
+  const accountError = inventoryQueries.some((query) => {
+    const observation = query.data?.data
+    return (
+      query.isError ||
+      (observation != null && observation.collection_status !== 'succeeded')
+    )
+  })
   const isRefreshing =
     instancesQuery.isFetching ||
     alertsQuery.isFetching ||
-    metricQueries.some((query) => query.isFetching)
+    metricQueries.some((query) => query.isFetching) ||
+    inventoryQueries.some((query) => query.isFetching)
   const coverage = instances.length
     ? Math.round((totals.collected / instances.length) * 100)
     : 0
@@ -594,6 +651,7 @@ export function FleetDashboard() {
     void instancesQuery.refetch()
     void alertsQuery.refetch()
     for (const query of metricQueries) void query.refetch()
+    for (const query of inventoryQueries) void query.refetch()
   }
 
   const handleFamilyChange = (nextFamily: FleetFamily) => {
@@ -620,6 +678,9 @@ export function FleetDashboard() {
         chartData={chartData}
         dailyUsageData={dailyUsageData}
         resourceData={resourceData}
+        accountRows={accountRows}
+        accountLoading={accountLoading}
+        accountError={accountError}
         healthRate={healthRate}
         coverage={coverage}
         metricCoverage={metricCoverage}
@@ -767,6 +828,9 @@ type DashboardContentProps = {
   chartData: { name: string; value: number }[]
   dailyUsageData: DailyUsageData[]
   resourceData: ResourceData[]
+  accountRows: AccountResourceRow[]
+  accountLoading: boolean
+  accountError: boolean
   healthRate: number
   coverage: number
   metricCoverage: number
@@ -804,6 +868,12 @@ function DashboardContent(props: DashboardContentProps) {
           error={props.alertsError}
         />
       </section>
+      <AccountDetailsPanel
+        family={props.family}
+        rows={props.accountRows}
+        loading={props.accountLoading}
+        error={props.accountError}
+      />
       <PerformanceTable family={props.family} rows={props.rows} />
     </div>
   )
@@ -1193,6 +1263,195 @@ function AccountManagementPanel(props: {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function AccountDetailsPanel(props: {
+  family: FleetFamily
+  rows: AccountResourceRow[]
+  loading: boolean
+  error: boolean
+}) {
+  const { t } = useTranslation()
+  const isChannel = props.family === 'new_api'
+  const sortedRows = [...props.rows].sort((left, right) => {
+    const availability =
+      Number(right.item.enabled === true) - Number(left.item.enabled === true)
+    if (availability !== 0) return availability
+    return (right.item.created_at ?? 0) - (left.item.created_at ?? 0)
+  })
+
+  let content: ReactNode
+  if (props.loading && sortedRows.length === 0) {
+    content = (
+      <div className='grid min-w-[980px] gap-px'>
+        {['first', 'second', 'third', 'fourth'].map((key) => (
+          <div key={key} className='flex h-14 items-center gap-8 px-6'>
+            <Skeleton className='h-4 w-36' />
+            <Skeleton className='h-4 w-28' />
+            <Skeleton className='h-4 w-24' />
+            <Skeleton className='h-4 w-32' />
+            <Skeleton className='ms-auto h-5 w-16' />
+          </div>
+        ))}
+      </div>
+    )
+  } else if (sortedRows.length === 0) {
+    content = (
+      <PanelEmpty
+        text={
+          props.error
+            ? t('Account data could not be loaded')
+            : t(isChannel ? 'No channel data' : 'No account data')
+        }
+      />
+    )
+  } else {
+    content = (
+      <Table className='min-w-[980px]'>
+        <TableHeader className='bg-muted/35'>
+          <TableRow>
+            <TableHead className='ps-6'>
+              {t(isChannel ? 'Channel' : 'Account')}
+            </TableHead>
+            <TableHead>{t('Instance')}</TableHead>
+            <TableHead>
+              {t('Platform')} / {t('Type')}
+            </TableHead>
+            <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
+            <TableHead className='text-right'>
+              {t(isChannel ? 'Used quota' : 'Today consumption')}
+            </TableHead>
+            <TableHead>{t('Last activity')}</TableHead>
+            <TableHead className='pe-6 text-right'>{t('Available')}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody className='[&>tr]:h-16'>
+          {sortedRows.map(({ instance, item }) => {
+            const descriptors = [item.platform, item.type, item.group].filter(
+              (value, index, values): value is string =>
+                Boolean(value) && values.indexOf(value) === index
+            )
+            return (
+              <TableRow key={`${instance.id}:${item.id}`}>
+                <TableCell className='ps-6'>
+                  <div className='max-w-52 min-w-36'>
+                    <p className='truncate font-medium'>
+                      {item.name || `#${item.id}`}
+                    </p>
+                    <p className='text-muted-foreground text-xs tabular-nums'>
+                      #{item.id}
+                    </p>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Link
+                    to='/instances/$id'
+                    params={{ id: String(instance.id) }}
+                    className='block max-w-40 truncate text-sm hover:underline'
+                  >
+                    {instance.name}
+                  </Link>
+                </TableCell>
+                <TableCell>
+                  <span className='block max-w-44 truncate text-sm'>
+                    {descriptors.join(' / ') || '--'}
+                  </span>
+                </TableCell>
+                <TableCell className='text-muted-foreground whitespace-nowrap'>
+                  {formatInventoryTimestamp(item.created_at)}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  <p className='font-medium'>{formatInventoryCost(item)}</p>
+                  {isChannel
+                    ? item.balance != null && (
+                        <p className='text-muted-foreground text-xs'>
+                          {t('Balance')} {exactCurrency.format(item.balance)}
+                        </p>
+                      )
+                    : (item.requests != null || item.tokens != null) && (
+                        <p className='text-muted-foreground text-xs'>
+                          {formatMetric(item.requests ?? null)} {t('Requests')}{' '}
+                          / {formatMetric(item.tokens ?? null)} {t('Tokens')}
+                        </p>
+                      )}
+                </TableCell>
+                <TableCell className='whitespace-nowrap'>
+                  <p className='text-sm'>
+                    {formatInventoryTimestamp(item.last_activity_at)}
+                  </p>
+                  {item.response_time_ms != null && (
+                    <p className='text-muted-foreground text-xs tabular-nums'>
+                      {item.response_time_ms} ms
+                    </p>
+                  )}
+                </TableCell>
+                <TableCell className='pe-6 text-right'>
+                  <AvailabilityBadge enabled={item.enabled} />
+                  {item.error_message && (
+                    <p
+                      className='text-destructive ms-auto mt-1 max-w-40 truncate text-xs'
+                      title={item.error_message}
+                    >
+                      {item.error_message}
+                    </p>
+                  )}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    )
+  }
+
+  return (
+    <Card className={PANEL_CARD_CLASS}>
+      <CardHeader
+        className={cn(
+          PANEL_HEADER_CLASS,
+          'flex-row items-start justify-between gap-3 space-y-0'
+        )}
+      >
+        <div className='min-w-0'>
+          <CardTitle className='flex items-center gap-2'>
+            <Users className='text-muted-foreground size-4' />
+            {t(isChannel ? 'Channel details' : 'Account details')}
+          </CardTitle>
+          <p className='text-muted-foreground mt-1 text-sm'>
+            {t(
+              isChannel
+                ? 'Remote channel availability and consumption'
+                : 'Remote account availability and consumption'
+            )}
+          </p>
+        </div>
+        <Badge variant='secondary' className='tabular-nums'>
+          {sortedRows.length}
+        </Badge>
+      </CardHeader>
+      {props.error && sortedRows.length > 0 && (
+        <div className='border-border bg-destructive/5 text-destructive border-b px-6 py-2 text-xs'>
+          {t('Some account data could not be loaded')}
+        </div>
+      )}
+      <CardContent className='overflow-x-auto px-0'>{content}</CardContent>
+    </Card>
+  )
+}
+
+function AvailabilityBadge({ enabled }: { enabled?: boolean }) {
+  const { t } = useTranslation()
+  if (enabled == null) return <Badge variant='secondary'>{t('Unknown')}</Badge>
+  if (!enabled) return <Badge variant='destructive'>{t('Unavailable')}</Badge>
+  return (
+    <Badge
+      variant='outline'
+      className='border-success/20 bg-success/10 text-success'
+    >
+      <CheckCircle2 />
+      {t('Available')}
+    </Badge>
   )
 }
 

@@ -36,12 +36,22 @@ type TimeWindow struct {
 }
 
 type InventoryItem struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Type    string `json:"type,omitempty"`
-	Group   string `json:"group,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Enabled *bool  `json:"enabled,omitempty"`
+	ID             int64    `json:"id"`
+	Name           string   `json:"name"`
+	Type           string   `json:"type,omitempty"`
+	Platform       string   `json:"platform,omitempty"`
+	Group          string   `json:"group,omitempty"`
+	Status         string   `json:"status,omitempty"`
+	Enabled        *bool    `json:"enabled,omitempty"`
+	CreatedAt      int64    `json:"created_at,omitempty"`
+	LastActivityAt int64    `json:"last_activity_at,omitempty"`
+	Requests       *float64 `json:"requests,omitempty"`
+	Tokens         *float64 `json:"tokens,omitempty"`
+	Cost           *float64 `json:"cost,omitempty"`
+	CostUnit       string   `json:"cost_unit,omitempty"`
+	Balance        *float64 `json:"balance,omitempty"`
+	ResponseTimeMS *int64   `json:"response_time_ms,omitempty"`
+	ErrorMessage   string   `json:"error_message,omitempty"`
 }
 
 type InventoryPage struct {
@@ -282,6 +292,7 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 	if err != nil {
 		return nil, err
 	}
+	enrichSub2AccountUsage(ctx, connector, headers, page)
 	if page.NextCursor == "" {
 		page.NextCursor = sub2NextPageCursor(data, pageNumber)
 	}
@@ -733,12 +744,74 @@ func normalizeInventoryItem(raw json.RawMessage) (InventoryItem, bool) {
 	if !ok || id <= 0 {
 		return InventoryItem{}, false
 	}
-	status := firstJSONString(fields, "status", "state")
+	status := firstJSONText(fields, "status", "state")
+	createdAt, _ := firstJSONUnixTime(fields, "created_at", "created_time")
+	lastActivityAt, _ := firstJSONUnixTime(fields, "last_used_at", "test_time")
+	responseTime, hasResponseTime := firstJSONInt64(fields, "response_time")
+	usedQuota, hasUsedQuota := firstJSONFloat64(fields, "used_quota")
+	balance, hasBalance := firstJSONFloat64(fields, "balance")
+	var responseTimeValue *int64
+	if hasResponseTime {
+		responseTimeValue = &responseTime
+	}
+	var costValue *float64
+	costUnit := ""
+	if hasUsedQuota {
+		costValue = &usedQuota
+		costUnit = "quota"
+	}
+	var balanceValue *float64
+	if hasBalance {
+		balanceValue = &balance
+	}
 	return InventoryItem{
-		ID: id, Name: firstJSONString(fields, "name", "username", "email", "label"),
-		Type: firstJSONString(fields, "type", "platform", "provider"), Group: firstJSONString(fields, "group", "group_name"),
-		Status: status, Enabled: normalizedEnabled(fields, status),
+		ID: id, Name: firstJSONText(fields, "name", "username", "email", "label"),
+		Type: firstJSONText(fields, "type", "provider"), Platform: firstJSONText(fields, "platform"),
+		Group: firstJSONText(fields, "group", "group_name"), Status: status, Enabled: normalizedEnabled(fields, status),
+		CreatedAt: createdAt, LastActivityAt: lastActivityAt, Cost: costValue, CostUnit: costUnit,
+		Balance: balanceValue, ResponseTimeMS: responseTimeValue,
+		ErrorMessage: firstJSONText(fields, "error_message", "error"),
 	}, true
+}
+
+func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers http.Header, page *InventoryPage) {
+	if page == nil || len(page.Items) == 0 {
+		return
+	}
+	accountIDs := make([]int64, 0, len(page.Items))
+	for _, item := range page.Items {
+		if item.ID > 0 {
+			accountIDs = append(accountIDs, item.ID)
+		}
+	}
+	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/v1/admin/accounts/today-stats/batch", headers, map[string]any{"account_ids": accountIDs})
+	if err != nil {
+		return
+	}
+	data, err := sub2EnvelopeData(response)
+	if err != nil {
+		return
+	}
+	var payload struct {
+		Stats map[string]struct {
+			Requests float64 `json:"requests"`
+			Tokens   float64 `json:"tokens"`
+			Cost     float64 `json:"cost"`
+		} `json:"stats"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return
+	}
+	for index := range page.Items {
+		stats, ok := payload.Stats[strconv.FormatInt(page.Items[index].ID, 10)]
+		if !ok {
+			continue
+		}
+		page.Items[index].Requests = &stats.Requests
+		page.Items[index].Tokens = &stats.Tokens
+		page.Items[index].Cost = &stats.Cost
+		page.Items[index].CostUnit = "usd"
+	}
 }
 
 func summaryFromInventory(window TimeWindow, page *InventoryPage) *SummaryResult {
@@ -797,14 +870,60 @@ func normalizeResourceKind(value string, fallback string) string {
 	}
 }
 
-func firstJSONString(fields map[string]json.RawMessage, names ...string) string {
+func firstJSONText(fields map[string]json.RawMessage, names ...string) string {
 	for _, name := range names {
 		var value string
 		if raw := fields[name]; len(raw) > 0 && json.Unmarshal(raw, &value) == nil {
 			return strings.TrimSpace(value)
 		}
+		var number json.Number
+		if raw := fields[name]; len(raw) > 0 && json.Unmarshal(raw, &number) == nil {
+			return number.String()
+		}
 	}
 	return ""
+}
+
+func firstJSONInt64(fields map[string]json.RawMessage, names ...string) (int64, bool) {
+	for _, name := range names {
+		if value, ok := jsonInt64(fields[name]); ok {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+func firstJSONFloat64(fields map[string]json.RawMessage, names ...string) (float64, bool) {
+	for _, name := range names {
+		var value float64
+		if raw := fields[name]; len(raw) > 0 && json.Unmarshal(raw, &value) == nil {
+			return value, true
+		}
+		var text string
+		if raw := fields[name]; len(raw) > 0 && json.Unmarshal(raw, &text) == nil {
+			value, err := strconv.ParseFloat(text, 64)
+			if err == nil {
+				return value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func firstJSONUnixTime(fields map[string]json.RawMessage, names ...string) (int64, bool) {
+	for _, name := range names {
+		if value, ok := jsonInt64(fields[name]); ok {
+			return value, true
+		}
+		var text string
+		if raw := fields[name]; len(raw) > 0 && json.Unmarshal(raw, &text) == nil {
+			parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(text))
+			if err == nil {
+				return parsed.Unix(), true
+			}
+		}
+	}
+	return 0, false
 }
 
 func jsonInt64(raw json.RawMessage) (int64, bool) {
@@ -821,27 +940,39 @@ func jsonInt64(raw json.RawMessage) (int64, bool) {
 }
 
 func normalizedEnabled(fields map[string]json.RawMessage, status string) *bool {
-	var enabled bool
-	if raw := fields["enabled"]; len(raw) > 0 && json.Unmarshal(raw, &enabled) == nil {
-		return &enabled
+	var result *bool
+	var explicitEnabled bool
+	if raw := fields["enabled"]; len(raw) > 0 && json.Unmarshal(raw, &explicitEnabled) == nil {
+		result = &explicitEnabled
 	}
 	var numeric int
-	if raw := fields["status"]; len(raw) > 0 && json.Unmarshal(raw, &numeric) == nil {
-		if numeric == 1 || numeric == 2 {
-			value := numeric == 1
-			return &value
+	if result == nil {
+		if raw := fields["status"]; len(raw) > 0 && json.Unmarshal(raw, &numeric) == nil {
+			if numeric >= 1 && numeric <= 3 {
+				value := numeric == 1
+				result = &value
+			}
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "active", "enabled", "healthy", "ok", "valid":
-		value := true
-		return &value
-	case "inactive", "disabled", "offline", "invalid", "expired":
-		value := false
-		return &value
-	default:
-		return nil
+	if result == nil {
+		switch strings.ToLower(strings.TrimSpace(status)) {
+		case "active", "enabled", "healthy", "ok", "valid":
+			value := true
+			result = &value
+		case "inactive", "disabled", "offline", "invalid", "expired":
+			value := false
+			result = &value
+		}
 	}
+	var schedulable bool
+	if raw := fields["schedulable"]; len(raw) > 0 && json.Unmarshal(raw, &schedulable) == nil {
+		if result == nil {
+			return &schedulable
+		}
+		value := *result && schedulable
+		return &value
+	}
+	return result
 }
 
 func managedInstanceObservationErrorCode(err error) string {
