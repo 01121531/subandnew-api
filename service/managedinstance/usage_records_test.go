@@ -266,11 +266,35 @@ func TestUsageCSVRowCalculatesSub2AccountBilledCost(t *testing.T) {
 	require.Equal(t, "1.250000", row[0])
 }
 
+func TestUsageRecordExportReportsProcessedRows(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":1,"username":"one"},{"id":2,"username":"two"}],"total":2,"page":1,"page_size":100}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	export, err := PrepareUsageRecordsCSV(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+
+	progress := make([]UsageRecordExportProgress, 0, 3)
+	var output bytes.Buffer
+	count, err := export.WriteWithProgress(context.Background(), &output, func(value UsageRecordExportProgress) error {
+		progress = append(progress, value)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, count)
+	require.NotEmpty(t, output.Bytes())
+	require.Equal(t, UsageRecordExportProgress{Progress: 0, Processed: 0, Total: 2, Stage: "exporting"}, progress[0])
+	require.Equal(t, UsageRecordExportProgress{Progress: 100, Processed: 2, Total: 2, Stage: "completed"}, progress[len(progress)-1])
+}
+
 func TestStreamUsageRecordsCSVRejectsOversizedExportBeforeWriting(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
-		writeProbeJSON(response, `{"success":true,"data":{"items":[],"total":100001,"page":1,"page_size":100}}`)
+		writeProbeJSON(response, `{"success":true,"data":{"items":[],"total":1000001,"page":1,"page_size":100}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
@@ -287,7 +311,7 @@ func TestSub2ExportRequestsExactTotalBeforeWriting(t *testing.T) {
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "true", request.URL.Query().Get("exact_total"))
-		writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":100001,"page":1,"page_size":100}}`)
+		writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":1000001,"page":1,"page_size":100}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "secret"})

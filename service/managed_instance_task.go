@@ -35,6 +35,14 @@ type ManagedInstanceSyncPayload struct {
 
 type managedInstanceSyncHandler struct{}
 
+type ManagedUsageExportPayload struct {
+	InstanceID int64      `json:"instance_id"`
+	ActorID    int        `json:"actor_id"`
+	Query      url.Values `json:"query"`
+}
+
+type managedUsageExportHandler struct{}
+
 type managedInstanceOperationScopedSlot struct {
 	slots chan struct{}
 	users int
@@ -54,6 +62,66 @@ func init() {
 	RegisterSystemTaskHandler(managedInstanceProbeHandler{})
 	RegisterSystemTaskHandler(managedInstanceSyncHandler{})
 	RegisterSystemTaskHandler(managedInstanceOperationHandler{})
+	RegisterSystemTaskHandler(managedUsageExportHandler{})
+}
+
+func (managedUsageExportHandler) Type() string {
+	return model.SystemTaskTypeManagedUsageExport
+}
+
+func EnqueueManagedUsageExport(instanceID int64, actorID int, query url.Values) (*model.SystemTask, error) {
+	if instanceID <= 0 || actorID <= 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	payload := ManagedUsageExportPayload{InstanceID: instanceID, ActorID: actorID, Query: query}
+	state := managedinstance.UsageRecordExportProgress{Progress: 0, Processed: 0, Total: 0, Stage: "queued"}
+	task, _, err := EnqueueScopedSystemTask(
+		model.SystemTaskTypeManagedUsageExport,
+		fmt.Sprintf("%d:%d", instanceID, actorID),
+		payload,
+		state,
+	)
+	return task, err
+}
+
+func GetManagedUsageExportTask(taskID string, instanceID int64, actorID int) (*model.SystemTask, error) {
+	task, err := model.GetSystemTaskByTaskID(taskID)
+	if err != nil || task == nil {
+		return task, err
+	}
+	payload := ManagedUsageExportPayload{}
+	if task.Type != model.SystemTaskTypeManagedUsageExport || task.DecodePayload(&payload) != nil || payload.InstanceID != instanceID || payload.ActorID != actorID {
+		return nil, nil
+	}
+	return task, nil
+}
+
+func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := ManagedUsageExportPayload{}
+	if err := task.DecodePayload(&payload); err != nil || payload.InstanceID <= 0 || payload.ActorID <= 0 || task.ScopeKey != fmt.Sprintf("%d:%d", payload.InstanceID, payload.ActorID) {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_usage_export_payload")
+		return
+	}
+	artifact, err := managedinstance.ExportUsageRecordsCSVToTaskFile(
+		ctx,
+		payload.InstanceID,
+		task.TaskID,
+		payload.Query,
+		func(progress managedinstance.UsageRecordExportProgress) error {
+			return model.UpdateSystemTaskState(task.TaskID, runnerID, progress)
+		},
+	)
+	if err != nil {
+		managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, 0, err)
+		errorCode := "usage_export_failed"
+		if errors.Is(err, managedinstance.ErrUsageExportTooLarge) {
+			errorCode = "usage_export_too_large"
+		}
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode)
+		return
+	}
+	managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, artifact.RecordCount, nil)
+	_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, artifact, "")
 }
 
 func (managedInstanceProbeHandler) Type() string {

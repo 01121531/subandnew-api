@@ -30,6 +30,23 @@ type ApiResponse<T> = {
   data: T
 }
 
+export type UsageRecordExportTask = {
+  task_id: string
+  status: 'pending' | 'running' | 'succeeded' | 'failed'
+  state?: {
+    progress?: number
+    processed?: number
+    total?: number
+    stage?: string
+  }
+  result?: {
+    file_name?: string
+    record_count?: number
+    size?: number
+  }
+  error?: string
+}
+
 function usageRecordParams(filters: UsageRecordFilters) {
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([key, value]) => {
@@ -63,16 +80,39 @@ export async function getUsageRecordSummary(
   return response.data
 }
 
-export async function exportUsageRecords(
+export async function createUsageRecordsExport(
   instanceId: number,
   filters: UsageRecordFilters
-) {
+): Promise<ApiResponse<UsageRecordExportTask>> {
   const params = usageRecordParams(filters)
   params.delete('p')
   params.delete('page')
   params.delete('page_size')
+  const response = await api.post<ApiResponse<UsageRecordExportTask>>(
+    `/api/managed-instances/${instanceId}/usage-records/exports?${params.toString()}`,
+    null,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function getUsageRecordsExport(
+  instanceId: number,
+  taskId: string
+): Promise<ApiResponse<UsageRecordExportTask>> {
+  const response = await api.get<ApiResponse<UsageRecordExportTask>>(
+    `/api/managed-instances/${instanceId}/usage-records/exports/${encodeURIComponent(taskId)}`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function downloadUsageRecordsExport(
+  instanceId: number,
+  taskId: string
+) {
   const response = await api.get(
-    `/api/managed-instances/${instanceId}/usage-records/export?${params.toString()}`,
+    `/api/managed-instances/${instanceId}/usage-records/exports/${encodeURIComponent(taskId)}/download`,
     { responseType: 'blob', disableDuplicate: true }
   )
   const disposition = String(response.headers['content-disposition'] ?? '')

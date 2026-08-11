@@ -37,6 +37,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -51,8 +52,10 @@ import type { ManagedInstance } from '@/features/managed-instances/types'
 import { cn } from '@/lib/utils'
 
 import {
-  exportUsageRecords,
+  createUsageRecordsExport,
+  downloadUsageRecordsExport,
   getUsageRecords,
+  getUsageRecordsExport,
   getUsageRecordSummary,
 } from './api'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -78,6 +81,9 @@ const PAGE_SIZE = 20
 const USAGE_RECORDS_REFRESH_MS = 120_000
 const EMPTY_INSTANCES: ManagedInstance[] = []
 const EMPTY_RECORDS: UsageRecord[] = []
+
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 const TIME_FILTER_KEYS = new Set([
   'start_time',
   'end_time',
@@ -320,6 +326,11 @@ export function UsageRecords() {
   )
   const [page, setPage] = useState(1)
   const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState({
+    progress: 0,
+    processed: 0,
+    total: 0,
+  })
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [sortKey, setSortKey] = useState<UsageSortKey>('created_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -420,15 +431,32 @@ export function UsageRecords() {
   const download = async () => {
     if (!selectedId) return
     setExporting(true)
+    setExportProgress({ progress: 0, processed: 0, total: 0 })
     try {
-      await exportUsageRecords(
-        selectedId,
-        requestFilters(
-          system,
-          withUsageSort(system, applied, sortKey, sortDirection),
-          1
-        )
+      const filters = requestFilters(
+        system,
+        withUsageSort(system, applied, sortKey, sortDirection),
+        1
       )
+      let task = (await createUsageRecordsExport(selectedId, filters)).data
+      while (task.status === 'pending' || task.status === 'running') {
+        setExportProgress({
+          progress: Math.max(0, Math.min(100, task.state?.progress ?? 0)),
+          processed: task.state?.processed ?? 0,
+          total: task.state?.total ?? 0,
+        })
+        await wait(1000)
+        task = (await getUsageRecordsExport(selectedId, task.task_id)).data
+      }
+      if (task.status !== 'succeeded') {
+        throw new Error(task.error || 'usage_export_failed')
+      }
+      setExportProgress({
+        progress: 100,
+        processed: task.result?.record_count ?? task.state?.processed ?? 0,
+        total: task.state?.total ?? task.result?.record_count ?? 0,
+      })
+      await downloadUsageRecordsExport(selectedId, task.task_id)
       toast.success('CSV 导出完成')
     } catch {
       toast.error('CSV 导出失败')
@@ -443,6 +471,19 @@ export function UsageRecords() {
         {t('Usage records', { defaultValue: '使用记录' })}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
+        {exporting ? (
+          <div className='hidden w-44 shrink-0 space-y-1 sm:block'>
+            <div className='text-muted-foreground flex justify-between text-xs tabular-nums'>
+              <span>正在导出</span>
+              <span>
+                {exportProgress.total > 0
+                  ? `${exportProgress.processed.toLocaleString()} / ${exportProgress.total.toLocaleString()}`
+                  : '准备数据'}
+              </span>
+            </div>
+            <Progress value={exportProgress.progress} className='h-1.5' />
+          </div>
+        ) : null}
         <Button
           variant='outline'
           size='icon-sm'
@@ -467,7 +508,7 @@ export function UsageRecords() {
           disabled={!selectedId || exporting}
         >
           <Download />
-          {exporting ? '正在导出' : '导出 CSV'}
+          {exporting ? `导出中 ${exportProgress.progress}%` : '导出 CSV'}
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>

@@ -21,6 +21,7 @@ const (
 
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
+	SystemTaskTypeManagedUsageExport   = "managed_usage_export"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

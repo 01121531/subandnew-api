@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -180,6 +181,77 @@ func ExportManagedInstanceUsageRecords(c *gin.Context) {
 		"X-Content-Type-Options": "nosniff",
 	})
 	managedinstance.RecordUsageRecordExportAudit(id, c.GetInt("id"), count, nil)
+}
+
+func CreateManagedInstanceUsageRecordExport(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	task, err := service.EnqueueManagedUsageExport(id, c.GetInt("id"), c.Request.URL.Query())
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+}
+
+func GetManagedInstanceUsageRecordExport(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	task, err := service.GetManagedUsageExportTask(c.Param("task_id"), id, c.GetInt("id"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export task not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+}
+
+func DownloadManagedInstanceUsageRecordExport(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	task, err := service.GetManagedUsageExportTask(c.Param("task_id"), id, c.GetInt("id"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export task not found"})
+		return
+	}
+	if task.Status != model.SystemTaskStatusSucceeded {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "usage export is not ready"})
+		return
+	}
+	artifact := managedinstance.UsageRecordExportArtifact{}
+	if json.Unmarshal([]byte(task.Result), &artifact) != nil || artifact.FileName == "" {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export file not found"})
+		return
+	}
+	file, err := managedinstance.OpenUsageRecordExportArtifact(task.TaskID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export file not found"})
+		return
+	}
+	defer file.Close()
+	defer managedinstance.RemoveUsageRecordExportArtifact(task.TaskID)
+	info, err := file.Stat()
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.DataFromReader(http.StatusOK, info.Size(), "text/csv; charset=utf-8", file, map[string]string{
+		"Content-Disposition":    `attachment; filename="` + artifact.FileName + `"`,
+		"X-Content-Type-Options": "nosniff",
+	})
 }
 
 func ListManagedInstanceAudits(c *gin.Context) {

@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,11 +21,11 @@ import (
 const (
 	usageRecordPageSize     = 20
 	usageRecordMaxPageSize  = 100
-	usageRecordExportLimit  = 100000
+	usageRecordExportLimit  = 1000000
 	usageRecordMaxTextValue = 512
 )
 
-var ErrUsageExportTooLarge = errors.New("usage record export exceeds the 100000 row limit")
+var ErrUsageExportTooLarge = errors.New("usage record export exceeds the 1000000 row limit")
 
 type UsageRecordPage struct {
 	SourceInstanceID int64             `json:"source_instance_id"`
@@ -53,6 +55,21 @@ type UsageRecordCSVExport struct {
 	query  url.Values
 	first  *UsageRecordPage
 }
+
+type UsageRecordExportProgress struct {
+	Progress  int    `json:"progress"`
+	Processed int64  `json:"processed"`
+	Total     int64  `json:"total"`
+	Stage     string `json:"stage"`
+}
+
+type UsageRecordExportArtifact struct {
+	FileName    string `json:"file_name"`
+	RecordCount int    `json:"record_count"`
+	Size        int64  `json:"size"`
+}
+
+type UsageRecordExportProgressCallback func(UsageRecordExportProgress) error
 
 func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordPage, error) {
 	client, err := newUsageRecordClient(instanceID)
@@ -110,6 +127,10 @@ func PrepareUsageRecordsCSV(ctx context.Context, instanceID int64, input url.Val
 }
 
 func (export *UsageRecordCSVExport) Write(ctx context.Context, writer io.Writer) (int, error) {
+	return export.WriteWithProgress(ctx, writer, nil)
+}
+
+func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, writer io.Writer, onProgress UsageRecordExportProgressCallback) (int, error) {
 	if export == nil || export.client == nil || export.first == nil {
 		return 0, ErrInvalidInstance
 	}
@@ -125,6 +146,9 @@ func (export *UsageRecordCSVExport) Write(ctx context.Context, writer io.Writer)
 
 	written := 0
 	page := export.first
+	if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "exporting"); err != nil {
+		return written, err
+	}
 	for {
 		for _, raw := range page.Items {
 			row, err := usageCSVRow(raw, fields)
@@ -138,6 +162,9 @@ func (export *UsageRecordCSVExport) Write(ctx context.Context, writer io.Writer)
 			if written >= usageRecordExportLimit {
 				break
 			}
+		}
+		if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "exporting"); err != nil {
+			return written, err
 		}
 		if written >= int(page.Total) || len(page.Items) < usageRecordMaxPageSize || written >= usageRecordExportLimit {
 			break
@@ -153,7 +180,95 @@ func (export *UsageRecordCSVExport) Write(ctx context.Context, writer io.Writer)
 	if err := csvWriter.Error(); err != nil {
 		return written, err
 	}
+	if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "completed"); err != nil {
+		return written, err
+	}
 	return written, nil
+}
+
+func reportUsageRecordExportProgress(callback UsageRecordExportProgressCallback, written int, total int64, stage string) error {
+	if callback == nil {
+		return nil
+	}
+	progress := 100
+	if total > 0 && int64(written) < total {
+		progress = int((int64(written) * 100) / total)
+		if progress > 99 {
+			progress = 99
+		}
+	}
+	return callback(UsageRecordExportProgress{
+		Progress: progress, Processed: int64(written), Total: total, Stage: stage,
+	})
+}
+
+func ExportUsageRecordsCSVToTaskFile(ctx context.Context, instanceID int64, taskID string, input url.Values, onProgress UsageRecordExportProgressCallback) (*UsageRecordExportArtifact, error) {
+	path, err := usageRecordExportTaskPath(taskID)
+	if err != nil {
+		return nil, err
+	}
+	cleanupExpiredUsageRecordExports()
+	export, err := PrepareUsageRecordsCSV(ctx, instanceID, input)
+	if err != nil {
+		return nil, err
+	}
+	temporary, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	count, exportErr := export.WriteWithProgress(ctx, temporary, onProgress)
+	closeErr := temporary.Close()
+	if exportErr != nil {
+		_ = os.Remove(path)
+		return nil, exportErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(path)
+		return nil, closeErr
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return &UsageRecordExportArtifact{
+		FileName:    "usage-records-" + strconv.FormatInt(instanceID, 10) + "-" + time.Now().Format("20060102-150405") + ".csv",
+		RecordCount: count,
+		Size:        info.Size(),
+	}, nil
+}
+
+func OpenUsageRecordExportArtifact(taskID string) (*os.File, error) {
+	path, err := usageRecordExportTaskPath(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
+func RemoveUsageRecordExportArtifact(taskID string) {
+	if path, err := usageRecordExportTaskPath(taskID); err == nil {
+		_ = os.Remove(path)
+	}
+}
+
+func usageRecordExportTaskPath(taskID string) (string, error) {
+	if !strings.HasPrefix(taskID, "systask_") || strings.IndexFunc(taskID, func(character rune) bool {
+		return character != '_' && character != '-' && (character < '0' || character > '9') && (character < 'A' || character > 'Z') && (character < 'a' || character > 'z')
+	}) >= 0 {
+		return "", ErrInvalidInstance
+	}
+	return filepath.Join(os.TempDir(), "managed-usage-"+taskID+".csv"), nil
+}
+
+func cleanupExpiredUsageRecordExports() {
+	paths, _ := filepath.Glob(filepath.Join(os.TempDir(), "managed-usage-systask_*.csv"))
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 func RecordUsageRecordExportAudit(instanceID int64, actorID int, count int, exportErr error) {
