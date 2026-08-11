@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,15 +93,17 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	requestedPages := make([]string, 0, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/api/v1/admin/accounts/today-stats/batch" {
-			var input struct {
-				AccountIDs []int64 `json:"account_ids"`
-			}
-			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
-			require.Len(t, input.AccountIDs, 1)
-			id := input.AccountIDs[0]
-			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"stats":{"%d":{"requests":%d,"tokens":%d,"cost":%.2f}}}}`, id, id*10, id*1000, float64(id)/10))
+		if strings.HasPrefix(request.URL.Path, "/api/v1/admin/accounts/") && strings.HasSuffix(request.URL.Path, "/usage") {
+			require.Equal(t, http.MethodGet, request.Method)
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+			id, err := strconv.ParseInt(parts[len(parts)-2], 10, 64)
+			require.NoError(t, err)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"seven_day":{"window_stats":{"requests":%d,"tokens":%d,"cost":%.2f}}}}`, id*10, id*1000, float64(id)/10))
 			return
+		}
+		if request.URL.Path == "/api/v1/admin/accounts/today-stats/batch" {
+			t.Fatal("supported account usage endpoint must not use the legacy batch endpoint")
 		}
 		require.Equal(t, "/api/v1/admin/accounts", request.URL.Path)
 		require.Equal(t, "100", request.URL.Query().Get("page_size"))
@@ -138,6 +142,33 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	require.Equal(t, "usd", page.Items[0].CostUnit)
 	require.False(t, *page.Items[1].Enabled)
 	require.Equal(t, "rate limited", page.Items[1].ErrorMessage)
+}
+
+func TestCollectInventoryFallsBackToSub2APIBatchUsage(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/admin/accounts":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":9,"name":"legacy"}],"total":1}}`)
+		case "/api/v1/admin/accounts/9/usage":
+			http.NotFound(response, request)
+		case "/api/v1/admin/accounts/today-stats/batch":
+			writeProbeJSON(response, `{"code":0,"data":{"stats":{"9":{"requests":4,"tokens":800,"cost":0.6}}}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "account", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, 4.0, *page.Items[0].Requests)
+	require.Equal(t, 800.0, *page.Items[0].Tokens)
+	require.Equal(t, 0.6, *page.Items[0].Cost)
 }
 
 func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {

@@ -539,7 +539,7 @@ function AccountTable(props: {
             </TableHead>
             <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
             <TableHead className='text-right'>
-              {t(isChannel ? 'Used quota' : 'Today consumption')}
+              {t(isChannel ? 'Used quota' : '7-day consumption')}
             </TableHead>
             <TableHead>{t('Last activity')}</TableHead>
             <TableHead className='pe-6 text-right'>{t('Available')}</TableHead>

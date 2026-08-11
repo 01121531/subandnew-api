@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -774,10 +775,115 @@ func normalizeInventoryItem(raw json.RawMessage) (InventoryItem, bool) {
 	}, true
 }
 
+type sub2AccountUsage struct {
+	Requests float64
+	Tokens   float64
+	Cost     float64
+}
+
 func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers http.Header, page *InventoryPage) {
 	if page == nil || len(page.Items) == 0 {
 		return
 	}
+	first, endpointAvailable := fetchSub2AccountUsage(ctx, connector, headers, page.Items[0].ID)
+	if !endpointAvailable {
+		enrichSub2AccountUsageBatch(ctx, connector, headers, page)
+		return
+	}
+	applySub2AccountUsage(&page.Items[0], first)
+	if len(page.Items) == 1 {
+		return
+	}
+
+	type usageResult struct {
+		Index int
+		Usage *sub2AccountUsage
+	}
+	const workerLimit = 6
+	workerCount := min(workerLimit, len(page.Items)-1)
+	jobs := make(chan int)
+	results := make(chan usageResult, len(page.Items)-1)
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				usage, _ := fetchSub2AccountUsage(ctx, connector, headers, page.Items[index].ID)
+				results <- usageResult{Index: index, Usage: usage}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for index := 1; index < len(page.Items); index++ {
+			select {
+			case jobs <- index:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+	for result := range results {
+		applySub2AccountUsage(&page.Items[result.Index], result.Usage)
+	}
+}
+
+func fetchSub2AccountUsage(ctx context.Context, connector *Connector, headers http.Header, accountID int64) (*sub2AccountUsage, bool) {
+	if accountID <= 0 {
+		return nil, true
+	}
+	query := url.Values{}
+	query.Set("timezone", "Asia/Shanghai")
+	endpoint := "/api/v1/admin/accounts/" + strconv.FormatInt(accountID, 10) + "/usage?" + query.Encode()
+	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
+	if err != nil {
+		return nil, false
+	}
+	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
+		return nil, false
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, false
+	}
+	data, err := sub2EnvelopeData(response)
+	if err != nil {
+		return nil, true
+	}
+	var payload struct {
+		SevenDay *struct {
+			WindowStats struct {
+				Requests float64 `json:"requests"`
+				Tokens   float64 `json:"tokens"`
+				Cost     float64 `json:"cost"`
+			} `json:"window_stats"`
+		} `json:"seven_day"`
+	}
+	if json.Unmarshal(data, &payload) != nil || payload.SevenDay == nil {
+		return nil, true
+	}
+	return &sub2AccountUsage{
+		Requests: payload.SevenDay.WindowStats.Requests,
+		Tokens:   payload.SevenDay.WindowStats.Tokens,
+		Cost:     payload.SevenDay.WindowStats.Cost,
+	}, true
+}
+
+func applySub2AccountUsage(item *InventoryItem, usage *sub2AccountUsage) {
+	if item == nil || usage == nil {
+		return
+	}
+	item.Requests = &usage.Requests
+	item.Tokens = &usage.Tokens
+	item.Cost = &usage.Cost
+	item.CostUnit = "usd"
+}
+
+func enrichSub2AccountUsageBatch(ctx context.Context, connector *Connector, headers http.Header, page *InventoryPage) {
 	accountIDs := make([]int64, 0, len(page.Items))
 	for _, item := range page.Items {
 		if item.ID > 0 {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -280,6 +281,11 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		return nil, err
 	}
 	if versionResponse.StatusCode != http.StatusOK {
+		if probeSub2AccountAccess(ctx, connector, headers) {
+			result.SystemName = "Sub2API"
+			result.Capabilities = append(result.Capabilities, "accounts.list", "usage.read")
+			return result, nil
+		}
 		return nil, probeHTTPError(versionResponse.StatusCode)
 	}
 	var version struct {
@@ -297,6 +303,22 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		result.Capabilities = append(result.Capabilities, "config.read", "config.apply")
 	}
 	return result, nil
+}
+
+func probeSub2AccountAccess(ctx context.Context, connector *Connector, headers http.Header) bool {
+	query := url.Values{}
+	query.Set("page", "1")
+	query.Set("page_size", "1")
+	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/accounts?"+query.Encode(), headers, nil)
+	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return false
+	}
+	data, err := sub2EnvelopeData(response)
+	if err != nil {
+		return false
+	}
+	_, _, _, err = extractInventoryRows(data)
+	return err == nil
 }
 
 func credentialAccessScope(credential *CredentialMaterial) string {

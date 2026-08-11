@@ -165,6 +165,44 @@ func TestProbeGenericDetectsSub2APIAndLogsInWithAccountPassword(t *testing.T) {
 	require.Equal(t, "0.1.125", result.Version)
 }
 
+func TestProbeGenericDetectsSub2APIChannelAdmin(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			http.NotFound(response, request)
+		case "/health":
+			writeProbeJSON(response, `{"status":"ok"}`)
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":0,"data":{"access_token":"channel-admin-token"}}`)
+		case "/api/v1/admin/system/version":
+			require.Equal(t, "Bearer channel-admin-token", request.Header.Get("Authorization"))
+			response.WriteHeader(http.StatusForbidden)
+			writeProbeJSON(response, `{"code":403,"message":"permission denied"}`)
+		case "/api/v1/admin/accounts":
+			require.Equal(t, "Bearer channel-admin-token", request.Header.Get("Authorization"))
+			require.Equal(t, "1", request.URL.Query().Get("page"))
+			require.Equal(t, "1", request.URL.Query().Get("page_size"))
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":53503,"name":"channel-account"}],"total":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "channel@example.com",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindSub2API, result.Kind)
+	require.Equal(t, "Sub2API", result.SystemName)
+	require.Contains(t, result.Capabilities, "accounts.list")
+	require.Contains(t, result.Capabilities, "usage.read")
+	require.NotContains(t, result.Capabilities, "config.read")
+}
+
 func TestProbeGenericDetectsSub2APIWithRegularAccount(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
