@@ -174,6 +174,13 @@ interface ManagedInstanceResourceSummary {
   unhealthy: number | null
 }
 
+export interface ManagedInstanceUsageTrendPoint {
+  date: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
 export interface ManagedInstanceSummary {
   window: { start: number; end: number }
   resources: ManagedInstanceResourceSummary[]
@@ -182,6 +189,7 @@ export interface ManagedInstanceSummary {
   cost: ManagedInstanceMetricSample
   error_rate: ManagedInstanceMetricSample
   latency: ManagedInstanceMetricSample
+  trend: ManagedInstanceUsageTrendPoint[]
 }
 
 export interface ManagedInstanceAlert {

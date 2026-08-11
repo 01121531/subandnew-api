@@ -64,6 +64,13 @@ type MetricSample struct {
 	CollectionStatus string   `json:"collection_status"`
 }
 
+type UsageTrendPoint struct {
+	Date     string  `json:"date"`
+	Requests float64 `json:"requests"`
+	Tokens   float64 `json:"tokens"`
+	Cost     float64 `json:"cost"`
+}
+
 type SummaryResult struct {
 	Window    TimeWindow        `json:"window"`
 	Resources []ResourceSummary `json:"resources"`
@@ -72,6 +79,7 @@ type SummaryResult struct {
 	Cost      MetricSample      `json:"cost"`
 	ErrorRate MetricSample      `json:"error_rate"`
 	Latency   MetricSample      `json:"latency"`
+	Trend     []UsageTrendPoint `json:"trend"`
 }
 
 type ObservationView struct {
@@ -174,6 +182,7 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	var payload struct {
 		Success bool `json:"success"`
 		Data    []struct {
+			CreatedAt int64   `json:"created_at"`
 			TokenUsed float64 `json:"token_used"`
 			Count     float64 `json:"count"`
 			Quota     float64 `json:"quota"`
@@ -186,14 +195,25 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	requests := 0.0
 	tokens := 0.0
 	quota := 0.0
+	daily := make(map[string]UsageTrendPoint)
 	for _, item := range payload.Data {
 		requests += item.Count
 		tokens += item.TokenUsed
 		quota += item.Quota
+		if item.CreatedAt > 0 {
+			date := time.Unix(item.CreatedAt, 0).UTC().Format("2006-01-02")
+			point := daily[date]
+			point.Date = date
+			point.Requests += item.Count
+			point.Tokens += item.TokenUsed
+			point.Cost += item.Quota
+			daily[date] = point
+		}
 	}
 	summary.Requests = supportedMetric(requests, "request")
 	summary.Tokens = supportedMetric(tokens, "token")
 	summary.Cost = supportedMetric(quota, "quota")
+	summary.Trend = fillDailyTrend(window, daily)
 	return summary, nil
 }
 
@@ -283,8 +303,9 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 	query.Set("start_date", time.Unix(window.Start, 0).UTC().Format("2006-01-02"))
 	query.Set("end_date", time.Unix(window.End, 0).UTC().Format("2006-01-02"))
 	query.Set("timezone", "UTC")
-	query.Set("granularity", sub2DashboardGranularity(window))
+	query.Set("granularity", "day")
 	query.Set("include_stats", "false")
+	query.Set("include_trend", "true")
 	query.Set("include_model_stats", "false")
 	query.Set("include_group_stats", "false")
 	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
@@ -302,6 +323,7 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 		Code any `json:"code"`
 		Data struct {
 			Trend *[]struct {
+				Date        string  `json:"date"`
 				Requests    float64 `json:"requests"`
 				TotalTokens float64 `json:"total_tokens"`
 				ActualCost  float64 `json:"actual_cost"`
@@ -315,22 +337,53 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 	requests := 0.0
 	tokens := 0.0
 	cost := 0.0
+	daily := make(map[string]UsageTrendPoint)
 	for _, item := range *payload.Data.Trend {
 		requests += item.Requests
 		tokens += item.TotalTokens
 		cost += item.ActualCost
+		date := normalizeTrendDate(item.Date)
+		if date != "" {
+			point := daily[date]
+			point.Date = date
+			point.Requests += item.Requests
+			point.Tokens += item.TotalTokens
+			point.Cost += item.ActualCost
+			daily[date] = point
+		}
 	}
 	summary.Requests = supportedMetric(requests, "request")
 	summary.Tokens = supportedMetric(tokens, "token")
 	summary.Cost = supportedMetric(cost, "usd")
+	summary.Trend = fillDailyTrend(window, daily)
 	return summary, nil
 }
 
-func sub2DashboardGranularity(window TimeWindow) string {
-	if window.End-window.Start <= 7*24*60*60 {
-		return "hour"
+func normalizeTrendDate(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= len("2006-01-02") {
+		value = value[:len("2006-01-02")]
 	}
-	return "day"
+	if _, err := time.Parse("2006-01-02", value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func fillDailyTrend(window TimeWindow, values map[string]UsageTrendPoint) []UsageTrendPoint {
+	start := time.Unix(window.Start, 0).UTC()
+	end := time.Unix(window.End, 0).UTC()
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+
+	trend := make([]UsageTrendPoint, 0, int(end.Sub(start)/(24*time.Hour))+1)
+	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+		date := cursor.Format("2006-01-02")
+		point := values[date]
+		point.Date = date
+		trend = append(trend, point)
+	}
+	return trend
 }
 
 func (genericAdapter) Inventory(context.Context, *Connector, *CredentialMaterial, string, string) (*InventoryPage, error) {

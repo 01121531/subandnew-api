@@ -149,9 +149,10 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 			require.Equal(t, "2026-08-08", request.URL.Query().Get("start_date"))
 			require.Equal(t, "2026-08-09", request.URL.Query().Get("end_date"))
 			require.Equal(t, "UTC", request.URL.Query().Get("timezone"))
-			require.Equal(t, "hour", request.URL.Query().Get("granularity"))
+			require.Equal(t, "day", request.URL.Query().Get("granularity"))
 			require.Equal(t, "false", request.URL.Query().Get("include_stats"))
-			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"requests":7,"total_tokens":1250,"actual_cost":1.25},{"requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
+			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-08","requests":7,"total_tokens":1250,"actual_cost":1.25},{"date":"2026-08-09","requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -167,6 +168,10 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	require.Equal(t, 2.0, *summary.Cost.Value)
 	require.Equal(t, "usd", summary.Cost.Unit)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
+	require.Len(t, summary.Trend, 2)
+	require.Equal(t, "2026-08-08", summary.Trend[0].Date)
+	require.Equal(t, 7.0, summary.Trend[0].Requests)
+	require.Equal(t, "2026-08-09", summary.Trend[1].Date)
 }
 
 func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
@@ -183,7 +188,8 @@ func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
 			writeProbeJSON(response, `{"code":0,"data":{"id":42,"email":"user@example.com","username":"User","role":"user","status":"active"}}`)
 		case "/api/v1/usage/dashboard/snapshot-v2":
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
-			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"requests":3,"total_tokens":500,"actual_cost":0.25}]}}`)
+			require.Equal(t, "day", request.URL.Query().Get("granularity"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-08","requests":3,"total_tokens":500,"actual_cost":0.25}]}}`)
 		case "/api/v1/admin/accounts", "/api/v1/admin/dashboard/snapshot-v2":
 			t.Fatal("regular account collection must not call an administrator endpoint")
 		default:
@@ -210,6 +216,9 @@ func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
 	require.Equal(t, 3.0, *summary.Requests.Value)
 	require.Equal(t, 500.0, *summary.Tokens.Value)
 	require.Equal(t, 0.25, *summary.Cost.Value)
+	require.Len(t, summary.Trend, 2)
+	require.Equal(t, 3.0, summary.Trend[0].Requests)
+	require.Zero(t, summary.Trend[1].Requests)
 }
 
 func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
@@ -224,7 +233,7 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 		case "/api/data/":
 			require.Equal(t, "100", request.URL.Query().Get("start_timestamp"))
 			require.Equal(t, "200", request.URL.Query().Get("end_timestamp"))
-			writeProbeJSON(response, `{"success":true,"data":[{"token_used":1200,"count":8,"quota":45.5},{"token_used":800,"count":5,"quota":24.5}]}`)
+			writeProbeJSON(response, `{"success":true,"data":[{"created_at":120,"token_used":1200,"count":8,"quota":45.5},{"created_at":180,"token_used":800,"count":5,"quota":24.5}]}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -240,6 +249,11 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	require.Equal(t, 70.0, *summary.Cost.Value)
 	require.Equal(t, "quota", summary.Cost.Unit)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
+	require.Len(t, summary.Trend, 1)
+	require.Equal(t, "1970-01-01", summary.Trend[0].Date)
+	require.Equal(t, 13.0, summary.Trend[0].Requests)
+	require.Equal(t, 2000.0, summary.Trend[0].Tokens)
+	require.Equal(t, 70.0, summary.Trend[0].Cost)
 }
 
 func TestConductorInventoryAndSummary(t *testing.T) {

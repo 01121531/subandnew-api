@@ -40,6 +40,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   XAxis,
@@ -120,6 +122,11 @@ type VersionData = {
   count: number
 }
 
+type DailyUsageData = {
+  date: string
+  value: number
+}
+
 type HealthData = {
   key: string
   label: string
@@ -167,6 +174,17 @@ const exactCurrency = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 4,
+})
+const trendAxisDate = new Intl.DateTimeFormat(undefined, {
+  month: '2-digit',
+  day: '2-digit',
+  timeZone: 'UTC',
+})
+const trendTooltipDate = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  timeZone: 'UTC',
 })
 
 const CONSUMPTION_CHART_CONFIG = {
@@ -292,6 +310,20 @@ function metricValue(
   return sample?.collection_status === 'succeeded' && sample.value != null
     ? sample.value
     : null
+}
+
+function trendMetricValue(
+  point: ManagedInstanceSummary['trend'][number],
+  metric: MetricKey
+) {
+  if (metric === 'quota') return point.cost
+  return point[metric]
+}
+
+function formatTrendDate(value: string, full = false) {
+  const date = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return value
+  return (full ? trendTooltipDate : trendAxisDate).format(date)
 }
 
 function metricLabel(metric: MetricKey, family: FleetFamily) {
@@ -462,6 +494,20 @@ export function FleetDashboard() {
         .map((row) => ({ name: row.instance.name, value: row[metric] ?? 0 })),
     [metric, rows]
   )
+  const dailyUsageData = useMemo<DailyUsageData[]>(() => {
+    const values = new Map<string, number>()
+    for (const row of rows) {
+      for (const point of row.summary?.trend ?? []) {
+        values.set(
+          point.date,
+          (values.get(point.date) ?? 0) + trendMetricValue(point, metric)
+        )
+      }
+    }
+    return [...values.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, value]) => ({ date, value }))
+  }, [metric, rows])
   const resourceData = useMemo<ResourceData[]>(() => {
     const totalsByKind = new Map<string, { total: number; enabled: number }>()
     for (const row of rows) {
@@ -590,6 +636,7 @@ export function FleetDashboard() {
         alertsError={alertsQuery.isError}
         healthData={healthData}
         chartData={chartData}
+        dailyUsageData={dailyUsageData}
         resourceData={resourceData}
         versionData={versionData}
         healthRate={healthRate}
@@ -737,6 +784,7 @@ type DashboardContentProps = {
   alertsError: boolean
   healthData: HealthData[]
   chartData: { name: string; value: number }[]
+  dailyUsageData: DailyUsageData[]
   resourceData: ResourceData[]
   versionData: VersionData[]
   healthRate: number
@@ -750,6 +798,12 @@ function DashboardContent(props: DashboardContentProps) {
   return (
     <div className='grid gap-4 pb-6'>
       <SummaryGrid {...props} />
+      <DailyUsagePanel
+        family={props.family}
+        metric={props.metric}
+        data={props.dailyUsageData}
+        onMetricChange={props.onMetricChange}
+      />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
         <ConsumptionPanel
           family={props.family}
@@ -770,6 +824,102 @@ function DashboardContent(props: DashboardContentProps) {
       </section>
       <PerformanceTable family={props.family} rows={props.rows} />
     </div>
+  )
+}
+
+function DailyUsagePanel(props: {
+  family: FleetFamily
+  metric: MetricKey
+  data: DailyUsageData[]
+  onMetricChange: (metric: MetricKey) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Card className={PANEL_CARD_CLASS}>
+      <CardHeader
+        className={cn(
+          PANEL_HEADER_CLASS,
+          'flex-row items-start justify-between gap-4 space-y-0'
+        )}
+      >
+        <div>
+          <CardTitle>{t('Daily usage trend')}</CardTitle>
+          <p className='text-muted-foreground mt-1 text-sm'>
+            {t('Daily totals in the selected period')}
+          </p>
+        </div>
+        <SegmentedControl
+          value={props.metric}
+          options={['requests', 'tokens', 'quota']}
+          getLabel={(value) => t(metricLabel(value, props.family))}
+          onChange={props.onMetricChange}
+        />
+      </CardHeader>
+      <CardContent className='py-4'>
+        {props.data.length ? (
+          <ChartContainer
+            config={CONSUMPTION_CHART_CONFIG}
+            className='aspect-auto h-[300px] w-full'
+          >
+            <LineChart
+              accessibilityLayer
+              data={props.data}
+              margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
+            >
+              <CartesianGrid vertical={false} strokeDasharray='3 3' />
+              <XAxis
+                dataKey='date'
+                axisLine={false}
+                tickLine={false}
+                tickMargin={10}
+                minTickGap={28}
+                tickFormatter={(value: string) => formatTrendDate(value)}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                width={54}
+                tickFormatter={(value: number) =>
+                  formatUsageMetric(props.metric, value, props.family)
+                }
+              />
+              <ChartTooltip
+                cursor={{ stroke: 'var(--color-border)' }}
+                content={
+                  <ChartTooltipContent
+                    indicator='line'
+                    labelFormatter={(label) =>
+                      formatTrendDate(String(label), true)
+                    }
+                    formatter={(value) => (
+                      <span className='font-mono font-medium tabular-nums'>
+                        {formatUsageMetric(
+                          props.metric,
+                          Number(value),
+                          props.family,
+                          false
+                        )}
+                      </span>
+                    )}
+                  />
+                }
+              />
+              <Line
+                type='monotone'
+                dataKey='value'
+                name={t(metricLabel(props.metric, props.family))}
+                stroke='var(--color-value)'
+                strokeWidth={2.25}
+                dot={props.data.length <= 14}
+                activeDot={{ r: 4 }}
+              />
+            </LineChart>
+          </ChartContainer>
+        ) : (
+          <PanelEmpty text={t('No daily usage data for this period')} />
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
