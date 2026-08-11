@@ -80,6 +80,7 @@ const ACCOUNT_FAMILIES: readonly AccountFamily[] = [
 ]
 const ALL_SITES_VALUE = 'all'
 const INVENTORY_REFRESH_MS = 120_000
+const FAILED_REFRESH_RETRY_MS = 60_000
 const ACCOUNT_PREFERENCES_KEY = 'managed-account-preferences-v1'
 const PANEL_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
 const EMPTY_INSTANCES: ManagedInstance[] = []
@@ -197,6 +198,8 @@ export function ManagedAccounts() {
   const instancesQuery = useQuery({
     queryKey: ['managed-account-instances'],
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
+    retry: 1,
+    retryDelay: FAILED_REFRESH_RETRY_MS,
     refetchInterval: INVENTORY_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
@@ -232,8 +235,23 @@ export function ManagedAccounts() {
   const inventoryQueries = useQueries({
     queries: instances.map((instance) => ({
       queryKey: ['managed-account-inventory', instance.id],
-      queryFn: () => getManagedInstanceInventory(instance.id, 'auto', ''),
-      retry: false,
+      queryFn: async () => {
+        const response = await getManagedInstanceInventory(
+          instance.id,
+          'auto',
+          ''
+        )
+        const observation = response.data
+        if (
+          observation.collection_status !== 'succeeded' ||
+          !observation.data
+        ) {
+          throw new Error(observation.error_code || 'collection_failed')
+        }
+        return response
+      },
+      retry: 1,
+      retryDelay: FAILED_REFRESH_RETRY_MS,
       staleTime: INVENTORY_REFRESH_MS / 2,
       refetchInterval: INVENTORY_REFRESH_MS,
       refetchIntervalInBackground: true,
