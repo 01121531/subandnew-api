@@ -73,6 +73,7 @@ type FilterDefinition = {
 }
 
 const PAGE_SIZE = 20
+const USAGE_RECORDS_REFRESH_MS = 120_000
 const EMPTY_INSTANCES: ManagedInstance[] = []
 const TIME_FILTER_KEYS = new Set([
   'start_time',
@@ -287,6 +288,8 @@ export function UsageRecords() {
   const instancesQuery = useQuery({
     queryKey: ['usage-record-instances'],
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
+    refetchInterval: USAGE_RECORDS_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const instances = useMemo(
@@ -314,12 +317,18 @@ export function UsageRecords() {
     queryFn: () => getUsageRecords(selectedId, apiFilters),
     enabled: selectedId > 0,
     retry: false,
+    staleTime: USAGE_RECORDS_REFRESH_MS / 2,
+    refetchInterval: USAGE_RECORDS_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const summaryQuery = useQuery({
     queryKey: ['usage-record-summary', selectedId, summaryApiFilters],
     queryFn: () => getUsageRecordSummary(selectedId, summaryApiFilters),
     enabled: selectedId > 0,
     retry: false,
+    staleTime: USAGE_RECORDS_REFRESH_MS / 2,
+    refetchInterval: USAGE_RECORDS_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const result = recordsQuery.data?.data
   const records = result?.items ?? []

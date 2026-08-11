@@ -120,7 +120,7 @@ type HealthData = {
   value: number
 }
 
-const LIVE_REFRESH_MS = 15_000
+const DASHBOARD_REFRESH_MS = 60_000
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
@@ -347,12 +347,14 @@ export function FleetDashboard() {
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
-    refetchInterval: 30_000,
+    refetchInterval: DASHBOARD_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const alertsQuery = useQuery({
     queryKey: ['fleet-dashboard-alerts'],
     queryFn: getManagedAlerts,
-    refetchInterval: 30_000,
+    refetchInterval: DASHBOARD_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -396,8 +398,8 @@ export function FleetDashboard() {
         )
       },
       retry: false,
-      staleTime: LIVE_REFRESH_MS / 2,
-      refetchInterval: LIVE_REFRESH_MS,
+      staleTime: DASHBOARD_REFRESH_MS / 2,
+      refetchInterval: DASHBOARD_REFRESH_MS,
       refetchIntervalInBackground: true,
     })),
   })
@@ -592,6 +594,7 @@ export function FleetDashboard() {
         healthData={healthData}
         chartData={chartData}
         dailyUsageData={dailyUsageData}
+        dailyUsageLoading={metricQueries.some((query) => query.isPending)}
         healthRate={healthRate}
         coverage={coverage}
         metricCoverage={metricCoverage}
@@ -738,6 +741,7 @@ type DashboardContentProps = {
   healthData: HealthData[]
   chartData: { name: string; value: number }[]
   dailyUsageData: DailyUsageData[]
+  dailyUsageLoading: boolean
   healthRate: number
   coverage: number
   metricCoverage: number
@@ -753,6 +757,7 @@ function DashboardContent(props: DashboardContentProps) {
         family={props.family}
         metric={props.metric}
         data={props.dailyUsageData}
+        loading={props.dailyUsageLoading}
         onMetricChange={props.onMetricChange}
       />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
@@ -778,6 +783,7 @@ function DailyUsagePanel(props: {
   family: FleetFamily
   metric: MetricKey
   data: DailyUsageData[]
+  loading: boolean
   onMetricChange: (metric: MetricKey) => void
 }) {
   const { t } = useTranslation()
@@ -803,7 +809,13 @@ function DailyUsagePanel(props: {
         />
       </CardHeader>
       <CardContent className='py-4'>
-        {props.data.length ? (
+        {props.loading && (
+          <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
+            <RefreshCw className='size-4 animate-spin' aria-hidden='true' />
+            <span>{t('Data loading')}</span>
+          </div>
+        )}
+        {!props.loading && props.data.length > 0 && (
           <ChartContainer
             config={CONSUMPTION_CHART_CONFIG}
             className='aspect-auto h-[300px] w-full'
@@ -862,7 +874,8 @@ function DailyUsagePanel(props: {
               />
             </LineChart>
           </ChartContainer>
-        ) : (
+        )}
+        {!props.loading && props.data.length === 0 && (
           <PanelEmpty text={t('No daily usage data for this period')} />
         )}
       </CardContent>

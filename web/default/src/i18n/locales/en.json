@@ -1292,6 +1292,7 @@
     "Daily usage trend": "Daily usage trend",
     "Daily totals in the selected period": "Daily totals in the selected period",
     "No daily usage data for this period": "No daily usage data for this period",
+    "Data loading": "Loading data...",
     "Fleet health": "Fleet health",
     "Current instance status distribution": "Current instance status distribution",
     "Resource inventory": "Resource inventory",
