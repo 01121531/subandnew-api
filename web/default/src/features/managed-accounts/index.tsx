@@ -79,7 +79,7 @@ const ACCOUNT_FAMILIES: readonly AccountFamily[] = [
   'conductor',
 ]
 const ALL_SITES_VALUE = 'all'
-const INVENTORY_REFRESH_MS = 15_000
+const INVENTORY_REFRESH_MS = 120_000
 const ACCOUNT_PREFERENCES_KEY = 'managed-account-preferences-v1'
 const PANEL_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
 const EMPTY_INSTANCES: ManagedInstance[] = []
