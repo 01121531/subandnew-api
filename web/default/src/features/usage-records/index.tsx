@@ -71,10 +71,13 @@ type FilterDefinition = {
   type?: 'text' | 'number' | 'date' | 'datetime-local'
   options?: FilterOption[]
 }
+type SortDirection = 'asc' | 'desc'
+type UsageSortKey = 'created_at' | 'model' | 'id'
 
 const PAGE_SIZE = 20
 const USAGE_RECORDS_REFRESH_MS = 120_000
 const EMPTY_INSTANCES: ManagedInstance[] = []
+const EMPTY_RECORDS: UsageRecord[] = []
 const TIME_FILTER_KEYS = new Set([
   'start_time',
   'end_time',
@@ -160,23 +163,6 @@ const SUB2_FILTERS: FilterDefinition[] = [
       { value: 'false', label: '仅一致' },
     ],
   },
-  {
-    key: 'sort_by',
-    label: '排序字段',
-    options: [
-      { value: 'created_at', label: '时间' },
-      { value: 'model', label: '模型' },
-      { value: 'id', label: '记录 ID' },
-    ],
-  },
-  {
-    key: 'sort_order',
-    label: '排序方向',
-    options: [
-      { value: 'desc', label: '降序' },
-      { value: 'asc', label: '升序' },
-    ],
-  },
 ]
 
 function localDateTime(date: Date) {
@@ -208,8 +194,6 @@ function defaultFilters(system: UsageSystem): UsageRecordFilters {
       start_date: localDate(start),
       end_date: localDate(end),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      sort_by: 'created_at',
-      sort_order: 'desc',
     }
   }
   return { start_time: localDateTime(start), end_time: localDateTime(end) }
@@ -271,6 +255,59 @@ function belongsToSystem(instance: ManagedInstance, system: UsageSystem) {
     : instance.kind === 'new_api' || instance.kind === 'huichuan'
 }
 
+function withUsageSort(
+  system: UsageSystem,
+  filters: UsageRecordFilters,
+  sortKey: UsageSortKey,
+  sortDirection: SortDirection
+) {
+  if (system !== 'sub2api') return filters
+  return { ...filters, sort_by: sortKey, sort_order: sortDirection }
+}
+
+function usageSortValue(
+  record: UsageRecord,
+  system: UsageSystem,
+  sortKey: UsageSortKey
+) {
+  if (sortKey === 'id') return number(record, 'id')
+  if (sortKey === 'model') {
+    return system === 'sub2api'
+      ? text(record, 'model')
+      : text(record, 'model_name')
+  }
+
+  const raw = value(record, 'created_at')
+  if (typeof raw === 'number') return raw
+  const timestamp = Date.parse(String(raw ?? ''))
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function sortUsageRecords(
+  records: UsageRecord[],
+  system: UsageSystem,
+  sortKey: UsageSortKey,
+  sortDirection: SortDirection
+) {
+  return [...records].sort((left, right) => {
+    const leftValue = usageSortValue(left, system, sortKey)
+    const rightValue = usageSortValue(right, system, sortKey)
+    const leftMissing = leftValue == null || leftValue === ''
+    const rightMissing = rightValue == null || rightValue === ''
+    if (leftMissing && rightMissing) return 0
+    if (leftMissing) return 1
+    if (rightMissing) return -1
+    const comparison =
+      typeof leftValue === 'number' && typeof rightValue === 'number'
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+    return sortDirection === 'asc' ? comparison : -comparison
+  })
+}
+
 export function UsageRecords() {
   const { t } = useTranslation()
   const [system, setSystem] = useState<UsageSystem>('new_api')
@@ -284,6 +321,8 @@ export function UsageRecords() {
   const [page, setPage] = useState(1)
   const [exporting, setExporting] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [sortKey, setSortKey] = useState<UsageSortKey>('created_at')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const instancesQuery = useQuery({
     queryKey: ['usage-record-instances'],
@@ -304,8 +343,13 @@ export function UsageRecords() {
 
   const selectedId = Number(instanceId)
   const apiFilters = useMemo(
-    () => requestFilters(system, applied, page),
-    [applied, page, system]
+    () =>
+      requestFilters(
+        system,
+        withUsageSort(system, applied, sortKey, sortDirection),
+        page
+      ),
+    [applied, page, sortDirection, sortKey, system]
   )
   const summaryApiFilters = useMemo(
     () => summaryRequestFilters(system, applied),
@@ -328,7 +372,11 @@ export function UsageRecords() {
     refetchInterval: USAGE_RECORDS_REFRESH_MS,
   })
   const result = recordsQuery.data?.data
-  const records = result?.items ?? []
+  const records = result?.items ?? EMPTY_RECORDS
+  const sortedRecords = useMemo(
+    () => sortUsageRecords(records, system, sortKey, sortDirection),
+    [records, sortDirection, sortKey, system]
+  )
   const total = result?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const filters = system === 'sub2api' ? SUB2_FILTERS : NEW_API_FILTERS
@@ -343,6 +391,8 @@ export function UsageRecords() {
     setInstanceId('')
     setDraft(defaults)
     setApplied(defaults)
+    setSortKey('created_at')
+    setSortDirection('desc')
     setPage(1)
   }
 
@@ -362,6 +412,8 @@ export function UsageRecords() {
     const defaults = defaultFilters(system)
     setDraft(defaults)
     setApplied(defaults)
+    setSortKey('created_at')
+    setSortDirection('desc')
     setPage(1)
   }
 
@@ -369,7 +421,14 @@ export function UsageRecords() {
     if (!selectedId) return
     setExporting(true)
     try {
-      await exportUsageRecords(selectedId, requestFilters(system, applied, 1))
+      await exportUsageRecords(
+        selectedId,
+        requestFilters(
+          system,
+          withUsageSort(system, applied, sortKey, sortDirection),
+          1
+        )
+      )
       toast.success('CSV 导出完成')
     } catch {
       toast.error('CSV 导出失败')
@@ -552,18 +611,51 @@ export function UsageRecords() {
           />
 
           <div className='border-border bg-card overflow-hidden rounded-lg border shadow-xs'>
-            <div className='border-border flex items-center justify-between border-b px-3 py-2.5'>
+            <div className='border-border flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5'>
               <div>
                 <div className='text-sm font-semibold'>记录明细</div>
                 <div className='text-muted-foreground text-xs tabular-nums'>
                   共 {total.toLocaleString('zh-CN')} 条
                 </div>
               </div>
-              <Badge variant='outline'>第 {page} 页</Badge>
+              <div className='flex max-w-full flex-wrap items-center justify-end gap-1.5'>
+                <NativeSelect
+                  value={sortKey}
+                  onChange={(event) => {
+                    setSortKey(event.target.value as UsageSortKey)
+                    setPage(1)
+                  }}
+                  className='h-7 w-28 text-xs'
+                  aria-label={t('Sort')}
+                >
+                  <NativeSelectOption value='created_at'>
+                    时间
+                  </NativeSelectOption>
+                  <NativeSelectOption value='model'>模型</NativeSelectOption>
+                  <NativeSelectOption value='id'>记录 ID</NativeSelectOption>
+                </NativeSelect>
+                <NativeSelect
+                  value={sortDirection}
+                  onChange={(event) => {
+                    setSortDirection(event.target.value as SortDirection)
+                    setPage(1)
+                  }}
+                  className='h-7 w-20 text-xs'
+                  aria-label={t('Sort')}
+                >
+                  <NativeSelectOption value='desc'>
+                    {t('Desc')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='asc'>
+                    {t('Asc')}
+                  </NativeSelectOption>
+                </NativeSelect>
+                <Badge variant='outline'>第 {page} 页</Badge>
+              </div>
             </div>
             <UsageRecordsContent
               system={system}
-              records={records}
+              records={sortedRecords}
               loading={recordsQuery.isLoading || instancesQuery.isLoading}
               error={recordsQuery.isError || instancesQuery.isError}
               hasInstance={selectedId > 0}

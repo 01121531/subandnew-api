@@ -68,6 +68,15 @@ type ResourceRow = {
   instance: ManagedInstance
   item: ManagedInstanceInventoryItem
 }
+type SortDirection = 'asc' | 'desc'
+type AccountSortKey =
+  | 'name'
+  | 'instance'
+  | 'created_at'
+  | 'cost'
+  | 'last_activity'
+  | 'survival'
+  | 'available'
 type AccountPreferences = {
   family: AccountFamily
   selectedInstances: Record<AccountFamily, string>
@@ -166,6 +175,75 @@ function getSurvivalSeconds(item: ManagedInstanceInventoryItem) {
   return end - item.created_at
 }
 
+function compareSortValues(
+  left: string | number | null | undefined,
+  right: string | number | null | undefined,
+  direction: SortDirection
+) {
+  const leftMissing = left == null || left === ''
+  const rightMissing = right == null || right === ''
+  if (leftMissing && rightMissing) return 0
+  if (leftMissing) return 1
+  if (rightMissing) return -1
+
+  const comparison =
+    typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        })
+  return direction === 'asc' ? comparison : -comparison
+}
+
+function availabilityRank(enabled?: boolean) {
+  if (enabled == null) return 1
+  return enabled ? 2 : 0
+}
+
+function compareResourceRows(
+  left: ResourceRow,
+  right: ResourceRow,
+  sortKey: AccountSortKey,
+  direction: SortDirection
+) {
+  let leftValue: string | number | null | undefined
+  let rightValue: string | number | null | undefined
+  switch (sortKey) {
+    case 'name':
+      leftValue = left.item.name
+      rightValue = right.item.name
+      break
+    case 'instance':
+      leftValue = left.instance.name
+      rightValue = right.instance.name
+      break
+    case 'created_at':
+      leftValue = left.item.created_at
+      rightValue = right.item.created_at
+      break
+    case 'cost':
+      leftValue = left.item.cost
+      rightValue = right.item.cost
+      break
+    case 'last_activity':
+      leftValue = left.item.last_activity_at
+      rightValue = right.item.last_activity_at
+      break
+    case 'survival':
+      leftValue = getSurvivalSeconds(left.item)
+      rightValue = getSurvivalSeconds(right.item)
+      break
+    case 'available':
+      leftValue = availabilityRank(left.item.enabled)
+      rightValue = availabilityRank(right.item.enabled)
+      break
+  }
+  const comparison = compareSortValues(leftValue, rightValue, direction)
+  if (comparison !== 0) return comparison
+  return (right.item.created_at ?? 0) - (left.item.created_at ?? 0)
+}
+
 function formatSurvivalDuration(seconds: number | null, t: TFunction) {
   if (seconds == null) return '--'
 
@@ -194,6 +272,8 @@ export function ManagedAccounts() {
     initialPreferences.selectedInstances
   )
   const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState<AccountSortKey>('available')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const instancesQuery = useQuery({
     queryKey: ['managed-account-instances'],
@@ -288,13 +368,10 @@ export function ManagedAccounts() {
             .includes(normalizedSearch)
         )
       : rows
-    return [...filtered].sort((left, right) => {
-      const availability =
-        Number(right.item.enabled === true) - Number(left.item.enabled === true)
-      if (availability !== 0) return availability
-      return (right.item.created_at ?? 0) - (left.item.created_at ?? 0)
-    })
-  }, [normalizedSearch, rows])
+    return [...filtered].sort((left, right) =>
+      compareResourceRows(left, right, sortKey, sortDirection)
+    )
+  }, [normalizedSearch, rows, sortDirection, sortKey])
   const loading = inventoryQueries.some((query) => query.isPending)
   const error = inventoryQueries.some((query) => {
     const observation = query.data?.data
@@ -377,6 +454,10 @@ export function ManagedAccounts() {
           loading={loading}
           error={error}
           searching={normalizedSearch !== ''}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSortKeyChange={setSortKey}
+          onSortDirectionChange={setSortDirection}
         />
       </div>
     )
@@ -406,7 +487,12 @@ export function ManagedAccounts() {
               getLabel={(option) =>
                 `${t(familyLabel(option))} · ${familyCounts[option]}`
               }
-              onChange={setFamily}
+              onChange={(value) => {
+                setFamily(value)
+                if (value === 'new_api' && sortKey === 'survival') {
+                  setSortKey('available')
+                }
+              }}
             />
             <Select
               items={[
@@ -559,9 +645,34 @@ function AccountTable(props: {
   loading: boolean
   error: boolean
   searching: boolean
+  sortKey: AccountSortKey
+  sortDirection: SortDirection
+  onSortKeyChange: (sortKey: AccountSortKey) => void
+  onSortDirectionChange: (direction: SortDirection) => void
 }) {
   const { t } = useTranslation()
   const isChannel = props.family === 'new_api'
+  const sortOptions: { value: AccountSortKey; label: string }[] = [
+    { value: 'available', label: t('Available') },
+    { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
+    { value: 'instance', label: t('Instance') },
+    {
+      value: 'created_at',
+      label: t(isChannel ? 'Created At' : 'Uploaded at'),
+    },
+    {
+      value: 'cost',
+      label: t(isChannel ? 'Used quota' : '7-day consumption'),
+    },
+    { value: 'last_activity', label: t('Last activity') },
+  ]
+  if (!isChannel) {
+    sortOptions.push({ value: 'survival', label: t('Survival time') })
+  }
+  const directionOptions: { value: SortDirection; label: string }[] = [
+    { value: 'desc', label: t('Desc') },
+    { value: 'asc', label: t('Asc') },
+  ]
   let emptyText = t(isChannel ? 'No channel data' : 'No account data')
   if (props.searching) emptyText = t('No matching accounts or channels')
   if (props.error) emptyText = t('Account data could not be loaded')
@@ -689,7 +800,7 @@ function AccountTable(props: {
 
   return (
     <Card className={PANEL_CLASS}>
-      <CardHeader className='border-border/70 flex-row items-start justify-between gap-3 space-y-0 border-b py-3.5'>
+      <CardHeader className='border-border/70 flex-row flex-wrap items-start justify-between gap-3 space-y-0 border-b py-3.5'>
         <div className='min-w-0'>
           <CardTitle className='flex items-center gap-2'>
             <Users className='text-muted-foreground size-4' />
@@ -703,11 +814,49 @@ function AccountTable(props: {
             )}
           </p>
         </div>
-        <Badge variant='secondary' className='tabular-nums'>
-          {props.rows.length === props.total
-            ? props.total
-            : `${props.rows.length} / ${props.total}`}
-        </Badge>
+        <div className='flex max-w-full flex-wrap items-center justify-end gap-1.5'>
+          <Select
+            items={sortOptions}
+            value={props.sortKey}
+            onValueChange={(value) =>
+              value && props.onSortKeyChange(value as AccountSortKey)
+            }
+          >
+            <SelectTrigger className='h-7 w-36 text-xs' aria-label={t('Sort')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align='end'>
+              {sortOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            items={directionOptions}
+            value={props.sortDirection}
+            onValueChange={(value) =>
+              value && props.onSortDirectionChange(value as SortDirection)
+            }
+          >
+            <SelectTrigger className='h-7 w-20 text-xs' aria-label={t('Sort')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align='end'>
+              {directionOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Badge variant='secondary' className='tabular-nums'>
+            {props.rows.length === props.total
+              ? props.total
+              : `${props.rows.length} / ${props.total}`}
+          </Badge>
+        </div>
       </CardHeader>
       {props.error && props.rows.length > 0 && (
         <div className='border-border bg-destructive/5 text-destructive border-b px-6 py-2 text-xs'>
