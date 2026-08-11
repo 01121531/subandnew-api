@@ -233,6 +233,10 @@ func supportedMetric(value float64, unit string) MetricSample {
 }
 
 func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
+	return adapter.inventory(ctx, connector, credential, resourceKind, cursor, true)
+}
+
+func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string, includeAccountUsage bool) (*InventoryPage, error) {
 	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
 		if strings.TrimSpace(cursor) != "" {
 			return nil, ErrInvalidInstance
@@ -293,7 +297,9 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 	if err != nil {
 		return nil, err
 	}
-	enrichSub2AccountUsage(ctx, connector, headers, page)
+	if includeAccountUsage {
+		enrichSub2AccountUsage(ctx, connector, headers, page)
+	}
 	if page.NextCursor == "" {
 		page.NextCursor = sub2NextPageCursor(data, pageNumber)
 	}
@@ -301,7 +307,7 @@ func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connecto
 }
 
 func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector, credential *CredentialMaterial, window TimeWindow) (*SummaryResult, error) {
-	page, err := adapter.Inventory(ctx, connector, credential, "account", "")
+	page, err := adapter.inventory(ctx, connector, credential, "account", "", false)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,6 +201,7 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	start := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.UTC).Unix()
 	end := start + 24*60*60
+	var accountUsageRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "admin-secret", request.Header.Get("x-api-key"))
 		switch request.URL.Path {
@@ -213,6 +215,9 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 			require.Equal(t, "false", request.URL.Query().Get("include_stats"))
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
 			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-08","requests":7,"total_tokens":1250,"actual_cost":1.25},{"date":"2026-08-09","requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
+		case "/api/v1/admin/accounts/9/usage", "/api/v1/admin/accounts/today-stats/batch":
+			accountUsageRequests.Add(1)
+			http.NotFound(response, request)
 		default:
 			http.NotFound(response, request)
 		}
@@ -232,6 +237,7 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	require.Equal(t, "2026-08-08", summary.Trend[0].Date)
 	require.Equal(t, 7.0, summary.Trend[0].Requests)
 	require.Equal(t, "2026-08-09", summary.Trend[1].Date)
+	require.Zero(t, accountUsageRequests.Load())
 }
 
 func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
