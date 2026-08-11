@@ -169,6 +169,49 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, summary.Requests.CollectionStatus)
 }
 
+func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	start := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.UTC).Unix()
+	end := start + 24*60*60
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
+		case "/api/v1/user/profile":
+			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"code":0,"data":{"id":42,"email":"user@example.com","username":"User","role":"user","status":"active"}}`)
+		case "/api/v1/usage/dashboard/snapshot-v2":
+			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"requests":3,"total_tokens":500,"actual_cost":0.25}]}}`)
+		case "/api/v1/admin/accounts", "/api/v1/admin/dashboard/snapshot-v2":
+			t.Fatal("regular account collection must not call an administrator endpoint")
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{
+		AuthType: "account_password", AccessScope: model.ManagedInstanceAccessUser,
+		Secret: "password", UserID: "user@example.com",
+	})
+
+	inventoryView, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	inventory := inventoryView.Data.(*InventoryPage)
+	require.Equal(t, "user", inventory.ResourceKind)
+	require.Equal(t, 1, inventory.Total)
+	require.Equal(t, "User", inventory.Items[0].Name)
+
+	summaryView, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: end})
+	require.NoError(t, err)
+	summary := summaryView.Data.(*SummaryResult)
+	require.Equal(t, "user", summary.Resources[0].ResourceKind)
+	require.Equal(t, 3.0, *summary.Requests.Value)
+	require.Equal(t, 500.0, *summary.Tokens.Value)
+	require.Equal(t, 0.25, *summary.Cost.Value)
+}
+
 func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
@@ -306,6 +349,7 @@ func TestPreflightStagesIncludeAuthenticationCapabilityAndTLSClassification(t *t
 	require.Equal(t, "tls", tlsStages[2].Name)
 	require.Equal(t, "failed", tlsStages[2].Status)
 	require.Equal(t, "not_run", tlsStages[3].Status)
+	require.Equal(t, "tls_verification_failed", managedInstanceObservationErrorCode(x509.UnknownAuthorityError{}))
 
 	successStages := succeededConnectionStages()
 	require.Len(t, successStages, 6)

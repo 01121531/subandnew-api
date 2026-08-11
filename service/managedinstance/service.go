@@ -22,10 +22,11 @@ var (
 )
 
 type CredentialInput struct {
-	AuthType  string
-	Secret    string
-	UserID    string
-	ExpiresAt int64
+	AuthType    string
+	AccessScope string
+	Secret      string
+	UserID      string
+	ExpiresAt   int64
 }
 
 type CreateInput struct {
@@ -78,6 +79,7 @@ type InstanceView struct {
 
 type CredentialView struct {
 	AuthType       string `json:"auth_type"`
+	AccessScope    string `json:"access_scope"`
 	Fingerprint    string `json:"fingerprint"`
 	ExpiresAt      int64  `json:"expires_at"`
 	LastVerifiedAt int64  `json:"last_verified_at"`
@@ -351,7 +353,7 @@ func RotateCredential(instanceID int64, input CredentialInput, actorID int) (*Cr
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "instance_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
-				"auth_type", "ciphertext", "key_version", "fingerprint", "expires_at", "last_verified_at", "rotated_by", "rotated_at", "updated_at",
+				"auth_type", "access_scope", "ciphertext", "key_version", "fingerprint", "expires_at", "last_verified_at", "rotated_by", "rotated_at", "updated_at",
 			}),
 		}).Create(credential).Error; err != nil {
 			return err
@@ -445,11 +447,18 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 
 func buildCredential(instanceID int64, input CredentialInput, actorID int) (*model.ManagedInstanceCredential, error) {
 	input.AuthType = strings.TrimSpace(input.AuthType)
+	input.AccessScope = strings.TrimSpace(input.AccessScope)
+	if input.AccessScope == "" {
+		input.AccessScope = model.ManagedInstanceAccessAdmin
+	}
 	if !validAuthType(input.AuthType) {
 		return nil, fmt.Errorf("%w: unsupported credential type", ErrInvalidInstance)
 	}
 	if strings.TrimSpace(input.Secret) == "" {
 		return nil, fmt.Errorf("%w: credential secret is required", ErrInvalidInstance)
+	}
+	if !validAccessScope(input.AccessScope) {
+		return nil, fmt.Errorf("%w: unsupported credential access scope", ErrInvalidInstance)
 	}
 	cipher, err := NewCredentialCipherFromEnvironment()
 	if err != nil {
@@ -461,7 +470,7 @@ func buildCredential(instanceID int64, input CredentialInput, actorID int) (*mod
 	}
 	now := common.GetTimestamp()
 	return &model.ManagedInstanceCredential{
-		InstanceId: instanceID, AuthType: input.AuthType, Ciphertext: ciphertext, KeyVersion: keyVersion,
+		InstanceId: instanceID, AuthType: input.AuthType, AccessScope: input.AccessScope, Ciphertext: ciphertext, KeyVersion: keyVersion,
 		Fingerprint: fingerprint, ExpiresAt: input.ExpiresAt, RotatedBy: actorID, RotatedAt: now,
 	}, nil
 }
@@ -515,6 +524,22 @@ func validAuthType(authType string) bool {
 	}
 }
 
+func validAccessScope(scope string) bool {
+	switch scope {
+	case model.ManagedInstanceAccessAdmin, model.ManagedInstanceAccessUser:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizedAccessScope(scope string) string {
+	if strings.TrimSpace(scope) == model.ManagedInstanceAccessUser {
+		return model.ManagedInstanceAccessUser
+	}
+	return model.ManagedInstanceAccessAdmin
+}
+
 func newInstanceView(instance *model.ManagedInstance, credential *model.ManagedInstanceCredential) *InstanceView {
 	labels := map[string]string{}
 	capabilities := []string{}
@@ -532,7 +557,7 @@ func newCredentialView(credential *model.ManagedInstanceCredential) *CredentialV
 		fingerprint = fingerprint[len(fingerprint)-8:]
 	}
 	return &CredentialView{
-		AuthType: credential.AuthType, Fingerprint: fingerprint, ExpiresAt: credential.ExpiresAt,
+		AuthType: credential.AuthType, AccessScope: credential.AccessScope, Fingerprint: fingerprint, ExpiresAt: credential.ExpiresAt,
 		LastVerifiedAt: credential.LastVerifiedAt, RotatedAt: credential.RotatedAt,
 	}
 }

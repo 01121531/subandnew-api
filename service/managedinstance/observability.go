@@ -3,10 +3,13 @@ package managedinstance
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -83,6 +86,37 @@ type ObservationView struct {
 type CommitGuard func(*gorm.DB) error
 
 func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		if strings.TrimSpace(cursor) != "" {
+			return nil, ErrInvalidInstance
+		}
+		headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
+		if err != nil {
+			return nil, err
+		}
+		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/user/self", headers, nil)
+		if err != nil {
+			return nil, err
+		}
+		data, err := newAPIEnvelopeData(response)
+		if err != nil {
+			return nil, err
+		}
+		var profile struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+			Role     int    `json:"role"`
+			Status   int    `json:"status"`
+		}
+		if json.Unmarshal(data, &profile) != nil || profile.ID <= 0 {
+			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		enabled := profile.Status == 1
+		return &InventoryPage{
+			ResourceKind: "user", Total: 1,
+			Items: []InventoryItem{{ID: profile.ID, Name: profile.Username, Type: strconv.Itoa(profile.Role), Status: strconv.Itoa(profile.Status), Enabled: &enabled}},
+		}, nil
+	}
 	resourceKind = normalizeResourceKind(resourceKind, "channel")
 	if resourceKind != "channel" {
 		return nil, ErrUnsupportedCapability
@@ -128,7 +162,11 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	query := url.Values{}
 	query.Set("start_timestamp", strconv.FormatInt(window.Start, 10))
 	query.Set("end_timestamp", strconv.FormatInt(window.End, 10))
-	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/data/?"+query.Encode(), headers, nil)
+	endpoint := "/api/data/"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/data/self"
+	}
+	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+query.Encode(), headers, nil)
 	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return summary, nil
 	}
@@ -164,6 +202,42 @@ func supportedMetric(value float64, unit string) MetricSample {
 }
 
 func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		if strings.TrimSpace(cursor) != "" {
+			return nil, ErrInvalidInstance
+		}
+		headers, err := sub2APIAuthHeaders(ctx, connector, credential)
+		if err != nil {
+			return nil, err
+		}
+		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/user/profile", headers, nil)
+		if err != nil {
+			return nil, err
+		}
+		data, err := sub2EnvelopeData(response)
+		if err != nil {
+			return nil, err
+		}
+		var profile struct {
+			ID       int64  `json:"id"`
+			Email    string `json:"email"`
+			Username string `json:"username"`
+			Role     string `json:"role"`
+			Status   string `json:"status"`
+		}
+		if json.Unmarshal(data, &profile) != nil || profile.ID <= 0 {
+			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		name := strings.TrimSpace(profile.Username)
+		if name == "" {
+			name = strings.TrimSpace(profile.Email)
+		}
+		enabled := strings.EqualFold(profile.Status, "active") || strings.EqualFold(profile.Status, "enabled")
+		return &InventoryPage{
+			ResourceKind: "user", Total: 1,
+			Items: []InventoryItem{{ID: profile.ID, Name: name, Type: profile.Role, Status: profile.Status, Enabled: &enabled}},
+		}, nil
+	}
 	resourceKind = normalizeResourceKind(resourceKind, "account")
 	if resourceKind != "account" {
 		return nil, ErrUnsupportedCapability
@@ -213,7 +287,13 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 	query.Set("include_stats", "false")
 	query.Set("include_model_stats", "false")
 	query.Set("include_group_stats", "false")
-	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/dashboard/snapshot-v2?"+query.Encode(), headers, nil)
+	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/dashboard/snapshot-v2"
+		query.Del("include_stats")
+		query.Set("include_trend", "true")
+	}
+	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+query.Encode(), headers, nil)
 	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return summary, nil
 	}
@@ -716,7 +796,20 @@ func managedInstanceObservationErrorCode(err error) string {
 	if errors.As(err, &probeError) {
 		return probeError.Code
 	}
+	var tlsVerificationError *tls.CertificateVerificationError
+	var unknownAuthorityError x509.UnknownAuthorityError
+	var hostnameError x509.HostnameError
+	var certificateInvalidError x509.CertificateInvalidError
+	var tlsRecordError tls.RecordHeaderError
+	var dnsError *net.DNSError
+	var networkError net.Error
 	switch {
+	case errors.As(err, &tlsVerificationError), errors.As(err, &unknownAuthorityError), errors.As(err, &hostnameError), errors.As(err, &certificateInvalidError):
+		return "tls_verification_failed"
+	case errors.As(err, &tlsRecordError):
+		return "tls_failed"
+	case errors.As(err, &dnsError):
+		return "dns_failed"
 	case errors.Is(err, ErrUnsupportedCapability):
 		return "unsupported_capability"
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -725,6 +818,8 @@ func managedInstanceObservationErrorCode(err error) string {
 		return "target_blocked"
 	case errors.Is(err, ErrConnectorResponseLarge):
 		return "response_too_large"
+	case errors.As(err, &networkError):
+		return "network_failed"
 	default:
 		return "collection_failed"
 	}

@@ -36,6 +36,7 @@ export const managedInstanceFormSchema = z.object({
   check_interval_seconds: z.number().int().min(10).max(86400),
   labels: z.string(),
   auth_type: z.string(),
+  access_scope: z.enum(['admin', 'user']),
   secret: z.string(),
   user_id: z.string(),
 })

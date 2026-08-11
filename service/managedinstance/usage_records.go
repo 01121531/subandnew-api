@@ -183,9 +183,15 @@ func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*U
 	var err error
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
 		endpoint = "/api/v1/admin/usage?" + query.Encode()
+		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
+			endpoint = "/api/v1/usage?" + query.Encode()
+		}
 		headers, err = sub2APIAuthHeaders(ctx, client.connector, client.credential)
 	} else {
 		endpoint = "/api/log/?" + query.Encode()
+		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
+			endpoint = "/api/log/self?" + query.Encode()
+		}
 		headers, err = newAPIAuthHeaders(ctx, client.connector, client.instance.Kind, client.credential)
 	}
 	if err != nil {
@@ -225,7 +231,11 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 			summaryQuery.Set(key, value)
 		}
 	}
-	response, err := client.connector.DoJSON(ctx, http.MethodGet, "/api/data/?"+summaryQuery.Encode(), headers, nil)
+	endpoint := "/api/data/"
+	if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/data/self"
+	}
+	response, err := client.connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), headers, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +304,13 @@ func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Valu
 	summaryQuery.Set("include_stats", "false")
 	summaryQuery.Set("include_model_stats", "false")
 	summaryQuery.Set("include_group_stats", "false")
-	response, err := client.connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/dashboard/snapshot-v2?"+summaryQuery.Encode(), headers, nil)
+	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
+	if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/dashboard/snapshot-v2"
+		summaryQuery.Del("include_stats")
+		summaryQuery.Set("include_trend", "true")
+	}
+	response, err := client.connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), headers, nil)
 	if err != nil {
 		return nil, err
 	}

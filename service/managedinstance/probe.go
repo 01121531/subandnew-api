@@ -117,7 +117,10 @@ func loadCredential(instanceID int64) (*CredentialMaterial, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &CredentialMaterial{AuthType: credential.AuthType, Secret: payload.Secret, UserID: payload.UserID}, nil
+	return &CredentialMaterial{
+		AuthType: credential.AuthType, AccessScope: normalizedAccessScope(credential.AccessScope),
+		Secret: payload.Secret, UserID: payload.UserID,
+	}, nil
 }
 
 func recordProbeFailure(instance *model.ManagedInstance, actorID int, probeErr error, checkedAt int64, guard CommitGuard) error {

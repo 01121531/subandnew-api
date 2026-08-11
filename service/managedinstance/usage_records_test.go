@@ -83,6 +83,43 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 	require.Len(t, page.Items, 1)
 }
 
+func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
+		case "/api/v1/usage":
+			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
+		case "/api/v1/usage/dashboard/snapshot-v2":
+			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"total_tokens":30,"actual_cost":0.5}]}}`)
+		case "/api/v1/admin/usage", "/api/v1/admin/dashboard/snapshot-v2":
+			t.Fatal("regular account usage must not call an administrator endpoint")
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{
+		AuthType: "account_password", AccessScope: model.ManagedInstanceAccessUser,
+		Secret: "password", UserID: "user@example.com",
+	})
+
+	page, err := ListUsageRecords(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), page.Total)
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+		"start_date": {"2026-08-01"}, "end_date": {"2026-08-07"}, "timezone": {"Asia/Shanghai"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 30.0, summary.TotalTokens)
+	require.Equal(t, 0.5, summary.Amount)
+}
+
 func TestGetUsageRecordSummaryUsesNativeNewAPIData(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

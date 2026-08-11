@@ -51,6 +51,7 @@ type CredentialSheetProps = {
 export function CredentialSheet(props: CredentialSheetProps) {
   const { t } = useTranslation()
   const [authType, setAuthType] = useState('bearer_pat')
+  const [accessScope, setAccessScope] = useState<'admin' | 'user'>('admin')
   const [secret, setSecret] = useState('')
   const [userId, setUserId] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -58,18 +59,26 @@ export function CredentialSheet(props: CredentialSheetProps) {
   useEffect(() => {
     if (!props.instance) return
     setAuthType(props.instance.credential?.auth_type || 'bearer_pat')
+    setAccessScope(props.instance.credential?.access_scope || 'admin')
     setSecret('')
     setUserId('')
   }, [props.instance])
 
   const submit = async () => {
-    if (!props.instance || !secret.trim()) return
+    if (
+      !props.instance ||
+      !secret.trim() ||
+      (authType === 'account_password' && !userId.trim())
+    ) {
+      return
+    }
     setSubmitting(true)
     try {
       const response = await rotateManagedInstanceCredential(
         props.instance.id,
         {
           auth_type: authType,
+          access_scope: accessScope,
           secret,
           user_id: userId.trim(),
           expires_at: 0,
@@ -112,10 +121,39 @@ export function CredentialSheet(props: CredentialSheetProps) {
               <NativeSelectOption value='legacy_access_token'>
                 {t('Legacy access token')}
               </NativeSelectOption>
+              <NativeSelectOption value='account_password'>
+                {t('Account and password')}
+              </NativeSelectOption>
             </NativeSelect>
           </div>
+          {authType === 'account_password' && (
+            <div className='grid gap-2'>
+              <Label htmlFor='credential-access-scope'>
+                {t('Account permissions')}
+              </Label>
+              <NativeSelect
+                id='credential-access-scope'
+                className='w-full'
+                value={accessScope}
+                onChange={(event) =>
+                  setAccessScope(event.target.value as 'admin' | 'user')
+                }
+              >
+                <NativeSelectOption value='admin'>
+                  {t('Administrator account (site-wide data)')}
+                </NativeSelectOption>
+                <NativeSelectOption value='user'>
+                  {t('Regular account (own data only)')}
+                </NativeSelectOption>
+              </NativeSelect>
+            </div>
+          )}
           <div className='grid gap-2'>
-            <Label htmlFor='credential-user-id'>{t('Legacy user ID')}</Label>
+            <Label htmlFor='credential-user-id'>
+              {t(
+                authType === 'account_password' ? 'Account' : 'Legacy user ID'
+              )}
+            </Label>
             <Input
               id='credential-user-id'
               value={userId}
@@ -141,7 +179,14 @@ export function CredentialSheet(props: CredentialSheetProps) {
           >
             {t('Cancel')}
           </SheetClose>
-          <Button disabled={submitting || !secret.trim()} onClick={submit}>
+          <Button
+            disabled={
+              submitting ||
+              !secret.trim() ||
+              (authType === 'account_password' && !userId.trim())
+            }
+            onClick={submit}
+          >
             {submitting ? t('Saving...') : t('Rotate')}
           </Button>
         </SheetFooter>

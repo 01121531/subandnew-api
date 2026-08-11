@@ -1323,6 +1323,19 @@
     "Select date": "Select date",
     "Select start time": "Select start time",
     "Select end time": "Select end time",
-    "Start time cannot be later than end time": "Start time cannot be later than end time"
+    "Start time cannot be later than end time": "Start time cannot be later than end time",
+    "Account permissions": "帳號權限",
+    "Invalid account or password.": "帳號或密碼不正確。",
+    "Site account": "站點帳號",
+    "Use an administrator or regular account. Credentials are encrypted and only used by the control plane.": "可填寫管理員帳號或一般帳號，憑證會加密保存且僅供控制平面使用。",
+    "Administrator account (site-wide data)": "管理員帳號（全站資料）",
+    "Regular account (own data only)": "一般帳號（僅自身資料）",
+    "Account and password": "帳號密碼",
+    "The account can sign in but does not have administrator permissions. Select regular account data or use an administrator account.": "帳號可以登入，但沒有管理員權限。請選擇一般帳號資料，或改用管理員帳號。",
+    "Connection detection failed. Check the site address, network, and TLS certificate.": "連線偵測失敗，請檢查站點位址、網路和 TLS 憑證。",
+    "The target TLS certificate is not trusted. Install a valid certificate before connecting.": "目標站點的 TLS 憑證不受信任，請先安裝有效憑證再接入。",
+    "The site URL protocol does not match the target service.": "站點位址協定與目標服務不相符。",
+    "The target hostname could not be resolved by the control-plane server.": "控制平面伺服器無法解析目標網域。",
+    "The control-plane server could not reach the target host or port.": "控制平面伺服器無法連線至目標主機或連接埠。"
   }
 }

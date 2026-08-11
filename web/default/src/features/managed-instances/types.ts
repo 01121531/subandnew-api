@@ -31,6 +31,7 @@ export type ManagedInstanceStatus =
 
 export interface ManagedInstanceCredential {
   auth_type: string
+  access_scope: 'admin' | 'user'
   fingerprint: string
   expires_at: number
   last_verified_at: number
@@ -74,6 +75,7 @@ export interface ManagedInstanceInput {
 
 export interface ManagedInstanceCredentialInput {
   auth_type: string
+  access_scope: 'admin' | 'user'
   secret: string
   user_id: string
   expires_at: number

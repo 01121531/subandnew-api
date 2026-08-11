@@ -165,6 +165,39 @@ func TestProbeGenericDetectsSub2APIAndLogsInWithAccountPassword(t *testing.T) {
 	require.Equal(t, "0.1.125", result.Version)
 }
 
+func TestProbeGenericDetectsSub2APIWithRegularAccount(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			http.NotFound(response, request)
+		case "/health":
+			writeProbeJSON(response, `{"status":"ok"}`)
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
+		case "/api/v1/user/profile":
+			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"code":0,"data":{"id":12,"email":"user@example.com","role":"user","status":"active"}}`)
+		case "/api/v1/admin/system/version":
+			t.Fatal("regular account probe must not call an administrator endpoint")
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", AccessScope: model.ManagedInstanceAccessUser,
+		Secret: "password", UserID: "user@example.com",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindSub2API, result.Kind)
+	require.Contains(t, result.Capabilities, "usage.read")
+	require.NotContains(t, result.Capabilities, "accounts.list")
+}
+
 func TestProbeGenericDetectsConductorAndLogsInWithAccountPassword(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

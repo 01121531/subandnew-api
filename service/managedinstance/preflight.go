@@ -44,12 +44,15 @@ func ProbeConnection(ctx context.Context, input CreateInput) (*PreflightResult, 
 		if !validAuthType(strings.TrimSpace(input.Credential.AuthType)) || strings.TrimSpace(input.Credential.Secret) == "" {
 			return nil, ErrInvalidInstance
 		}
+		if strings.TrimSpace(input.Credential.AccessScope) != "" && !validAccessScope(strings.TrimSpace(input.Credential.AccessScope)) {
+			return nil, ErrInvalidInstance
+		}
 		if input.Credential.ExpiresAt > 0 && input.Credential.ExpiresAt <= common.GetTimestamp() {
 			return &PreflightResult{Success: false, Stages: pendingConnectionStages(), ErrorCode: ProbeErrorCredentialExpired, Advice: "Rotate the managed credential before saving the instance."}, nil
 		}
 		credential = &CredentialMaterial{
 			AuthType: strings.TrimSpace(input.Credential.AuthType), Secret: input.Credential.Secret,
-			UserID: strings.TrimSpace(input.Credential.UserID),
+			UserID: strings.TrimSpace(input.Credential.UserID), AccessScope: normalizedAccessScope(input.Credential.AccessScope),
 		}
 	}
 	policy, err := ConnectorPolicyFromEnvironment()
@@ -141,6 +144,14 @@ func preflightAdvice(code string) string {
 		return "Add the private target to the managed instance outbound allowlist after reviewing the network boundary."
 	case ProbeErrorInvalidResponse:
 		return "Confirm the selected instance type and supported remote version."
+	case "tls_verification_failed":
+		return "Install a publicly trusted TLS certificate on the target or configure a trusted internal certificate."
+	case "tls_failed":
+		return "Confirm that the URL scheme matches the target service protocol."
+	case "dns_failed":
+		return "Confirm that the target hostname resolves from the control-plane server."
+	case "network_failed":
+		return "Confirm that the control-plane server can reach the target host and port."
 	default:
 		return "Verify DNS, network reachability, TLS trust, and the configured base URL."
 	}

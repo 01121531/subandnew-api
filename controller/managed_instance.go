@@ -16,10 +16,11 @@ import (
 )
 
 type managedInstanceCredentialRequest struct {
-	AuthType  string `json:"auth_type"`
-	Secret    string `json:"secret"`
-	UserID    string `json:"user_id"`
-	ExpiresAt int64  `json:"expires_at"`
+	AuthType    string `json:"auth_type"`
+	AccessScope string `json:"access_scope"`
+	Secret      string `json:"secret"`
+	UserID      string `json:"user_id"`
+	ExpiresAt   int64  `json:"expires_at"`
 }
 
 type managedInstanceRequest struct {
@@ -377,7 +378,8 @@ func credentialInput(request *managedInstanceCredentialRequest) *managedinstance
 		return nil
 	}
 	return &managedinstance.CredentialInput{
-		AuthType: request.AuthType, Secret: request.Secret, UserID: request.UserID, ExpiresAt: request.ExpiresAt,
+		AuthType: request.AuthType, AccessScope: request.AccessScope,
+		Secret: request.Secret, UserID: request.UserID, ExpiresAt: request.ExpiresAt,
 	}
 }
 

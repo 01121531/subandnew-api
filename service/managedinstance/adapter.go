@@ -32,9 +32,10 @@ func (err *ProbeError) Error() string {
 }
 
 type CredentialMaterial struct {
-	AuthType string
-	Secret   string
-	UserID   string
+	AuthType    string
+	AccessScope string
+	Secret      string
+	UserID      string
 }
 
 type ProbeResult struct {
@@ -111,6 +112,29 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 		headers, err := newAPIAuthHeaders(ctx, connector, detectedKind, credential)
 		if err != nil {
 			return nil, err
+		}
+		if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+			profileResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/user/self", headers, nil)
+			if err != nil {
+				return nil, err
+			}
+			if profileResponse.StatusCode != http.StatusOK {
+				return nil, probeHTTPError(profileResponse.StatusCode)
+			}
+			var profile struct {
+				Success bool `json:"success"`
+				Data    struct {
+					ID int64 `json:"id"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(profileResponse.Body, &profile) != nil || !profile.Success || profile.Data.ID <= 0 {
+				return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: profileResponse.StatusCode}
+			}
+			capabilities = append(capabilities, "profile.read", "usage.read")
+			return &ProbeResult{
+				Kind: detectedKind, Version: status.Data.Version, SystemName: status.Data.SystemName,
+				StartTime: status.Data.StartTime, Status: model.ManagedInstanceStatusHealthy, Capabilities: capabilities,
+			}, nil
 		}
 		adminResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/status/test", headers, nil)
 		if err != nil {
@@ -230,6 +254,27 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	if err != nil {
 		return nil, err
 	}
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		profileResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/user/profile", headers, nil)
+		if err != nil {
+			return nil, err
+		}
+		if profileResponse.StatusCode != http.StatusOK {
+			return nil, probeHTTPError(profileResponse.StatusCode)
+		}
+		var profile struct {
+			Code any `json:"code"`
+			Data struct {
+				ID int64 `json:"id"`
+			} `json:"data"`
+		}
+		if json.Unmarshal(profileResponse.Body, &profile) != nil || !sub2SuccessCode(profile.Code) || profile.Data.ID <= 0 {
+			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: profileResponse.StatusCode}
+		}
+		result.SystemName = "Sub2API"
+		result.Capabilities = append(result.Capabilities, "profile.read", "usage.read", "quota.read")
+		return result, nil
+	}
 	versionResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/system/version", headers, nil)
 	if err != nil {
 		return nil, err
@@ -252,6 +297,13 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		result.Capabilities = append(result.Capabilities, "config.read", "config.apply")
 	}
 	return result, nil
+}
+
+func credentialAccessScope(credential *CredentialMaterial) string {
+	if credential != nil && credential.AccessScope == model.ManagedInstanceAccessUser {
+		return model.ManagedInstanceAccessUser
+	}
+	return model.ManagedInstanceAccessAdmin
 }
 
 func probeConfigEndpoint(ctx context.Context, connector *Connector, kind string, headers http.Header) bool {

@@ -80,6 +80,7 @@ const defaultValues: ManagedInstanceFormValues = {
   check_interval_seconds: 60,
   labels: '',
   auth_type: 'account_password',
+  access_scope: 'admin',
   secret: '',
   user_id: '',
 }
@@ -129,7 +130,19 @@ function createInstanceErrorMessage(error: unknown) {
     case 'target_blocked':
       return 'The target address is blocked by the outbound security policy.'
     case 'authentication_failed':
-      return 'Invalid administrator account or password.'
+      return 'Invalid account or password.'
+    case 'permission_denied':
+      return 'The account can sign in but does not have administrator permissions. Select regular account data or use an administrator account.'
+    case 'collection_failed':
+      return 'Connection detection failed. Check the site address, network, and TLS certificate.'
+    case 'tls_verification_failed':
+      return 'The target TLS certificate is not trusted. Install a valid certificate before connecting.'
+    case 'tls_failed':
+      return 'The site URL protocol does not match the target service.'
+    case 'dns_failed':
+      return 'The target hostname could not be resolved by the control-plane server.'
+    case 'network_failed':
+      return 'The control-plane server could not reach the target host or port.'
     case 'two_factor_required':
       return 'This administrator account requires two-factor authentication.'
     case 'invalid_response':
@@ -158,6 +171,7 @@ function toInput(
   if (values.secret.trim()) {
     input.credential = {
       auth_type: autoDetect ? 'account_password' : values.auth_type,
+      access_scope: values.access_scope,
       secret: values.secret,
       user_id: values.user_id.trim(),
       expires_at: 0,
@@ -194,6 +208,7 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
       check_interval_seconds: props.instance.check_interval_seconds,
       labels: labelsToText(props.instance.labels),
       auth_type: props.instance.credential?.auth_type || 'bearer_pat',
+      access_scope: props.instance.credential?.access_scope || 'admin',
       secret: '',
       user_id: '',
     })
@@ -446,14 +461,32 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
 
             {!props.instance && (
               <SideDrawerSection>
-                <h3 className='text-sm font-medium'>
-                  {t('Administrator account')}
-                </h3>
+                <h3 className='text-sm font-medium'>{t('Site account')}</h3>
                 <p className='text-muted-foreground text-xs'>
                   {t(
-                    'Use the administrator username or email. Credentials are encrypted and only used by the control plane.'
+                    'Use an administrator or regular account. Credentials are encrypted and only used by the control plane.'
                   )}
                 </p>
+                <FormField
+                  control={form.control}
+                  name='access_scope'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Account permissions')}</FormLabel>
+                      <FormControl>
+                        <NativeSelect className='w-full' {...field}>
+                          <NativeSelectOption value='admin'>
+                            {t('Administrator account (site-wide data)')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='user'>
+                            {t('Regular account (own data only)')}
+                          </NativeSelectOption>
+                        </NativeSelect>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name='user_id'

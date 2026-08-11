@@ -21,6 +21,9 @@ const (
 	ManagedInstanceStatusDegraded   = "degraded"
 	ManagedInstanceStatusOffline    = "offline"
 	ManagedInstanceStatusAuthFailed = "auth_failed"
+
+	ManagedInstanceAccessAdmin = "admin"
+	ManagedInstanceAccessUser  = "user"
 )
 
 type ManagedInstance struct {
@@ -81,6 +84,7 @@ type ManagedInstanceCredential struct {
 	Id             int64  `json:"id" gorm:"primaryKey"`
 	InstanceId     int64  `json:"instance_id" gorm:"not null;uniqueIndex"`
 	AuthType       string `json:"auth_type" gorm:"type:varchar(32);not null"`
+	AccessScope    string `json:"access_scope" gorm:"type:varchar(16);not null;default:'admin'"`
 	Ciphertext     string `json:"-" gorm:"type:text;not null"`
 	KeyVersion     string `json:"key_version" gorm:"type:varchar(32);not null"`
 	Fingerprint    string `json:"fingerprint" gorm:"type:varchar(64);not null"`
@@ -96,6 +100,9 @@ func (ManagedInstanceCredential) TableName() string { return "managed_instance_c
 
 func (credential *ManagedInstanceCredential) BeforeCreate(_ *gorm.DB) error {
 	now := common.GetTimestamp()
+	if credential.AccessScope == "" {
+		credential.AccessScope = ManagedInstanceAccessAdmin
+	}
 	if credential.RotatedAt == 0 {
 		credential.RotatedAt = now
 	}
