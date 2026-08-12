@@ -23,6 +23,7 @@ func TestManagedInstancePermissionRoutes(t *testing.T) {
 		http.MethodGet + " /:id/inventory":                               authz.ManagedInstanceView,
 		http.MethodGet + " /:id/metrics":                                 authz.ManagedInstanceView,
 		http.MethodGet + " /:id/usage-records":                           authz.ManagedInstanceUsageView,
+		http.MethodGet + " /:id/usage-records/filter-options":            authz.ManagedInstanceUsageView,
 		http.MethodGet + " /:id/usage-records/summary":                   authz.ManagedInstanceUsageView,
 		http.MethodPost + " /:id/usage-records/exports":                  authz.ManagedInstanceUsageView,
 		http.MethodGet + " /:id/usage-records/exports/:task_id":          authz.ManagedInstanceUsageView,

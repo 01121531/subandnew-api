@@ -126,6 +126,19 @@ func GetManagedInstanceUsageRecords(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
 
+func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	result, err := managedinstance.GetUsageRecordFilterOptions(c.Request.Context(), id, c.Request.URL.Query())
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
 	id, ok := managedInstanceID(c)
 	if !ok {

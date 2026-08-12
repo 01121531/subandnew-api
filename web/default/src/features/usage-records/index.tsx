@@ -32,9 +32,9 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import { MultiSelect } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Progress } from '@/components/ui/progress'
@@ -56,6 +56,7 @@ import {
   downloadUsageRecordsExport,
   getUsageRecords,
   getUsageRecordsExport,
+  getUsageRecordFilterOptions,
   getUsageRecordSummary,
 } from './api'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
@@ -71,7 +72,6 @@ type FilterDefinition = {
   key: string
   label: string
   placeholder?: string
-  type?: 'text' | 'number' | 'date' | 'datetime-local'
   options?: FilterOption[]
 }
 type SortDirection = 'asc' | 'desc'
@@ -91,7 +91,6 @@ const TIME_FILTER_KEYS = new Set([
   'end_date',
 ])
 const LOG_TYPES: FilterOption[] = [
-  { value: '', label: '全部类型' },
   { value: '1', label: '充值' },
   { value: '2', label: '消费' },
   { value: '3', label: '管理' },
@@ -102,13 +101,13 @@ const LOG_TYPES: FilterOption[] = [
 ]
 
 const NEW_API_FILTERS: FilterDefinition[] = [
-  { key: 'start_time', label: '开始时间', type: 'datetime-local' },
-  { key: 'end_time', label: '结束时间', type: 'datetime-local' },
+  { key: 'start_time', label: '开始时间' },
+  { key: 'end_time', label: '结束时间' },
   { key: 'type', label: '日志类型', options: LOG_TYPES },
   { key: 'username', label: '用户名', placeholder: '精确用户名' },
   { key: 'token_name', label: '令牌名称', placeholder: '精确令牌名称' },
   { key: 'model_name', label: '模型', placeholder: '模型名称' },
-  { key: 'channel', label: '渠道 ID', type: 'number' },
+  { key: 'channel', label: '渠道 ID' },
   { key: 'group', label: '分组', placeholder: '分组名称' },
   { key: 'request_id', label: '请求 ID', placeholder: 'request_id' },
   {
@@ -116,23 +115,22 @@ const NEW_API_FILTERS: FilterDefinition[] = [
     label: '上游请求 ID',
     placeholder: 'upstream_request_id',
   },
-  { key: 'proxy_id', label: '代理 ID', type: 'number' },
+  { key: 'proxy_id', label: '代理 ID' },
 ]
 
 const SUB2_FILTERS: FilterDefinition[] = [
-  { key: 'start_date', label: '开始日期', type: 'date' },
-  { key: 'end_date', label: '结束日期', type: 'date' },
-  { key: 'user_id', label: '用户 ID', type: 'number' },
-  { key: 'api_key_id', label: 'API Key ID', type: 'number' },
-  { key: 'account_id', label: '账号 ID', type: 'number' },
-  { key: 'group_id', label: '分组 ID', type: 'number' },
+  { key: 'start_date', label: '开始日期' },
+  { key: 'end_date', label: '结束日期' },
+  { key: 'user_id', label: '用户 ID' },
+  { key: 'api_key_id', label: 'API Key ID' },
+  { key: 'account_id', label: '账号 ID' },
+  { key: 'group_id', label: '分组 ID' },
   { key: 'model', label: '模型', placeholder: '请求模型' },
   { key: 'request_id', label: '请求 ID', placeholder: 'request_id' },
   {
     key: 'request_type',
     label: '请求类型',
     options: [
-      { value: '', label: '全部类型' },
       { value: 'sync', label: '同步' },
       { value: 'stream', label: '流式' },
       { value: 'ws_v2', label: 'WebSocket' },
@@ -144,7 +142,6 @@ const SUB2_FILTERS: FilterDefinition[] = [
     key: 'billing_type',
     label: '计费类型',
     options: [
-      { value: '', label: '全部类型' },
       { value: '0', label: '余额' },
       { value: '1', label: '订阅' },
     ],
@@ -153,7 +150,6 @@ const SUB2_FILTERS: FilterDefinition[] = [
     key: 'billing_mode',
     label: '计费模式',
     options: [
-      { value: '', label: '全部模式' },
       { value: 'token', label: 'Token' },
       { value: 'per_request', label: '按请求' },
       { value: 'image', label: '图片' },
@@ -164,7 +160,6 @@ const SUB2_FILTERS: FilterDefinition[] = [
     key: 'upstream_model_mismatch',
     label: '上游模型校验',
     options: [
-      { value: '', label: '全部结果' },
       { value: 'true', label: '仅不一致' },
       { value: 'false', label: '仅一致' },
     ],
@@ -181,9 +176,22 @@ function localDate(date: Date) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 10)
 }
 
-function filterDate(value: string | undefined, dateOnly: boolean) {
-  if (!value) return undefined
-  const date = new Date(dateOnly ? `${value}T00:00` : value)
+function scalarFilter(value: UsageRecordFilters[string] | undefined) {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
+}
+
+function selectedFilters(value: UsageRecordFilters[string] | undefined) {
+  if (Array.isArray(value)) return value
+  return value ? [value] : []
+}
+
+function filterDate(
+  value: UsageRecordFilters[string] | undefined,
+  dateOnly: boolean
+) {
+  const normalized = scalarFilter(value)
+  if (!normalized) return undefined
+  const date = new Date(dateOnly ? `${normalized}T00:00` : normalized)
   return Number.isNaN(date.getTime()) ? undefined : date
 }
 
@@ -215,9 +223,11 @@ function requestFilters(
     [system === 'sub2api' ? 'page' : 'p']: String(page),
   }
   Object.entries(filters).forEach(([key, value]) => {
-    if (!value) return
+    if (!value || (Array.isArray(value) && value.length === 0)) return
     if (system === 'new_api' && (key === 'start_time' || key === 'end_time')) {
-      const timestamp = Math.floor(new Date(value).getTime() / 1000)
+      const timestamp = Math.floor(
+        new Date(scalarFilter(value)).getTime() / 1000
+      )
       if (Number.isFinite(timestamp)) {
         result[key === 'start_time' ? 'start_timestamp' : 'end_timestamp'] =
           String(timestamp)
@@ -249,7 +259,12 @@ function usageFilterError(
 ): string | null {
   const start = filters[system === 'sub2api' ? 'start_date' : 'start_time']
   const end = filters[system === 'sub2api' ? 'end_date' : 'end_time']
-  if (start && end && new Date(start).getTime() > new Date(end).getTime()) {
+  if (
+    start &&
+    end &&
+    new Date(scalarFilter(start)).getTime() >
+      new Date(scalarFilter(end)).getTime()
+  ) {
     return '开始时间不能晚于结束时间'
   }
   return null
@@ -381,6 +396,13 @@ export function UsageRecords() {
     retry: false,
     staleTime: USAGE_RECORDS_REFRESH_MS / 2,
     refetchInterval: USAGE_RECORDS_REFRESH_MS,
+  })
+  const filterOptionsQuery = useQuery({
+    queryKey: ['usage-record-filter-options', selectedId, summaryApiFilters],
+    queryFn: () => getUsageRecordFilterOptions(selectedId, summaryApiFilters),
+    enabled: selectedId > 0,
+    retry: false,
+    staleTime: USAGE_RECORDS_REFRESH_MS,
   })
   const result = recordsQuery.data?.data
   const records = result?.items ?? EMPTY_RECORDS
@@ -617,7 +639,10 @@ export function UsageRecords() {
                   <FilterControl
                     key={filter.key}
                     definition={filter}
-                    value={draft[filter.key] ?? ''}
+                    value={selectedFilters(draft[filter.key])}
+                    dynamicOptions={
+                      filterOptionsQuery.data?.data.fields[filter.key] ?? []
+                    }
                     onChange={(value) =>
                       setDraft((current) => ({
                         ...current,
@@ -805,39 +830,34 @@ function SummaryMetric(props: {
 
 function FilterControl(props: {
   definition: FilterDefinition
-  value: string
-  onChange: (value: string) => void
+  value: string[]
+  dynamicOptions: FilterOption[]
+  onChange: (value: string[]) => void
 }) {
   const { definition } = props
   const controlId = `usage-filter-${definition.key}`
+  const options = useMemo(() => {
+    const values = new Map<string, FilterOption>()
+    ;[...(definition.options ?? []), ...props.dynamicOptions].forEach(
+      (option) => {
+        if (option.value) values.set(option.value, option)
+      }
+    )
+    return [...values.values()]
+  }, [definition.options, props.dynamicOptions])
   return (
     <div className='grid min-w-0 gap-1.5'>
       <Label htmlFor={controlId} className='text-xs'>
         {definition.label}
       </Label>
-      {definition.options ? (
-        <NativeSelect
-          id={controlId}
-          className='w-full'
-          value={props.value}
-          onChange={(event) => props.onChange(event.target.value)}
-        >
-          {definition.options.map((option) => (
-            <NativeSelectOption key={option.value} value={option.value}>
-              {option.label}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      ) : (
-        <Input
-          id={controlId}
-          type={definition.type ?? 'text'}
-          min={definition.type === 'number' ? 1 : undefined}
-          value={props.value}
-          placeholder={definition.placeholder}
-          onChange={(event) => props.onChange(event.target.value)}
-        />
-      )}
+      <MultiSelect
+        id={controlId}
+        options={options}
+        selected={props.value}
+        onChange={props.onChange}
+        placeholder={definition.placeholder ?? '请选择或输入'}
+        allowCreate
+      />
     </div>
   )
 }

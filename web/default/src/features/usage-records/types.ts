@@ -39,4 +39,16 @@ export interface UsageRecordSummary {
   currency: 'USD' | 'quota'
 }
 
-export type UsageRecordFilters = Record<string, string>
+export type UsageRecordFilterValue = string | string[]
+export type UsageRecordFilters = Record<string, UsageRecordFilterValue>
+
+export type UsageRecordFilterOption = {
+  value: string
+  label: string
+}
+
+export interface UsageRecordFilterOptions {
+  source_instance_id: number
+  kind: ManagedInstance['kind']
+  fields: Record<string, UsageRecordFilterOption[]>
+}

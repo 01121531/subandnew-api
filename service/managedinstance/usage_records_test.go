@@ -30,6 +30,12 @@ func TestNormalizeUsageRecordQueryKeepsOnlyNativeFilters(t *testing.T) {
 	require.Equal(t, "upstream-1", query.Get("upstream_request_id"))
 	require.Empty(t, query.Get("unknown"))
 
+	multi, err := normalizeUsageRecordQuery(model.ManagedInstanceKindNewAPI, url.Values{
+		"username": {"alice", "bob", "alice"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"alice", "bob"}, multi["username"])
+
 	_, err = normalizeUsageRecordQuery(model.ManagedInstanceKindSub2API, url.Values{"start_date": {"2026/08/09"}})
 	require.ErrorIs(t, err, ErrInvalidInstance)
 	_, err = normalizeUsageRecordQuery(model.ManagedInstanceKindNewAPI, url.Values{"channel": {"abc"}})
@@ -44,6 +50,51 @@ func TestNormalizeUsageRecordQueryKeepsOnlyNativeFilters(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidInstance)
 	_, err = normalizeUsageRecordQuery(model.ManagedInstanceKindSub2API, url.Values{"timezone": {"not/a-zone"}})
 	require.ErrorIs(t, err, ErrInvalidInstance)
+}
+
+func TestListUsageRecordsCombinesMultipleFilterValues(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		username := request.URL.Query().Get("username")
+		require.Contains(t, []string{"alice", "bob"}, username)
+		require.Len(t, request.URL.Query()["username"], 1)
+		id := 1
+		createdAt := 100
+		if username == "bob" {
+			id = 2
+			createdAt = 200
+		}
+		writeProbeJSON(response, fmt.Sprintf(`{"success":true,"data":{"items":[{"id":%d,"username":%q,"created_at":%d}],"total":1,"page":1,"page_size":20}}`, id, username, createdAt))
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{
+		"username": {"alice", "bob"}, "p": {"1"}, "page_size": {"20"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), page.Total)
+	require.Len(t, page.Items, 2)
+	require.Contains(t, string(page.Items[0]), `"username":"bob"`)
+}
+
+func TestUsageRecordFilterOptionsComeFromNativeUsageFields(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
+		require.Equal(t, "100", request.URL.Query().Get("page_size"))
+		writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"user_id":11,"user":{"email":"user@example.com"},"api_key_id":12,"api_key":{"name":"primary"},"account_id":13,"account":{"name":"openai-main"},"group_id":14,"group":{"name":"default"},"model":"gpt-5","request_id":"req-1"}],"total":1,"page":1,"page_size":100}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "secret"})
+
+	options, err := GetUsageRecordFilterOptions(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, "11", options.Fields["user_id"][0].Value)
+	require.Equal(t, "user@example.com (#11)", options.Fields["user_id"][0].Label)
+	require.Equal(t, "gpt-5", options.Fields["model"][0].Value)
 }
 
 func TestListUsageRecordsUsesNativeNewAPIContract(t *testing.T) {

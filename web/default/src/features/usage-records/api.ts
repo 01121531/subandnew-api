@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 
 import type {
   UsageRecordFilters,
+  UsageRecordFilterOptions,
   UsageRecordPage,
   UsageRecordSummary,
 } from './types'
@@ -50,10 +51,25 @@ export type UsageRecordExportTask = {
 function usageRecordParams(filters: UsageRecordFilters) {
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([key, value]) => {
-    const normalized = value.trim()
-    if (normalized) params.set(key, normalized)
+    const values = Array.isArray(value) ? value : [value]
+    values.forEach((item) => {
+      const normalized = item.trim()
+      if (normalized) params.append(key, normalized)
+    })
   })
   return params
+}
+
+export async function getUsageRecordFilterOptions(
+  instanceId: number,
+  filters: UsageRecordFilters
+): Promise<ApiResponse<UsageRecordFilterOptions>> {
+  const params = usageRecordParams(filters)
+  const response = await api.get<ApiResponse<UsageRecordFilterOptions>>(
+    `/api/managed-instances/${instanceId}/usage-records/filter-options?${params.toString()}`,
+    { disableDuplicate: true }
+  )
+  return response.data
 }
 
 export async function getUsageRecords(

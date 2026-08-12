@@ -11,8 +11,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/01121531/subandnew-api/model"
@@ -23,6 +25,8 @@ const (
 	usageRecordMaxPageSize  = 100
 	usageRecordExportLimit  = 1000000
 	usageRecordMaxTextValue = 512
+	usageRecordMaxValues    = 20
+	usageRecordMaxVariants  = 64
 )
 
 var ErrUsageExportTooLarge = errors.New("usage record export exceeds the 1000000 row limit")
@@ -42,6 +46,17 @@ type UsageRecordSummary struct {
 	TotalTokens      float64 `json:"total_tokens"`
 	Amount           float64 `json:"amount"`
 	Currency         string  `json:"currency"`
+}
+
+type UsageRecordFilterOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+type UsageRecordFilterOptions struct {
+	SourceInstanceID int64                                `json:"source_instance_id"`
+	Kind             string                               `json:"kind"`
+	Fields           map[string][]UsageRecordFilterOption `json:"fields"`
 }
 
 type usageRecordClient struct {
@@ -81,6 +96,29 @@ func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (
 		return nil, err
 	}
 	return client.list(ctx, query)
+}
+
+func GetUsageRecordFilterOptions(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordFilterOptions, error) {
+	client, err := newUsageRecordClient(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	query, err := normalizeUsageRecordQuery(client.instance.Kind, input)
+	if err != nil {
+		return nil, err
+	}
+	keep := map[string]bool{"start_timestamp": true, "end_timestamp": true, "start_date": true, "end_date": true, "timezone": true}
+	for key := range query {
+		if !keep[key] {
+			query.Del(key)
+		}
+	}
+	setUsageRecordPage(query, client.instance.Kind, 1, usageRecordMaxPageSize)
+	page, err := client.listTarget(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return usageRecordOptionsFromPage(client.instance, page), nil
 }
 
 func GetUsageRecordSummary(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordSummary, error) {
@@ -293,6 +331,85 @@ func newUsageRecordClient(instanceID int64) (*usageRecordClient, error) {
 }
 
 func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*UsageRecordPage, error) {
+	variants, err := usageRecordQueryVariants(query)
+	if err != nil {
+		return nil, err
+	}
+	if len(variants) == 1 {
+		return client.listTarget(ctx, variants[0])
+	}
+
+	requestedPage := integerValue(query.Get(pageField(client.instance.Kind)), 1)
+	requestedSize := integerValue(query.Get("page_size"), usageRecordPageSize)
+	needed := requestedPage * requestedSize
+	type variantResult struct {
+		items []json.RawMessage
+		total int64
+		err   error
+	}
+	results := make([]variantResult, len(variants))
+	semaphore := make(chan struct{}, 6)
+	var group sync.WaitGroup
+	for index, variant := range variants {
+		group.Add(1)
+		go func(index int, variant url.Values) {
+			defer group.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			results[index].items, results[index].total, results[index].err = client.collectUsageVariant(ctx, variant, needed)
+		}(index, variant)
+	}
+	group.Wait()
+
+	items := make([]json.RawMessage, 0, needed*len(variants))
+	var total int64
+	for _, result := range results {
+		if result.err != nil {
+			return nil, result.err
+		}
+		items = append(items, result.items...)
+		total += result.total
+	}
+	sortUsageRecordItems(items, client.instance.Kind, query.Get("sort_by"), query.Get("sort_order"))
+	start := (requestedPage - 1) * requestedSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + requestedSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return &UsageRecordPage{
+		SourceInstanceID: client.instance.Id,
+		Kind:             client.instance.Kind,
+		Items:            items[start:end], Total: total, Page: requestedPage, PageSize: requestedSize,
+	}, nil
+}
+
+func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query url.Values, needed int) ([]json.RawMessage, int64, error) {
+	items := make([]json.RawMessage, 0, needed)
+	var total int64
+	for pageNumber := 1; len(items) < needed; pageNumber++ {
+		pageSize := needed - len(items)
+		if pageSize > usageRecordMaxPageSize {
+			pageSize = usageRecordMaxPageSize
+		}
+		pageQuery := cloneURLValues(query)
+		setUsageRecordPage(pageQuery, client.instance.Kind, pageNumber, pageSize)
+		page, err := client.listTarget(ctx, pageQuery)
+		if err != nil {
+			return nil, 0, err
+		}
+		total = page.Total
+		items = append(items, page.Items...)
+		if len(page.Items) < pageSize || int64(len(items)) >= total {
+			break
+		}
+	}
+	return items, total, nil
+}
+
+func (client *usageRecordClient) listTarget(ctx context.Context, query url.Values) (*UsageRecordPage, error) {
 	var endpoint string
 	var response *ConnectorResponse
 	var err error
@@ -485,14 +602,24 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 	query := make(url.Values)
 	for key, values := range input {
 		validator, ok := allowed[key]
-		if !ok || len(values) == 0 || strings.TrimSpace(values[0]) == "" {
+		if !ok || len(values) == 0 {
 			continue
 		}
-		value := strings.TrimSpace(values[0])
-		if len(value) > usageRecordMaxTextValue || !validator(value) {
-			return nil, fmt.Errorf("%w: invalid usage record filter %s", ErrInvalidInstance, key)
+		seen := map[string]bool{}
+		for _, raw := range values {
+			value := strings.TrimSpace(raw)
+			if value == "" || seen[value] {
+				continue
+			}
+			if len(value) > usageRecordMaxTextValue || !validator(value) {
+				return nil, fmt.Errorf("%w: invalid usage record filter %s", ErrInvalidInstance, key)
+			}
+			seen[value] = true
+			query.Add(key, value)
+			if len(query[key]) > usageRecordMaxValues {
+				return nil, fmt.Errorf("%w: too many values for usage record filter %s", ErrInvalidInstance, key)
+			}
 		}
-		query.Set(key, value)
 	}
 	page := integerValue(query.Get(pageField(kind)), 1)
 	pageSize := integerValue(query.Get("page_size"), usageRecordPageSize)
@@ -504,6 +631,43 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 		return nil, err
 	}
 	return query, nil
+}
+
+func usageRecordQueryVariants(query url.Values) ([]url.Values, error) {
+	variants := []url.Values{cloneURLValues(query)}
+	for key, values := range query {
+		if len(values) < 2 || !usageRecordMultiValueFields[key] {
+			continue
+		}
+		if len(variants)*len(values) > usageRecordMaxVariants {
+			return nil, fmt.Errorf("%w: usage record filter combinations exceed %d", ErrInvalidInstance, usageRecordMaxVariants)
+		}
+		next := make([]url.Values, 0, len(variants)*len(values))
+		for _, variant := range variants {
+			for _, value := range values {
+				copy := cloneURLValues(variant)
+				copy.Set(key, value)
+				next = append(next, copy)
+			}
+		}
+		variants = next
+	}
+	for _, variant := range variants {
+		for key, values := range variant {
+			if len(values) > 1 {
+				variant.Set(key, values[0])
+			}
+		}
+	}
+	return variants, nil
+}
+
+func cloneURLValues(source url.Values) url.Values {
+	copy := make(url.Values, len(source))
+	for key, values := range source {
+		copy[key] = append([]string(nil), values...)
+	}
+	return copy
 }
 
 func validateUsageRecordRange(kind string, query url.Values) error {
@@ -571,6 +735,116 @@ var sub2UsageQueryFields = map[string]usageQueryValidator{
 	"upstream_model_mismatch": booleanValue, "start_date": dateValue, "end_date": dateValue,
 	"timezone": timezoneValue, "sort_by": oneOf("created_at", "model", "id"),
 	"sort_order": oneOf("asc", "desc"), "exact_total": booleanValue,
+}
+
+var usageRecordMultiValueFields = map[string]bool{
+	"type": true, "username": true, "token_name": true, "model_name": true,
+	"channel": true, "group": true, "request_id": true, "upstream_request_id": true, "proxy_id": true,
+	"user_id": true, "api_key_id": true, "account_id": true, "group_id": true, "model": true,
+	"request_type": true, "stream": true, "billing_type": true, "billing_mode": true,
+	"upstream_model_mismatch": true,
+}
+
+func sortUsageRecordItems(items []json.RawMessage, kind string, sortBy string, sortOrder string) {
+	if sortBy == "" {
+		sortBy = "created_at"
+	}
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+	sort.SliceStable(items, func(left int, right int) bool {
+		leftValue := usageRecordSortValue(items[left], kind, sortBy)
+		rightValue := usageRecordSortValue(items[right], kind, sortBy)
+		comparison := compareUsageRecordValues(leftValue, rightValue)
+		if sortOrder == "asc" {
+			return comparison < 0
+		}
+		return comparison > 0
+	})
+}
+
+func usageRecordSortValue(raw json.RawMessage, kind string, sortBy string) any {
+	var item map[string]any
+	if json.Unmarshal(raw, &item) != nil {
+		return nil
+	}
+	if sortBy == "model" {
+		if kind == model.ManagedInstanceKindSub2API {
+			return item["model"]
+		}
+		return item["model_name"]
+	}
+	return item[sortBy]
+}
+
+func compareUsageRecordValues(left any, right any) int {
+	leftNumber, leftIsNumber := usageNumber(left)
+	rightNumber, rightIsNumber := usageNumber(right)
+	if leftIsNumber && rightIsNumber {
+		if leftNumber < rightNumber {
+			return -1
+		}
+		if leftNumber > rightNumber {
+			return 1
+		}
+		return 0
+	}
+	return strings.Compare(strings.ToLower(fmt.Sprint(left)), strings.ToLower(fmt.Sprint(right)))
+}
+
+func usageRecordOptionsFromPage(instance *model.ManagedInstance, page *UsageRecordPage) *UsageRecordFilterOptions {
+	fields := map[string]map[string]string{}
+	add := func(field string, value any, label any) {
+		normalized := strings.TrimSpace(fmt.Sprint(value))
+		if normalized == "" || normalized == "<nil>" {
+			return
+		}
+		if fields[field] == nil {
+			fields[field] = map[string]string{}
+		}
+		display := strings.TrimSpace(fmt.Sprint(label))
+		if display == "" || display == "<nil>" || display == normalized {
+			display = normalized
+		} else {
+			display += " (#" + normalized + ")"
+		}
+		fields[field][normalized] = display
+	}
+
+	for _, raw := range page.Items {
+		var item map[string]any
+		if json.Unmarshal(raw, &item) != nil {
+			continue
+		}
+		if instance.Kind == model.ManagedInstanceKindSub2API {
+			add("user_id", item["user_id"], nestedUsageValue(item, []string{"user", "email"}))
+			add("api_key_id", item["api_key_id"], nestedUsageValue(item, []string{"api_key", "name"}))
+			add("account_id", item["account_id"], nestedUsageValue(item, []string{"account", "name"}))
+			add("group_id", item["group_id"], nestedUsageValue(item, []string{"group", "name"}))
+			add("model", item["model"], item["model"])
+			add("request_id", item["request_id"], item["request_id"])
+			continue
+		}
+		add("username", item["username"], item["username"])
+		add("token_name", item["token_name"], item["token_name"])
+		add("model_name", item["model_name"], item["model_name"])
+		add("channel", item["channel"], item["channel_name"])
+		add("group", item["group"], item["group"])
+		add("request_id", item["request_id"], item["request_id"])
+		add("upstream_request_id", item["upstream_request_id"], item["upstream_request_id"])
+		add("proxy_id", item["proxy_id"], item["proxy_id"])
+	}
+
+	result := &UsageRecordFilterOptions{SourceInstanceID: instance.Id, Kind: instance.Kind, Fields: map[string][]UsageRecordFilterOption{}}
+	for field, values := range fields {
+		options := make([]UsageRecordFilterOption, 0, len(values))
+		for value, label := range values {
+			options = append(options, UsageRecordFilterOption{Value: value, Label: label})
+		}
+		sort.Slice(options, func(left int, right int) bool { return options[left].Label < options[right].Label })
+		result.Fields[field] = options
+	}
+	return result
 }
 
 func textValue(value string) bool { return strings.TrimSpace(value) != "" }
