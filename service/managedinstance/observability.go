@@ -109,11 +109,7 @@ func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector
 		if strings.TrimSpace(cursor) != "" {
 			return nil, ErrInvalidInstance
 		}
-		headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
-		if err != nil {
-			return nil, err
-		}
-		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/user/self", headers, nil)
+		response, err := newAPIDoJSON(ctx, connector, adapter.configuredKind, credential, http.MethodGet, "/api/user/self", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -140,15 +136,11 @@ func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector
 	if resourceKind != "channel" {
 		return nil, ErrUnsupportedCapability
 	}
-	headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
-	if err != nil {
-		return nil, err
-	}
 	pageNumber, err := newAPIPageNumber(cursor)
 	if err != nil {
 		return nil, err
 	}
-	response, err := connector.DoJSON(ctx, http.MethodGet, newAPIInventoryEndpoint(pageNumber), headers, nil)
+	response, err := newAPIDoJSON(ctx, connector, adapter.configuredKind, credential, http.MethodGet, newAPIInventoryEndpoint(pageNumber), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -174,10 +166,6 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	}
 	summary := summaryFromInventory(window, page)
 
-	headers, err := newAPIAuthHeaders(ctx, connector, adapter.configuredKind, credential)
-	if err != nil {
-		return summary, nil
-	}
 	query := url.Values{}
 	query.Set("start_timestamp", strconv.FormatInt(window.Start, 10))
 	query.Set("end_timestamp", strconv.FormatInt(window.End, 10))
@@ -185,7 +173,7 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
 		endpoint = "/api/data/self"
 	}
-	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+query.Encode(), headers, nil)
+	response, err := newAPIDoJSON(ctx, connector, adapter.configuredKind, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
 	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return summary, nil
 	}

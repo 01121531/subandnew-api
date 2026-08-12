@@ -66,6 +66,78 @@ func TestListUsageRecordsUsesNativeNewAPIContract(t *testing.T) {
 	require.Len(t, page.Items, 1)
 }
 
+func TestNewAPIAccountPasswordReusesSessionAcrossUsageRequests(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/user/login":
+			loginCount.Add(1)
+			http.SetCookie(response, &http.Cookie{Name: "session", Value: "shared-session", Path: "/"})
+			writeProbeJSON(response, `{"success":true,"data":{"id":7}}`)
+		case "/api/log/":
+			cookie, err := request.Cookie("session")
+			require.NoError(t, err)
+			require.Equal(t, "shared-session", cookie.Value)
+			require.Equal(t, "7", request.Header.Get("New-Api-User"))
+			writeProbeJSON(response, `{"success":true,"data":{"items":[],"total":0,"page":1,"page_size":20}}`)
+		case "/api/data/":
+			cookie, err := request.Cookie("session")
+			require.NoError(t, err)
+			require.Equal(t, "shared-session", cookie.Value)
+			writeProbeJSON(response, `{"success":true,"data":[]}`)
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"quota_per_unit":500000}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+
+	_, err := ListUsageRecords(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	_, err = GetUsageRecordSummary(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, int32(1), loginCount.Load())
+}
+
+func TestNewAPIAccountPasswordRefreshesRejectedSession(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/user/login":
+			login := loginCount.Add(1)
+			http.SetCookie(response, &http.Cookie{Name: "session", Value: fmt.Sprintf("session-%d", login), Path: "/"})
+			writeProbeJSON(response, `{"success":true,"data":{"id":7}}`)
+		case "/api/log/":
+			cookie, err := request.Cookie("session")
+			require.NoError(t, err)
+			if cookie.Value == "session-1" {
+				response.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			require.Equal(t, "session-2", cookie.Value)
+			writeProbeJSON(response, `{"success":true,"data":{"items":[],"total":0,"page":1,"page_size":20}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+
+	_, err := ListUsageRecords(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), loginCount.Load())
+}
+
 func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

@@ -81,6 +81,17 @@ type newAPIAdapter struct {
 	configuredKind string
 }
 
+type newAPISession struct {
+	mu        sync.Mutex
+	userID    int
+	cookies   []*http.Cookie
+	expiresAt time.Time
+}
+
+const newAPISessionTTL = 30 * time.Minute
+
+var newAPISessions sync.Map
+
 type newAPIStatusResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
@@ -113,12 +124,8 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 	}
 	capabilities := []string{"health.read", "version.read"}
 	if credential != nil {
-		headers, err := newAPIAuthHeaders(ctx, connector, detectedKind, credential)
-		if err != nil {
-			return nil, err
-		}
 		if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
-			profileResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/user/self", headers, nil)
+			profileResponse, err := newAPIDoJSON(ctx, connector, detectedKind, credential, http.MethodGet, "/api/user/self", nil)
 			if err != nil {
 				return nil, err
 			}
@@ -140,7 +147,7 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 				StartTime: status.Data.StartTime, Status: model.ManagedInstanceStatusHealthy, Capabilities: capabilities,
 			}, nil
 		}
-		adminResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/status/test", headers, nil)
+		adminResponse, err := newAPIDoJSON(ctx, connector, detectedKind, credential, http.MethodGet, "/api/status/test", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -157,6 +164,10 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 			return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: adminResponse.StatusCode}
 		}
 		capabilities = append(capabilities, "channels.list", "channels.test", "channels.toggle")
+		headers, err := newAPIAuthHeaders(ctx, connector, detectedKind, credential)
+		if err != nil {
+			return nil, err
+		}
 		if probeConfigEndpoint(ctx, connector, detectedKind, headers) {
 			capabilities = append(capabilities, "config.read", "config.apply")
 		}
@@ -193,6 +204,15 @@ func loginNewAPI(ctx context.Context, connector *Connector, kind string, credent
 	if username == "" {
 		return nil, &ProbeError{Code: ProbeErrorAuthentication}
 	}
+	key := credentialSessionKey(connector, credential)
+	stateValue, _ := newAPISessions.LoadOrStore(key, &newAPISession{})
+	state := stateValue.(*newAPISession)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.userID > 0 && len(state.cookies) > 0 && time.Now().Before(state.expiresAt) {
+		applyNewAPISession(connector, state.cookies)
+		return newAPIUserHeaders(kind, state.userID), nil
+	}
 	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/user/login", nil, map[string]string{
 		"username": username,
 		"password": credential.Secret,
@@ -220,13 +240,78 @@ func loginNewAPI(ctx context.Context, connector *Connector, kind string, credent
 	if !envelope.Success || envelope.Data.ID <= 0 {
 		return nil, &ProbeError{Code: ProbeErrorAuthentication, StatusCode: response.StatusCode}
 	}
+	state.userID = envelope.Data.ID
+	state.cookies = cloneHTTPCookies(connector.client.Jar.Cookies(connector.baseURL))
+	state.expiresAt = time.Now().Add(newAPISessionTTL)
+	return newAPIUserHeaders(kind, envelope.Data.ID), nil
+}
+
+func newAPIUserHeaders(kind string, userID int) http.Header {
 	headers := make(http.Header)
 	if kind == model.ManagedInstanceKindHuichuan {
-		headers.Set("HUICHUAN-User", strconv.Itoa(envelope.Data.ID))
+		headers.Set("HUICHUAN-User", strconv.Itoa(userID))
 	} else {
-		headers.Set("New-Api-User", strconv.Itoa(envelope.Data.ID))
+		headers.Set("New-Api-User", strconv.Itoa(userID))
 	}
-	return headers, nil
+	return headers
+}
+
+func applyNewAPISession(connector *Connector, cookies []*http.Cookie) {
+	if connector == nil || connector.client == nil || connector.client.Jar == nil || connector.baseURL == nil {
+		return
+	}
+	connector.client.Jar.SetCookies(connector.baseURL, cloneHTTPCookies(cookies))
+}
+
+func cloneHTTPCookies(cookies []*http.Cookie) []*http.Cookie {
+	cloned := make([]*http.Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie == nil {
+			continue
+		}
+		copy := *cookie
+		cloned = append(cloned, &copy)
+	}
+	return cloned
+}
+
+func credentialSessionKey(connector *Connector, credential *CredentialMaterial) string {
+	baseURL := ""
+	if connector != nil && connector.baseURL != nil {
+		baseURL = connector.baseURL.String()
+	}
+	fingerprint := sha256.Sum256([]byte(credential.Secret))
+	return baseURL + "\x00" + strings.ToLower(strings.TrimSpace(credential.UserID)) + "\x00" + fmt.Sprintf("%x", fingerprint)
+}
+
+func invalidateNewAPISession(connector *Connector, credential *CredentialMaterial) {
+	stateValue, ok := newAPISessions.Load(credentialSessionKey(connector, credential))
+	if !ok {
+		return
+	}
+	state := stateValue.(*newAPISession)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.userID = 0
+	state.cookies = nil
+	state.expiresAt = time.Time{}
+}
+
+func newAPIDoJSON(ctx context.Context, connector *Connector, kind string, credential *CredentialMaterial, method string, path string, requestBody any) (*ConnectorResponse, error) {
+	headers, err := newAPIAuthHeaders(ctx, connector, kind, credential)
+	if err != nil {
+		return nil, err
+	}
+	response, err := connector.DoJSON(ctx, method, path, headers, requestBody)
+	if err != nil || credential.AuthType != "account_password" || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+		return response, err
+	}
+	invalidateNewAPISession(connector, credential)
+	headers, err = newAPIAuthHeaders(ctx, connector, kind, credential)
+	if err != nil {
+		return nil, err
+	}
+	return connector.DoJSON(ctx, method, path, headers, requestBody)
 }
 
 type sub2APIAdapter struct{}
@@ -433,12 +518,7 @@ func sub2APIBearerHeaders(accessToken string) http.Header {
 }
 
 func sub2APISessionKey(connector *Connector, credential *CredentialMaterial) string {
-	baseURL := ""
-	if connector != nil && connector.baseURL != nil {
-		baseURL = connector.baseURL.String()
-	}
-	fingerprint := sha256.Sum256([]byte(credential.Secret))
-	return baseURL + "\x00" + strings.ToLower(strings.TrimSpace(credential.UserID)) + "\x00" + fmt.Sprintf("%x", fingerprint)
+	return credentialSessionKey(connector, credential)
 }
 
 func invalidateSub2APISession(connector *Connector, credential *CredentialMaterial, accessToken string) {

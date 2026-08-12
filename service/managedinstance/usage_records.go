@@ -307,11 +307,7 @@ func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*U
 		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
 			endpoint = "/api/log/self?" + query.Encode()
 		}
-		var headers http.Header
-		headers, err = newAPIAuthHeaders(ctx, client.connector, client.instance.Kind, client.credential)
-		if err == nil {
-			response, err = client.connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
-		}
+		response, err = newAPIDoJSON(ctx, client.connector, client.instance.Kind, client.credential, http.MethodGet, endpoint, nil)
 	}
 	if err != nil {
 		return nil, err
@@ -336,10 +332,6 @@ func (client *usageRecordClient) summary(ctx context.Context, query url.Values) 
 }
 
 func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
-	headers, err := newAPIAuthHeaders(ctx, client.connector, client.instance.Kind, client.credential)
-	if err != nil {
-		return nil, err
-	}
 	summaryQuery := url.Values{}
 	for _, key := range []string{"start_timestamp", "end_timestamp"} {
 		if value := query.Get(key); value != "" {
@@ -350,7 +342,7 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 	if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
 		endpoint = "/api/data/self"
 	}
-	response, err := client.connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), headers, nil)
+	response, err := newAPIDoJSON(ctx, client.connector, client.instance.Kind, client.credential, http.MethodGet, endpoint+"?"+summaryQuery.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
