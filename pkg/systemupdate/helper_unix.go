@@ -46,9 +46,6 @@ func applyUpdatePlan(planPath string) error {
 		_ = saveState(plan.StatePath, state)
 	}
 	writeState()
-	if err := os.WriteFile(plan.ReadyPath, []byte("ready\n"), 0600); err != nil {
-		return failPlanState(plan, state, "helper_ready_failed", err)
-	}
 	healthTimeout := normalizedHealthTimeout(plan.HealthTimeoutSeconds)
 	serviceManaged := serviceManagerWillRestart()
 
@@ -81,6 +78,15 @@ func applyUpdatePlan(planPath string) error {
 		_ = os.Remove(plan.TargetPath)
 		_ = os.Rename(plan.BackupPath, plan.TargetPath)
 		return failPlanState(plan, state, "installed_binary_verification_failed", err)
+	}
+
+	// The manager treats this marker as permission to stop the parent process.
+	// systemd may kill every remaining process in the service cgroup as soon as
+	// the parent exits, so the verified target must already be in place first.
+	if err := os.WriteFile(plan.ReadyPath, []byte("ready\n"), 0600); err != nil {
+		_ = os.Remove(plan.TargetPath)
+		_ = os.Rename(plan.BackupPath, plan.TargetPath)
+		return failPlanState(plan, state, "helper_ready_failed", err)
 	}
 
 	if err := ensureProcessExit(plan.ParentPID, processExitTimeout(plan.ShutdownTimeoutSeconds)); err != nil {
