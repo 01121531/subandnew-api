@@ -34,6 +34,7 @@ const (
 	minShutdownTimeout      = 10 * time.Second
 	maxShutdownTimeout      = 30 * time.Minute
 	processExitGracePeriod  = 30 * time.Second
+	maxSafeReleaseID        = int64(1<<53 - 1)
 	stateDirectoryName      = ".subandnew-update"
 	stateFileName           = "state.json"
 )
@@ -523,6 +524,9 @@ func releaseIDForTag(tag string) int64 {
 	for _, value := range digest[:7] {
 		id = id<<8 | int64(value)
 	}
+	// Release IDs cross the browser boundary as JSON numbers. Keep the
+	// deterministic fallback ID within JavaScript's exact integer range.
+	id &= maxSafeReleaseID
 	if id == 0 {
 		return 1
 	}

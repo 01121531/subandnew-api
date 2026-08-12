@@ -98,6 +98,22 @@ func TestLatestReleaseTag(t *testing.T) {
 	require.ErrorContains(t, err, "no GitHub release")
 }
 
+func TestReleaseIDForTagIsJavaScriptSafe(t *testing.T) {
+	tags := []string{"v1.1.46", "v1.1.47", "v99.999.999", "release-candidate"}
+	for _, tag := range tags {
+		id := releaseIDForTag(tag)
+		require.Positive(t, id)
+		require.LessOrEqual(t, id, maxSafeReleaseID)
+		require.Equal(t, id, int64(float64(id)))
+	}
+	require.Equal(t, releaseIDForTag("v1.1.46"), releaseIDForTag("v1.1.46"))
+	require.NotEqual(t, releaseIDForTag("v1.1.46"), releaseIDForTag("v1.1.47"))
+
+	// v1.1.50 is safe under both the legacy 56-bit algorithm and this one,
+	// allowing installations on older versions to bootstrap the fix.
+	require.Equal(t, int64(1_068_889_200_509_843), releaseIDForTag("v1.1.50"))
+}
+
 func TestChecksumForFile(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "checksums-windows.txt")
