@@ -58,7 +58,7 @@ func applyUpdatePlan(planPath string) error {
 		return failPlanState(plan, state, "staged_binary_changed", err)
 	}
 
-	if err := waitForProcessExit(plan.ParentPID, processExitTimeout(plan.ShutdownTimeoutSeconds)); err != nil {
+	if err := ensureProcessExit(plan.ParentPID, processExitTimeout(plan.ShutdownTimeoutSeconds)); err != nil {
 		state.Phase = PhaseFailed
 		state.Progress = 0
 		state.ErrorCode = "server_shutdown_timeout"
@@ -190,6 +190,23 @@ func waitForProcessExit(pid int, timeout time.Duration) error {
 	}
 	if result == uint32(windows.WAIT_TIMEOUT) {
 		return errors.New("timed out waiting for the server process to exit")
+	}
+	return nil
+}
+
+func ensureProcessExit(pid int, gracefulTimeout time.Duration) error {
+	if err := waitForProcessExit(pid, gracefulTimeout); err == nil {
+		return nil
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return nil
+	}
+	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("force the server process to exit: %w", err)
+	}
+	if err := waitForProcessExit(pid, 5*time.Second); err != nil {
+		return fmt.Errorf("server process remained alive after forced shutdown: %w", err)
 	}
 	return nil
 }

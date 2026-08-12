@@ -143,20 +143,20 @@ func TestHashFileSHA256AndVerification(t *testing.T) {
 func TestSystemUpdateTimeoutConfiguration(t *testing.T) {
 	t.Setenv("SYSTEM_UPDATE_HEALTH_TIMEOUT_SECONDS", "")
 	t.Setenv("SYSTEM_UPDATE_SHUTDOWN_TIMEOUT_SECONDS", "")
-	require.Equal(t, 600, updateHealthTimeoutSeconds())
-	require.Equal(t, 300, ShutdownTimeoutSeconds())
-	require.Equal(t, 10*time.Minute, normalizedHealthTimeout(600))
-	require.Equal(t, 5*time.Minute+processExitGracePeriod, processExitTimeout(300))
+	require.Equal(t, 120, updateHealthTimeoutSeconds())
+	require.Equal(t, 30, ShutdownTimeoutSeconds())
+	require.Equal(t, 2*time.Minute, normalizedHealthTimeout(600))
+	require.Equal(t, 30*time.Second+processExitGracePeriod, processExitTimeout(300))
 
-	t.Setenv("SYSTEM_UPDATE_HEALTH_TIMEOUT_SECONDS", "900")
-	t.Setenv("SYSTEM_UPDATE_SHUTDOWN_TIMEOUT_SECONDS", "420")
-	require.Equal(t, 900, updateHealthTimeoutSeconds())
-	require.Equal(t, 420, ShutdownTimeoutSeconds())
+	t.Setenv("SYSTEM_UPDATE_HEALTH_TIMEOUT_SECONDS", "180")
+	t.Setenv("SYSTEM_UPDATE_SHUTDOWN_TIMEOUT_SECONDS", "90")
+	require.Equal(t, 180, updateHealthTimeoutSeconds())
+	require.Equal(t, 90, ShutdownTimeoutSeconds())
 
 	t.Setenv("SYSTEM_UPDATE_HEALTH_TIMEOUT_SECONDS", "10")
 	t.Setenv("SYSTEM_UPDATE_SHUTDOWN_TIMEOUT_SECONDS", "99999")
-	require.Equal(t, 600, updateHealthTimeoutSeconds())
-	require.Equal(t, 300, ShutdownTimeoutSeconds())
+	require.Equal(t, 120, updateHealthTimeoutSeconds())
+	require.Equal(t, 30, ShutdownTimeoutSeconds())
 }
 
 func TestServiceManagedValidationFailureStaysActive(t *testing.T) {

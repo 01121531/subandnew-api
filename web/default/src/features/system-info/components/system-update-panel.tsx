@@ -201,6 +201,19 @@ export function SystemUpdatePanel() {
     [t]
   )
 
+  const stateLabel = useCallback(
+    (state?: SystemUpdateState | null) => {
+      if (state?.message_code === 'waiting_for_shutdown') {
+        return t('Waiting for existing connections to close...')
+      }
+      if (state?.message_code === 'waiting_for_service_manager') {
+        return t('Waiting for the service manager to start the new version...')
+      }
+      return phaseLabel(state?.phase)
+    },
+    [phaseLabel, t]
+  )
+
   const refreshStatus = useCallback(async () => {
     try {
       const state = await getSystemUpdateStatus()
@@ -398,7 +411,7 @@ export function SystemUpdatePanel() {
                 >
                   <UpdatePhaseIcon phase={updateState.phase} />
                   <span className='min-w-0 flex-1 truncate text-sm'>
-                    {phaseLabel(updateState.phase)}
+                    {stateLabel(updateState)}
                   </span>
                   <Badge variant='secondary' className='tabular-nums'>
                     {updateState.progress}%
@@ -552,7 +565,7 @@ export function SystemUpdatePanel() {
           <div className='flex items-center gap-3'>
             <UpdatePhaseIcon phase={updateState?.phase} large />
             <div>
-              <p className='font-medium'>{phaseLabel(updateState?.phase)}</p>
+              <p className='font-medium'>{stateLabel(updateState)}</p>
               {reconnecting ? (
                 <p className='text-muted-foreground text-sm'>
                   {t('Connection interrupted during restart. Reconnecting...')}

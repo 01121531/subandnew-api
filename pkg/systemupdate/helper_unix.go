@@ -83,7 +83,7 @@ func applyUpdatePlan(planPath string) error {
 		return failPlanState(plan, state, "installed_binary_verification_failed", err)
 	}
 
-	if err := waitForProcessExit(plan.ParentPID, processExitTimeout(plan.ShutdownTimeoutSeconds)); err != nil {
+	if err := ensureProcessExit(plan.ParentPID, processExitTimeout(plan.ShutdownTimeoutSeconds)); err != nil {
 		_ = os.Remove(plan.TargetPath)
 		_ = os.Rename(plan.BackupPath, plan.TargetPath)
 		state.Phase = PhaseFailed
@@ -231,6 +231,29 @@ func waitForProcessExit(pid int, timeout time.Duration) error {
 		time.Sleep(250 * time.Millisecond)
 	}
 	return errors.New("timed out waiting for the server process to exit")
+}
+
+func ensureProcessExit(pid int, gracefulTimeout time.Duration) error {
+	if err := waitForProcessExit(pid, gracefulTimeout); err == nil {
+		return nil
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return nil
+	}
+	// The application has already been asked to shut down internally. A stale
+	// HTTP stream must not leave an online update at 94% indefinitely.
+	_ = process.Signal(syscall.SIGTERM)
+	if err := waitForProcessExit(pid, 10*time.Second); err == nil {
+		return nil
+	}
+	if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return fmt.Errorf("force the server process to exit: %w", err)
+	}
+	if err := waitForProcessExit(pid, 5*time.Second); err != nil {
+		return fmt.Errorf("server process remained alive after forced shutdown: %w", err)
+	}
+	return nil
 }
 
 func processIsZombie(pid int) bool {

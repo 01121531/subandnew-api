@@ -25,6 +25,8 @@
     "Verifying SHA-256 checksum...": "正在校验 SHA-256 校验和...",
     "Update verified and ready to restart...": "更新已验证，准备重启...",
     "Restarting the service...": "正在重启服务...",
+    "Waiting for existing connections to close...": "正在等待旧连接关闭...",
+    "Waiting for the service manager to start the new version...": "正在等待服务守护程序启动新版本...",
     "Waiting for the new version to become healthy...": "正在等待新版本通过健康检查...",
     "New version is unhealthy. Rolling back...": "新版本健康检查失败，正在回滚...",
     "Online update is available for {{platform}}/{{arch}}.": "{{platform}}/{{arch}} 支持在线升级。",
