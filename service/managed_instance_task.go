@@ -116,6 +116,8 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		errorCode := "usage_export_failed"
 		if errors.Is(err, managedinstance.ErrUsageExportTooLarge) {
 			errorCode = "usage_export_too_large"
+		} else if errors.Is(err, managedinstance.ErrUsageExportIncomplete) {
+			errorCode = "usage_export_incomplete"
 		}
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode)
 		return

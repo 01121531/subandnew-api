@@ -3,10 +3,12 @@ package managedinstance
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -411,6 +413,65 @@ func TestUsageRecordExportReportsProcessedRows(t *testing.T) {
 	require.NotEmpty(t, output.Bytes())
 	require.Equal(t, UsageRecordExportProgress{Progress: 0, Processed: 0, Total: 2, Stage: "exporting"}, progress[0])
 	require.Equal(t, UsageRecordExportProgress{Progress: 100, Processed: 2, Total: 2, Stage: "completed"}, progress[len(progress)-1])
+}
+
+func TestUsageRecordExportContinuesWhenUpstreamCapsPageSize(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requests++
+		page, err := strconv.Atoi(request.URL.Query().Get("p"))
+		require.NoError(t, err)
+		require.Equal(t, "100", request.URL.Query().Get("page_size"))
+		start := (page - 1) * 20
+		end := start + 20
+		if end > 45 {
+			end = 45
+		}
+		items := make([]map[string]any, 0, end-start)
+		for id := start + 1; id <= end; id++ {
+			items = append(items, map[string]any{"id": id, "username": fmt.Sprintf("user-%d", id)})
+		}
+		response.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
+			"success": true,
+			"data":    map[string]any{"items": items, "total": 45, "page": page, "page_size": 20},
+		}))
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	var output bytes.Buffer
+	count, err := StreamUsageRecordsCSV(context.Background(), instance.Id, nil, &output)
+	require.NoError(t, err)
+	require.Equal(t, 45, count)
+	require.Equal(t, 3, requests)
+	require.Contains(t, output.String(), "user-45")
+}
+
+func TestUsageRecordExportRejectsPrematureEmptyPage(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		page := integerValue(request.URL.Query().Get("p"), 1)
+		items := []map[string]any{{"id": 1, "username": "first"}}
+		if page > 1 {
+			items = []map[string]any{}
+		}
+		response.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
+			"success": true,
+			"data":    map[string]any{"items": items, "total": 2, "page": page, "page_size": 1},
+		}))
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	var output bytes.Buffer
+	count, err := StreamUsageRecordsCSV(context.Background(), instance.Id, nil, &output)
+	require.ErrorIs(t, err, ErrUsageExportIncomplete)
+	require.Equal(t, 1, count)
 }
 
 func TestStreamUsageRecordsCSVRejectsOversizedExportBeforeWriting(t *testing.T) {

@@ -30,6 +30,7 @@ const (
 )
 
 var ErrUsageExportTooLarge = errors.New("usage record export exceeds the 1000000 row limit")
+var ErrUsageExportIncomplete = errors.New("usage record export ended before all rows were returned")
 
 type UsageRecordPage struct {
 	SourceInstanceID int64             `json:"source_instance_id"`
@@ -184,10 +185,15 @@ func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, write
 
 	written := 0
 	page := export.first
-	if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "exporting"); err != nil {
+	total := page.Total
+	nextPage := 2
+	if err := reportUsageRecordExportProgress(onProgress, written, total, "exporting"); err != nil {
 		return written, err
 	}
 	for {
+		if len(page.Items) == 0 && int64(written) < total {
+			return written, ErrUsageExportIncomplete
+		}
 		for _, raw := range page.Items {
 			row, err := usageCSVRow(raw, fields)
 			if err != nil {
@@ -201,13 +207,14 @@ func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, write
 				break
 			}
 		}
-		if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "exporting"); err != nil {
+		if err := reportUsageRecordExportProgress(onProgress, written, total, "exporting"); err != nil {
 			return written, err
 		}
-		if written >= int(page.Total) || len(page.Items) < usageRecordMaxPageSize || written >= usageRecordExportLimit {
+		if int64(written) >= total || written >= usageRecordExportLimit {
 			break
 		}
-		setUsageRecordPage(export.query, export.client.instance.Kind, page.Page+1, usageRecordMaxPageSize)
+		setUsageRecordPage(export.query, export.client.instance.Kind, nextPage, usageRecordMaxPageSize)
+		nextPage++
 		var err error
 		page, err = export.client.list(ctx, export.query)
 		if err != nil {
@@ -218,7 +225,7 @@ func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, write
 	if err := csvWriter.Error(); err != nil {
 		return written, err
 	}
-	if err := reportUsageRecordExportProgress(onProgress, written, page.Total, "completed"); err != nil {
+	if err := reportUsageRecordExportProgress(onProgress, written, total, "completed"); err != nil {
 		return written, err
 	}
 	return written, nil
@@ -402,7 +409,7 @@ func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query 
 		}
 		total = page.Total
 		items = append(items, page.Items...)
-		if len(page.Items) < pageSize || int64(len(items)) >= total {
+		if len(page.Items) == 0 || int64(len(items)) >= total {
 			break
 		}
 	}
