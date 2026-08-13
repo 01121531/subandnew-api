@@ -294,7 +294,10 @@ func TestConductorUsageRecordsSummaryOptionsAndSessionReuse(t *testing.T) {
 	require.Equal(t, 3.0, *dashboard.Requests.Value)
 	require.Equal(t, 1650000.0, *dashboard.Tokens.Value)
 	require.InDelta(t, 2.1, *dashboard.Cost.Value, 0.000001)
-	require.Equal(t, "2026-08-12", dashboard.Trend[0].Date)
+	require.Len(t, dashboard.Trend, 7)
+	require.Equal(t, "2026-08-07", dashboard.Trend[0].Date)
+	require.Equal(t, "2026-08-12", dashboard.Trend[5].Date)
+	require.Equal(t, 3.0, dashboard.Trend[5].Requests)
 	require.Equal(t, int32(3), usageCount.Load())
 }
 

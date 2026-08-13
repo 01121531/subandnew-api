@@ -38,6 +38,7 @@ import type {
   ManagedInstanceOperationExecution,
   ManagedInstanceOperationPlanInput,
   ManagedInstancePreflight,
+  ManagedInstanceRealtimeMetrics,
   ManagedInstanceTask,
   ManagedInstanceSummary,
   ManagedConfigBinding,
@@ -180,6 +181,23 @@ export async function getManagedInstanceMetrics(
     : null
   const response = await api.get(
     `/api/managed-instances/${id}/metrics${params ? `?${params.toString()}` : ''}`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function getManagedInstanceRealtimeMetrics(
+  id: number,
+  options?: { silent?: boolean }
+): Promise<
+  ApiResponse<ManagedInstanceObservation<ManagedInstanceRealtimeMetrics>>
+> {
+  const response = await api.get(
+    `/api/managed-instances/${id}/realtime-metrics`,
     {
       disableDuplicate: true,
       skipBusinessError: options?.silent,

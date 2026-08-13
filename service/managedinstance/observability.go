@@ -103,6 +103,10 @@ type SummaryResult struct {
 	Trend     []UsageTrendPoint `json:"trend"`
 }
 
+type RealtimeMetricsResult struct {
+	RPM MetricSample `json:"rpm"`
+}
+
 type ObservationView struct {
 	SourceInstanceID int64  `json:"source_instance_id"`
 	ObservedAt       int64  `json:"observed_at"`
@@ -226,8 +230,39 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	return summary, nil
 }
 
+func newAPICurrentRPM(ctx context.Context, connector *Connector, configuredKind string, credential *CredentialMaterial) MetricSample {
+	now := time.Now()
+	query := url.Values{
+		"type":            {"2"},
+		"start_timestamp": {strconv.FormatInt(now.Add(-time.Minute).Unix(), 10)},
+		"end_timestamp":   {strconv.FormatInt(now.Unix(), 10)},
+	}
+	endpoint := "/api/log/stat"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/log/self/stat"
+	}
+	response, err := newAPIDoJSON(ctx, connector, configuredKind, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
+	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return unsupportedMetric("request/min")
+	}
+	var payload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			RPM float64 `json:"rpm"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(response.Body, &payload) != nil || !payload.Success || payload.Data.RPM < 0 {
+		return unsupportedMetric("request/min")
+	}
+	return supportedMetric(payload.Data.RPM, "request/min")
+}
+
 func supportedMetric(value float64, unit string) MetricSample {
 	return MetricSample{Value: &value, Unit: unit, CollectionStatus: model.ManagedInstanceCollectionSucceeded}
+}
+
+func unsupportedMetric(unit string) MetricSample {
+	return MetricSample{Unit: unit, CollectionStatus: model.ManagedInstanceCollectionUnsupported}
 }
 
 func (adapter sub2APIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
@@ -375,6 +410,188 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 	return summary, nil
 }
 
+func sub2CurrentRPM(ctx context.Context, connector *Connector, credential *CredentialMaterial) MetricSample {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.UTC
+	}
+	now := time.Now().In(location)
+	query := url.Values{
+		"start_date":          {now.Format("2006-01-02")},
+		"end_date":            {now.AddDate(0, 0, 1).Format("2006-01-02")},
+		"timezone":            {location.String()},
+		"granularity":         {"hour"},
+		"include_stats":       {"true"},
+		"include_trend":       {"false"},
+		"include_model_stats": {"false"},
+		"include_group_stats": {"false"},
+	}
+	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/dashboard/snapshot-v2"
+		query.Del("include_stats")
+	}
+	response, requestErr := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
+	if requestErr == nil && response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
+		if value, ok := findRPMValue(response.Body); ok && value >= 0 {
+			return supportedMetric(value, "request/min")
+		}
+	}
+	if value, ok := sub2RPMFromRecentUsage(ctx, connector, credential); ok {
+		return supportedMetric(value, "request/min")
+	}
+	return unsupportedMetric("request/min")
+}
+
+func findRPMValue(body []byte) (float64, bool) {
+	var payload any
+	if json.Unmarshal(body, &payload) != nil {
+		return 0, false
+	}
+	return findNamedJSONNumber(payload, map[string]bool{
+		"rpm": true, "current_rpm": true, "rpm_current": true,
+		"requests_per_minute": true, "request_per_minute": true,
+	})
+}
+
+func findNamedJSONNumber(value any, names map[string]bool) (float64, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, candidate := range typed {
+			if names[strings.ToLower(strings.TrimSpace(key))] {
+				if number, ok := jsonNumber(candidate); ok {
+					return number, true
+				}
+			}
+		}
+		for _, candidate := range typed {
+			if number, ok := findNamedJSONNumber(candidate, names); ok {
+				return number, true
+			}
+		}
+	case []any:
+		for _, candidate := range typed {
+			if number, ok := findNamedJSONNumber(candidate, names); ok {
+				return number, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func jsonNumber(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func sub2RPMFromRecentUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial) (float64, bool) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.UTC
+	}
+	now := time.Now()
+	localNow := now.In(location)
+	cutoff := now.Add(-time.Minute)
+	const pageSize = 100
+	count := 0.0
+	parsedTimestamp := false
+
+	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
+		query := url.Values{
+			"page":       {strconv.Itoa(pageNumber)},
+			"page_size":  {strconv.Itoa(pageSize)},
+			"start_date": {localNow.Format("2006-01-02")},
+			"end_date":   {localNow.AddDate(0, 0, 1).Format("2006-01-02")},
+			"timezone":   {location.String()},
+			"sort_by":    {"created_at"},
+			"sort_order": {"desc"},
+		}
+		endpoint := "/api/v1/admin/usage"
+		if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+			endpoint = "/api/v1/usage"
+		}
+		response, requestErr := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
+		if requestErr != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			return 0, false
+		}
+		data, decodeErr := sub2EnvelopeData(response)
+		if decodeErr != nil {
+			return 0, false
+		}
+		var result struct {
+			Items    []json.RawMessage `json:"items"`
+			Total    int               `json:"total"`
+			Pages    int               `json:"pages"`
+			Page     int               `json:"page"`
+			PageSize int               `json:"page_size"`
+		}
+		if json.Unmarshal(data, &result) != nil || result.Items == nil || result.Total < 0 {
+			return 0, false
+		}
+		if len(result.Items) == 0 {
+			return count, true
+		}
+		reachedOlder := false
+		for _, item := range result.Items {
+			createdAt, ok := sub2UsageCreatedAt(item, location)
+			if !ok {
+				continue
+			}
+			parsedTimestamp = true
+			if createdAt.Before(cutoff) {
+				reachedOlder = true
+				break
+			}
+			if !createdAt.After(now.Add(5 * time.Second)) {
+				count++
+			}
+		}
+		if reachedOlder || len(result.Items) < pageSize || (result.Pages > 0 && pageNumber >= result.Pages) || pageNumber*pageSize >= result.Total {
+			return count, parsedTimestamp
+		}
+	}
+	return count, parsedTimestamp
+}
+
+func sub2UsageCreatedAt(raw json.RawMessage, location *time.Location) (time.Time, bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil {
+		return time.Time{}, false
+	}
+	for _, key := range []string{"created_at", "createdAt", "timestamp", "time"} {
+		value := fields[key]
+		if unix, ok := jsonInt64(value); ok {
+			if unix > 1_000_000_000_000 {
+				unix /= 1000
+			}
+			return time.Unix(unix, 0), unix > 0
+		}
+		var text string
+		if len(value) == 0 || json.Unmarshal(value, &text) != nil {
+			continue
+		}
+		text = strings.TrimSpace(text)
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if parsed, err := time.Parse(layout, text); err == nil {
+				return parsed, true
+			}
+		}
+		for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+			if parsed, err := time.ParseInLocation(layout, text, location); err == nil {
+				return parsed, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
 func normalizeTrendDate(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) >= len("2006-01-02") {
@@ -387,10 +604,17 @@ func normalizeTrendDate(value string) string {
 }
 
 func fillDailyTrend(window TimeWindow, values map[string]UsageTrendPoint) []UsageTrendPoint {
-	start := time.Unix(window.Start, 0).UTC()
-	end := time.Unix(window.End, 0).UTC()
-	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
-	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	return fillDailyTrendInLocation(window, values, time.UTC)
+}
+
+func fillDailyTrendInLocation(window TimeWindow, values map[string]UsageTrendPoint, location *time.Location) []UsageTrendPoint {
+	if location == nil {
+		location = time.UTC
+	}
+	start := time.Unix(window.Start, 0).In(location)
+	end := time.Unix(window.End, 0).In(location)
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, location)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, location)
 
 	trend := make([]UsageTrendPoint, 0, int(end.Sub(start)/(24*time.Hour))+1)
 	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
@@ -557,6 +781,24 @@ func sub2NextPageCursor(data json.RawMessage, requestedPage int) string {
 
 func CollectSummary(ctx context.Context, instanceID int64, window TimeWindow) (*ObservationView, error) {
 	return collectSummary(ctx, instanceID, window, nil)
+}
+
+func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*ObservationView, error) {
+	instance, _, connector, credential, err := observationClient(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	result := &RealtimeMetricsResult{RPM: unsupportedMetric("request/min")}
+	switch instance.Kind {
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+		result.RPM = newAPICurrentRPM(ctx, connector, instance.Kind, credential)
+	case model.ManagedInstanceKindSub2API:
+		result.RPM = sub2CurrentRPM(ctx, connector, credential)
+	case model.ManagedInstanceKindConductor:
+		result.RPM = conductorCurrentRPM(ctx, connector, credential)
+	}
+	view, _, err := observationView(instance.Id, common.GetTimestamp(), result, nil)
+	return view, err
 }
 
 func CollectSummaryWithCommitGuard(ctx context.Context, instanceID int64, window TimeWindow, guard CommitGuard) (*ObservationView, error) {

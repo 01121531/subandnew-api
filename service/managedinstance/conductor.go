@@ -377,7 +377,10 @@ func (adapter conductorAdapter) Summary(ctx context.Context, connector *Connecto
 	unsupported := func(unit string) MetricSample {
 		return MetricSample{Unit: unit, CollectionStatus: model.ManagedInstanceCollectionUnsupported}
 	}
-	result := &SummaryResult{Window: window, Resources: []ResourceSummary{{ResourceKind: "account", Total: health.AccountsTotal, Enabled: &enabled, Unhealthy: &unhealthy}}, ErrorRate: unsupported("ratio"), Latency: unsupported("ms")}
+	result := &SummaryResult{
+		Window: window, Resources: []ResourceSummary{{ResourceKind: "account", Total: health.AccountsTotal, Enabled: &enabled, Unhealthy: &unhealthy}},
+		ErrorRate: unsupported("ratio"), Latency: unsupported("ms"),
+	}
 	aggregate, aggregateErr := conductorUsageAggregateForWindow(ctx, connector, credential, window)
 	if aggregateErr != nil {
 		result.Requests, result.Tokens, result.Cost = unsupported("request"), unsupported("token"), unsupported("USD")
@@ -389,8 +392,46 @@ func (adapter conductorAdapter) Summary(ctx context.Context, connector *Connecto
 	result.Requests = supportedMetric(aggregate.Requests, "request")
 	result.Tokens = supportedMetric(aggregate.Tokens, "token")
 	result.Cost = supportedMetric(aggregate.Cost, "USD")
-	result.Trend = aggregate.Trend
+	location, locationErr := time.LoadLocation("Asia/Shanghai")
+	if locationErr != nil {
+		location = time.UTC
+	}
+	daily := make(map[string]UsageTrendPoint, len(aggregate.Trend))
+	for _, point := range aggregate.Trend {
+		daily[point.Date] = point
+	}
+	result.Trend = fillDailyTrendInLocation(window, daily, location)
 	return result, nil
+}
+
+func conductorCurrentRPM(ctx context.Context, connector *Connector, credential *CredentialMaterial) MetricSample {
+	cursor := ""
+	total := 0.0
+	found := false
+	for pageNumber := 0; pageNumber < managedInstanceInventoryMaxPages; pageNumber++ {
+		page, err := conductorAccountInventory(ctx, connector, credential, cursor)
+		if err != nil {
+			return unsupportedMetric("request/min")
+		}
+		for _, item := range page.Items {
+			if item.RPM == nil || *item.RPM < 0 {
+				continue
+			}
+			found = true
+			total += float64(*item.RPM)
+		}
+		if page.NextCursor == "" {
+			if !found && page.Total == 0 {
+				return supportedMetric(0, "request/min")
+			}
+			if found {
+				return supportedMetric(total, "request/min")
+			}
+			return unsupportedMetric("request/min")
+		}
+		cursor = page.NextCursor
+	}
+	return unsupportedMetric("request/min")
 }
 
 func conductorRecordedUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial) (float64, bool) {

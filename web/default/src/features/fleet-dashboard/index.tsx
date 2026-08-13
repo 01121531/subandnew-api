@@ -78,6 +78,7 @@ import { cn } from '@/lib/utils'
 import {
   getManagedAlerts,
   getManagedInstanceMetrics,
+  getManagedInstanceRealtimeMetrics,
   getManagedInstances,
 } from '../managed-instances/api'
 import { StatusBadge } from '../managed-instances/components/status-badge'
@@ -104,6 +105,7 @@ type InstanceMetricRow = {
   observedAt: number
   collected: boolean
   requests: number | null
+  rpm: number | null
   tokens: number | null
   quota: number | null
 }
@@ -121,6 +123,7 @@ type HealthData = {
 }
 
 const DASHBOARD_REFRESH_MS = 60_000
+const RPM_REFRESH_MS = 10_000
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
@@ -136,6 +139,7 @@ const EMPTY_ALERTS: ManagedInstanceAlert[] = []
 const KPI_SKELETON_KEYS = [
   'availability',
   'requests',
+  'rpm',
   'tokens',
   'quota',
   'alerts',
@@ -419,27 +423,53 @@ export function FleetDashboard() {
       refetchInterval: DASHBOARD_REFRESH_MS,
     })),
   })
+  const rpmQueries = useQueries({
+    queries: instances.map((instance) => ({
+      queryKey: ['fleet-dashboard-rpm', instance.id],
+      queryFn: async () => {
+        const response = await getManagedInstanceRealtimeMetrics(instance.id, {
+          silent: true,
+        })
+        const observation = response.data
+        if (
+          observation.collection_status !== 'succeeded' ||
+          !observation.data ||
+          observation.data.rpm.collection_status !== 'succeeded'
+        ) {
+          throw new Error(observation.error_code || 'rpm_unavailable')
+        }
+        return response
+      },
+      retry: false,
+      staleTime: RPM_REFRESH_MS / 2,
+      refetchInterval: RPM_REFRESH_MS,
+      refetchIntervalInBackground: false,
+    })),
+  })
   const rows = useMemo<InstanceMetricRow[]>(
     () =>
       instances.map((instance, index) => {
         const observation = metricQueries[index]?.data?.data
         const summary = observation?.data
+        const realtime = rpmQueries[index]?.data?.data?.data
         return {
           instance,
           summary,
           observedAt: observation?.observed_at ?? 0,
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
+          rpm: metricValue(realtime?.rpm),
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
         }
       }),
-    [instances, metricQueries]
+    [instances, metricQueries, rpmQueries]
   )
 
   const totals = useMemo(
     () => ({
       requests: rows.reduce((sum, row) => sum + (row.requests ?? 0), 0),
+      rpm: rows.reduce((sum, row) => sum + (row.rpm ?? 0), 0),
       tokens: rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
       quota: rows.reduce((sum, row) => sum + (row.quota ?? 0), 0),
       collected: rows.filter((row) => row.collected).length,
@@ -447,6 +477,7 @@ export function FleetDashboard() {
         (row) => row.requests != null || row.tokens != null || row.quota != null
       ).length,
       requestsReady: rows.filter((row) => row.requests != null).length,
+      rpmReady: rows.filter((row) => row.rpm != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
@@ -593,7 +624,13 @@ export function FleetDashboard() {
     void instancesQuery.refetch()
     void alertsQuery.refetch()
     for (const query of metricQueries) void query.refetch()
+    for (const query of rpmQueries) void query.refetch()
   }
+
+  const refreshRPM = () => {
+    for (const query of rpmQueries) void query.refetch()
+  }
+  const rpmRefreshing = rpmQueries.some((query) => query.isFetching)
 
   const handleFamilyChange = (nextFamily: FleetFamily) => {
     setFamily(nextFamily)
@@ -625,6 +662,8 @@ export function FleetDashboard() {
         metricCoverage={metricCoverage}
         metric={metric}
         onMetricChange={setMetric}
+        rpmRefreshing={rpmRefreshing}
+        onRPMRefresh={refreshRPM}
       />
     )
   }
@@ -753,11 +792,13 @@ type DashboardContentProps = {
   rows: InstanceMetricRow[]
   totals: {
     requests: number
+    rpm: number
     tokens: number
     quota: number
     collected: number
     metricReady: number
     requestsReady: number
+    rpmReady: number
     tokensReady: number
     quotaReady: number
     healthy: number
@@ -775,6 +816,8 @@ type DashboardContentProps = {
   metricCoverage: number
   metric: MetricKey
   onMetricChange: (metric: MetricKey) => void
+  rpmRefreshing: boolean
+  onRPMRefresh: () => void
 }
 
 function DashboardContent(props: DashboardContentProps) {
@@ -929,11 +972,16 @@ function SummaryGrid(props: DashboardContentProps) {
   } else if (props.family === 'conductor') {
     costDetail = t('Actual cost calculated from Conductor prices')
   }
+  const rpmDetail = `${t('Last 60 seconds across {{count}} instances', {
+    count: props.totals.rpmReady,
+  })} · ${t('Auto-refreshing every {{seconds}}s', {
+    seconds: RPM_REFRESH_MS / 1000,
+  })}`
 
   return (
     <section
       aria-label={t('Fleet summary')}
-      className='bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3 xl:grid-cols-6'
+      className='bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3 xl:grid-cols-7'
     >
       <MetricCard
         icon={CheckCircle2}
@@ -955,6 +1003,26 @@ function SummaryGrid(props: DashboardContentProps) {
           count: props.totals.requestsReady,
         })}
         tone='blue'
+      />
+      <MetricCard
+        icon={Radio}
+        label='RPM'
+        value={formatMetric(props.totals.rpmReady ? props.totals.rpm : null)}
+        detail={rpmDetail}
+        tone='success'
+        action={
+          <Button
+            variant='ghost'
+            size='icon-xs'
+            aria-label={t('Refresh')}
+            title={t('Refresh')}
+            onClick={props.onRPMRefresh}
+          >
+            <RefreshCw
+              className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
+            />
+          </Button>
+        }
       />
       <MetricCard
         icon={DatabaseZap}
@@ -1265,6 +1333,7 @@ function PerformanceTable({
                 <TableHead className='ps-6'>{t('Instance')}</TableHead>
                 <TableHead>{t('Status')}</TableHead>
                 <TableHead className='text-right'>{t('Requests')}</TableHead>
+                <TableHead className='text-right'>RPM</TableHead>
                 <TableHead className='text-right'>{t('Tokens')}</TableHead>
                 <TableHead className='text-right'>
                   {t(metricLabel('quota', family))}
@@ -1297,6 +1366,9 @@ function PerformanceTable({
                   </TableCell>
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.requests, false)}
+                  </TableCell>
+                  <TableCell className='text-right font-mono text-xs tabular-nums'>
+                    {formatMetric(row.rpm, false)}
                   </TableCell>
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.tokens, false)}
@@ -1338,6 +1410,7 @@ function MetricCard(props: {
   value: string | number
   detail: string
   tone: MetricCardTone
+  action?: ReactNode
 }) {
   const toneClass: Record<MetricCardTone, string> = {
     success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
@@ -1353,14 +1426,17 @@ function MetricCard(props: {
         <p className='text-muted-foreground truncate text-xs font-medium'>
           {props.label}
         </p>
-        <span
-          className={cn(
-            'flex size-7 shrink-0 items-center justify-center rounded-md',
-            toneClass[props.tone]
-          )}
-        >
-          <props.icon className='size-3.5' aria-hidden='true' />
-        </span>
+        <div className='flex shrink-0 items-center gap-1'>
+          {props.action}
+          <span
+            className={cn(
+              'flex size-7 shrink-0 items-center justify-center rounded-md',
+              toneClass[props.tone]
+            )}
+          >
+            <props.icon className='size-3.5' aria-hidden='true' />
+          </span>
+        </div>
       </div>
       <p className='mt-2 font-mono text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
         {props.value}

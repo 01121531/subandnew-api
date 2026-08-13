@@ -212,6 +212,10 @@ export interface ManagedInstanceSummary {
   trend: ManagedInstanceUsageTrendPoint[]
 }
 
+export interface ManagedInstanceRealtimeMetrics {
+  rpm: ManagedInstanceMetricSample
+}
+
 export interface ManagedInstanceAlert {
   id: number
   instance_id: number

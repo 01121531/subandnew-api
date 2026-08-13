@@ -300,6 +300,8 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 			require.Equal(t, "100", request.URL.Query().Get("start_timestamp"))
 			require.Equal(t, "200", request.URL.Query().Get("end_timestamp"))
 			writeProbeJSON(response, `{"success":true,"data":[{"created_at":120,"token_used":1200,"count":8,"quota":45.5},{"created_at":180,"token_used":800,"count":5,"quota":24.5}]}`)
+		case "/api/log/stat":
+			writeProbeJSON(response, `{"success":true,"data":{"rpm":23,"tpm":4000}}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -320,6 +322,30 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	require.Equal(t, 13.0, summary.Trend[0].Requests)
 	require.Equal(t, 2000.0, summary.Trend[0].Tokens)
 	require.Equal(t, 70.0, summary.Trend[0].Cost)
+
+	realtimeView, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := realtimeView.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 23.0, *realtime.RPM.Value)
+	require.Equal(t, "request/min", realtime.RPM.Unit)
+}
+
+func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/dashboard/snapshot-v2", request.URL.Path)
+		require.Equal(t, "true", request.URL.Query().Get("include_stats"))
+		require.Equal(t, "false", request.URL.Query().Get("include_trend"))
+		writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":17}}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := view.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 17.0, *realtime.RPM.Value)
 }
 
 func TestConductorInventoryAndSummary(t *testing.T) {
@@ -333,7 +359,7 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 			require.Equal(t, "Bearer conductor-token", request.Header.Get("Authorization"))
 			require.Equal(t, "0", request.URL.Query().Get("offset"))
 			require.Equal(t, "100", request.URL.Query().Get("limit"))
-			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"101","email":"one@example.com","label":"Primary","auth_type":"oauth","health":"Healthy","available":true},{"account_id":"102","email":"two@example.com","auth_type":"oauth","status":"Paused","available":false}],"total":2}}`)
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"101","email":"one@example.com","label":"Primary","auth_type":"oauth","health":"Healthy","available":true,"rpm_current":5},{"account_id":"102","email":"two@example.com","auth_type":"oauth","status":"Paused","available":false,"rpm_current":7}],"total":2}}`)
 		case "/api/v1/system/health":
 			writeProbeJSON(response, `{"code":200,"data":{"status":"ok","accounts_total":2,"accounts_available":1,"accounts_paused":1,"accounts_rejected":0}}`)
 		case "/api/v1/system/stats":
@@ -361,6 +387,11 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 	require.Equal(t, 1, *summary.Resources[0].Enabled)
 	require.Equal(t, 1, *summary.Resources[0].Unhealthy)
 	require.Equal(t, 7.0, *summary.Requests.Value)
+
+	realtimeView, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := realtimeView.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 12.0, *realtime.RPM.Value)
 }
 
 func TestConductorAdditionalInventories(t *testing.T) {

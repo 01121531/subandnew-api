@@ -1279,6 +1279,7 @@
     "Fleet availability": "Fleet availability",
     "{{healthy}} of {{total}} healthy": "{{healthy}} of {{total}} healthy",
     "Across {{count}} instances": "Across {{count}} instances",
+    "Last 60 seconds across {{count}} instances": "Last 60 seconds across {{count}} instances",
     "Selected period total": "Selected period total",
     "Quota usage": "Quota usage",
     "Remote quota units": "Remote quota units",

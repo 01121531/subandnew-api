@@ -1279,6 +1279,7 @@
     "Fleet availability": "实例可用率",
     "{{healthy}} of {{total}} healthy": "{{total}} 个实例中 {{healthy}} 个健康",
     "Across {{count}} instances": "汇总自 {{count}} 个实例",
+    "Last 60 seconds across {{count}} instances": "最近 60 秒，汇总自 {{count}} 个实例",
     "Selected period total": "所选时段累计",
     "Quota usage": "额度消耗",
     "Remote quota units": "目标实例额度单位",
