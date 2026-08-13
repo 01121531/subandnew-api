@@ -373,7 +373,7 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		return nil, err
 	}
 	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
-		profileResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/user/profile", headers, nil)
+		profileResponse, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/user/profile", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -393,12 +393,12 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		result.Capabilities = append(result.Capabilities, "profile.read", "usage.read", "quota.read")
 		return result, nil
 	}
-	versionResponse, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/system/version", headers, nil)
+	versionResponse, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/admin/system/version", nil)
 	if err != nil {
 		return nil, err
 	}
 	if versionResponse.StatusCode != http.StatusOK {
-		if probeSub2AccountAccess(ctx, connector, headers) {
+		if probeSub2AccountAccess(ctx, connector, credential) {
 			result.SystemName = "Sub2API"
 			result.Capabilities = append(result.Capabilities, "accounts.list", "usage.read")
 			return result, nil
@@ -412,6 +412,11 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(versionResponse.Body, &version); err != nil || !sub2SuccessCode(version.Code) {
+		if probeSub2AccountAccess(ctx, connector, credential) {
+			result.SystemName = "Sub2API"
+			result.Capabilities = append(result.Capabilities, "accounts.list", "usage.read")
+			return result, nil
+		}
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: versionResponse.StatusCode}
 	}
 	result.Version = version.Data.Version
@@ -422,11 +427,11 @@ func (sub2APIAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	return result, nil
 }
 
-func probeSub2AccountAccess(ctx context.Context, connector *Connector, headers http.Header) bool {
+func probeSub2AccountAccess(ctx context.Context, connector *Connector, credential *CredentialMaterial) bool {
 	query := url.Values{}
 	query.Set("page", "1")
 	query.Set("page_size", "1")
-	response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/admin/accounts?"+query.Encode(), headers, nil)
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/admin/accounts?"+query.Encode(), nil)
 	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return false
 	}
@@ -588,22 +593,24 @@ func authenticationRejected(response *ConnectorResponse) bool {
 		return false
 	}
 	code := strings.TrimSpace(fmt.Sprint(envelope.Code))
-	if code == "401" || code == "403" {
+	if code == "401" {
 		return true
 	}
-	if envelope.Success == nil || *envelope.Success {
-		return false
-	}
 	message := strings.ToLower(strings.TrimSpace(envelope.Message))
+	messageRejected := false
 	for _, marker := range []string{
 		"not logged in", "login required", "session expired", "token expired",
 		"unauthorized", "authentication required", "未登录", "登录已过期", "会话已过期", "令牌已过期",
 	} {
 		if strings.Contains(message, marker) {
-			return true
+			messageRejected = true
+			break
 		}
 	}
-	return false
+	if code == "403" {
+		return messageRejected
+	}
+	return envelope.Success != nil && !*envelope.Success && messageRejected
 }
 
 type genericAdapter struct{}

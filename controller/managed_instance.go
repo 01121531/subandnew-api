@@ -91,9 +91,10 @@ func GetManagedInstanceInventory(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.CollectInventory(c.Request.Context(), id, c.DefaultQuery("resource", "auto"), c.Query("cursor"))
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
+		return managedinstance.CollectInventory(c.Request.Context(), id, c.DefaultQuery("resource", "auto"), c.Query("cursor"))
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -105,9 +106,10 @@ func GetManagedInstanceMetrics(c *gin.Context) {
 		return
 	}
 	window := managedInstanceTimeWindow(c)
-	result, err := managedinstance.CollectSummary(c.Request.Context(), id, window)
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
+		return managedinstance.CollectSummary(c.Request.Context(), id, window)
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -118,9 +120,10 @@ func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.CollectRealtimeMetrics(c.Request.Context(), id)
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
+		return managedinstance.CollectRealtimeMetrics(c.Request.Context(), id)
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -131,9 +134,11 @@ func GetManagedInstanceAccountOutput(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.CollectAccountOutput(c.Request.Context(), id, managedInstanceTimeWindow(c))
-	if err != nil {
-		managedInstanceError(c, err)
+	window := managedInstanceTimeWindow(c)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
+		return managedinstance.CollectAccountOutput(c.Request.Context(), id, window)
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -144,9 +149,10 @@ func GetManagedInstanceUsageRecords(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.ListUsageRecords(c.Request.Context(), id, c.Request.URL.Query())
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.UsageRecordPage, error) {
+		return managedinstance.ListUsageRecords(c.Request.Context(), id, c.Request.URL.Query())
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -157,9 +163,10 @@ func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.GetUsageRecordFilterOptions(c.Request.Context(), id, c.Request.URL.Query())
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.UsageRecordFilterOptions, error) {
+		return managedinstance.GetUsageRecordFilterOptions(c.Request.Context(), id, c.Request.URL.Query())
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -170,9 +177,10 @@ func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
 	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
-	result, err := managedinstance.GetUsageRecordSummary(c.Request.Context(), id, c.Request.URL.Query())
-	if err != nil {
-		managedInstanceError(c, err)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.UsageRecordSummary, error) {
+		return managedinstance.GetUsageRecordSummary(c.Request.Context(), id, c.Request.URL.Query())
+	})
+	if !ok {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
@@ -647,10 +655,33 @@ func managedInstanceDataReady(c *gin.Context, instanceID int64) bool {
 	return true
 }
 
+func managedInstanceDataCall[T any](c *gin.Context, instanceID int64, collect func() (T, error)) (T, bool) {
+	result, err := collect()
+	if err == nil {
+		return result, true
+	}
+	if managedinstance.ShouldRecoverDataConnection(err) {
+		if recoverErr := managedinstance.RecoverDataConnection(c.Request.Context(), instanceID, c.GetInt("id")); recoverErr != nil {
+			var zero T
+			managedInstanceError(c, recoverErr)
+			return zero, false
+		}
+		result, err = collect()
+		if err == nil {
+			return result, true
+		}
+	}
+	var zero T
+	managedInstanceError(c, managedinstance.RemoteDataError(err))
+	return zero, false
+}
+
 func managedInstanceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, managedinstance.ErrInstanceConnectionFailed):
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": managedinstance.ErrInstanceConnectionFailed.Error()})
+	case errors.Is(err, managedinstance.ErrRemoteDataUnavailable):
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": managedinstance.ErrRemoteDataUnavailable.Error()})
 	case errors.Is(err, managedinstance.ErrInvalidInstance):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrInstanceNotFound), errors.Is(err, gorm.ErrRecordNotFound):

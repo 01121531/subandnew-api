@@ -171,6 +171,7 @@ func TestProbeGenericDetectsSub2APIAndLogsInWithAccountPassword(t *testing.T) {
 func TestProbeGenericDetectsSub2APIChannelAdmin(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/status":
@@ -178,11 +179,11 @@ func TestProbeGenericDetectsSub2APIChannelAdmin(t *testing.T) {
 		case "/health":
 			writeProbeJSON(response, `{"status":"ok"}`)
 		case "/api/v1/auth/login":
+			loginCount.Add(1)
 			writeProbeJSON(response, `{"code":0,"data":{"access_token":"channel-admin-token"}}`)
 		case "/api/v1/admin/system/version":
 			require.Equal(t, "Bearer channel-admin-token", request.Header.Get("Authorization"))
-			response.WriteHeader(http.StatusForbidden)
-			writeProbeJSON(response, `{"code":403,"message":"permission denied"}`)
+			writeProbeJSON(response, `{"code":403,"message":"permission denied","data":null}`)
 		case "/api/v1/admin/accounts":
 			require.Equal(t, "Bearer channel-admin-token", request.Header.Get("Authorization"))
 			require.Equal(t, "1", request.URL.Query().Get("page"))
@@ -204,6 +205,7 @@ func TestProbeGenericDetectsSub2APIChannelAdmin(t *testing.T) {
 	require.Contains(t, result.Capabilities, "accounts.list")
 	require.Contains(t, result.Capabilities, "usage.read")
 	require.NotContains(t, result.Capabilities, "config.read")
+	require.Equal(t, int32(1), loginCount.Load())
 }
 
 func TestProbeGenericDetectsSub2APIWithRegularAccount(t *testing.T) {
