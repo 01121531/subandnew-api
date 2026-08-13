@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -36,6 +37,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getManagedInstances } from '@/features/managed-instances/api'
 import {
   cancelUsageRecordsExport,
@@ -46,7 +53,15 @@ import {
   type UsageRecordExportTask,
 } from '@/features/usage-records/api'
 import { ROLE } from '@/lib/roles'
+import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
+
+import {
+  ExportStatusBadge,
+  FilterDetailsDialog,
+  FilterSummaryButton,
+} from './filter-details-dialog'
+import { EXPORT_STATUS_META } from './status-meta'
 
 const PAGE_SIZE = 20
 const SKELETON_ROWS = [
@@ -65,21 +80,6 @@ const STATUS_OPTIONS = [
   ['cancelled', '已取消'],
   ['expired', '已过期'],
 ] as const
-
-const statusMeta: Record<
-  UsageRecordExportTask['status'],
-  {
-    label: string
-    variant: 'outline' | 'default' | 'destructive' | 'secondary'
-  }
-> = {
-  pending: { label: '等待中', variant: 'secondary' },
-  running: { label: '导出中', variant: 'default' },
-  succeeded: { label: '已完成', variant: 'outline' },
-  failed: { label: '失败', variant: 'destructive' },
-  cancelled: { label: '已取消', variant: 'secondary' },
-  expired: { label: '文件已过期', variant: 'secondary' },
-}
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -100,14 +100,6 @@ function formatBytes(value: number) {
     unit += 1
   }
   return `${size.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
-}
-
-function filterSummary(filters: Record<string, string[]>) {
-  const ignored = new Set(['sort_by', 'sort_order', 'exact_total'])
-  const parts = Object.entries(filters)
-    .filter(([key, values]) => !ignored.has(key) && values.length > 0)
-    .map(([key, values]) => `${key}: ${values.join(', ')}`)
-  return parts.length > 0 ? parts.join(' · ') : '全部记录'
 }
 
 function ExportProgress({ item }: { item: UsageRecordExportTask }) {
@@ -137,6 +129,44 @@ function ExportProgress({ item }: { item: UsageRecordExportTask }) {
   return <span className='text-muted-foreground text-xs'>等待处理</span>
 }
 
+function ExportActionButton({
+  label,
+  icon: Icon,
+  disabled,
+  destructive = false,
+  onClick,
+}: {
+  label: string
+  icon: LucideIcon
+  disabled: boolean
+  destructive?: boolean
+  onClick: () => void
+}) {
+  const button = (
+    <Button
+      variant='ghost'
+      size='icon-sm'
+      aria-label={label}
+      disabled={disabled}
+      className={cn(
+        destructive &&
+          'text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+      )}
+      onClick={onClick}
+    >
+      <Icon />
+    </Button>
+  )
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger render={button} />
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 export function ExportRecords() {
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = user?.role === ROLE.SUPER_ADMIN
@@ -146,6 +176,8 @@ export function ExportRecords() {
   const [actorId, setActorId] = useState('')
   const [busyTask, setBusyTask] = useState('')
   const [deleteTarget, setDeleteTarget] =
+    useState<UsageRecordExportTask | null>(null)
+  const [detailTarget, setDetailTarget] =
     useState<UsageRecordExportTask | null>(null)
 
   const queryFilters = useMemo(
@@ -308,7 +340,7 @@ export function ExportRecords() {
           <div className='border-border bg-card overflow-hidden rounded-lg border shadow-xs'>
             <div className='overflow-x-auto'>
               <Table className='min-w-[1180px]'>
-                <TableHeader>
+                <TableHeader className='bg-muted/35'>
                   <TableRow>
                     <TableHead>状态</TableHead>
                     <TableHead>实例</TableHead>
@@ -341,12 +373,20 @@ export function ExportRecords() {
                       </TableRow>
                     )}
                   {items.map((item) => {
-                    const meta = statusMeta[item.status]
+                    const meta = EXPORT_STATUS_META[item.status]
                     return (
-                      <TableRow key={item.task_id}>
-                        <TableCell>
+                      <TableRow
+                        key={item.task_id}
+                        className='hover:bg-muted/30'
+                      >
+                        <TableCell
+                          className={cn(
+                            'border-l-2 pl-3',
+                            meta.accentClassName
+                          )}
+                        >
                           <div className='grid gap-1'>
-                            <Badge variant={meta.variant}>{meta.label}</Badge>
+                            <ExportStatusBadge status={item.status} />
                             {item.queue_position > 0 && (
                               <span className='text-muted-foreground text-xs tabular-nums'>
                                 队列第 {item.queue_position} 位
@@ -358,20 +398,30 @@ export function ExportRecords() {
                           <div className='font-medium'>
                             {item.instance_name}
                           </div>
-                          <div className='text-muted-foreground text-xs'>
-                            {item.instance_kind === 'sub2api'
-                              ? 'Sub2API'
-                              : 'New API'}{' '}
-                            · #{item.instance_id}
+                          <div className='mt-1 flex items-center gap-1.5'>
+                            <Badge
+                              variant='outline'
+                              className={cn(
+                                'h-4 rounded px-1.5 text-[10px] font-medium',
+                                item.instance_kind === 'sub2api'
+                                  ? 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300'
+                                  : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300'
+                              )}
+                            >
+                              {item.instance_kind === 'sub2api'
+                                ? 'Sub2API'
+                                : 'New API'}
+                            </Badge>
+                            <span className='text-muted-foreground text-xs tabular-nums'>
+                              #{item.instance_id}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell className='max-w-80'>
-                          <div
-                            className='truncate text-xs'
-                            title={filterSummary(item.filters)}
-                          >
-                            {filterSummary(item.filters)}
-                          </div>
+                        <TableCell className='w-72 max-w-72'>
+                          <FilterSummaryButton
+                            item={item}
+                            onClick={() => setDetailTarget(item)}
+                          />
                         </TableCell>
                         <TableCell>
                           <div>{item.actor_name}</div>
@@ -382,10 +432,10 @@ export function ExportRecords() {
                         <TableCell>
                           <ExportProgress item={item} />
                         </TableCell>
-                        <TableCell className='text-xs'>
+                        <TableCell className='text-xs tabular-nums'>
                           {formatTime(item.created_at)}
                         </TableCell>
-                        <TableCell className='text-xs'>
+                        <TableCell className='text-xs tabular-nums'>
                           <div>{formatTime(item.finished_at)}</div>
                           {item.expires_at > 0 && (
                             <div className='text-muted-foreground'>
@@ -396,58 +446,43 @@ export function ExportRecords() {
                         <TableCell className='text-right'>
                           <div className='flex justify-end gap-1'>
                             {item.status === 'pending' && (
-                              <Button
-                                variant='ghost'
-                                size='icon-sm'
-                                aria-label='取消导出'
-                                title='取消导出'
+                              <ExportActionButton
+                                label='取消导出'
+                                icon={Ban}
                                 disabled={busyTask === item.task_id}
                                 onClick={() =>
                                   void runAction(item.task_id, 'cancel')
                                 }
-                              >
-                                <Ban />
-                              </Button>
+                              />
                             )}
                             {item.status === 'succeeded' && (
-                              <Button
-                                variant='ghost'
-                                size='icon-sm'
-                                aria-label='下载 CSV'
-                                title='下载 CSV'
+                              <ExportActionButton
+                                label='下载 CSV'
+                                icon={Download}
                                 disabled={busyTask === item.task_id}
                                 onClick={() => void download(item.task_id)}
-                              >
-                                <Download />
-                              </Button>
+                              />
                             )}
                             {(item.status === 'failed' ||
                               item.status === 'expired') && (
-                              <Button
-                                variant='ghost'
-                                size='icon-sm'
-                                aria-label='重新导出'
-                                title='重新导出'
+                              <ExportActionButton
+                                label='重新导出'
+                                icon={RotateCcw}
                                 disabled={busyTask === item.task_id}
                                 onClick={() =>
                                   void runAction(item.task_id, 'retry')
                                 }
-                              >
-                                <RotateCcw />
-                              </Button>
+                              />
                             )}
                             {item.status !== 'pending' &&
                               item.status !== 'running' && (
-                                <Button
-                                  variant='ghost'
-                                  size='icon-sm'
-                                  aria-label='删除导出记录'
-                                  title='删除导出记录'
+                                <ExportActionButton
+                                  label='删除导出记录'
+                                  icon={Trash2}
                                   disabled={busyTask === item.task_id}
+                                  destructive
                                   onClick={() => setDeleteTarget(item)}
-                                >
-                                  <Trash2 />
-                                </Button>
+                                />
                               )}
                           </div>
                         </TableCell>
@@ -486,10 +521,18 @@ export function ExportRecords() {
           </div>
         </div>
       </SectionPageLayout.Content>
+      <FilterDetailsDialog
+        item={detailTarget}
+        onOpenChange={(open) => {
+          if (!open) setDetailTarget(null)
+        }}
+      />
       <ConfirmDialog
         open={deleteTarget != null}
         onOpenChange={(open) => {
-          if (!open && busyTask !== deleteTarget?.task_id) setDeleteTarget(null)
+          if (!open && busyTask !== deleteTarget?.task_id) {
+            setDeleteTarget(null)
+          }
         }}
         title='删除导出记录'
         desc='删除后将同时清理已生成的 CSV 文件，且无法恢复。'
