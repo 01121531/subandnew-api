@@ -56,11 +56,7 @@ import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import {
-  ExportStatusBadge,
-  FilterDetailsDialog,
-  FilterSummaryButton,
-} from './filter-details-dialog'
+import { ExportStatusBadge, FilterDetailsDialog } from './filter-details-dialog'
 import { EXPORT_STATUS_META } from './status-meta'
 
 const PAGE_SIZE = 20
@@ -176,8 +172,6 @@ export function ExportRecords() {
   const [actorId, setActorId] = useState('')
   const [busyTask, setBusyTask] = useState('')
   const [deleteTarget, setDeleteTarget] =
-    useState<UsageRecordExportTask | null>(null)
-  const [detailTarget, setDetailTarget] =
     useState<UsageRecordExportTask | null>(null)
 
   const queryFilters = useMemo(
@@ -418,10 +412,7 @@ export function ExportRecords() {
                           </div>
                         </TableCell>
                         <TableCell className='w-72 max-w-72'>
-                          <FilterSummaryButton
-                            item={item}
-                            onClick={() => setDetailTarget(item)}
-                          />
+                          <FilterDetailsDialog item={item} />
                         </TableCell>
                         <TableCell>
                           <div>{item.actor_name}</div>
@@ -521,12 +512,6 @@ export function ExportRecords() {
           </div>
         </div>
       </SectionPageLayout.Content>
-      <FilterDetailsDialog
-        item={detailTarget}
-        onOpenChange={(open) => {
-          if (!open) setDetailTarget(null)
-        }}
-      />
       <ConfirmDialog
         open={deleteTarget != null}
         onOpenChange={(open) => {

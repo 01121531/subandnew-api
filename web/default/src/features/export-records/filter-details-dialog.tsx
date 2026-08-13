@@ -15,6 +15,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import type { UsageRecordExportTask } from '@/features/usage-records/api'
 import { cn } from '@/lib/utils'
@@ -196,14 +197,8 @@ function FilterSection({
   )
 }
 
-export function FilterDetailsDialog({
-  item,
-  onOpenChange,
-}: {
-  item: UsageRecordExportTask | null
-  onOpenChange: (open: boolean) => void
-}) {
-  const entries = item ? nonEmptyFilterEntries(item.filters) : []
+export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
+  const entries = nonEmptyFilterEntries(item.filters)
   const timeEntries = entries.filter(({ key }) => TIME_KEYS.has(key))
   const parameterEntries = entries.filter(({ key }) =>
     EXPORT_PARAMETER_KEYS.has(key)
@@ -211,9 +206,30 @@ export function FilterDetailsDialog({
   const conditionEntries = entries.filter(
     ({ key }) => !TIME_KEYS.has(key) && !EXPORT_PARAMETER_KEYS.has(key)
   )
+  const summary = getFilterSummary(item.filters)
 
   return (
-    <Dialog open={item != null} onOpenChange={onOpenChange}>
+    <Dialog>
+      <DialogTrigger
+        render={
+          <button
+            type='button'
+            className='border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-ring/50 group flex w-full min-w-0 items-center gap-2 rounded-md border bg-transparent px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-[3px]'
+            aria-label={`查看筛选条件详情：${summary.label}`}
+          />
+        }
+      >
+        <Filter className='text-primary size-4 shrink-0' />
+        <span className='min-w-0 flex-1 truncate text-xs font-medium'>
+          {summary.label}
+        </span>
+        {summary.count > 0 && (
+          <span className='bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[11px] tabular-nums'>
+            {summary.count}
+          </span>
+        )}
+        <ChevronRight className='text-muted-foreground size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5' />
+      </DialogTrigger>
       <DialogContent className='max-h-[min(82vh,760px)] gap-0 overflow-hidden p-0 sm:max-w-2xl'>
         <DialogHeader className='border-border border-b px-5 py-4 pr-12'>
           <div className='flex flex-wrap items-center gap-2'>
@@ -221,12 +237,10 @@ export function FilterDetailsDialog({
               <Filter className='size-4' />
             </div>
             <DialogTitle>筛选条件详情</DialogTitle>
-            {item && <ExportStatusBadge status={item.status} />}
+            <ExportStatusBadge status={item.status} />
           </div>
           <DialogDescription>
-            {item
-              ? `${item.instance_name} · ${item.instance_kind === 'sub2api' ? 'Sub2API' : 'New API'} · 只读快照`
-              : '导出任务的只读筛选快照'}
+            {`${item.instance_name} · ${item.instance_kind === 'sub2api' ? 'Sub2API' : 'New API'} · 只读快照`}
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-5 overflow-y-auto px-5 py-4'>
@@ -248,34 +262,5 @@ export function FilterDetailsDialog({
         </div>
       </DialogContent>
     </Dialog>
-  )
-}
-
-export function FilterSummaryButton({
-  item,
-  onClick,
-}: {
-  item: UsageRecordExportTask
-  onClick: () => void
-}) {
-  const summary = getFilterSummary(item.filters)
-  return (
-    <button
-      type='button'
-      className='border-border hover:bg-muted/60 focus-visible:border-ring focus-visible:ring-ring/50 group flex w-full min-w-0 items-center gap-2 rounded-md border bg-transparent px-2.5 py-2 text-left transition-colors outline-none focus-visible:ring-[3px]'
-      aria-label={`查看筛选条件详情：${summary.label}`}
-      onClick={onClick}
-    >
-      <Filter className='text-primary size-4 shrink-0' />
-      <span className='min-w-0 flex-1 truncate text-xs font-medium'>
-        {summary.label}
-      </span>
-      {summary.count > 0 && (
-        <span className='bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[11px] tabular-nums'>
-          {summary.count}
-        </span>
-      )}
-      <ChevronRight className='text-muted-foreground size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5' />
-    </button>
   )
 }
