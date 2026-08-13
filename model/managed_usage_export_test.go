@@ -122,3 +122,20 @@ func TestExpireManagedUsageExportsKeepsRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ManagedUsageExportStatusExpired, reloaded.Status)
 }
+
+func TestManagedUsageExportListIncludesCompletedRecords(t *testing.T) {
+	truncateTables(t)
+	record := &ManagedUsageExport{
+		TaskID: "systask_completed", InstanceID: 1, InstanceName: "one",
+		InstanceKind: ManagedInstanceKindSub2API, ActorID: 10, ActorName: "admin",
+		Query: `{}`, Status: ManagedUsageExportStatusSucceeded, ExpiresAt: common.GetTimestamp() + 3600,
+	}
+	require.NoError(t, DB.Create(record).Error)
+
+	list, err := ListManagedUsageExports(ManagedUsageExportListFilter{ActorID: 10})
+	require.NoError(t, err)
+	require.False(t, list.HasActive)
+	require.Equal(t, int64(1), list.Total)
+	require.Len(t, list.Items, 1)
+	require.Equal(t, record.TaskID, list.Items[0].TaskID)
+}

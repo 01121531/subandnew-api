@@ -7,11 +7,19 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import { useQuery } from '@tanstack/react-query'
-import { Ban, Download, RefreshCw, RotateCcw, Search } from 'lucide-react'
+import {
+  Ban,
+  CircleAlert,
+  Download,
+  RefreshCw,
+  RotateCcw,
+  Search,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -263,6 +271,16 @@ export function ExportRecords() {
             )}
           </div>
 
+          {exportsQuery.isError && (
+            <Alert variant='destructive'>
+              <CircleAlert />
+              <AlertTitle>导出记录加载失败</AlertTitle>
+              <AlertDescription>
+                请检查服务状态后重试。已有导出任务不会因此丢失。
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className='border-border bg-card overflow-hidden rounded-lg border shadow-xs'>
             <div className='overflow-x-auto'>
               <Table className='min-w-[1180px]'>
@@ -287,15 +305,17 @@ export function ExportRecords() {
                         </TableCell>
                       </TableRow>
                     ))}
-                  {!exportsQuery.isLoading && items.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={8} className='h-40 text-center'>
-                        <span className='text-muted-foreground text-sm'>
-                          暂无导出记录
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  )}
+                  {!exportsQuery.isLoading &&
+                    !exportsQuery.isError &&
+                    items.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={8} className='h-40 text-center'>
+                          <span className='text-muted-foreground text-sm'>
+                            暂无导出记录
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    )}
                   {items.map((item) => {
                     const meta = statusMeta[item.status]
                     return (

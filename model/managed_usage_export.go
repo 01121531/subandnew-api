@@ -113,27 +113,17 @@ func ListManagedUsageExports(filter ManagedUsageExportListFilter) (*ManagedUsage
 	if filter.PageSize > 100 {
 		filter.PageSize = 100
 	}
-	query := DB.Model(&ManagedUsageExport{})
-	if filter.Status != "" {
-		query = query.Where("status = ?", filter.Status)
-	}
-	if filter.InstanceID > 0 {
-		query = query.Where("instance_id = ?", filter.InstanceID)
-	}
-	if filter.ActorID > 0 {
-		query = query.Where("actor_id = ?", filter.ActorID)
-	}
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := managedUsageExportListQuery(filter).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	active := []string{ManagedUsageExportStatusPending, ManagedUsageExportStatusRunning}
 	var activeCount int64
-	if err := query.Where("status IN ?", active).Count(&activeCount).Error; err != nil {
+	if err := managedUsageExportListQuery(filter).Where("status IN ?", active).Count(&activeCount).Error; err != nil {
 		return nil, err
 	}
 	var items []*ManagedUsageExport
-	err := query.
+	err := managedUsageExportListQuery(filter).
 		Order("CASE WHEN status IN ('pending', 'running') THEN 0 ELSE 1 END ASC").
 		Order("CASE WHEN status IN ('pending', 'running') THEN id END ASC").
 		Order("id DESC").
@@ -144,6 +134,20 @@ func ListManagedUsageExports(filter ManagedUsageExportListFilter) (*ManagedUsage
 	return &ManagedUsageExportList{
 		Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize, HasActive: activeCount > 0,
 	}, nil
+}
+
+func managedUsageExportListQuery(filter ManagedUsageExportListFilter) *gorm.DB {
+	query := DB.Model(&ManagedUsageExport{})
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+	if filter.InstanceID > 0 {
+		query = query.Where("instance_id = ?", filter.InstanceID)
+	}
+	if filter.ActorID > 0 {
+		query = query.Where("actor_id = ?", filter.ActorID)
+	}
+	return query
 }
 
 func GetManagedUsageExport(taskID string) (*ManagedUsageExport, error) {
