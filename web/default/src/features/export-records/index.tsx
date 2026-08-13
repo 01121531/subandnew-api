@@ -57,7 +57,11 @@ import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { ExportStatusBadge, FilterDetailsDialog } from './filter-details-dialog'
-import { EXPORT_STATUS_META } from './status-meta'
+import {
+  EXPORT_STATUS_META,
+  exportInstanceKindClassName,
+  exportInstanceKindLabel,
+} from './status-meta'
 
 const PAGE_SIZE = 20
 const SKELETON_ROWS = [
@@ -397,14 +401,10 @@ export function ExportRecords() {
                               variant='outline'
                               className={cn(
                                 'h-4 rounded px-1.5 text-[10px] font-medium',
-                                item.instance_kind === 'sub2api'
-                                  ? 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300'
-                                  : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300'
+                                exportInstanceKindClassName(item.instance_kind)
                               )}
                             >
-                              {item.instance_kind === 'sub2api'
-                                ? 'Sub2API'
-                                : 'New API'}
+                              {exportInstanceKindLabel(item.instance_kind)}
                             </Badge>
                             <span className='text-muted-foreground text-xs tabular-nums'>
                               #{item.instance_id}

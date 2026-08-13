@@ -652,6 +652,8 @@ function AccountTable(props: {
 }) {
   const { t } = useTranslation()
   const isChannel = props.family === 'new_api'
+  const isConductor = props.family === 'conductor'
+  const showsSurvival = !isChannel && !isConductor
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -666,7 +668,7 @@ function AccountTable(props: {
     },
     { value: 'last_activity', label: t('Last activity') },
   ]
-  if (!isChannel) {
+  if (showsSurvival) {
     sortOptions.push({ value: 'survival', label: t('Survival time') })
   }
   const directionOptions: { value: SortDirection; label: string }[] = [
@@ -695,10 +697,12 @@ function AccountTable(props: {
             </TableHead>
             <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
             <TableHead className='text-right'>
-              {t(isChannel ? 'Used quota' : '7-day consumption')}
+              {isConductor
+                ? '运行负载'
+                : t(isChannel ? 'Used quota' : '7-day consumption')}
             </TableHead>
             <TableHead>{t('Last activity')}</TableHead>
-            {!isChannel && <TableHead>{t('Survival time')}</TableHead>}
+            {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
             <TableHead className='pe-6 text-right'>{t('Available')}</TableHead>
           </TableRow>
         </TableHeader>
@@ -708,7 +712,9 @@ function AccountTable(props: {
               (value, index, values): value is string =>
                 Boolean(value) && values.indexOf(value) === index
             )
-            const survivalSeconds = isChannel ? null : getSurvivalSeconds(item)
+            const survivalSeconds = showsSurvival
+              ? getSurvivalSeconds(item)
+              : null
             return (
               <TableRow key={`${instance.id}:${item.id}`}>
                 <TableCell className='ps-6'>
@@ -739,19 +745,36 @@ function AccountTable(props: {
                   {formatTimestamp(item.created_at)}
                 </TableCell>
                 <TableCell className='text-right tabular-nums'>
-                  <p className='font-medium'>{formatCost(item)}</p>
-                  {isChannel
-                    ? item.balance != null && (
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Balance')} {exactCurrency.format(item.balance)}
-                        </p>
-                      )
-                    : (item.requests != null || item.tokens != null) && (
-                        <p className='text-muted-foreground text-xs'>
-                          {formatOptionalNumber(item.requests)} {t('Requests')}{' '}
-                          / {formatOptionalNumber(item.tokens)} {t('Tokens')}
-                        </p>
-                      )}
+                  {isConductor ? (
+                    <>
+                      <p className='font-medium'>
+                        {formatOptionalNumber(item.rpm)} RPM
+                      </p>
+                      <p className='text-muted-foreground text-xs'>
+                        {formatOptionalNumber(item.active_sessions)} 个会话 ·{' '}
+                        {item.utilization_5h == null
+                          ? '--'
+                          : `${(item.utilization_5h * 100).toFixed(1)}%`}{' '}
+                        / 5h
+                      </p>
+                    </>
+                  ) : (
+                    <p className='font-medium'>{formatCost(item)}</p>
+                  )}
+                  {!isConductor &&
+                    (isChannel
+                      ? item.balance != null && (
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Balance')} {exactCurrency.format(item.balance)}
+                          </p>
+                        )
+                      : (item.requests != null || item.tokens != null) && (
+                          <p className='text-muted-foreground text-xs'>
+                            {formatOptionalNumber(item.requests)}{' '}
+                            {t('Requests')} /{' '}
+                            {formatOptionalNumber(item.tokens)} {t('Tokens')}
+                          </p>
+                        ))}
                 </TableCell>
                 <TableCell className='whitespace-nowrap'>
                   <p className='text-sm'>
@@ -763,7 +786,7 @@ function AccountTable(props: {
                     </p>
                   )}
                 </TableCell>
-                {!isChannel && (
+                {showsSurvival && (
                   <TableCell className='whitespace-nowrap'>
                     <p className='text-sm font-medium tabular-nums'>
                       {formatSurvivalDuration(survivalSeconds, t)}

@@ -162,6 +162,16 @@ export interface ManagedInstanceInventoryItem {
   balance?: number
   response_time_ms?: number
   error_message?: string
+  active_sessions?: number
+  rpm?: number
+  account_count?: number
+  utilization_5h?: number
+  utilization_7d?: number
+  utilization_7d_oi?: number
+  input_price_per_m?: number
+  output_price_per_m?: number
+  cache_read_price_per_m?: number
+  cache_create_price_per_m?: number
 }
 
 export interface ManagedInstanceInventoryPage {

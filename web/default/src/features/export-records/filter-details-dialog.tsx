@@ -20,7 +20,7 @@ import {
 import type { UsageRecordExportTask } from '@/features/usage-records/api'
 import { cn } from '@/lib/utils'
 
-import { EXPORT_STATUS_META } from './status-meta'
+import { EXPORT_STATUS_META, exportInstanceKindLabel } from './status-meta'
 
 const FILTER_LABELS: Record<string, string> = {
   start_timestamp: '开始时间',
@@ -240,7 +240,7 @@ export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
             <ExportStatusBadge status={item.status} />
           </div>
           <DialogDescription>
-            {`${item.instance_name} · ${item.instance_kind === 'sub2api' ? 'Sub2API' : 'New API'} · 只读快照`}
+            {`${item.instance_name} · ${exportInstanceKindLabel(item.instance_kind)} · 只读快照`}
           </DialogDescription>
         </DialogHeader>
         <div className='space-y-5 overflow-y-auto px-5 py-4'>

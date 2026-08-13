@@ -37,22 +37,32 @@ type TimeWindow struct {
 }
 
 type InventoryItem struct {
-	ID             int64    `json:"id"`
-	Name           string   `json:"name"`
-	Type           string   `json:"type,omitempty"`
-	Platform       string   `json:"platform,omitempty"`
-	Group          string   `json:"group,omitempty"`
-	Status         string   `json:"status,omitempty"`
-	Enabled        *bool    `json:"enabled,omitempty"`
-	CreatedAt      int64    `json:"created_at,omitempty"`
-	LastActivityAt int64    `json:"last_activity_at,omitempty"`
-	Requests       *float64 `json:"requests,omitempty"`
-	Tokens         *float64 `json:"tokens,omitempty"`
-	Cost           *float64 `json:"cost,omitempty"`
-	CostUnit       string   `json:"cost_unit,omitempty"`
-	Balance        *float64 `json:"balance,omitempty"`
-	ResponseTimeMS *int64   `json:"response_time_ms,omitempty"`
-	ErrorMessage   string   `json:"error_message,omitempty"`
+	ID                   int64    `json:"id"`
+	Name                 string   `json:"name"`
+	Type                 string   `json:"type,omitempty"`
+	Platform             string   `json:"platform,omitempty"`
+	Group                string   `json:"group,omitempty"`
+	Status               string   `json:"status,omitempty"`
+	Enabled              *bool    `json:"enabled,omitempty"`
+	CreatedAt            int64    `json:"created_at,omitempty"`
+	LastActivityAt       int64    `json:"last_activity_at,omitempty"`
+	Requests             *float64 `json:"requests,omitempty"`
+	Tokens               *float64 `json:"tokens,omitempty"`
+	Cost                 *float64 `json:"cost,omitempty"`
+	CostUnit             string   `json:"cost_unit,omitempty"`
+	Balance              *float64 `json:"balance,omitempty"`
+	ResponseTimeMS       *int64   `json:"response_time_ms,omitempty"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ActiveSessions       *int     `json:"active_sessions,omitempty"`
+	RPM                  *int     `json:"rpm,omitempty"`
+	AccountCount         *int     `json:"account_count,omitempty"`
+	Utilization5H        *float64 `json:"utilization_5h,omitempty"`
+	Utilization7D        *float64 `json:"utilization_7d,omitempty"`
+	Utilization7DOI      *float64 `json:"utilization_7d_oi,omitempty"`
+	InputPricePerM       *float64 `json:"input_price_per_m,omitempty"`
+	OutputPricePerM      *float64 `json:"output_price_per_m,omitempty"`
+	CacheReadPricePerM   *float64 `json:"cache_read_price_per_m,omitempty"`
+	CacheCreatePricePerM *float64 `json:"cache_create_price_per_m,omitempty"`
 }
 
 type InventoryPage struct {

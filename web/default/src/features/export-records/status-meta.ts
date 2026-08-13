@@ -72,3 +72,19 @@ export const EXPORT_STATUS_META: Record<
     accentClassName: 'border-l-orange-500 dark:border-l-orange-400',
   },
 }
+
+export function exportInstanceKindLabel(kind: string) {
+  if (kind === 'sub2api') return 'Sub2API'
+  if (kind === 'conductor') return 'Conductor'
+  return 'New API'
+}
+
+export function exportInstanceKindClassName(kind: string) {
+  if (kind === 'sub2api') {
+    return 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/40 dark:text-cyan-300'
+  }
+  if (kind === 'conductor') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300'
+  }
+  return 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300'
+}

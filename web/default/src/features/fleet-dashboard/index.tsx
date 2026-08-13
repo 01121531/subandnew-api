@@ -283,7 +283,7 @@ function formatUsageMetric(
   compact = true
 ) {
   if (value == null) return '--'
-  if (metric === 'quota' && family === 'sub2api') {
+  if (metric === 'quota' && family !== 'new_api') {
     return (compact ? compactCurrency : exactCurrency).format(value)
   }
   return formatMetric(value, compact)
@@ -318,7 +318,7 @@ function metricLabel(metric: MetricKey, family: FleetFamily) {
     case 'tokens':
       return 'Tokens'
     case 'quota':
-      return family === 'sub2api' ? 'Actual cost' : 'Quota'
+      return family !== 'new_api' ? 'Actual cost' : 'Quota'
   }
 }
 
@@ -922,11 +922,13 @@ function SummaryGrid(props: DashboardContentProps) {
   if (props.healthRate < 75) availabilityTone = 'danger'
   else if (props.healthRate < 100) availabilityTone = 'amber'
   const costLabel =
-    props.family === 'sub2api' ? t('Actual cost') : t('Quota usage')
-  const costDetail =
-    props.family === 'sub2api'
-      ? t('Actual cost reported by Sub2API')
-      : t('Remote quota units')
+    props.family !== 'new_api' ? t('Actual cost') : t('Quota usage')
+  let costDetail = t('Remote quota units')
+  if (props.family === 'sub2api') {
+    costDetail = t('Actual cost reported by Sub2API')
+  } else if (props.family === 'conductor') {
+    costDetail = t('Actual cost calculated from Conductor prices')
+  }
 
   return (
     <section

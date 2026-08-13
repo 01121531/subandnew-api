@@ -62,9 +62,11 @@ type UsageRecordFilterOptions struct {
 }
 
 type usageRecordClient struct {
-	instance   *model.ManagedInstance
-	connector  *Connector
-	credential *CredentialMaterial
+	instance         *model.ManagedInstance
+	connector        *Connector
+	credential       *CredentialMaterial
+	conductorCacheMu sync.Mutex
+	conductorCache   map[string][]json.RawMessage
 }
 
 type UsageRecordCSVExport struct {
@@ -118,6 +120,9 @@ func GetUsageRecordFilterOptions(ctx context.Context, instanceID int64, input ur
 		if !keep[key] {
 			query.Del(key)
 		}
+	}
+	if client.instance.Kind == model.ManagedInstanceKindConductor {
+		return conductorUsageFilterOptions(ctx, client, query)
 	}
 	setUsageRecordPage(query, client.instance.Kind, 1, usageRecordMaxPageSize)
 	page, err := client.listTarget(ctx, query)
@@ -364,7 +369,7 @@ func newUsageRecordClient(instanceID int64) (*usageRecordClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindHuichuan && instance.Kind != model.ManagedInstanceKindSub2API {
+	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindHuichuan && instance.Kind != model.ManagedInstanceKindSub2API && instance.Kind != model.ManagedInstanceKindConductor {
 		return nil, ErrUnsupportedCapability
 	}
 	return &usageRecordClient{instance: instance, connector: connector, credential: credential}, nil
@@ -450,6 +455,9 @@ func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query 
 }
 
 func (client *usageRecordClient) listTarget(ctx context.Context, query url.Values) (*UsageRecordPage, error) {
+	if client.instance.Kind == model.ManagedInstanceKindConductor {
+		return conductorUsageRecordPage(ctx, client, query)
+	}
 	var endpoint string
 	var response *ConnectorResponse
 	var err error
@@ -487,6 +495,9 @@ func (client *usageRecordClient) summary(ctx context.Context, query url.Values) 
 	}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
 		return client.sub2Summary(ctx, query)
+	}
+	if client.instance.Kind == model.ManagedInstanceKindConductor {
+		return client.filteredSummary(ctx, query)
 	}
 	return client.newAPISummary(ctx, query)
 }
@@ -540,7 +551,7 @@ func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.
 		}
 	}
 	currency := "USD"
-	if client.instance.Kind != model.ManagedInstanceKindSub2API {
+	if client.instance.Kind != model.ManagedInstanceKindSub2API && client.instance.Kind != model.ManagedInstanceKindConductor {
 		amount, currency = client.newAPIQuotaAmount(ctx, amount)
 	}
 	return &UsageRecordSummary{
@@ -564,6 +575,9 @@ func usageRecordTotals(kind string, raw json.RawMessage) (float64, float64, erro
 	if kind == model.ManagedInstanceKindSub2API {
 		tokens := value("input_tokens") + value("output_tokens") + value("cache_read_tokens") + value("cache_creation_tokens")
 		return tokens, value("actual_cost"), nil
+	}
+	if kind == model.ManagedInstanceKindConductor {
+		return value("total_tokens"), value("actual_cost"), nil
 	}
 	return value("prompt_tokens") + value("completion_tokens"), value("quota"), nil
 }
@@ -723,6 +737,8 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 	allowed := newAPIUsageQueryFields
 	if kind == model.ManagedInstanceKindSub2API {
 		allowed = sub2UsageQueryFields
+	} else if kind == model.ManagedInstanceKindConductor {
+		allowed = conductorUsageQueryFields
 	}
 	query := make(url.Values)
 	for key, values := range input {
@@ -752,6 +768,19 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 		return nil, fmt.Errorf("%w: invalid usage record pagination", ErrInvalidInstance)
 	}
 	setUsageRecordPage(query, kind, page, pageSize)
+	if kind == model.ManagedInstanceKindConductor {
+		location, _ := time.LoadLocation("Asia/Shanghai")
+		now := time.Now().In(location)
+		if query.Get("end_date") == "" {
+			query.Set("end_date", now.Format("2006-01-02"))
+		}
+		if query.Get("start_date") == "" {
+			query.Set("start_date", now.AddDate(0, 0, -1).Format("2006-01-02"))
+		}
+		if query.Get("timezone") == "" {
+			query.Set("timezone", "Asia/Shanghai")
+		}
+	}
 	if err := validateUsageRecordRange(kind, query); err != nil {
 		return nil, err
 	}
@@ -764,6 +793,8 @@ func UnsupportedUsageRecordFilterFields(kind string, input url.Values) []string 
 	allowed := newAPIUsageQueryFields
 	if kind == model.ManagedInstanceKindSub2API {
 		allowed = sub2UsageQueryFields
+	} else if kind == model.ManagedInstanceKindConductor {
+		allowed = conductorUsageQueryFields
 	}
 	unsupported := make([]string, 0)
 	for key, values := range input {
@@ -819,7 +850,7 @@ func validateUsageRecordRange(kind string, query url.Values) error {
 	invalid := func() error {
 		return fmt.Errorf("%w: usage record start must not be after end", ErrInvalidInstance)
 	}
-	if kind == model.ManagedInstanceKindSub2API {
+	if kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor {
 		start, startErr := time.Parse("2006-01-02", query.Get("start_date"))
 		end, endErr := time.Parse("2006-01-02", query.Get("end_date"))
 		if startErr == nil && endErr == nil && start.After(end) {
@@ -836,7 +867,7 @@ func validateUsageRecordRange(kind string, query url.Values) error {
 }
 
 func pageField(kind string) string {
-	if kind == model.ManagedInstanceKindSub2API {
+	if kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor {
 		return "page"
 	}
 	return "p"
@@ -882,6 +913,14 @@ var sub2UsageQueryFields = map[string]usageQueryValidator{
 	"sort_order": oneOf("asc", "desc"), "exact_total": booleanValue,
 }
 
+var conductorUsageQueryFields = map[string]usageQueryValidator{
+	"page": positiveInteger, "page_size": positiveInteger,
+	"user_id": positiveInteger, "model": textValue,
+	"start_date": dateValue, "end_date": dateValue, "timezone": timezoneValue,
+	"sort_by":    oneOf("date", "created_at", "id", "user_id", "model", "requests", "total_tokens", "actual_cost"),
+	"sort_order": oneOf("asc", "desc"),
+}
+
 var usageRecordMultiValueFields = map[string]bool{
 	"type": true, "username": true, "token_name": true, "model_name": true,
 	"channel": true, "group": true, "request_id": true, "upstream_request_id": true, "proxy_id": true,
@@ -914,7 +953,7 @@ func usageRecordSortValue(raw json.RawMessage, kind string, sortBy string) any {
 		return nil
 	}
 	if sortBy == "model" {
-		if kind == model.ManagedInstanceKindSub2API {
+		if kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor {
 			return item["model"]
 		}
 		return item["model_name"]
@@ -968,6 +1007,11 @@ func usageRecordOptionsFromPage(instance *model.ManagedInstance, page *UsageReco
 			add("group_id", item["group_id"], nestedUsageValue(item, []string{"group", "name"}))
 			add("model", item["model"], item["model"])
 			add("request_id", item["request_id"], item["request_id"])
+			continue
+		}
+		if instance.Kind == model.ManagedInstanceKindConductor {
+			add("user_id", item["user_id"], item["username"])
+			add("model", item["model"], item["model"])
 			continue
 		}
 		add("username", item["username"], item["username"])
@@ -1035,6 +1079,13 @@ func field(paths ...string) usageCSVField {
 }
 
 func usageCSVSchema(kind string) ([]string, []usageCSVField) {
+	if kind == model.ManagedInstanceKindConductor {
+		return []string{"日期", "用户", "用户 ID", "模型", "请求数", "输入 Token", "输出 Token", "缓存读取 Token", "缓存创建 Token", "5 分钟缓存 Token", "1 小时缓存 Token", "总 Token", "消费金额 (USD)"}, []usageCSVField{
+			field("date"), field("username"), field("user_id"), field("model"), field("requests"),
+			field("input_tokens"), field("output_tokens"), field("cache_read_tokens"), field("cache_creation_tokens"),
+			field("cache_5m_tokens"), field("cache_1h_tokens"), field("total_tokens"), field("actual_cost"),
+		}
+	}
 	if kind == model.ManagedInstanceKindSub2API {
 		return []string{"时间", "用户", "API Key", "账号", "请求模型", "上游模型", "响应模型", "上游模型不一致", "分组", "请求类型", "输入Token", "输出Token", "缓存读取Token", "缓存创建Token", "原始成本", "用户计费", "账号计费", "首字延迟(ms)", "耗时(ms)", "请求ID", "IP"}, []usageCSVField{
 			field("created_at"), field("user.email", "user_id"), field("api_key.name", "api_key_id"), field("account.name", "account_id"),

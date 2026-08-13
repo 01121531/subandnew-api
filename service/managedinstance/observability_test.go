@@ -363,6 +363,42 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 	require.Equal(t, 7.0, *summary.Requests.Value)
 }
 
+func TestConductorAdditionalInventories(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "Bearer conductor-secret", request.Header.Get("Authorization"))
+		switch request.URL.Path {
+		case "/api/v1/users":
+			writeProbeJSON(response, `{"code":200,"data":[{"id":1,"username":"root","role":"admin","is_active":true,"created_at":"2026-08-01T10:00:00Z"}]}`)
+		case "/api/v1/ws-clients":
+			writeProbeJSON(response, `{"code":200,"data":[{"id":2,"name":"worker","url":"ws://worker","enabled":true,"health":"healthy","account_count":4}]}`)
+		case "/api/v1/prices":
+			writeProbeJSON(response, `{"code":200,"data":[{"id":3,"model":"gpt-5","input_price_per_m":1.2,"output_price_per_m":4.8,"cache_read_price_per_m":0.3,"cache_create_price_per_m":1.5,"note":"current"}]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{AuthType: "bearer_pat", Secret: "conductor-secret"})
+
+	users, err := CollectInventory(context.Background(), instance.Id, "user", "")
+	require.NoError(t, err)
+	userPage := users.Data.(*InventoryPage)
+	require.Equal(t, "root", userPage.Items[0].Name)
+	require.True(t, *userPage.Items[0].Enabled)
+
+	clients, err := CollectInventory(context.Background(), instance.Id, "ws_client", "")
+	require.NoError(t, err)
+	clientPage := clients.Data.(*InventoryPage)
+	require.Equal(t, 4, *clientPage.Items[0].AccountCount)
+
+	prices, err := CollectInventory(context.Background(), instance.Id, "price", "")
+	require.NoError(t, err)
+	pricePage := prices.Data.(*InventoryPage)
+	require.InDelta(t, 4.8, *pricePage.Items[0].OutputPricePerM, 0.000001)
+}
+
 func TestCollectInventoryPersistsFailureWithoutSyntheticCounts(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

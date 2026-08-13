@@ -214,6 +214,90 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 	require.Len(t, page.Items, 1)
 }
 
+func TestConductorUsageRecordsSummaryOptionsAndSessionReuse(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	var usageCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/auth/login" {
+			loginCount.Add(1)
+			writeProbeJSON(response, `{"code":200,"data":{"token":"conductor-token"}}`)
+			return
+		}
+		require.Equal(t, "Bearer conductor-token", request.Header.Get("Authorization"))
+		switch request.URL.Path {
+		case "/api/v1/users":
+			writeProbeJSON(response, `{"code":200,"data":[{"id":7,"username":"alice","role":"admin","is_active":true}]}`)
+		case "/api/v1/prices":
+			writeProbeJSON(response, `{"code":200,"data":[{"id":1,"model":"gpt-5","input_price_per_m":1,"output_price_per_m":2,"cache_read_price_per_m":0.5,"cache_create_price_per_m":1,"note":"test"}]}`)
+		case "/api/v1/system/health":
+			writeProbeJSON(response, `{"code":200,"data":{"status":"ok","accounts_total":2,"accounts_available":1,"accounts_paused":1,"accounts_rejected":0}}`)
+		case "/api/v1/usage":
+			usageCount.Add(1)
+			require.Equal(t, "2026-08-07", request.URL.Query().Get("from"))
+			require.Equal(t, "2026-08-13", request.URL.Query().Get("to"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			require.Equal(t, "model", request.URL.Query().Get("group_by"))
+			writeProbeJSON(response, `{"code":200,"data":{"labels":{"7":"alice"},"total":1,"usage":{"7":{"2026-08-12":{"gpt-5":{"requests":3,"input_tokens":1000000,"output_tokens":500000,"cache_read_tokens":100000,"cache_creation_tokens":50000,"cache_5m_tokens":30000,"cache_1h_tokens":20000},"_total":{"requests":3}}}}}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+	filters := url.Values{
+		"start_date": {"2026-08-07"}, "end_date": {"2026-08-13"}, "timezone": {"Asia/Shanghai"},
+		"page": {"1"}, "page_size": {"20"}, "user_id": {"7"}, "model": {"gpt-5"},
+	}
+
+	page, err := ListUsageRecords(context.Background(), instance.Id, filters)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindConductor, page.Kind)
+	require.Equal(t, int64(1), page.Total)
+	require.Len(t, page.Items, 1)
+	var row conductorUsageRow
+	require.NoError(t, json.Unmarshal(page.Items[0], &row))
+	require.Equal(t, 3.0, row.Requests)
+	require.Equal(t, 1650000.0, row.TotalTokens)
+	require.InDelta(t, 2.1, row.ActualCost, 0.000001)
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, filters)
+	require.NoError(t, err)
+	require.Equal(t, "USD", summary.Currency)
+	require.Equal(t, 1650000.0, summary.TotalTokens)
+	require.InDelta(t, 2.1, summary.Amount, 0.000001)
+
+	options, err := GetUsageRecordFilterOptions(context.Background(), instance.Id, filters)
+	require.NoError(t, err)
+	require.Equal(t, "7", options.Fields["user_id"][0].Value)
+	require.Equal(t, "gpt-5", options.Fields["model"][0].Value)
+	require.Equal(t, int32(1), loginCount.Load())
+
+	headers, fields := usageCSVSchema(model.ManagedInstanceKindConductor)
+	require.Len(t, headers, 13)
+	cells, err := usageCSVRow(page.Items[0], fields)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5", cells[3])
+	require.Equal(t, "2.1", cells[12])
+
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{
+		Start: time.Date(2026, 8, 7, 0, 0, 0, 0, location).Unix(),
+		End:   time.Date(2026, 8, 13, 0, 0, 0, 0, location).Unix(),
+	})
+	require.NoError(t, err)
+	dashboard := view.Data.(*SummaryResult)
+	require.Equal(t, 3.0, *dashboard.Requests.Value)
+	require.Equal(t, 1650000.0, *dashboard.Tokens.Value)
+	require.InDelta(t, 2.1, *dashboard.Cost.Value, 0.000001)
+	require.Equal(t, "2026-08-12", dashboard.Trend[0].Date)
+	require.Equal(t, int32(3), usageCount.Load())
+}
+
 func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

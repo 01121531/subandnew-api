@@ -74,7 +74,13 @@ type FilterDefinition = {
   options?: FilterOption[]
 }
 type SortDirection = 'asc' | 'desc'
-type UsageSortKey = 'created_at' | 'model' | 'id'
+type UsageSortKey =
+  | 'created_at'
+  | 'model'
+  | 'id'
+  | 'requests'
+  | 'total_tokens'
+  | 'actual_cost'
 
 const PAGE_SIZE = 20
 const USAGE_RECORDS_REFRESH_MS = 120_000
@@ -163,6 +169,17 @@ const SUB2_FILTERS: FilterDefinition[] = [
   },
 ]
 
+const CONDUCTOR_FILTERS: FilterDefinition[] = [
+  { key: 'start_date', label: '开始日期' },
+  { key: 'end_date', label: '结束日期' },
+  { key: 'user_id', label: '用户', placeholder: '选择或输入用户 ID' },
+  { key: 'model', label: '模型', placeholder: '选择或输入模型' },
+]
+
+function usesDateOnly(system: UsageSystem) {
+  return system !== 'new_api'
+}
+
 function localDateTime(date: Date) {
   const offset = date.getTimezoneOffset() * 60_000
   return new Date(date.getTime() - offset).toISOString().slice(0, 16)
@@ -194,13 +211,13 @@ function filterDate(
 
 function serializeRangeDate(system: UsageSystem, date?: Date) {
   if (!date) return ''
-  return system === 'sub2api' ? localDate(date) : localDateTime(date)
+  return usesDateOnly(system) ? localDate(date) : localDateTime(date)
 }
 
 function defaultFilters(system: UsageSystem): UsageRecordFilters {
   const end = new Date()
   const start = new Date(end.getTime() - 86_400_000)
-  if (system === 'sub2api') {
+  if (usesDateOnly(system)) {
     return {
       start_date: localDate(start),
       end_date: localDate(end),
@@ -217,7 +234,7 @@ function requestFilters(
 ) {
   const result: UsageRecordFilters = {
     page_size: String(PAGE_SIZE),
-    [system === 'sub2api' ? 'page' : 'p']: String(page),
+    [usesDateOnly(system) ? 'page' : 'p']: String(page),
   }
   Object.entries(filters).forEach(([key, value]) => {
     if (!value || (Array.isArray(value) && value.length === 0)) return
@@ -238,10 +255,9 @@ function requestFilters(
 
 function rangeRequestFilters(system: UsageSystem, filters: UsageRecordFilters) {
   const request = requestFilters(system, filters, 1)
-  const keys =
-    system === 'sub2api'
-      ? ['start_date', 'end_date', 'timezone']
-      : ['start_timestamp', 'end_timestamp']
+  const keys = usesDateOnly(system)
+    ? ['start_date', 'end_date', 'timezone']
+    : ['start_timestamp', 'end_timestamp']
   return Object.fromEntries(
     keys.flatMap((key) => (request[key] ? [[key, request[key]]] : []))
   )
@@ -265,8 +281,8 @@ function usageFilterError(
   system: UsageSystem,
   filters: UsageRecordFilters
 ): string | null {
-  const start = filters[system === 'sub2api' ? 'start_date' : 'start_time']
-  const end = filters[system === 'sub2api' ? 'end_date' : 'end_time']
+  const start = filters[usesDateOnly(system) ? 'start_date' : 'start_time']
+  const end = filters[usesDateOnly(system) ? 'end_date' : 'end_time']
   if (
     start &&
     end &&
@@ -279,9 +295,21 @@ function usageFilterError(
 }
 
 function belongsToSystem(instance: ManagedInstance, system: UsageSystem) {
-  return system === 'sub2api'
-    ? instance.kind === 'sub2api'
-    : instance.kind === 'new_api' || instance.kind === 'huichuan'
+  if (system === 'sub2api') return instance.kind === 'sub2api'
+  if (system === 'conductor') return instance.kind === 'conductor'
+  return instance.kind === 'new_api' || instance.kind === 'huichuan'
+}
+
+function filtersForSystem(system: UsageSystem) {
+  if (system === 'sub2api') return SUB2_FILTERS
+  if (system === 'conductor') return CONDUCTOR_FILTERS
+  return NEW_API_FILTERS
+}
+
+function usageSystemLabel(system: UsageSystem) {
+  if (system === 'sub2api') return 'Sub2API'
+  if (system === 'conductor') return 'Conductor'
+  return 'New API'
 }
 
 function withUsageSort(
@@ -290,7 +318,7 @@ function withUsageSort(
   sortKey: UsageSortKey,
   sortDirection: SortDirection
 ) {
-  if (system !== 'sub2api') return filters
+  if (system === 'new_api') return filters
   return { ...filters, sort_by: sortKey, sort_order: sortDirection }
 }
 
@@ -300,8 +328,15 @@ function usageSortValue(
   sortKey: UsageSortKey
 ) {
   if (sortKey === 'id') return number(record, 'id')
+  if (
+    sortKey === 'requests' ||
+    sortKey === 'total_tokens' ||
+    sortKey === 'actual_cost'
+  ) {
+    return number(record, sortKey)
+  }
   if (sortKey === 'model') {
-    return system === 'sub2api'
+    return system === 'sub2api' || system === 'conductor'
       ? text(record, 'model')
       : text(record, 'model_name')
   }
@@ -419,17 +454,16 @@ export function UsageRecords() {
   )
   const total = result?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const sub2PageSize = Math.max(1, result?.page_size ?? PAGE_SIZE)
-  const hasNextPage =
-    system === 'sub2api'
-      ? result?.page === page &&
-        (records.length >= sub2PageSize || page < totalPages)
-      : page < totalPages
-  const filters = system === 'sub2api' ? SUB2_FILTERS : NEW_API_FILTERS
+  const remotePageSize = Math.max(1, result?.page_size ?? PAGE_SIZE)
+  const hasNextPage = usesDateOnly(system)
+    ? result?.page === page &&
+      (records.length >= remotePageSize || page < totalPages)
+    : page < totalPages
+  const filters = filtersForSystem(system)
 
   useEffect(() => {
     if (!result) return
-    if (system === 'sub2api') {
+    if (usesDateOnly(system)) {
       if (result.page === page && page > 1 && records.length === 0) {
         setPage((value) => value - 1)
       }
@@ -538,7 +572,7 @@ export function UsageRecords() {
         <div className='grid gap-4'>
           <div className='border-border bg-card flex flex-wrap items-center gap-2 rounded-lg border p-2 shadow-xs'>
             <div className='bg-muted flex h-8 items-center rounded-md p-0.5'>
-              {(['new_api', 'sub2api'] as const).map((value) => (
+              {(['new_api', 'sub2api', 'conductor'] as const).map((value) => (
                 <button
                   key={value}
                   type='button'
@@ -551,14 +585,14 @@ export function UsageRecords() {
                   )}
                   onClick={() => changeSystem(value)}
                 >
-                  {value === 'sub2api' ? 'Sub2API' : 'New API'}
+                  {usageSystemLabel(value)}
                 </button>
               ))}
             </div>
             <NativeSelect
               id='usage-record-instance'
               name='usage-record-instance'
-              className='min-w-0 flex-1 sm:max-w-72'
+              className='w-full flex-[1_0_100%] sm:max-w-72 sm:flex-1'
               value={instanceId}
               onChange={(event) => {
                 setInstanceId(event.target.value)
@@ -614,18 +648,20 @@ export function UsageRecords() {
               <div className='min-w-0 sm:col-span-2'>
                 <CompactDateTimeRangePicker
                   start={filterDate(
-                    draft[system === 'sub2api' ? 'start_date' : 'start_time'],
-                    system === 'sub2api'
+                    draft[usesDateOnly(system) ? 'start_date' : 'start_time'],
+                    usesDateOnly(system)
                   )}
                   end={filterDate(
-                    draft[system === 'sub2api' ? 'end_date' : 'end_time'],
-                    system === 'sub2api'
+                    draft[usesDateOnly(system) ? 'end_date' : 'end_time'],
+                    usesDateOnly(system)
                   )}
                   onChange={({ start, end }) => {
-                    const startKey =
-                      system === 'sub2api' ? 'start_date' : 'start_time'
-                    const endKey =
-                      system === 'sub2api' ? 'end_date' : 'end_time'
+                    const startKey = usesDateOnly(system)
+                      ? 'start_date'
+                      : 'start_time'
+                    const endKey = usesDateOnly(system)
+                      ? 'end_date'
+                      : 'end_time'
                     setDraft((current) => ({
                       ...current,
                       [startKey]: serializeRangeDate(system, start),
@@ -731,7 +767,7 @@ export function UsageRecords() {
             {(total > 0 || records.length > 0) && (
               <div className='border-border flex items-center justify-between border-t px-3 py-2'>
                 <span className='text-muted-foreground text-xs tabular-nums'>
-                  {system === 'sub2api'
+                  {usesDateOnly(system)
                     ? `第 ${page} 页 · 本页 ${records.length} 条`
                     : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} / ${total}`}
                 </span>
@@ -906,11 +942,7 @@ function UsageRecordsContent(props: {
   return (
     <>
       <div className='hidden overflow-x-auto md:block'>
-        {props.system === 'sub2api' ? (
-          <Sub2Table records={props.records} />
-        ) : (
-          <NewAPITable records={props.records} />
-        )}
+        <UsageDesktopTable system={props.system} records={props.records} />
       </div>
       <div className='divide-border divide-y md:hidden'>
         {props.records.map((record, index) => (
@@ -923,6 +955,19 @@ function UsageRecordsContent(props: {
       </div>
     </>
   )
+}
+
+function UsageDesktopTable(props: {
+  system: UsageSystem
+  records: UsageRecord[]
+}) {
+  if (props.system === 'sub2api') {
+    return <Sub2Table records={props.records} />
+  }
+  if (props.system === 'conductor') {
+    return <ConductorTable records={props.records} />
+  }
+  return <NewAPITable records={props.records} />
 }
 
 function NewAPITable({ records }: { records: UsageRecord[] }) {
@@ -1053,15 +1098,88 @@ function Sub2Table({ records }: { records: UsageRecord[] }) {
   )
 }
 
+function ConductorTable({ records }: { records: UsageRecord[] }) {
+  return (
+    <Table className='min-w-[1120px]'>
+      <TableHeader>
+        <TableRow>
+          {[
+            '日期',
+            '用户',
+            '模型',
+            '请求数',
+            '输入 / 输出',
+            '缓存读取 / 创建',
+            '总 Token',
+            '消费金额',
+          ].map((label) => (
+            <TableHead key={label}>{label}</TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {records.map((record, index) => (
+          <TableRow key={String(record.id ?? index)}>
+            <TableCell className='whitespace-nowrap'>
+              {text(record, 'date') || '--'}
+            </TableCell>
+            <TableCell>
+              <div className='max-w-48'>
+                <p className='truncate font-medium'>
+                  {text(record, 'username') || `#${text(record, 'user_id')}`}
+                </p>
+                <p className='text-muted-foreground text-xs tabular-nums'>
+                  #{text(record, 'user_id')}
+                </p>
+              </div>
+            </TableCell>
+            <EllipsisCell value={text(record, 'model')} />
+            <TableCell className='font-mono tabular-nums'>
+              {formatNumber(number(record, 'requests'))}
+            </TableCell>
+            <TableCell className='font-mono tabular-nums'>
+              {formatNumber(number(record, 'input_tokens'))} /{' '}
+              {formatNumber(number(record, 'output_tokens'))}
+            </TableCell>
+            <TableCell className='font-mono tabular-nums'>
+              {formatNumber(number(record, 'cache_read_tokens'))} /{' '}
+              {formatNumber(number(record, 'cache_creation_tokens'))}
+            </TableCell>
+            <TableCell className='font-mono tabular-nums'>
+              {formatNumber(number(record, 'total_tokens'))}
+            </TableCell>
+            <TableCell className='font-mono tabular-nums'>
+              {formatCurrency(number(record, 'actual_cost'))}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
 function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
   const record = props.record
   const sub2 = props.system === 'sub2api'
+  const conductor = props.system === 'conductor'
   const user = sub2
     ? text(record, 'user.email') || text(record, 'user_id')
     : text(record, 'username')
-  const model = text(record, sub2 ? 'model' : 'model_name')
-  const input = number(record, sub2 ? 'input_tokens' : 'prompt_tokens')
-  const output = number(record, sub2 ? 'output_tokens' : 'completion_tokens')
+  const model = text(record, sub2 || conductor ? 'model' : 'model_name')
+  const input = number(
+    record,
+    sub2 || conductor ? 'input_tokens' : 'prompt_tokens'
+  )
+  const output = number(
+    record,
+    sub2 || conductor ? 'output_tokens' : 'completion_tokens'
+  )
+  const recordTime = conductor
+    ? text(record, 'date')
+    : formatTime(value(record, 'created_at'))
+  const recordDetail = conductor
+    ? `${formatNumber(number(record, 'requests'))} 次请求 · ${formatNumber(number(record, 'total_tokens'))} Token`
+    : text(record, 'request_id') || '无请求 ID'
   return (
     <div className='grid gap-2 p-3'>
       <div className='flex min-w-0 items-start justify-between gap-3'>
@@ -1072,16 +1190,16 @@ function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
           </div>
         </div>
         <span className='text-muted-foreground shrink-0 text-xs'>
-          {formatTime(value(record, 'created_at'))}
+          {recordTime}
         </span>
       </div>
       <div className='grid grid-cols-3 gap-2 text-xs'>
         <Metric label='输入' value={formatNumber(input)} />
         <Metric label='输出' value={formatNumber(output)} />
         <Metric
-          label={sub2 ? '计费' : '额度'}
+          label={sub2 || conductor ? '计费' : '额度'}
           value={
-            sub2
+            sub2 || conductor
               ? formatCurrency(number(record, 'actual_cost'))
               : formatNumber(number(record, 'quota'))
           }
@@ -1089,9 +1207,9 @@ function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
       </div>
       <div
         className='text-muted-foreground truncate font-mono text-xs'
-        title={text(record, 'request_id')}
+        title={recordDetail}
       >
-        {text(record, 'request_id') || '无请求 ID'}
+        {recordDetail}
       </div>
     </div>
   )
