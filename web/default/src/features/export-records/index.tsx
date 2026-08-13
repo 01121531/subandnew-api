@@ -14,10 +14,12 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Trash2,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -37,6 +39,7 @@ import {
 import { getManagedInstances } from '@/features/managed-instances/api'
 import {
   cancelUsageRecordsExport,
+  deleteUsageRecordsExport,
   downloadUsageRecordsExport,
   listUsageRecordsExports,
   retryUsageRecordsExport,
@@ -142,6 +145,8 @@ export function ExportRecords() {
   const [instanceId, setInstanceId] = useState('')
   const [actorId, setActorId] = useState('')
   const [busyTask, setBusyTask] = useState('')
+  const [deleteTarget, setDeleteTarget] =
+    useState<UsageRecordExportTask | null>(null)
 
   const queryFilters = useMemo(
     () => ({
@@ -192,6 +197,25 @@ export function ExportRecords() {
       await downloadUsageRecordsExport(taskId)
     } catch {
       toast.error('下载失败，文件可能已经过期')
+    } finally {
+      setBusyTask('')
+    }
+  }
+
+  const remove = async () => {
+    if (!deleteTarget) return
+    setBusyTask(deleteTarget.task_id)
+    try {
+      await deleteUsageRecordsExport(deleteTarget.task_id)
+      toast.success('导出记录已删除')
+      setDeleteTarget(null)
+      if (items.length === 1 && page > 1) {
+        setPage(page - 1)
+      } else {
+        await exportsQuery.refetch()
+      }
+    } catch {
+      toast.error('删除导出记录失败')
     } finally {
       setBusyTask('')
     }
@@ -412,6 +436,19 @@ export function ExportRecords() {
                                 <RotateCcw />
                               </Button>
                             )}
+                            {item.status !== 'pending' &&
+                              item.status !== 'running' && (
+                                <Button
+                                  variant='ghost'
+                                  size='icon-sm'
+                                  aria-label='删除导出记录'
+                                  title='删除导出记录'
+                                  disabled={busyTask === item.task_id}
+                                  onClick={() => setDeleteTarget(item)}
+                                >
+                                  <Trash2 />
+                                </Button>
+                              )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -449,6 +486,18 @@ export function ExportRecords() {
           </div>
         </div>
       </SectionPageLayout.Content>
+      <ConfirmDialog
+        open={deleteTarget != null}
+        onOpenChange={(open) => {
+          if (!open && busyTask !== deleteTarget?.task_id) setDeleteTarget(null)
+        }}
+        title='删除导出记录'
+        desc='删除后将同时清理已生成的 CSV 文件，且无法恢复。'
+        confirmText='删除记录'
+        destructive
+        isLoading={deleteTarget != null && busyTask === deleteTarget.task_id}
+        handleConfirm={() => void remove()}
+      />
     </SectionPageLayout>
   )
 }

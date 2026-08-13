@@ -210,6 +210,15 @@ func CancelManagedUsageExport(taskID string, actorID int, root bool) error {
 	return model.CancelManagedUsageExport(taskID, actorID, root)
 }
 
+func DeleteManagedUsageExport(taskID string, actorID int, root bool) (*model.ManagedUsageExport, error) {
+	record, err := model.DeleteManagedUsageExport(taskID, actorID, root)
+	if err != nil || record == nil {
+		return record, err
+	}
+	managedinstance.RemoveUsageRecordExportArtifact(taskID)
+	return record, nil
+}
+
 func RetryManagedUsageExport(taskID string, actorID int, root bool) (*model.SystemTask, error) {
 	record, err := GetManagedUsageExport(taskID, actorID, root)
 	if err != nil || record == nil {

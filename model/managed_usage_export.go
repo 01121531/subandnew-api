@@ -299,3 +299,32 @@ func ExpireManagedUsageExport(taskID string) error {
 		Where("task_id = ? AND status = ?", taskID, ManagedUsageExportStatusSucceeded).
 		Updates(map[string]any{"status": ManagedUsageExportStatusExpired, "updated_at": common.GetTimestamp()}).Error
 }
+
+func DeleteManagedUsageExport(taskID string, actorID int, root bool) (*ManagedUsageExport, error) {
+	var deleted *ManagedUsageExport
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("task_id = ?", taskID)
+		if !root {
+			query = query.Where("actor_id = ?", actorID)
+		}
+		var record ManagedUsageExport
+		if err := query.First(&record).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if record.Status == ManagedUsageExportStatusPending || record.Status == ManagedUsageExportStatusRunning {
+			return ErrManagedUsageExportConflict
+		}
+		if err := tx.Where("task_id = ?", taskID).Delete(&SystemTask{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&record).Error; err != nil {
+			return err
+		}
+		deleted = &record
+		return nil
+	})
+	return deleted, err
+}

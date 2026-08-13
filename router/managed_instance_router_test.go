@@ -94,6 +94,7 @@ func TestManagedUsageExportRoutesAreRegistered(t *testing.T) {
 		"GET /api/managed-usage-exports/:task_id/download",
 		"POST /api/managed-usage-exports/:task_id/cancel",
 		"POST /api/managed-usage-exports/:task_id/retry",
+		"DELETE /api/managed-usage-exports/:task_id",
 	} {
 		assert.Truef(t, routes[route], "%s must be registered", route)
 	}

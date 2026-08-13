@@ -200,3 +200,11 @@ export async function retryUsageRecordsExport(taskId: string) {
   )
   return response.data
 }
+
+export async function deleteUsageRecordsExport(taskId: string) {
+  const response = await api.delete<ApiResponse<unknown>>(
+    `/api/managed-usage-exports/${encodeURIComponent(taskId)}`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}

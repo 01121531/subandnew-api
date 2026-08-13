@@ -297,6 +297,23 @@ func CancelManagedUsageExport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 }
 
+func DeleteManagedUsageExport(c *gin.Context) {
+	record, err := service.DeleteManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if errors.Is(err, model.ErrManagedUsageExportConflict) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "active exports cannot be deleted"})
+		return
+	}
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if record == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+}
+
 func RetryManagedUsageExport(c *gin.Context) {
 	task, err := service.RetryManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
 	if errors.Is(err, model.ErrManagedUsageExportConflict) {

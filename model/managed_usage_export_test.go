@@ -139,3 +139,31 @@ func TestManagedUsageExportListIncludesCompletedRecords(t *testing.T) {
 	require.Len(t, list.Items, 1)
 	require.Equal(t, record.TaskID, list.Items[0].TaskID)
 }
+
+func TestDeleteManagedUsageExportOnlyDeletesOwnedTerminalRecord(t *testing.T) {
+	truncateTables(t)
+	pendingRecord := &ManagedUsageExport{InstanceID: 1, InstanceName: "one", InstanceKind: ManagedInstanceKindSub2API, ActorID: 10, ActorName: "admin", Query: `{}`}
+	pendingTask, err := CreateManagedUsageExport(pendingRecord, map[string]int{"instance_id": 1}, nil)
+	require.NoError(t, err)
+	_, err = DeleteManagedUsageExport(pendingTask.TaskID, 10, false)
+	require.ErrorIs(t, err, ErrManagedUsageExportConflict)
+
+	finishedRecord := &ManagedUsageExport{InstanceID: 1, InstanceName: "one", InstanceKind: ManagedInstanceKindSub2API, ActorID: 10, ActorName: "admin", Query: `{}`}
+	finishedTask, err := CreateManagedUsageExport(finishedRecord, map[string]int{"instance_id": 1}, nil)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&ManagedUsageExport{}).Where("task_id = ?", finishedTask.TaskID).Update("status", ManagedUsageExportStatusFailed).Error)
+	require.NoError(t, DB.Model(&SystemTask{}).Where("task_id = ?", finishedTask.TaskID).Updates(map[string]any{"status": SystemTaskStatusFailed, "active_key": nil}).Error)
+
+	deleted, err := DeleteManagedUsageExport(finishedTask.TaskID, 11, false)
+	require.NoError(t, err)
+	require.Nil(t, deleted)
+	deleted, err = DeleteManagedUsageExport(finishedTask.TaskID, 10, false)
+	require.NoError(t, err)
+	require.Equal(t, finishedTask.TaskID, deleted.TaskID)
+	record, err := GetManagedUsageExport(finishedTask.TaskID)
+	require.NoError(t, err)
+	require.Nil(t, record)
+	task, err := GetSystemTaskByTaskID(finishedTask.TaskID)
+	require.NoError(t, err)
+	require.Nil(t, task)
+}

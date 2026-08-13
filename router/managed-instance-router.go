@@ -24,6 +24,7 @@ func registerManagedInstanceRoutes(apiRouter *gin.RouterGroup) {
 	exportGroup.GET("/:task_id/download", controller.DownloadManagedUsageExport)
 	exportGroup.POST("/:task_id/cancel", controller.CancelManagedUsageExport)
 	exportGroup.POST("/:task_id/retry", controller.RetryManagedUsageExport)
+	exportGroup.DELETE("/:task_id", controller.DeleteManagedUsageExport)
 
 	templateGroup := apiRouter.Group("/managed-config")
 	templateGroup.Use(middleware.AdminAuth())
