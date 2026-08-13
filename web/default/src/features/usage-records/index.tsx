@@ -239,10 +239,7 @@ function requestFilters(
   return result
 }
 
-function summaryRequestFilters(
-  system: UsageSystem,
-  filters: UsageRecordFilters
-) {
+function rangeRequestFilters(system: UsageSystem, filters: UsageRecordFilters) {
   const request = requestFilters(system, filters, 1)
   const keys =
     system === 'sub2api'
@@ -251,6 +248,20 @@ function summaryRequestFilters(
   return Object.fromEntries(
     keys.flatMap((key) => (request[key] ? [[key, request[key]]] : []))
   )
+}
+
+function summaryRequestFilters(
+  system: UsageSystem,
+  filters: UsageRecordFilters
+) {
+  const request = requestFilters(system, filters, 1)
+  delete request.page
+  delete request.p
+  delete request.page_size
+  delete request.sort_by
+  delete request.sort_order
+  delete request.exact_total
+  return request
 }
 
 function usageFilterError(
@@ -381,6 +392,10 @@ export function UsageRecords() {
     () => summaryRequestFilters(system, applied),
     [applied, system]
   )
+  const rangeApiFilters = useMemo(
+    () => rangeRequestFilters(system, applied),
+    [applied, system]
+  )
   const recordsQuery = useQuery({
     queryKey: ['usage-records', selectedId, apiFilters],
     queryFn: () => getUsageRecords(selectedId, apiFilters),
@@ -398,8 +413,8 @@ export function UsageRecords() {
     refetchInterval: USAGE_RECORDS_REFRESH_MS,
   })
   const filterOptionsQuery = useQuery({
-    queryKey: ['usage-record-filter-options', selectedId, summaryApiFilters],
-    queryFn: () => getUsageRecordFilterOptions(selectedId, summaryApiFilters),
+    queryKey: ['usage-record-filter-options', selectedId, rangeApiFilters],
+    queryFn: () => getUsageRecordFilterOptions(selectedId, rangeApiFilters),
     enabled: selectedId > 0,
     retry: false,
     staleTime: USAGE_RECORDS_REFRESH_MS,

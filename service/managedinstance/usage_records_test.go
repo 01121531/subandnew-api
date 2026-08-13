@@ -369,6 +369,73 @@ func TestGetUsageRecordSummaryUsesNativeSub2Dashboard(t *testing.T) {
 	require.Equal(t, "USD", summary.Currency)
 }
 
+func TestGetUsageRecordSummaryAggregatesFilteredSub2Records(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
+		require.Equal(t, "7", request.URL.Query().Get("account_id"))
+		require.Equal(t, "claude-sonnet", request.URL.Query().Get("model"))
+		require.Equal(t, "100", request.URL.Query().Get("page_size"))
+		require.Empty(t, request.URL.Query().Get("exact_total"))
+		switch request.URL.Query().Get("page") {
+		case "1":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"input_tokens":10,"output_tokens":5,"cache_read_tokens":2,"cache_creation_tokens":1,"actual_cost":0.25},{"input_tokens":7,"output_tokens":3,"actual_cost":0.75}],"total":1,"page":1,"page_size":100}}`)
+		case "2":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":1,"page":2,"page_size":100}}`)
+		default:
+			t.Fatalf("unexpected usage page %s", request.URL.Query().Get("page"))
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+		"start_date": {"2026-08-01"}, "end_date": {"2026-08-07"}, "timezone": {"Asia/Shanghai"},
+		"account_id": {"7"}, "model": {"claude-sonnet"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindSub2API, summary.Kind)
+	require.Equal(t, 28.0, summary.TotalTokens)
+	require.InDelta(t, 1.0, summary.Amount, 0.000001)
+	require.Equal(t, "USD", summary.Currency)
+}
+
+func TestGetUsageRecordSummaryAggregatesFilteredNewAPIRecords(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/log/":
+			require.Equal(t, "alice", request.URL.Query().Get("username"))
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
+			switch request.URL.Query().Get("p") {
+			case "1":
+				writeProbeJSON(response, `{"success":true,"data":{"items":[{"prompt_tokens":10,"completion_tokens":5,"quota":500000}],"total":1,"page":1,"page_size":100}}`)
+			case "2":
+				writeProbeJSON(response, `{"success":true,"data":{"items":[],"total":1,"page":2,"page_size":100}}`)
+			default:
+				t.Fatalf("unexpected usage page %s", request.URL.Query().Get("p"))
+			}
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"quota_per_unit":500000}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "new-api-secret"})
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+		"start_timestamp": {"100"}, "end_timestamp": {"200"}, "username": {"alice"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindNewAPI, summary.Kind)
+	require.Equal(t, 15.0, summary.TotalTokens)
+	require.InDelta(t, 1.0, summary.Amount, 0.000001)
+	require.Equal(t, "USD", summary.Currency)
+}
+
 func TestUsageCSVCellPreventsFormulaInjection(t *testing.T) {
 	row, err := usageCSVRow([]byte(`{"username":"=HYPERLINK(\"https://example.invalid\")","quota":-12,"content":" @SUM(1,1)"}`), []usageCSVField{
 		field("username"), field("quota"), field("content"),

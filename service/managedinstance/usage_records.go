@@ -452,10 +452,90 @@ func (client *usageRecordClient) listTarget(ctx context.Context, query url.Value
 }
 
 func (client *usageRecordClient) summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	if hasUsageRecordDetailFilters(query) {
+		return client.filteredSummary(ctx, query)
+	}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
 		return client.sub2Summary(ctx, query)
 	}
 	return client.newAPISummary(ctx, query)
+}
+
+func hasUsageRecordDetailFilters(query url.Values) bool {
+	ignored := map[string]bool{
+		"p": true, "page": true, "page_size": true,
+		"start_timestamp": true, "end_timestamp": true,
+		"start_date": true, "end_date": true, "timezone": true,
+		"sort_by": true, "sort_order": true, "exact_total": true,
+	}
+	for key, values := range query {
+		if !ignored[key] && len(values) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	variants, err := usageRecordQueryVariants(query)
+	if err != nil {
+		return nil, err
+	}
+	totalTokens := 0.0
+	amount := 0.0
+	processed := 0
+	for _, variant := range variants {
+		variant.Del("exact_total")
+		for pageNumber := 1; ; pageNumber++ {
+			setUsageRecordPage(variant, client.instance.Kind, pageNumber, usageRecordMaxPageSize)
+			page, err := client.listTarget(ctx, variant)
+			if err != nil {
+				return nil, err
+			}
+			if len(page.Items) == 0 {
+				break
+			}
+			processed += len(page.Items)
+			if processed > usageRecordExportLimit {
+				return nil, ErrUsageExportTooLarge
+			}
+			for _, raw := range page.Items {
+				tokens, cost, err := usageRecordTotals(client.instance.Kind, raw)
+				if err != nil {
+					return nil, err
+				}
+				totalTokens += tokens
+				amount += cost
+			}
+		}
+	}
+	currency := "USD"
+	if client.instance.Kind != model.ManagedInstanceKindSub2API {
+		amount, currency = client.newAPIQuotaAmount(ctx, amount)
+	}
+	return &UsageRecordSummary{
+		SourceInstanceID: client.instance.Id,
+		Kind:             client.instance.Kind,
+		TotalTokens:      totalTokens,
+		Amount:           amount,
+		Currency:         currency,
+	}, nil
+}
+
+func usageRecordTotals(kind string, raw json.RawMessage) (float64, float64, error) {
+	var item map[string]any
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	value := func(key string) float64 {
+		number, _ := usageNumber(item[key])
+		return number
+	}
+	if kind == model.ManagedInstanceKindSub2API {
+		tokens := value("input_tokens") + value("output_tokens") + value("cache_read_tokens") + value("cache_creation_tokens")
+		return tokens, value("actual_cost"), nil
+	}
+	return value("prompt_tokens") + value("completion_tokens"), value("quota"), nil
 }
 
 func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
@@ -493,6 +573,17 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 		totalTokens += item.TokenUsed
 		quota += item.Quota
 	}
+	amount, currency := client.newAPIQuotaAmount(ctx, quota)
+	return &UsageRecordSummary{
+		SourceInstanceID: client.instance.Id,
+		Kind:             client.instance.Kind,
+		TotalTokens:      totalTokens,
+		Amount:           amount,
+		Currency:         currency,
+	}, nil
+}
+
+func (client *usageRecordClient) newAPIQuotaAmount(ctx context.Context, quota float64) (float64, string) {
 	amount := quota
 	currency := "quota"
 	statusResponse, statusErr := client.connector.DoJSON(ctx, http.MethodGet, "/api/status", nil, nil)
@@ -508,13 +599,7 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 			currency = "USD"
 		}
 	}
-	return &UsageRecordSummary{
-		SourceInstanceID: client.instance.Id,
-		Kind:             client.instance.Kind,
-		TotalTokens:      totalTokens,
-		Amount:           amount,
-		Currency:         currency,
-	}, nil
+	return amount, currency
 }
 
 func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
