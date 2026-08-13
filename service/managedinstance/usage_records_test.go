@@ -174,7 +174,7 @@ func TestNewAPIAccountPasswordRefreshesRejectedSession(t *testing.T) {
 			cookie, err := request.Cookie("session")
 			require.NoError(t, err)
 			if cookie.Value == "session-1" {
-				response.WriteHeader(http.StatusUnauthorized)
+				writeProbeJSON(response, `{"success":false,"message":"session expired"}`)
 				return
 			}
 			require.Equal(t, "session-2", cookie.Value)
@@ -353,7 +353,6 @@ func TestSub2AccountPasswordReusesAndRefreshesConcurrentSession(t *testing.T) {
 		case "/api/v1/admin/usage", "/api/v1/admin/dashboard/snapshot-v2":
 			expected := fmt.Sprintf("Bearer token-%d", currentToken.Load())
 			if request.Header.Get("Authorization") != expected {
-				response.WriteHeader(http.StatusUnauthorized)
 				writeProbeJSON(response, `{"code":401,"message":"token expired"}`)
 				return
 			}

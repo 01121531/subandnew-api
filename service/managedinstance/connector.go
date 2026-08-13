@@ -230,6 +230,18 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 	return &ConnectorResponse{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: responseBody}, nil
 }
 
+func (c *Connector) resetCookies() error {
+	if c == nil || c.client == nil {
+		return nil
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return err
+	}
+	c.client.Jar = jar
+	return nil
+}
+
 func parseAllowedCIDRs(raw string) ([]*net.IPNet, error) {
 	parts := strings.Split(raw, ",")
 	allowed := make([]*net.IPNet, 0, len(parts))

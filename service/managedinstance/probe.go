@@ -54,6 +54,14 @@ func probe(ctx context.Context, instanceID int64, actorID int, guard CommitGuard
 	}
 	startedAt := time.Now()
 	result, probeErr := adapter.Probe(ctx, connector, credential)
+	if shouldRefreshProbeSession(credential, probeErr) {
+		invalidateAccountPasswordSession(connector, instance.Kind, credential)
+		connector, err = NewConnector(&instance, policy)
+		if err != nil {
+			return nil, err
+		}
+		result, probeErr = adapter.Probe(ctx, connector, credential)
+	}
 	checkedAt := common.GetTimestamp()
 	if probeErr != nil {
 		if err := recordProbeFailure(&instance, actorID, probeErr, checkedAt, guard); err != nil {
@@ -96,6 +104,19 @@ func probe(ctx context.Context, instanceID int64, actorID int, guard CommitGuard
 		return nil, err
 	}
 	return result, nil
+}
+
+func shouldRefreshProbeSession(credential *CredentialMaterial, err error) bool {
+	if credential == nil || credential.AuthType != "account_password" || err == nil {
+		return false
+	}
+	var probeError *ProbeError
+	if !errors.As(err, &probeError) {
+		return false
+	}
+	return probeError.Code == ProbeErrorAuthentication ||
+		probeError.Code == ProbeErrorPermission ||
+		probeError.Code == ProbeErrorInvalidResponse
 }
 
 func loadCredential(instanceID int64) (*CredentialMaterial, error) {

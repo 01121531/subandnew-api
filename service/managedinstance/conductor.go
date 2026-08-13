@@ -120,7 +120,7 @@ func invalidateConductorSession(connector *Connector, credential *CredentialMate
 	state := value.(*conductorSession)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.token == token {
+	if token == "" || state.token == token {
 		state.token = ""
 		state.expiresAt = time.Time{}
 	}
@@ -132,7 +132,7 @@ func conductorDoJSON(ctx context.Context, connector *Connector, credential *Cred
 		return nil, err
 	}
 	response, err := connector.DoJSON(ctx, method, path, headers, body)
-	if err != nil || credential.AuthType != "account_password" || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+	if err != nil || credential.AuthType != "account_password" || !authenticationRejected(response) {
 		return response, err
 	}
 	invalidateConductorSession(connector, credential, strings.TrimPrefix(headers.Get("Authorization"), "Bearer "))
@@ -148,7 +148,13 @@ func conductorEnvelopeData(response *ConnectorResponse) (json.RawMessage, error)
 		return nil, err
 	}
 	var envelope conductorEnvelope
-	if json.Unmarshal(response.Body, &envelope) != nil || (envelope.Code != 0 && envelope.Code != http.StatusOK && envelope.Code != http.StatusCreated) || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+	if json.Unmarshal(response.Body, &envelope) != nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	if envelope.Code == http.StatusUnauthorized || envelope.Code == http.StatusForbidden {
+		return nil, probeHTTPError(envelope.Code)
+	}
+	if (envelope.Code != 0 && envelope.Code != http.StatusOK && envelope.Code != http.StatusCreated) || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	return envelope.Data, nil

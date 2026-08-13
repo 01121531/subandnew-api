@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -269,6 +270,114 @@ func TestProbeGenericDetectsConductorAndLogsInWithAccountPassword(t *testing.T) 
 	require.Equal(t, model.ManagedInstanceKindConductor, result.Kind)
 	require.Equal(t, "Conductor", result.SystemName)
 	require.Contains(t, result.Capabilities, "accounts.list")
+}
+
+func TestProbeNewAPIRefreshesExpiredCookieSession(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	var rejectFirstSession atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"version":"v1","system_name":"New API","start_time":10}}`)
+		case "/api/user/login":
+			_, cookieErr := request.Cookie("session")
+			require.Error(t, cookieErr)
+			login := loginCount.Add(1)
+			http.SetCookie(response, &http.Cookie{Name: "session", Value: fmt.Sprintf("session-%d", login), Path: "/"})
+			writeProbeJSON(response, `{"success":true,"data":{"id":7}}`)
+		case "/api/status/test":
+			cookie, err := request.Cookie("session")
+			require.NoError(t, err)
+			if rejectFirstSession.Load() && cookie.Value == "session-1" {
+				writeProbeJSON(response, `{"success":false,"message":"session expired"}`)
+				return
+			}
+			writeProbeJSON(response, `{"success":true}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+
+	_, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	rejectFirstSession.Store(true)
+	_, err = Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), loginCount.Load())
+}
+
+func TestProbeSub2RefreshesExpiredAccountToken(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	var rejectFirstToken atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/health":
+			writeProbeJSON(response, `{"status":"ok"}`)
+		case "/api/v1/auth/login":
+			login := loginCount.Add(1)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"access_token":"token-%d"}}`, login))
+		case "/api/v1/admin/system/version":
+			if rejectFirstToken.Load() && request.Header.Get("Authorization") == "Bearer token-1" {
+				writeProbeJSON(response, `{"code":401,"message":"token expired","data":null}`)
+				return
+			}
+			writeProbeJSON(response, `{"code":0,"data":{"version":"v1"}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin@example.com",
+	})
+
+	_, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	rejectFirstToken.Store(true)
+	_, err = Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), loginCount.Load())
+}
+
+func TestProbeConductorRefreshesExpiredAccountToken(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var loginCount atomic.Int32
+	var rejectFirstToken atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			login := loginCount.Add(1)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":200,"data":{"token":"token-%d"}}`, login))
+		case "/api/v1/system/health":
+			if rejectFirstToken.Load() && request.Header.Get("Authorization") == "Bearer token-1" {
+				writeProbeJSON(response, `{"code":401,"message":"token expired","data":null}`)
+				return
+			}
+			writeProbeJSON(response, `{"code":200,"data":{"status":"ok"}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "admin",
+	})
+
+	_, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	rejectFirstToken.Store(true)
+	_, err = Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), loginCount.Load())
 }
 
 func TestProbeAuthenticationFailureUpdatesStateAndRedactedAudit(t *testing.T) {

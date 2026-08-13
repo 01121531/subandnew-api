@@ -285,6 +285,7 @@ func credentialSessionKey(connector *Connector, credential *CredentialMaterial) 
 }
 
 func invalidateNewAPISession(connector *Connector, credential *CredentialMaterial) {
+	_ = connector.resetCookies()
 	stateValue, ok := newAPISessions.Load(credentialSessionKey(connector, credential))
 	if !ok {
 		return
@@ -297,13 +298,31 @@ func invalidateNewAPISession(connector *Connector, credential *CredentialMateria
 	state.expiresAt = time.Time{}
 }
 
+func invalidateAccountPasswordSession(connector *Connector, kind string, credential *CredentialMaterial) {
+	if credential == nil || credential.AuthType != "account_password" {
+		return
+	}
+	switch kind {
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+		invalidateNewAPISession(connector, credential)
+	case model.ManagedInstanceKindSub2API:
+		invalidateSub2APISession(connector, credential, "")
+	case model.ManagedInstanceKindConductor:
+		invalidateConductorSession(connector, credential, "")
+	case model.ManagedInstanceKindGeneric:
+		invalidateNewAPISession(connector, credential)
+		invalidateSub2APISession(connector, credential, "")
+		invalidateConductorSession(connector, credential, "")
+	}
+}
+
 func newAPIDoJSON(ctx context.Context, connector *Connector, kind string, credential *CredentialMaterial, method string, path string, requestBody any) (*ConnectorResponse, error) {
 	headers, err := newAPIAuthHeaders(ctx, connector, kind, credential)
 	if err != nil {
 		return nil, err
 	}
 	response, err := connector.DoJSON(ctx, method, path, headers, requestBody)
-	if err != nil || credential.AuthType != "account_password" || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+	if err != nil || credential.AuthType != "account_password" || !authenticationRejected(response) {
 		return response, err
 	}
 	invalidateNewAPISession(connector, credential)
@@ -529,7 +548,7 @@ func invalidateSub2APISession(connector *Connector, credential *CredentialMateri
 	state := stateValue.(*sub2APISession)
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.accessToken == accessToken {
+	if accessToken == "" || state.accessToken == accessToken {
 		state.accessToken = ""
 		state.expiresAt = time.Time{}
 	}
@@ -541,7 +560,7 @@ func sub2APIDoJSON(ctx context.Context, connector *Connector, credential *Creden
 		return nil, err
 	}
 	response, err := connector.DoJSON(ctx, method, path, headers, requestBody)
-	if err != nil || credential.AuthType != "account_password" || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+	if err != nil || credential.AuthType != "account_password" || !authenticationRejected(response) {
 		return response, err
 	}
 	accessToken := strings.TrimPrefix(headers.Get("Authorization"), "Bearer ")
@@ -551,6 +570,40 @@ func sub2APIDoJSON(ctx context.Context, connector *Connector, credential *Creden
 		return nil, err
 	}
 	return connector.DoJSON(ctx, method, path, headers, requestBody)
+}
+
+func authenticationRejected(response *ConnectorResponse) bool {
+	if response == nil {
+		return false
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return true
+	}
+	var envelope struct {
+		Code    any    `json:"code"`
+		Success *bool  `json:"success"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(response.Body, &envelope) != nil {
+		return false
+	}
+	code := strings.TrimSpace(fmt.Sprint(envelope.Code))
+	if code == "401" || code == "403" {
+		return true
+	}
+	if envelope.Success == nil || *envelope.Success {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(envelope.Message))
+	for _, marker := range []string{
+		"not logged in", "login required", "session expired", "token expired",
+		"unauthorized", "authentication required", "未登录", "登录已过期", "会话已过期", "令牌已过期",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 type genericAdapter struct{}
