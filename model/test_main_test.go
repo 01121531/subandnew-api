@@ -46,6 +46,20 @@ func TestMain(m *testing.M) {
 		&ManagedUsageExport{},
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
+		&BillingFilterTemplate{},
+		&BillingFilterTemplateVersion{},
+		&BillingAlertRule{},
+		&BillingAlertRuleInstance{},
+		&BillingAlertThreshold{},
+		&BillingCycleSnapshot{},
+		&BillingEvaluationSnapshot{},
+		&BillingAlertEvent{},
+		&BillingEmailDelivery{},
+		&ExchangeRate{},
+		&ExchangeRateSetting{},
+		&SMTPSetting{},
+		&BillingAudit{},
+		&BillingAlertExport{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -57,6 +71,10 @@ func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
+			"billing_email_deliveries", "billing_alert_events", "billing_evaluation_snapshots",
+			"billing_cycle_snapshots", "billing_alert_thresholds", "billing_alert_rule_instances",
+			"billing_alert_rules", "billing_filter_template_versions", "billing_filter_templates",
+			"exchange_rate_settings", "exchange_rates", "smtp_settings", "billing_audits", "billing_alert_exports",
 			"passkey_credentials", "two_fa_backup_codes", "two_fas",
 			"user_oauth_bindings", "users", "system_instances",
 			"system_task_locks", "system_task_scope_locks", "system_tasks",

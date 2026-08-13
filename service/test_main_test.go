@@ -38,6 +38,20 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstanceSnapshot{},
 		&model.ManagedInstanceAlert{},
 		&model.ManagedUsageExport{},
+		&model.BillingFilterTemplate{},
+		&model.BillingFilterTemplateVersion{},
+		&model.BillingAlertRule{},
+		&model.BillingAlertRuleInstance{},
+		&model.BillingAlertThreshold{},
+		&model.BillingCycleSnapshot{},
+		&model.BillingEvaluationSnapshot{},
+		&model.BillingAlertEvent{},
+		&model.BillingEmailDelivery{},
+		&model.ExchangeRate{},
+		&model.ExchangeRateSetting{},
+		&model.SMTPSetting{},
+		&model.BillingAudit{},
+		&model.BillingAlertExport{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -48,6 +62,10 @@ func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
+			"billing_email_deliveries", "billing_alert_events", "billing_evaluation_snapshots",
+			"billing_cycle_snapshots", "billing_alert_thresholds", "billing_alert_rule_instances",
+			"billing_alert_rules", "billing_filter_template_versions", "billing_filter_templates",
+			"exchange_rate_settings", "exchange_rates", "smtp_settings", "billing_audits", "billing_alert_exports",
 			"users",
 			"system_task_locks", "system_task_scope_locks", "system_tasks",
 			"managed_instance_operation_batch_items", "managed_instance_operation_batches",

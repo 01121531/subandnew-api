@@ -758,6 +758,26 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 	return query, nil
 }
 
+// UnsupportedUsageRecordFilterFields returns fields that the target system
+// cannot apply. Callers that calculate money must not silently drop them.
+func UnsupportedUsageRecordFilterFields(kind string, input url.Values) []string {
+	allowed := newAPIUsageQueryFields
+	if kind == model.ManagedInstanceKindSub2API {
+		allowed = sub2UsageQueryFields
+	}
+	unsupported := make([]string, 0)
+	for key, values := range input {
+		if len(values) == 0 {
+			continue
+		}
+		if _, exists := allowed[key]; !exists {
+			unsupported = append(unsupported, key)
+		}
+	}
+	sort.Strings(unsupported)
+	return unsupported
+}
+
 func usageRecordQueryVariants(query url.Values) ([]url.Values, error) {
 	variants := []url.Values{cloneURLValues(query)}
 	for key, values := range query {

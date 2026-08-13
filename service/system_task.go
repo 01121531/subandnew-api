@@ -9,6 +9,7 @@ import (
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/billingalert"
 
 	"github.com/bytedance/gopkg/util/gopool"
 )
@@ -299,6 +300,9 @@ func runSystemTaskScheduler() {
 			logger.LogWarn(context.Background(), fmt.Sprintf("managed usage export cleanup failed: %v", err))
 		} else {
 			managedUsageExportLastCleanup = time.Now()
+		}
+		if err := billingalert.CleanupExpiredAlertExports(); err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("billing alert export cleanup failed: %v", err))
 		}
 	}
 	managedUsageExportCleanupMu.Unlock()

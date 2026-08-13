@@ -26,6 +26,7 @@ export type AdminCapabilities = AdminPermissionMatrix
 export const ADMIN_PERMISSION_RESOURCES = {
   MANAGED_INSTANCE: 'managed_instance',
   MANAGED_TEMPLATE: 'managed_template',
+  BILLING_ALERT: 'billing_alert',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
@@ -39,6 +40,8 @@ export const ADMIN_PERMISSION_ACTIONS = {
   AUDIT: 'audit',
   USAGE_VIEW: 'usage_view',
   BATCH_OPERATE: 'batch_operate',
+  MANAGE: 'manage',
+  SETTINGS: 'settings',
 } as const
 
 // The role whose baseline grants are used as defaults in the permission editor.

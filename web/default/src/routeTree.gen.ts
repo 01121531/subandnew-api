@@ -31,6 +31,8 @@ import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authent
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
 import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_authenticated/export-records/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
+import { Route as AuthenticatedBillingAlertsIndexRouteImport } from './routes/_authenticated/billing-alerts/index'
+import { Route as AuthenticatedBillingAlertRecordsIndexRouteImport } from './routes/_authenticated/billing-alert-records/index'
 import { Route as AuthenticatedAccountManagementIndexRouteImport } from './routes/_authenticated/account-management/index'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -155,6 +157,18 @@ const AuthenticatedDashboardIndexRoute =
     path: '/dashboard/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedBillingAlertsIndexRoute =
+  AuthenticatedBillingAlertsIndexRouteImport.update({
+    id: '/billing-alerts/',
+    path: '/billing-alerts/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedBillingAlertRecordsIndexRoute =
+  AuthenticatedBillingAlertRecordsIndexRouteImport.update({
+    id: '/billing-alert-records/',
+    path: '/billing-alert-records/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAccountManagementIndexRoute =
   AuthenticatedAccountManagementIndexRouteImport.update({
     id: '/account-management/',
@@ -214,6 +228,8 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/account-management/': typeof AuthenticatedAccountManagementIndexRoute
+  '/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
+  '/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
@@ -242,6 +258,8 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/account-management': typeof AuthenticatedAccountManagementIndexRoute
+  '/billing-alert-records': typeof AuthenticatedBillingAlertRecordsIndexRoute
+  '/billing-alerts': typeof AuthenticatedBillingAlertsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/export-records': typeof AuthenticatedExportRecordsIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
@@ -274,6 +292,8 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/_authenticated/account-management/': typeof AuthenticatedAccountManagementIndexRoute
+  '/_authenticated/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
+  '/_authenticated/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
@@ -305,6 +325,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/instances/$id'
     | '/account-management/'
+    | '/billing-alert-records/'
+    | '/billing-alerts/'
     | '/dashboard/'
     | '/export-records/'
     | '/instances/'
@@ -333,6 +355,8 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/instances/$id'
     | '/account-management'
+    | '/billing-alert-records'
+    | '/billing-alerts'
     | '/dashboard'
     | '/export-records'
     | '/instances'
@@ -364,6 +388,8 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/instances/$id'
     | '/_authenticated/account-management/'
+    | '/_authenticated/billing-alert-records/'
+    | '/_authenticated/billing-alerts/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/export-records/'
     | '/_authenticated/instances/'
@@ -547,6 +573,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/billing-alerts/': {
+      id: '/_authenticated/billing-alerts/'
+      path: '/billing-alerts'
+      fullPath: '/billing-alerts/'
+      preLoaderRoute: typeof AuthenticatedBillingAlertsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/billing-alert-records/': {
+      id: '/_authenticated/billing-alert-records/'
+      path: '/billing-alert-records'
+      fullPath: '/billing-alert-records/'
+      preLoaderRoute: typeof AuthenticatedBillingAlertRecordsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/account-management/': {
       id: '/_authenticated/account-management/'
       path: '/account-management'
@@ -647,6 +687,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
   AuthenticatedAccountManagementIndexRoute: typeof AuthenticatedAccountManagementIndexRoute
+  AuthenticatedBillingAlertRecordsIndexRoute: typeof AuthenticatedBillingAlertRecordsIndexRoute
+  AuthenticatedBillingAlertsIndexRoute: typeof AuthenticatedBillingAlertsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedExportRecordsIndexRoute: typeof AuthenticatedExportRecordsIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
@@ -663,6 +705,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInstancesIdRoute: AuthenticatedInstancesIdRoute,
   AuthenticatedAccountManagementIndexRoute:
     AuthenticatedAccountManagementIndexRoute,
+  AuthenticatedBillingAlertRecordsIndexRoute:
+    AuthenticatedBillingAlertRecordsIndexRoute,
+  AuthenticatedBillingAlertsIndexRoute: AuthenticatedBillingAlertsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedExportRecordsIndexRoute: AuthenticatedExportRecordsIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,

@@ -23,6 +23,11 @@ const (
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
 	SystemTaskTypeManagedUsageExport   = "managed_usage_export"
+	SystemTaskTypeBillingAlertScan     = "billing_alert_scan"
+	SystemTaskTypeBillingAlertEvaluate = "billing_alert_evaluate"
+	SystemTaskTypeBillingEmailDelivery = "billing_email_delivery"
+	SystemTaskTypeExchangeRateRefresh  = "exchange_rate_refresh"
+	SystemTaskTypeBillingAlertExport   = "billing_alert_export"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

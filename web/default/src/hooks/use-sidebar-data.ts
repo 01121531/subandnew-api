@@ -7,6 +7,8 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import {
+  BellRing,
+  BellDot,
   LayoutDashboard,
   FileClock,
   ScrollText,
@@ -38,6 +40,11 @@ export function useSidebarData(): SidebarData {
     user,
     ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
     ADMIN_PERMISSION_ACTIONS.USAGE_VIEW
+  )
+  const canViewBillingAlerts = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.BILLING_ALERT,
+    ADMIN_PERMISSION_ACTIONS.VIEW
   )
 
   return {
@@ -76,6 +83,20 @@ export function useSidebarData(): SidebarData {
                   title: '导出记录',
                   url: '/export-records',
                   icon: FileClock,
+                },
+              ]
+            : []),
+          ...(canViewBillingAlerts
+            ? [
+                {
+                  title: '账单预警',
+                  url: '/billing-alerts',
+                  icon: BellRing,
+                },
+                {
+                  title: '预警记录',
+                  url: '/billing-alert-records',
+                  icon: BellDot,
                 },
               ]
             : []),

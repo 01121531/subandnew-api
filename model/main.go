@@ -201,6 +201,20 @@ func controlPlaneModels() []interface{} {
 		&ManagedInstanceOperationBatchItem{},
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
+		&BillingFilterTemplate{},
+		&BillingFilterTemplateVersion{},
+		&BillingAlertRule{},
+		&BillingAlertRuleInstance{},
+		&BillingAlertThreshold{},
+		&BillingCycleSnapshot{},
+		&BillingEvaluationSnapshot{},
+		&BillingAlertEvent{},
+		&BillingEmailDelivery{},
+		&ExchangeRate{},
+		&ExchangeRateSetting{},
+		&SMTPSetting{},
+		&BillingAudit{},
+		&BillingAlertExport{},
 	}
 }
 
