@@ -45,8 +45,10 @@ type ScheduledSystemTaskHandler interface {
 }
 
 var (
-	systemTaskHandlersMu sync.RWMutex
-	systemTaskHandlers   = map[string]SystemTaskHandler{}
+	systemTaskHandlersMu          sync.RWMutex
+	systemTaskHandlers            = map[string]SystemTaskHandler{}
+	managedUsageExportCleanupMu   sync.Mutex
+	managedUsageExportLastCleanup time.Time
 )
 
 // RegisterSystemTaskHandler registers a handler keyed by its Type(). It must be
@@ -291,6 +293,15 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 // row. The task active_key unique index deduplicates concurrent creation while
 // the per-type lock guarantees only one runner executes the task.
 func runSystemTaskScheduler() {
+	managedUsageExportCleanupMu.Lock()
+	if time.Since(managedUsageExportLastCleanup) >= time.Hour {
+		if err := CleanupExpiredManagedUsageExports(); err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed usage export cleanup failed: %v", err))
+		} else {
+			managedUsageExportLastCleanup = time.Now()
+		}
+	}
+	managedUsageExportCleanupMu.Unlock()
 	now := common.GetTimestamp()
 	handlers := registeredSystemTaskHandlers()
 	scheduledHandlers := make([]ScheduledSystemTaskHandler, 0, len(handlers))

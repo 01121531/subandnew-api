@@ -8,6 +8,7 @@ License, or (at your option) any later version.
 */
 import {
   LayoutDashboard,
+  FileClock,
   ScrollText,
   Server,
   ServerCog,
@@ -70,6 +71,11 @@ export function useSidebarData(): SidebarData {
                   title: t('Usage records'),
                   url: '/usage-records',
                   icon: ScrollText,
+                },
+                {
+                  title: '导出记录',
+                  url: '/export-records',
+                  icon: FileClock,
                 },
               ]
             : []),

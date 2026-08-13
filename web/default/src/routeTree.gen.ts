@@ -29,6 +29,7 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
+import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_authenticated/export-records/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedAccountManagementIndexRouteImport } from './routes/_authenticated/account-management/index'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
@@ -142,6 +143,12 @@ const AuthenticatedInstancesIndexRoute =
     path: '/instances/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedExportRecordsIndexRoute =
+  AuthenticatedExportRecordsIndexRouteImport.update({
+    id: '/export-records/',
+    path: '/export-records/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -208,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -235,6 +243,7 @@ export interface FileRoutesByTo {
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/account-management': typeof AuthenticatedAccountManagementIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/export-records': typeof AuthenticatedExportRecordsIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
@@ -266,6 +275,7 @@ export interface FileRoutesById {
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/_authenticated/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -296,6 +306,7 @@ export interface FileRouteTypes {
     | '/instances/$id'
     | '/account-management/'
     | '/dashboard/'
+    | '/export-records/'
     | '/instances/'
     | '/profile/'
     | '/system-info/'
@@ -323,6 +334,7 @@ export interface FileRouteTypes {
     | '/instances/$id'
     | '/account-management'
     | '/dashboard'
+    | '/export-records'
     | '/instances'
     | '/profile'
     | '/system-info'
@@ -353,6 +365,7 @@ export interface FileRouteTypes {
     | '/_authenticated/instances/$id'
     | '/_authenticated/account-management/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/export-records/'
     | '/_authenticated/instances/'
     | '/_authenticated/profile/'
     | '/_authenticated/system-info/'
@@ -520,6 +533,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInstancesIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/export-records/': {
+      id: '/_authenticated/export-records/'
+      path: '/export-records'
+      fullPath: '/export-records/'
+      preLoaderRoute: typeof AuthenticatedExportRecordsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -628,6 +648,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
   AuthenticatedAccountManagementIndexRoute: typeof AuthenticatedAccountManagementIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedExportRecordsIndexRoute: typeof AuthenticatedExportRecordsIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
@@ -643,6 +664,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAccountManagementIndexRoute:
     AuthenticatedAccountManagementIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedExportRecordsIndexRoute: AuthenticatedExportRecordsIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,

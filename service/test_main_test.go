@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{},
 		&model.ManagedInstanceAlert{},
+		&model.ManagedUsageExport{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -53,6 +54,7 @@ func truncate(t *testing.T) {
 			"managed_instance_operations", "managed_instance_credentials",
 			"managed_instance_audits", "managed_instance_snapshots",
 			"managed_instance_alerts", "managed_instances",
+			"managed_usage_exports",
 		} {
 			model.DB.Exec("DELETE FROM " + table)
 		}

@@ -79,3 +79,22 @@ func TestControlPlaneRouterExcludesLegacyBusinessRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedUsageExportRoutesAreRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+	routes := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, route := range []string{
+		"GET /api/managed-usage-exports",
+		"GET /api/managed-usage-exports/:task_id",
+		"GET /api/managed-usage-exports/:task_id/download",
+		"POST /api/managed-usage-exports/:task_id/cancel",
+		"POST /api/managed-usage-exports/:task_id/retry",
+	} {
+		assert.Truef(t, routes[route], "%s must be registered", route)
+	}
+}

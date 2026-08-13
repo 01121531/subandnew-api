@@ -21,12 +21,13 @@ import (
 )
 
 const (
-	usageRecordPageSize     = 20
-	usageRecordMaxPageSize  = 100
-	usageRecordExportLimit  = 1000000
-	usageRecordMaxTextValue = 512
-	usageRecordMaxValues    = 20
-	usageRecordMaxVariants  = 64
+	usageRecordPageSize        = 20
+	usageRecordMaxPageSize     = 100
+	usageRecordExportLimit     = 1000000
+	usageRecordMaxTextValue    = 512
+	usageRecordMaxValues       = 20
+	usageRecordMaxVariants     = 64
+	usageRecordExportRetention = 30 * 24 * time.Hour
 )
 
 var ErrUsageExportTooLarge = errors.New("usage record export exceeds the 1000000 row limit")
@@ -83,6 +84,7 @@ type UsageRecordExportArtifact struct {
 	FileName    string `json:"file_name"`
 	RecordCount int    `json:"record_count"`
 	Size        int64  `json:"size"`
+	ExpiresAt   int64  `json:"expires_at"`
 }
 
 type UsageRecordExportProgressCallback func(UsageRecordExportProgress) error
@@ -251,28 +253,40 @@ func reportUsageRecordExportProgress(callback UsageRecordExportProgressCallback,
 }
 
 func ExportUsageRecordsCSVToTaskFile(ctx context.Context, instanceID int64, taskID string, input url.Values, onProgress UsageRecordExportProgressCallback) (*UsageRecordExportArtifact, error) {
-	path, err := usageRecordExportTaskPath(taskID)
+	path, err := usageRecordExportTaskPath(taskID, false)
 	if err != nil {
 		return nil, err
 	}
-	cleanupExpiredUsageRecordExports()
+	temporaryPath, err := usageRecordExportTaskPath(taskID, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	_ = os.Remove(temporaryPath)
+	_ = os.Remove(path)
 	export, err := PrepareUsageRecordsCSV(ctx, instanceID, input)
 	if err != nil {
 		return nil, err
 	}
-	temporary, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	temporary, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	count, exportErr := export.WriteWithProgress(ctx, temporary, onProgress)
 	closeErr := temporary.Close()
 	if exportErr != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(temporaryPath)
 		return nil, exportErr
 	}
 	if closeErr != nil {
-		_ = os.Remove(path)
+		_ = os.Remove(temporaryPath)
 		return nil, closeErr
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		_ = os.Remove(temporaryPath)
+		return nil, err
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -283,11 +297,12 @@ func ExportUsageRecordsCSVToTaskFile(ctx context.Context, instanceID int64, task
 		FileName:    "usage-records-" + strconv.FormatInt(instanceID, 10) + "-" + time.Now().Format("20060102-150405") + ".csv",
 		RecordCount: count,
 		Size:        info.Size(),
+		ExpiresAt:   time.Now().Add(usageRecordExportRetention).Unix(),
 	}, nil
 }
 
 func OpenUsageRecordExportArtifact(taskID string) (*os.File, error) {
-	path, err := usageRecordExportTaskPath(taskID)
+	path, err := usageRecordExportTaskPath(taskID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -295,23 +310,38 @@ func OpenUsageRecordExportArtifact(taskID string) (*os.File, error) {
 }
 
 func RemoveUsageRecordExportArtifact(taskID string) {
-	if path, err := usageRecordExportTaskPath(taskID); err == nil {
+	if path, err := usageRecordExportTaskPath(taskID, false); err == nil {
+		_ = os.Remove(path)
+	}
+	if path, err := usageRecordExportTaskPath(taskID, true); err == nil {
 		_ = os.Remove(path)
 	}
 }
 
-func usageRecordExportTaskPath(taskID string) (string, error) {
+func usageRecordExportTaskPath(taskID string, temporary bool) (string, error) {
 	if !strings.HasPrefix(taskID, "systask_") || strings.IndexFunc(taskID, func(character rune) bool {
 		return character != '_' && character != '-' && (character < '0' || character > '9') && (character < 'A' || character > 'Z') && (character < 'a' || character > 'z')
 	}) >= 0 {
 		return "", ErrInvalidInstance
 	}
-	return filepath.Join(os.TempDir(), "managed-usage-"+taskID+".csv"), nil
+	directory := strings.TrimSpace(os.Getenv("MANAGED_USAGE_EXPORT_DIR"))
+	if directory == "" {
+		directory = filepath.Join(".", "exports", "usage-records")
+	}
+	extension := ".csv"
+	if temporary {
+		extension = ".part"
+	}
+	return filepath.Join(directory, "managed-usage-"+taskID+extension), nil
 }
 
-func cleanupExpiredUsageRecordExports() {
-	paths, _ := filepath.Glob(filepath.Join(os.TempDir(), "managed-usage-systask_*.csv"))
-	cutoff := time.Now().Add(-24 * time.Hour)
+func CleanupStaleUsageRecordExportParts() {
+	directory := strings.TrimSpace(os.Getenv("MANAGED_USAGE_EXPORT_DIR"))
+	if directory == "" {
+		directory = filepath.Join(".", "exports", "usage-records")
+	}
+	paths, _ := filepath.Glob(filepath.Join(directory, "managed-usage-systask_*.part"))
+	cutoff := time.Now().Add(-2 * time.Hour)
 	for _, path := range paths {
 		if info, err := os.Stat(path); err == nil && info.ModTime().Before(cutoff) {
 			_ = os.Remove(path)

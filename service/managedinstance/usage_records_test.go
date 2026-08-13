@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -482,6 +484,36 @@ func TestUsageRecordExportReportsProcessedRows(t *testing.T) {
 	require.NotEmpty(t, output.Bytes())
 	require.Equal(t, UsageRecordExportProgress{Progress: 0, Processed: 0, Total: 2, Stage: "exporting"}, progress[0])
 	require.Equal(t, UsageRecordExportProgress{Progress: 100, Processed: 2, Total: 2, Stage: "completed"}, progress[len(progress)-1])
+}
+
+func TestUsageRecordTaskExportPersistsForRepeatedDownloads(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	t.Setenv("MANAGED_USAGE_EXPORT_DIR", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":1,"username":"one"}],"total":1,"page":1,"page_size":100}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	taskID := "systask_persistent_export"
+
+	artifact, err := ExportUsageRecordsCSVToTaskFile(context.Background(), instance.Id, taskID, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, artifact.RecordCount)
+	require.Greater(t, artifact.ExpiresAt, time.Now().Add(29*24*time.Hour).Unix())
+
+	partPath, err := usageRecordExportTaskPath(taskID, true)
+	require.NoError(t, err)
+	_, err = os.Stat(partPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	for range 2 {
+		file, openErr := OpenUsageRecordExportArtifact(taskID)
+		require.NoError(t, openErr)
+		info, statErr := file.Stat()
+		require.NoError(t, statErr)
+		require.Equal(t, artifact.Size, info.Size())
+		require.NoError(t, file.Close())
+	}
 }
 
 func TestUsageRecordExportContinuesWhenUpstreamCapsPageSize(t *testing.T) {

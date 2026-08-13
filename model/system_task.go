@@ -18,6 +18,7 @@ const (
 	SystemTaskStatusRunning   SystemTaskStatus = "running"
 	SystemTaskStatusSucceeded SystemTaskStatus = "succeeded"
 	SystemTaskStatusFailed    SystemTaskStatus = "failed"
+	SystemTaskStatusCancelled SystemTaskStatus = "cancelled"
 
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
@@ -644,6 +645,9 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 				return nil
 			}
 			return err
+		}
+		if task.Type == SystemTaskTypeManagedUsageExport {
+			return RequeueExpiredManagedUsageExportLease(tx, taskID, now)
 		}
 		taskUpdate := tx.Model(&SystemTask{}).Where("id = ? AND status = ?", task.ID, SystemTaskStatusRunning).
 			Updates(map[string]any{

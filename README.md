@@ -90,6 +90,7 @@ openssl rand -base64 32
 SESSION_SECRET=replace-with-a-random-session-secret
 MANAGED_INSTANCE_SECRET_KEY=replace-with-the-base64-value
 MANAGED_INSTANCE_SECRET_KEY_VERSION=v1
+MANAGED_USAGE_EXPORT_DIR=./exports/usage-records
 ```
 
 未配置 `MANAGED_INSTANCE_SECRET_KEY` 时，可以浏览不含密钥的实例信息，但系统会拒绝写入远端凭据。
@@ -136,6 +137,7 @@ go build ./...
 | `MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY` | 受控操作全局并发上限，默认 `4` |
 | `MANAGED_INSTANCE_OPERATION_MAX_PER_HOST` | 同一远端主机的操作并发上限，默认 `2` |
 | `MANAGED_INSTANCE_BATCH_MAX_CONCURRENCY` | 同一批次的操作并发上限，默认 `2` |
+| `MANAGED_USAGE_EXPORT_DIR` | 使用记录后台导出的持久化目录，默认 `./exports/usage-records`；Docker 建议设为 `/data/exports/usage-records` |
 
 默认拒绝访问私网和回环地址。如控制平面需要连接内网实例，必须通过 `MANAGED_INSTANCE_ALLOWED_CIDRS` 显式放行精确网段。
 

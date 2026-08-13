@@ -32,20 +32,42 @@ type ApiResponse<T> = {
 }
 
 export type UsageRecordExportTask = {
+  id: number
   task_id: string
-  status: 'pending' | 'running' | 'succeeded' | 'failed'
-  state?: {
-    progress?: number
-    processed?: number
-    total?: number
-    stage?: string
-  }
-  result?: {
-    file_name?: string
-    record_count?: number
-    size?: number
-  }
-  error?: string
+  instance_id: number
+  instance_name: string
+  instance_kind: string
+  actor_id: number
+  actor_name: string
+  filters: Record<string, string[]>
+  status:
+    | 'pending'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'expired'
+  queue_position: number
+  progress: number
+  processed: number
+  total: number
+  file_name: string
+  file_size: number
+  record_count: number
+  error_code: string
+  started_at: number
+  finished_at: number
+  expires_at: number
+  created_at: number
+  updated_at: number
+}
+
+export type UsageRecordExportList = {
+  items: UsageRecordExportTask[]
+  total: number
+  page: number
+  page_size: number
+  has_active: boolean
 }
 
 function usageRecordParams(filters: UsageRecordFilters) {
@@ -113,28 +135,24 @@ export async function createUsageRecordsExport(
 }
 
 export async function getUsageRecordsExport(
-  instanceId: number,
   taskId: string
 ): Promise<ApiResponse<UsageRecordExportTask>> {
   const response = await api.get<ApiResponse<UsageRecordExportTask>>(
-    `/api/managed-instances/${instanceId}/usage-records/exports/${encodeURIComponent(taskId)}`,
+    `/api/managed-usage-exports/${encodeURIComponent(taskId)}`,
     { disableDuplicate: true }
   )
   return response.data
 }
 
-export async function downloadUsageRecordsExport(
-  instanceId: number,
-  taskId: string
-) {
+export async function downloadUsageRecordsExport(taskId: string) {
   const response = await api.get(
-    `/api/managed-instances/${instanceId}/usage-records/exports/${encodeURIComponent(taskId)}/download`,
+    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/download`,
     { responseType: 'blob', disableDuplicate: true }
   )
   const disposition = String(response.headers['content-disposition'] ?? '')
   const filename =
     disposition.match(/filename="?([^";]+)"?/i)?.[1] ??
-    `usage-records-${instanceId}.csv`
+    `usage-records-${taskId}.csv`
   const objectUrl = URL.createObjectURL(response.data)
   const anchor = document.createElement('a')
   anchor.href = objectUrl
@@ -143,4 +161,42 @@ export async function downloadUsageRecordsExport(
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(objectUrl)
+}
+
+export async function listUsageRecordsExports(filters: {
+  page: number
+  page_size: number
+  status?: string
+  instance_id?: number
+  actor_id?: number
+}): Promise<ApiResponse<UsageRecordExportList>> {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== '' && value !== 0) {
+      params.set(key, String(value))
+    }
+  })
+  const response = await api.get<ApiResponse<UsageRecordExportList>>(
+    `/api/managed-usage-exports?${params.toString()}`,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function cancelUsageRecordsExport(taskId: string) {
+  const response = await api.post<ApiResponse<unknown>>(
+    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/cancel`,
+    null,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
+export async function retryUsageRecordsExport(taskId: string) {
+  const response = await api.post<ApiResponse<UsageRecordExportTask>>(
+    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/retry`,
+    null,
+    { disableDuplicate: true }
+  )
+  return response.data
 }

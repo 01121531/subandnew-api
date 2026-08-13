@@ -206,7 +206,117 @@ func CreateManagedInstanceUsageRecordExport(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+	view, err := service.GetManagedUsageExportView(task.TaskID, c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
+}
+
+func ListManagedUsageExports(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	instanceID, _ := strconv.ParseInt(c.Query("instance_id"), 10, 64)
+	actorID, _ := strconv.Atoi(c.Query("actor_id"))
+	if c.GetInt("role") < common.RoleRootUser {
+		actorID = c.GetInt("id")
+	}
+	result, err := service.ListManagedUsageExports(model.ManagedUsageExportListFilter{
+		Status: c.Query("status"), InstanceID: instanceID, ActorID: actorID,
+		Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedUsageExport(c *gin.Context) {
+	view, err := service.GetManagedUsageExportView(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if view == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": view})
+}
+
+func DownloadManagedUsageExport(c *gin.Context) {
+	record, err := service.GetManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if record == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
+		return
+	}
+	if record.Status == model.ManagedUsageExportStatusExpired || (record.ExpiresAt > 0 && record.ExpiresAt <= time.Now().Unix()) {
+		_ = model.ExpireManagedUsageExport(record.TaskID)
+		managedinstance.RemoveUsageRecordExportArtifact(record.TaskID)
+		c.JSON(http.StatusGone, gin.H{"success": false, "message": "usage export file expired"})
+		return
+	}
+	if record.Status != model.ManagedUsageExportStatusSucceeded {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "usage export is not ready"})
+		return
+	}
+	file, err := managedinstance.OpenUsageRecordExportArtifact(record.TaskID)
+	if err != nil {
+		_ = model.ExpireManagedUsageExport(record.TaskID)
+		c.JSON(http.StatusGone, gin.H{"success": false, "message": "usage export file unavailable"})
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.DataFromReader(http.StatusOK, info.Size(), "text/csv; charset=utf-8", file, map[string]string{
+		"Content-Disposition":    `attachment; filename="` + record.FileName + `"`,
+		"X-Content-Type-Options": "nosniff",
+	})
+}
+
+func CancelManagedUsageExport(c *gin.Context) {
+	err := service.CancelManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if errors.Is(err, model.ErrManagedUsageExportConflict) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "only pending exports can be cancelled"})
+		return
+	}
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+}
+
+func RetryManagedUsageExport(c *gin.Context) {
+	task, err := service.RetryManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if errors.Is(err, model.ErrManagedUsageExportConflict) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "only failed or expired exports can be retried"})
+		return
+	}
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if task == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
+		return
+	}
+	view, err := service.GetManagedUsageExportView(task.TaskID, c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
 }
 
 func GetManagedInstanceUsageRecordExport(c *gin.Context) {
@@ -255,7 +365,6 @@ func DownloadManagedInstanceUsageRecordExport(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	defer managedinstance.RemoveUsageRecordExportArtifact(task.TaskID)
 	info, err := file.Stat()
 	if err != nil {
 		managedInstanceError(c, err)

@@ -26,6 +26,7 @@ var expectedControlPlaneTables = []string{
 	"managed_instance_operations",
 	"managed_instance_snapshots",
 	"managed_instances",
+	"managed_usage_exports",
 	"options",
 	"passkey_credentials",
 	"setups",

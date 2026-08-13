@@ -194,6 +194,7 @@ func controlPlaneModels() []interface{} {
 		&ManagedInstanceCredential{},
 		&ManagedInstanceSnapshot{},
 		&ManagedInstanceAlert{},
+		&ManagedUsageExport{},
 		&ManagedInstanceAudit{},
 		&ManagedInstanceOperation{},
 		&ManagedInstanceOperationBatch{},
