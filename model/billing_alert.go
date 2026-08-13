@@ -18,6 +18,7 @@ type BillingFilterTemplate struct {
 	ID             int64  `json:"id" gorm:"primaryKey"`
 	Name           string `json:"name" gorm:"type:varchar(128);not null;uniqueIndex"`
 	Description    string `json:"description" gorm:"type:varchar(512)"`
+	SystemKind     string `json:"system_kind" gorm:"type:varchar(32);not null;default:'';index"`
 	CurrentVersion int    `json:"current_version" gorm:"not null;default:1"`
 	Enabled        bool   `json:"enabled" gorm:"not null;default:true;index"`
 	CreatedBy      int    `json:"created_by" gorm:"not null;index"`

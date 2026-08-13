@@ -36,6 +36,7 @@ var (
 type TemplateInput struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
+	SystemKind  string              `json:"system_kind"`
 	Filters     map[string][]string `json:"filters"`
 }
 
@@ -133,13 +134,17 @@ func CreateTemplate(input TemplateInput, actorID int) (*TemplateView, error) {
 	if input.Name == "" || actorID <= 0 {
 		return nil, ErrInvalidBillingInput
 	}
+	systemKind, err := normalizeTemplateSystemKind(input.SystemKind)
+	if err != nil {
+		return nil, err
+	}
 	filters, err := normalizeFilters(input.Filters)
 	if err != nil {
 		return nil, err
 	}
 	encoded, _ := json.Marshal(filters)
 	template := &model.BillingFilterTemplate{
-		Name: input.Name, Description: strings.TrimSpace(input.Description), CurrentVersion: 1,
+		Name: input.Name, Description: strings.TrimSpace(input.Description), SystemKind: systemKind, CurrentVersion: 1,
 		Enabled: true, CreatedBy: actorID, UpdatedBy: actorID,
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
@@ -194,6 +199,17 @@ func PreviewTemplateUpdate(id int64, input TemplateInput) (*TemplateImpact, erro
 	}
 	impact := &TemplateImpact{TemplateID: id, CurrentVersion: current.CurrentVersion, NextVersion: current.CurrentVersion + 1}
 	impact.AddedFields, impact.RemovedFields, impact.ChangedFields = filterDiff(current.Filters, next)
+	systemKind, err := normalizeTemplateSystemKind(input.SystemKind)
+	if err != nil {
+		return nil, err
+	}
+	if systemKind != "" && systemKind != current.SystemKind {
+		if err := validateTemplateBindingsKind(model.DB, id, systemKind); err != nil {
+			return nil, err
+		}
+		impact.ChangedFields = append(impact.ChangedFields, "system_kind")
+		sort.Strings(impact.ChangedFields)
+	}
 	if err := model.DB.Model(&model.BillingAlertRule{}).Where("template_id = ?", id).Count(&impact.RuleCount).Error; err != nil {
 		return nil, err
 	}
@@ -215,6 +231,10 @@ func UpdateTemplate(id int64, input TemplateInput, actorID int) (*TemplateView, 
 	if input.Name == "" || actorID <= 0 {
 		return nil, ErrInvalidBillingInput
 	}
+	systemKind, err := normalizeTemplateSystemKind(input.SystemKind)
+	if err != nil {
+		return nil, err
+	}
 	filters, err := normalizeFilters(input.Filters)
 	if err != nil {
 		return nil, err
@@ -226,6 +246,12 @@ func UpdateTemplate(id int64, input TemplateInput, actorID int) (*TemplateView, 
 			return err
 		}
 		nextVersion := template.CurrentVersion + 1
+		if systemKind == "" {
+			systemKind = template.SystemKind
+		}
+		if err := validateTemplateBindingsKind(tx, id, systemKind); err != nil {
+			return err
+		}
 		if err := tx.Create(&model.BillingFilterTemplateVersion{
 			TemplateID: id, Version: nextVersion, Filters: string(encoded), CreatedBy: actorID,
 		}).Error; err != nil {
@@ -233,6 +259,7 @@ func UpdateTemplate(id int64, input TemplateInput, actorID int) (*TemplateView, 
 		}
 		if err := tx.Model(&template).Updates(map[string]any{
 			"name": input.Name, "description": strings.TrimSpace(input.Description),
+			"system_kind":     systemKind,
 			"current_version": nextVersion, "updated_by": actorID, "updated_at": common.GetTimestamp(),
 		}).Error; err != nil {
 			return err
@@ -490,19 +517,67 @@ func replaceRuleChildren(tx *gorm.DB, ruleID int64, thresholds []ThresholdInput,
 }
 
 func requireTemplateAndInstances(tx *gorm.DB, templateID int64, instanceIDs []int64) error {
-	var templateCount int64
-	if err := tx.Model(&model.BillingFilterTemplate{}).Where("id = ?", templateID).Count(&templateCount).Error; err != nil {
+	var template model.BillingFilterTemplate
+	if err := tx.First(&template, templateID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInvalidBillingInput
+		}
 		return err
 	}
-	if templateCount != 1 {
-		return ErrInvalidBillingInput
-	}
-	var instanceCount int64
-	if err := tx.Model(&model.ManagedInstance{}).Where("id IN ?", instanceIDs).Count(&instanceCount).Error; err != nil {
+	var instances []model.ManagedInstance
+	if err := tx.Where("id IN ?", instanceIDs).Find(&instances).Error; err != nil {
 		return err
 	}
-	if instanceCount != int64(len(instanceIDs)) {
+	if len(instances) != len(instanceIDs) {
 		return ErrInvalidBillingInput
+	}
+	for _, instance := range instances {
+		if !templateSupportsInstanceKind(template.SystemKind, instance.Kind) {
+			return ErrInvalidBillingInput
+		}
+	}
+	return nil
+}
+
+func normalizeTemplateSystemKind(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "", model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor:
+		return value, nil
+	case model.ManagedInstanceKindHuichuan:
+		return model.ManagedInstanceKindNewAPI, nil
+	default:
+		return "", ErrInvalidBillingInput
+	}
+}
+
+func templateSupportsInstanceKind(templateKind string, instanceKind string) bool {
+	if templateKind == "" {
+		return true
+	}
+	if templateKind == model.ManagedInstanceKindNewAPI {
+		return instanceKind == model.ManagedInstanceKindNewAPI || instanceKind == model.ManagedInstanceKindHuichuan
+	}
+	return templateKind == instanceKind
+}
+
+func validateTemplateBindingsKind(tx *gorm.DB, templateID int64, systemKind string) error {
+	if systemKind == "" {
+		return nil
+	}
+	var instances []model.ManagedInstance
+	err := tx.Distinct("managed_instances.*").
+		Joins("JOIN billing_alert_rule_instances ON billing_alert_rule_instances.instance_id = managed_instances.id").
+		Joins("JOIN billing_alert_rules ON billing_alert_rules.id = billing_alert_rule_instances.rule_id").
+		Where("billing_alert_rules.template_id = ?", templateID).
+		Find(&instances).Error
+	if err != nil {
+		return err
+	}
+	for _, instance := range instances {
+		if !templateSupportsInstanceKind(systemKind, instance.Kind) {
+			return ErrInvalidBillingInput
+		}
 	}
 	return nil
 }

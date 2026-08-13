@@ -46,11 +46,11 @@ func setupRepositoryTestDB(t *testing.T) {
 
 func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 	setupRepositoryTestDB(t)
-	instance := &model.ManagedInstance{Name: "billing-new-api", Kind: "new-api", BaseURL: "https://example.com"}
+	instance := &model.ManagedInstance{Name: "billing-new-api", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://example.com"}
 	require.NoError(t, model.DB.Create(instance).Error)
 
 	template, err := CreateTemplate(TemplateInput{
-		Name: "production-users",
+		Name: "production-users", SystemKind: model.ManagedInstanceKindNewAPI,
 		Filters: map[string][]string{
 			"username": {"alice", "bob"},
 			"model":    {"gpt-5"},
@@ -58,6 +58,7 @@ func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 	}, 1)
 	require.NoError(t, err)
 	require.Equal(t, 1, template.CurrentVersion)
+	require.Equal(t, model.ManagedInstanceKindNewAPI, template.SystemKind)
 
 	rule, err := CreateRule(RuleInput{
 		Name:         "monthly-spend",
@@ -95,6 +96,17 @@ func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 	require.Equal(t, []string{"model"}, impact.RemovedFields)
 	require.Equal(t, []string{"username"}, impact.ChangedFields)
 
+	incompatible := &model.ManagedInstance{Name: "billing-sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"}
+	require.NoError(t, model.DB.Create(incompatible).Error)
+	_, err = CreateRule(RuleInput{
+		Name: "incompatible-template", TemplateID: template.ID, Enabled: true,
+		CycleType: CycleNaturalMonth, CycleConfig: json.RawMessage(`{}`), DiscountRate: "1",
+		ExchangeMode: ExchangeModeLatest, ScheduleType: ScheduleInterval, ScheduleConfig: json.RawMessage(`{"seconds":300}`),
+		Recipients: []string{"ops@example.com"}, InstanceIDs: []int64{incompatible.Id},
+		Thresholds: []ThresholdInput{{Name: "notice", Severity: "warning", Currency: model.BillingCurrencyUSD, Amount: "10", ReminderMode: ReminderOnce}},
+	}, 1)
+	require.ErrorIs(t, err, ErrInvalidBillingInput)
+
 	_, err = UpdateTemplate(template.ID, TemplateInput{
 		Name: "production-users", Filters: map[string][]string{"username": {"alice"}},
 	}, 1)
@@ -102,6 +114,12 @@ func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 	updated, err := GetTemplate(template.ID)
 	require.NoError(t, err)
 	require.Equal(t, 2, updated.CurrentVersion)
+	require.Equal(t, model.ManagedInstanceKindNewAPI, updated.SystemKind)
+	_, err = UpdateTemplate(template.ID, TemplateInput{
+		Name: "production-users", SystemKind: model.ManagedInstanceKindSub2API,
+		Filters: map[string][]string{"user_id": {"1"}},
+	}, 1)
+	require.ErrorIs(t, err, ErrInvalidBillingInput)
 
 	require.Error(t, DeleteTemplate(template.ID))
 	require.NoError(t, DeleteRule(rule.ID))

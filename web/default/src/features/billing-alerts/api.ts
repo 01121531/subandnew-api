@@ -20,6 +20,7 @@ export interface BillingTemplate {
   id: number
   name: string
   description: string
+  system_kind: 'new_api' | 'sub2api' | 'conductor' | ''
   current_version: number
   enabled: boolean
   filters: BillingFilters
@@ -185,7 +186,10 @@ export async function listBillingTemplates() {
 }
 
 export async function createBillingTemplate(
-  input: Pick<BillingTemplate, 'name' | 'description' | 'filters'>
+  input: Pick<
+    BillingTemplate,
+    'name' | 'description' | 'system_kind' | 'filters'
+  >
 ) {
   return (
     await api.post<ApiResponse<BillingTemplate>>(
@@ -197,7 +201,10 @@ export async function createBillingTemplate(
 
 export async function updateBillingTemplate(
   id: number,
-  input: Pick<BillingTemplate, 'name' | 'description' | 'filters'>
+  input: Pick<
+    BillingTemplate,
+    'name' | 'description' | 'system_kind' | 'filters'
+  >
 ) {
   return (
     await api.put<ApiResponse<BillingTemplate>>(
@@ -209,7 +216,10 @@ export async function updateBillingTemplate(
 
 export async function previewBillingTemplate(
   id: number,
-  input: Pick<BillingTemplate, 'name' | 'description' | 'filters'>
+  input: Pick<
+    BillingTemplate,
+    'name' | 'description' | 'system_kind' | 'filters'
+  >
 ) {
   return (
     await api.post<ApiResponse<TemplateImpact>>(

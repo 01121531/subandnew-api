@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { SectionPageLayout } from '@/components/layout'
+import { MultiSelect, type MultiSelectOption } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -47,8 +48,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { getManagedInstances } from '@/features/managed-instances/api'
+import { getUsageRecordFilterOptions } from '@/features/usage-records/api'
+import type { UsageSystem } from '@/features/usage-records/types'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -105,26 +107,187 @@ function parseJSON<T>(value: string, fallback: T): T {
   }
 }
 
-function normalizeFilters(text: string): BillingFilters {
-  const lines = text.split('\n')
-  const result: BillingFilters = {}
-  for (const line of lines) {
-    const [rawKey, ...parts] = line.split('=')
-    const key = rawKey.trim()
-    const values = parts
-      .join('=')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    if (key && values.length) result[key] = values
-  }
-  return result
+type FilterDefinition = {
+  key: string
+  label: string
+  placeholder?: string
+  options?: MultiSelectOption[]
 }
 
-function filterText(filters: BillingFilters) {
-  return Object.entries(filters)
-    .map(([key, values]) => `${key}=${values.join(', ')}`)
-    .join('\n')
+type BillingInstance = {
+  id: number
+  name: string
+  kind: string
+  status?: string
+}
+
+const SYSTEM_LABELS: Record<UsageSystem, string> = {
+  new_api: 'New API',
+  sub2api: 'Sub2API',
+  conductor: 'Conductor',
+}
+
+const NEW_API_TEMPLATE_FILTERS: FilterDefinition[] = [
+  {
+    key: 'type',
+    label: '日志类型',
+    options: [
+      { value: '1', label: '充值' },
+      { value: '2', label: '消费' },
+      { value: '3', label: '管理' },
+      { value: '4', label: '系统' },
+      { value: '5', label: '错误' },
+      { value: '6', label: '退款' },
+      { value: '7', label: '登录' },
+    ],
+  },
+  { key: 'username', label: '用户名', placeholder: '选择或输入用户名' },
+  { key: 'token_name', label: '令牌名称', placeholder: '选择或输入令牌' },
+  { key: 'model_name', label: '模型', placeholder: '选择或输入模型' },
+  { key: 'channel', label: '渠道', placeholder: '选择或输入渠道 ID' },
+  { key: 'group', label: '分组', placeholder: '选择或输入分组' },
+  { key: 'request_id', label: '请求 ID', placeholder: '输入请求 ID' },
+  {
+    key: 'upstream_request_id',
+    label: '上游请求 ID',
+    placeholder: '输入上游请求 ID',
+  },
+  { key: 'proxy_id', label: '代理 ID', placeholder: '输入代理 ID' },
+]
+
+const SUB2_TEMPLATE_FILTERS: FilterDefinition[] = [
+  { key: 'user_id', label: '用户', placeholder: '选择或输入用户 ID' },
+  { key: 'api_key_id', label: 'API Key', placeholder: '选择或输入 Key ID' },
+  { key: 'account_id', label: '账号', placeholder: '选择或输入账号 ID' },
+  { key: 'group_id', label: '分组', placeholder: '选择或输入分组 ID' },
+  { key: 'model', label: '模型', placeholder: '选择或输入模型' },
+  { key: 'request_id', label: '请求 ID', placeholder: '输入请求 ID' },
+  {
+    key: 'request_type',
+    label: '请求类型',
+    options: [
+      { value: 'sync', label: '同步' },
+      { value: 'stream', label: '流式' },
+      { value: 'ws_v2', label: 'WebSocket' },
+      { value: 'live', label: 'Live' },
+      { value: 'cyber', label: 'Cyber' },
+    ],
+  },
+  {
+    key: 'billing_type',
+    label: '计费类型',
+    options: [
+      { value: '0', label: '余额' },
+      { value: '1', label: '订阅' },
+    ],
+  },
+  {
+    key: 'billing_mode',
+    label: '计费模式',
+    options: [
+      { value: 'token', label: 'Token' },
+      { value: 'per_request', label: '按请求' },
+      { value: 'image', label: '图片' },
+      { value: 'video', label: '视频' },
+    ],
+  },
+  {
+    key: 'upstream_model_mismatch',
+    label: '上游模型校验',
+    options: [
+      { value: 'true', label: '仅不一致' },
+      { value: 'false', label: '仅一致' },
+    ],
+  },
+]
+
+const CONDUCTOR_TEMPLATE_FILTERS: FilterDefinition[] = [
+  { key: 'user_id', label: '用户', placeholder: '选择或输入用户 ID' },
+  { key: 'model', label: '模型', placeholder: '选择或输入模型' },
+]
+
+function systemForInstance(kind: string): UsageSystem | null {
+  if (kind === 'new_api' || kind === 'huichuan') return 'new_api'
+  if (kind === 'sub2api' || kind === 'conductor') return kind
+  return null
+}
+
+function filtersForTemplate(system: UsageSystem) {
+  if (system === 'sub2api') return SUB2_TEMPLATE_FILTERS
+  if (system === 'conductor') return CONDUCTOR_TEMPLATE_FILTERS
+  return NEW_API_TEMPLATE_FILTERS
+}
+
+function inferTemplateSystem(
+  template: BillingTemplate | null,
+  instances: BillingInstance[],
+  rules: BillingRule[]
+): UsageSystem {
+  if (
+    template?.system_kind === 'new_api' ||
+    template?.system_kind === 'sub2api' ||
+    template?.system_kind === 'conductor'
+  ) {
+    return template.system_kind
+  }
+  const instanceMap = new Map(
+    instances.map((instance) => [instance.id, instance])
+  )
+  const boundRule = rules.find((rule) => rule.template_id === template?.id)
+  for (const instanceID of boundRule?.instance_ids ?? []) {
+    const inferred = systemForInstance(instanceMap.get(instanceID)?.kind ?? '')
+    if (inferred) return inferred
+  }
+  const keys = new Set(Object.keys(template?.filters ?? {}))
+  if (
+    ['api_key_id', 'account_id', 'group_id', 'billing_mode'].some((key) =>
+      keys.has(key)
+    )
+  ) {
+    return 'sub2api'
+  }
+  if (template && (keys.has('user_id') || keys.has('model'))) {
+    return 'conductor'
+  }
+  if (!template) {
+    for (const instance of instances) {
+      const inferred = systemForInstance(instance.kind)
+      if (inferred) return inferred
+    }
+  }
+  return 'new_api'
+}
+
+function compatibleInstances(
+  instances: BillingInstance[],
+  system: UsageSystem | ''
+) {
+  if (!system) return instances
+  return instances.filter(
+    (instance) => systemForInstance(instance.kind) === system
+  )
+}
+
+function templateSystemLabel(kind: string) {
+  if (kind === 'new_api' || kind === 'sub2api' || kind === 'conductor') {
+    return SYSTEM_LABELS[kind]
+  }
+  return '未指定系统'
+}
+
+function cleanFilters(filters: BillingFilters) {
+  return Object.fromEntries(
+    Object.entries(filters).filter(([, values]) => values.length > 0)
+  )
+}
+
+function mergeOptions(...groups: MultiSelectOption[][]) {
+  const seen = new Set<string>()
+  return groups.flat().filter((option) => {
+    if (seen.has(option.value)) return false
+    seen.add(option.value)
+    return true
+  })
 }
 
 function defaultCycleConfig(type: string): Record<string, unknown> {
@@ -150,29 +313,98 @@ function localTimestamp(value: string) {
 function TemplateDialog({
   open,
   template,
+  instances,
+  rules,
   onOpenChange,
   onSaved,
 }: {
   open: boolean
   template: BillingTemplate | null
+  instances: BillingInstance[]
+  rules: BillingRule[]
   onOpenChange: (open: boolean) => void
   onSaved: () => Promise<unknown>
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [filters, setFilters] = useState('')
+  const [system, setSystem] = useState<UsageSystem>('new_api')
+  const [referenceInstanceId, setReferenceInstanceId] = useState('')
+  const [filters, setFilters] = useState<BillingFilters>({})
   const [busy, setBusy] = useState(false)
   const [impact, setImpact] = useState<TemplateImpact | null>(null)
   const [previewSignature, setPreviewSignature] = useState('')
+  const availableInstances = useMemo(
+    () => compatibleInstances(instances, system),
+    [instances, system]
+  )
+  const filterOptionsQuery = useQuery({
+    queryKey: ['billing-template-filter-options', Number(referenceInstanceId)],
+    queryFn: () => getUsageRecordFilterOptions(Number(referenceInstanceId), {}),
+    enabled: open && Number(referenceInstanceId) > 0,
+    retry: false,
+    staleTime: 60_000,
+  })
+  const remoteOptions = filterOptionsQuery.data?.data?.fields ?? {}
+  const filterDefinitions = useMemo(() => {
+    const definitions = filtersForTemplate(system)
+    const known = new Set(definitions.map((definition) => definition.key))
+    const unknown: FilterDefinition[] = Object.keys(filters)
+      .filter((key) => !known.has(key))
+      .map((key) => ({
+        key,
+        label: key,
+        placeholder: '选择或输入筛选值',
+      }))
+    return [...definitions, ...unknown]
+  }, [filters, system])
 
   useEffect(() => {
     if (!open) return
+    const nextSystem = inferTemplateSystem(template, instances, rules)
+    const nextInstances = compatibleInstances(instances, nextSystem)
     setName(template?.name ?? '')
     setDescription(template?.description ?? '')
-    setFilters(filterText(template?.filters ?? {}))
+    setSystem(nextSystem)
+    setReferenceInstanceId(
+      nextInstances.length > 0 ? String(nextInstances[0].id) : ''
+    )
+    setFilters({ ...template?.filters })
     setImpact(null)
     setPreviewSignature('')
-  }, [open, template])
+  }, [instances, open, rules, template])
+
+  useEffect(() => {
+    if (!open) return
+    const valid = availableInstances.some(
+      (instance) => String(instance.id) === referenceInstanceId
+    )
+    if (!valid) {
+      setReferenceInstanceId(
+        availableInstances.length > 0 ? String(availableInstances[0].id) : ''
+      )
+    }
+  }, [availableInstances, open, referenceInstanceId])
+
+  const changeSystem = (nextSystem: UsageSystem) => {
+    const nextInstances = compatibleInstances(instances, nextSystem)
+    setSystem(nextSystem)
+    setReferenceInstanceId(
+      nextInstances.length > 0 ? String(nextInstances[0].id) : ''
+    )
+    setFilters({})
+    setImpact(null)
+    setPreviewSignature('')
+  }
+
+  const changeFilter = (key: string, values: string[]) => {
+    setFilters((current) => {
+      const next = { ...current }
+      if (values.length > 0) next[key] = values
+      else delete next[key]
+      return next
+    })
+    setImpact(null)
+  }
 
   const save = async () => {
     if (!name.trim()) return toast.error('请输入模板名称')
@@ -181,7 +413,8 @@ function TemplateDialog({
       const input = {
         name: name.trim(),
         description: description.trim(),
-        filters: normalizeFilters(filters),
+        system_kind: system,
+        filters: cleanFilters(filters),
       }
       const signature = JSON.stringify(input)
       if (template && (!impact || previewSignature !== signature)) {
@@ -204,20 +437,21 @@ function TemplateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-xl'>
-        <DialogHeader>
+      <DialogContent className='grid h-[calc(100dvh-2rem)] max-h-[820px] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl'>
+        <DialogHeader className='border-b px-6 py-5'>
           <DialogTitle>
             {template ? '编辑筛选模板' : '新建筛选模板'}
           </DialogTitle>
           <DialogDescription>
-            每行填写一个筛选字段，多个值使用英文逗号分隔。
+            从实际实例读取可选值，支持多选，也可以直接输入新值。
           </DialogDescription>
         </DialogHeader>
-        <div className='grid gap-4'>
+        <div className='grid min-h-0 gap-5 overflow-y-auto px-6 py-5'>
           <Field label='名称'>
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
+              placeholder='例如：生产环境 GPT 用户'
             />
           </Field>
           {impact && (
@@ -231,20 +465,105 @@ function TemplateDialog({
             <Input
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              placeholder='可选，说明这组筛选条件的用途'
             />
           </Field>
-          <Field label='筛选条件'>
-            <Textarea
-              value={filters}
-              onChange={(event) => setFilters(event.target.value)}
-              placeholder={
-                'username=alice, bob\nmodel_name=gpt-5\ngroup=default'
-              }
-              className='min-h-40 font-mono text-xs'
-            />
-          </Field>
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <Field label='适用系统'>
+              <NativeSelect
+                value={system}
+                onChange={(event) =>
+                  changeSystem(event.target.value as UsageSystem)
+                }
+              >
+                <NativeSelectOption value='new_api'>New API</NativeSelectOption>
+                <NativeSelectOption value='sub2api'>Sub2API</NativeSelectOption>
+                <NativeSelectOption value='conductor'>
+                  Conductor
+                </NativeSelectOption>
+              </NativeSelect>
+            </Field>
+            <Field label='参考实例'>
+              <NativeSelect
+                value={referenceInstanceId}
+                disabled={availableInstances.length === 0}
+                onChange={(event) => setReferenceInstanceId(event.target.value)}
+              >
+                {availableInstances.length === 0 && (
+                  <NativeSelectOption value=''>暂无可用实例</NativeSelectOption>
+                )}
+                {availableInstances.map((instance) => (
+                  <NativeSelectOption
+                    key={instance.id}
+                    value={String(instance.id)}
+                  >
+                    {instance.name}
+                    {instance.status ? ` · ${instance.status}` : ''}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+          </div>
+
+          <section
+            className='grid gap-3'
+            aria-labelledby='template-filter-title'
+          >
+            <div className='flex min-h-8 items-center justify-between gap-3'>
+              <div>
+                <h3 id='template-filter-title' className='text-sm font-medium'>
+                  筛选条件
+                </h3>
+                <p className='text-muted-foreground mt-0.5 text-xs'>
+                  留空的条件不会参与统计；一个条件可选择多个值。
+                </p>
+              </div>
+              {filterOptionsQuery.isFetching && (
+                <span className='text-muted-foreground flex items-center gap-1.5 text-xs'>
+                  <RefreshCw className='size-3 animate-spin' />
+                  正在读取选项
+                </span>
+              )}
+              {filterOptionsQuery.isError && (
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  onClick={() => void filterOptionsQuery.refetch()}
+                  aria-label='重新读取筛选选项'
+                  title='读取失败，点击重试'
+                >
+                  <RefreshCw />
+                  重新读取
+                </Button>
+              )}
+            </div>
+            <div className='bg-muted/20 grid gap-4 rounded-lg border p-4 sm:grid-cols-2'>
+              {filterDefinitions.map((definition) => (
+                <Field key={definition.key} label={definition.label}>
+                  <MultiSelect
+                    id={`billing-filter-${definition.key}`}
+                    options={mergeOptions(
+                      definition.options ?? [],
+                      remoteOptions[definition.key] ?? []
+                    )}
+                    selected={filters[definition.key] ?? []}
+                    onChange={(values) => changeFilter(definition.key, values)}
+                    placeholder={definition.placeholder ?? '选择或输入'}
+                    allowCreate
+                    maxVisibleChips={2}
+                  />
+                </Field>
+              ))}
+            </div>
+            {!referenceInstanceId && (
+              <p className='text-muted-foreground text-xs'>
+                当前系统暂无实例，仍可手动输入筛选值；添加实例后可读取实际选项。
+              </p>
+            )}
+          </section>
         </div>
-        <DialogFooter>
+        <DialogFooter className='border-t px-6 py-4'>
           <Button variant='outline' onClick={() => onOpenChange(false)}>
             取消
           </Button>
@@ -268,7 +587,7 @@ function RuleDialog({
   open: boolean
   rule: BillingRule | null
   templates: BillingTemplate[]
-  instances: { id: number; name: string; kind: string }[]
+  instances: BillingInstance[]
   onOpenChange: (open: boolean) => void
   onSaved: () => Promise<unknown>
 }) {
@@ -277,6 +596,14 @@ function RuleDialog({
   const [busy, setBusy] = useState(false)
   const [impact, setImpact] = useState<RuleImpact | null>(null)
   const [previewSignature, setPreviewSignature] = useState('')
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === input.template_id),
+    [input.template_id, templates]
+  )
+  const selectableInstances = useMemo(
+    () => compatibleInstances(instances, selectedTemplate?.system_kind ?? ''),
+    [instances, selectedTemplate?.system_kind]
+  )
 
   useEffect(() => {
     if (!open) return
@@ -308,6 +635,23 @@ function RuleDialog({
         itemIndex === index ? { ...item, ...patch } : item
       ),
     }))
+
+  const changeTemplate = (templateID: number) => {
+    const nextTemplate = templates.find(
+      (template) => template.id === templateID
+    )
+    const compatibleIDs = new Set(
+      compatibleInstances(instances, nextTemplate?.system_kind ?? '').map(
+        (instance) => instance.id
+      )
+    )
+    setInput((current) => ({
+      ...current,
+      template_id: templateID,
+      instance_ids: current.instance_ids.filter((id) => compatibleIDs.has(id)),
+    }))
+    setImpact(null)
+  }
 
   const save = async () => {
     const recipients = recipientText
@@ -368,9 +712,7 @@ function RuleDialog({
               <Field label='筛选模板'>
                 <NativeSelect
                   value={String(input.template_id)}
-                  onChange={(e) =>
-                    update('template_id', Number(e.target.value))
-                  }
+                  onChange={(e) => changeTemplate(Number(e.target.value))}
                 >
                   <NativeSelectOption value=''>请选择</NativeSelectOption>
                   {templates.map((template) => (
@@ -402,7 +744,7 @@ function RuleDialog({
 
           <FormSection title='实例绑定'>
             <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-              {instances.map((instance) => (
+              {selectableInstances.map((instance) => (
                 <label
                   key={instance.id}
                   className='hover:bg-muted/50 flex items-center gap-3 rounded-md border px-3 py-2'
@@ -430,6 +772,11 @@ function RuleDialog({
                   </span>
                 </label>
               ))}
+              {selectableInstances.length === 0 && (
+                <div className='text-muted-foreground col-span-full rounded-md border border-dashed px-4 py-8 text-center text-sm'>
+                  当前筛选模板没有可绑定的同类型实例
+                </div>
+              )}
             </div>
           </FormSection>
 
@@ -1167,7 +1514,12 @@ export function BillingAlerts() {
                     {templates.map((template) => (
                       <TableRow key={template.id}>
                         <TableCell>
-                          <div className='font-medium'>{template.name}</div>
+                          <div className='flex items-center gap-2'>
+                            <span className='font-medium'>{template.name}</span>
+                            <Badge variant='secondary' className='font-normal'>
+                              {templateSystemLabel(template.system_kind)}
+                            </Badge>
+                          </div>
                           <div className='text-muted-foreground text-xs'>
                             {template.description || '—'}
                           </div>
@@ -1242,6 +1594,8 @@ export function BillingAlerts() {
           <TemplateDialog
             open={templateOpen}
             template={editingTemplate}
+            instances={instances}
+            rules={rules}
             onOpenChange={setTemplateOpen}
             onSaved={() => templatesQuery.refetch()}
           />
