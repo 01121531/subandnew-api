@@ -97,7 +97,7 @@ func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (
 		return nil, err
 	}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
-		query.Set("exact_total", "true")
+		query.Del("exact_total")
 	}
 	return client.list(ctx, query)
 }

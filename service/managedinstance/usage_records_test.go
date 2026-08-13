@@ -198,14 +198,14 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
 		require.Equal(t, "7", request.URL.Query().Get("account_id"))
 		require.Equal(t, "stream", request.URL.Query().Get("request_type"))
-		require.Equal(t, "true", request.URL.Query().Get("exact_total"))
+		require.Empty(t, request.URL.Query().Get("exact_total"))
 		require.Equal(t, "sub2-secret", request.Header.Get("x-api-key"))
 		writeProbeJSON(response, `{"code":0,"message":"success","data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
 
-	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"account_id": {"7"}, "request_type": {"stream"}})
+	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"account_id": {"7"}, "request_type": {"stream"}, "exact_total": {"true"}})
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceKindSub2API, page.Kind)
 	require.Equal(t, int64(1), page.Total)
@@ -221,7 +221,7 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
 		case "/api/v1/usage":
 			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
-			require.Equal(t, "true", request.URL.Query().Get("exact_total"))
+			require.Empty(t, request.URL.Query().Get("exact_total"))
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
 		case "/api/v1/usage/dashboard/snapshot-v2":
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
@@ -238,7 +238,7 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 		Secret: "password", UserID: "user@example.com",
 	})
 
-	page, err := ListUsageRecords(context.Background(), instance.Id, nil)
+	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"exact_total": {"true"}})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), page.Total)
 

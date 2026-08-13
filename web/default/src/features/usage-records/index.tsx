@@ -222,7 +222,6 @@ function requestFilters(
     page_size: String(PAGE_SIZE),
     [system === 'sub2api' ? 'page' : 'p']: String(page),
   }
-  if (system === 'sub2api') result.exact_total = 'true'
   Object.entries(filters).forEach(([key, value]) => {
     if (!value || (Array.isArray(value) && value.length === 0)) return
     if (system === 'new_api' && (key === 'start_time' || key === 'end_time')) {
@@ -413,11 +412,24 @@ export function UsageRecords() {
   )
   const total = result?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const sub2PageSize = Math.max(1, result?.page_size ?? PAGE_SIZE)
+  const hasNextPage =
+    system === 'sub2api'
+      ? result?.page === page &&
+        (records.length >= sub2PageSize || page < totalPages)
+      : page < totalPages
   const filters = system === 'sub2api' ? SUB2_FILTERS : NEW_API_FILTERS
 
   useEffect(() => {
-    if (result && page > totalPages) setPage(totalPages)
-  }, [page, result, totalPages])
+    if (!result) return
+    if (system === 'sub2api') {
+      if (result.page === page && page > 1 && records.length === 0) {
+        setPage((value) => value - 1)
+      }
+      return
+    }
+    if (page > totalPages) setPage(totalPages)
+  }, [page, records.length, result, system, totalPages])
 
   const changeSystem = (value: UsageSystem) => {
     const defaults = defaultFilters(value)
@@ -728,11 +740,12 @@ export function UsageRecords() {
               hasInstance={selectedId > 0}
               onRetry={() => void recordsQuery.refetch()}
             />
-            {total > 0 && (
+            {(total > 0 || records.length > 0) && (
               <div className='border-border flex items-center justify-between border-t px-3 py-2'>
                 <span className='text-muted-foreground text-xs tabular-nums'>
-                  {(page - 1) * PAGE_SIZE + 1}–
-                  {Math.min(page * PAGE_SIZE, total)} / {total}
+                  {system === 'sub2api'
+                    ? `第 ${page} 页 · 本页 ${records.length} 条`
+                    : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} / ${total}`}
                 </span>
                 <div className='flex items-center gap-1'>
                   <Button
@@ -746,7 +759,7 @@ export function UsageRecords() {
                   <Button
                     variant='outline'
                     size='sm'
-                    disabled={page >= totalPages || recordsQuery.isFetching}
+                    disabled={!hasNextPage || recordsQuery.isFetching}
                     onClick={() => setPage((value) => value + 1)}
                   >
                     下一页
