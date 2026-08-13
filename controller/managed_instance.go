@@ -88,7 +88,7 @@ func ProbeManagedInstance(c *gin.Context) {
 
 func GetManagedInstanceInventory(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.CollectInventory(c.Request.Context(), id, c.DefaultQuery("resource", "auto"), c.Query("cursor"))
@@ -101,7 +101,7 @@ func GetManagedInstanceInventory(c *gin.Context) {
 
 func GetManagedInstanceMetrics(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	window := managedInstanceTimeWindow(c)
@@ -115,7 +115,7 @@ func GetManagedInstanceMetrics(c *gin.Context) {
 
 func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.CollectRealtimeMetrics(c.Request.Context(), id)
@@ -128,7 +128,7 @@ func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 
 func GetManagedInstanceAccountOutput(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.CollectAccountOutput(c.Request.Context(), id, managedInstanceTimeWindow(c))
@@ -141,7 +141,7 @@ func GetManagedInstanceAccountOutput(c *gin.Context) {
 
 func GetManagedInstanceUsageRecords(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.ListUsageRecords(c.Request.Context(), id, c.Request.URL.Query())
@@ -154,7 +154,7 @@ func GetManagedInstanceUsageRecords(c *gin.Context) {
 
 func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.GetUsageRecordFilterOptions(c.Request.Context(), id, c.Request.URL.Query())
@@ -167,7 +167,7 @@ func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
 
 func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok {
+	if !ok || !managedInstanceDataReady(c, id) {
 		return
 	}
 	result, err := managedinstance.GetUsageRecordSummary(c.Request.Context(), id, c.Request.URL.Query())
@@ -639,8 +639,18 @@ func managedInstanceTimeWindow(c *gin.Context) managedinstance.TimeWindow {
 	return managedinstance.TimeWindow{Start: start, End: end}
 }
 
+func managedInstanceDataReady(c *gin.Context, instanceID int64) bool {
+	if err := managedinstance.EnsureDataConnection(c.Request.Context(), instanceID, c.GetInt("id")); err != nil {
+		managedInstanceError(c, err)
+		return false
+	}
+	return true
+}
+
 func managedInstanceError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, managedinstance.ErrInstanceConnectionFailed):
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": managedinstance.ErrInstanceConnectionFailed.Error()})
 	case errors.Is(err, managedinstance.ErrInvalidInstance):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrInstanceNotFound), errors.Is(err, gorm.ErrRecordNotFound):

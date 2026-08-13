@@ -6,8 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -350,6 +352,37 @@ func TestProbeAvailabilityAlertThresholdDeduplicatesAndResolves(t *testing.T) {
 	alerts, err := ListAlerts(AlertListFilter{InstanceID: instance.Id, Status: model.ManagedInstanceAlertStatusResolved})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), alerts.Total)
+}
+
+func TestEnsureDataConnectionCoalescesFailedPageProbes(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		time.Sleep(25 * time.Millisecond)
+		response.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "token"})
+
+	const readers = 6
+	var wait sync.WaitGroup
+	errorsSeen := make(chan error, readers)
+	for range readers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			errorsSeen <- EnsureDataConnection(context.Background(), instance.Id, 7)
+		}()
+	}
+	wait.Wait()
+	close(errorsSeen)
+	for err := range errorsSeen {
+		require.ErrorIs(t, err, ErrInstanceConnectionFailed)
+	}
+	require.Equal(t, int32(1), requests.Load())
+	dataReadProbeStates.Delete(instance.Id)
 }
 
 func createProbeInstance(t *testing.T, baseURL string, kind string, credential CredentialInput) *InstanceView {

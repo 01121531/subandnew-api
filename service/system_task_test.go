@@ -125,13 +125,13 @@ func TestRunWithLeaseHeartbeatHonorsParentCancellation(t *testing.T) {
 	}
 }
 
-func TestManagedInstanceProbeDueAppliesFailureBackoff(t *testing.T) {
-	now := int64(10_000)
+func TestManagedInstanceProbeDueRetriesFailuresAfterOneHour(t *testing.T) {
+	now := int64(20_000)
 	instance := &model.ManagedInstance{
-		Id: 4, CheckIntervalSeconds: 60, LastCheckedAt: now - 100, ConsecutiveFailures: 2,
+		Id: 4, CheckIntervalSeconds: 60, LastCheckedAt: now - 3599, ConsecutiveFailures: 1,
 	}
 	require.False(t, managedInstanceProbeDue(instance, now))
-	instance.LastCheckedAt = now - 300
+	instance.LastCheckedAt = now - 3600
 	require.True(t, managedInstanceProbeDue(instance, now))
 }
 

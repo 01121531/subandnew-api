@@ -89,7 +89,7 @@ export async function getUsageRecordFilterOptions(
   const params = usageRecordParams(filters)
   const response = await api.get<ApiResponse<UsageRecordFilterOptions>>(
     `/api/managed-instances/${instanceId}/usage-records/filter-options?${params.toString()}`,
-    { disableDuplicate: true }
+    { disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }
@@ -101,7 +101,7 @@ export async function getUsageRecords(
   const params = usageRecordParams(filters)
   const response = await api.get<ApiResponse<UsageRecordPage>>(
     `/api/managed-instances/${instanceId}/usage-records?${params.toString()}`,
-    { disableDuplicate: true }
+    { disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }
@@ -113,7 +113,7 @@ export async function getUsageRecordSummary(
   const params = usageRecordParams(filters)
   const response = await api.get<ApiResponse<UsageRecordSummary>>(
     `/api/managed-instances/${instanceId}/usage-records/summary?${params.toString()}`,
-    { disableDuplicate: true }
+    { disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }

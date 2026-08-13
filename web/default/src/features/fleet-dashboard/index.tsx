@@ -81,7 +81,9 @@ import {
   getManagedInstanceRealtimeMetrics,
   getManagedInstances,
 } from '../managed-instances/api'
+import { InstanceConnectionAlert } from '../managed-instances/components/instance-connection-alert'
 import { StatusBadge } from '../managed-instances/components/status-badge'
+import { isInstanceConnectionError } from '../managed-instances/errors'
 import type {
   ManagedInstance,
   ManagedInstanceAlert,
@@ -549,6 +551,9 @@ export function FleetDashboard() {
     !dailyUsageLoading &&
     dailyUsageData.length === 0 &&
     metricQueries.some((query) => query.isError)
+  const connectionFailed = [...metricQueries, ...rpmQueries].some((query) =>
+    isInstanceConnectionError(query.error)
+  )
   const isRefreshing =
     instancesQuery.isFetching ||
     alertsQuery.isFetching ||
@@ -645,26 +650,34 @@ export function FleetDashboard() {
     content = <EmptyFleet family={family} />
   } else {
     content = (
-      <DashboardContent
-        instances={instances}
-        family={family}
-        rows={rows}
-        totals={totals}
-        openAlerts={openAlerts}
-        alertsError={alertsQuery.isError}
-        healthData={healthData}
-        chartData={chartData}
-        dailyUsageData={dailyUsageData}
-        dailyUsageLoading={dailyUsageLoading}
-        dailyUsageError={dailyUsageError}
-        healthRate={healthRate}
-        coverage={coverage}
-        metricCoverage={metricCoverage}
-        metric={metric}
-        onMetricChange={setMetric}
-        rpmRefreshing={rpmRefreshing}
-        onRPMRefresh={refreshRPM}
-      />
+      <div className='grid gap-4'>
+        {connectionFailed && (
+          <InstanceConnectionAlert
+            onRetry={refresh}
+            retrying={isRefreshing || rpmRefreshing}
+          />
+        )}
+        <DashboardContent
+          instances={instances}
+          family={family}
+          rows={rows}
+          totals={totals}
+          openAlerts={openAlerts}
+          alertsError={alertsQuery.isError}
+          healthData={healthData}
+          chartData={chartData}
+          dailyUsageData={dailyUsageData}
+          dailyUsageLoading={dailyUsageLoading}
+          dailyUsageError={dailyUsageError}
+          healthRate={healthRate}
+          coverage={coverage}
+          metricCoverage={metricCoverage}
+          metric={metric}
+          onMetricChange={setMetric}
+          rpmRefreshing={rpmRefreshing}
+          onRPMRefresh={refreshRPM}
+        />
+      </div>
     )
   }
 

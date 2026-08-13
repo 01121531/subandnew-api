@@ -68,6 +68,8 @@ import {
   getManagedInstanceAccountOutput,
   getManagedInstances,
 } from '@/features/managed-instances/api'
+import { InstanceConnectionAlert } from '@/features/managed-instances/components/instance-connection-alert'
+import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type {
   ManagedInstance,
   ManagedInstanceAccountOutputItem,
@@ -337,7 +339,8 @@ export function ManagedAccounts() {
         const response = await getManagedInstanceInventory(
           instance.id,
           'auto',
-          ''
+          '',
+          { silent: true }
         )
         const observation = response.data
         if (
@@ -473,6 +476,9 @@ export function ManagedAccounts() {
       (observation != null && observation.collection_status !== 'succeeded')
     )
   })
+  const connectionFailed = [...inventoryQueries, ...outputQueries].some(
+    (query) => isInstanceConnectionError(query.error)
+  )
   const collectedInstances = inventoryQueries.filter(
     (query) => query.data?.data.collection_status === 'succeeded'
   ).length
@@ -535,6 +541,9 @@ export function ManagedAccounts() {
   } else {
     content = (
       <div className='grid gap-4 pb-6'>
+        {connectionFailed && (
+          <InstanceConnectionAlert onRetry={refresh} retrying={isRefreshing} />
+        )}
         <AccountSummary
           total={rows.length}
           available={available}

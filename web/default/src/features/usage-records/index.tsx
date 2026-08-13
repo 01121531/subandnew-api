@@ -49,6 +49,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { getManagedInstances } from '@/features/managed-instances/api'
+import { InstanceConnectionAlert } from '@/features/managed-instances/components/instance-connection-alert'
+import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type { ManagedInstance } from '@/features/managed-instances/types'
 import { cn } from '@/lib/utils'
 
@@ -446,6 +448,20 @@ export function UsageRecords() {
     retry: false,
     staleTime: USAGE_RECORDS_REFRESH_MS,
   })
+  const connectionFailed = [
+    recordsQuery.error,
+    summaryQuery.error,
+    filterOptionsQuery.error,
+  ].some(isInstanceConnectionError)
+  const retryConnection = () => {
+    void recordsQuery.refetch()
+    void summaryQuery.refetch()
+    void filterOptionsQuery.refetch()
+  }
+  const retryingConnection =
+    recordsQuery.isFetching ||
+    summaryQuery.isFetching ||
+    filterOptionsQuery.isFetching
   const result = recordsQuery.data?.data
   const records = result?.items ?? EMPTY_RECORDS
   const sortedRecords = useMemo(
@@ -706,6 +722,13 @@ export function UsageRecords() {
             </div>
           </form>
 
+          {connectionFailed && (
+            <InstanceConnectionAlert
+              onRetry={retryConnection}
+              retrying={retryingConnection}
+            />
+          )}
+
           <UsageSummaryPanel
             summary={summaryQuery.data?.data}
             loading={summaryQuery.isLoading}
@@ -760,7 +783,10 @@ export function UsageRecords() {
               system={system}
               records={sortedRecords}
               loading={recordsQuery.isLoading || instancesQuery.isLoading}
-              error={recordsQuery.isError || instancesQuery.isError}
+              error={
+                (recordsQuery.isError && records.length === 0) ||
+                instancesQuery.isError
+              }
               hasInstance={selectedId > 0}
               onRetry={() => void recordsQuery.refetch()}
             />

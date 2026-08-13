@@ -156,7 +156,8 @@ export async function checkManagedInstance(
 export async function getManagedInstanceInventory(
   id: number,
   resource = 'auto',
-  cursor = ''
+  cursor = '',
+  options?: { silent?: boolean }
 ): Promise<
   ApiResponse<ManagedInstanceObservation<ManagedInstanceInventoryPage>>
 > {
@@ -164,7 +165,11 @@ export async function getManagedInstanceInventory(
   if (cursor) params.set('cursor', cursor)
   const response = await api.get(
     `/api/managed-instances/${id}/inventory?${params.toString()}`,
-    { disableDuplicate: true }
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
   )
   return response.data
 }

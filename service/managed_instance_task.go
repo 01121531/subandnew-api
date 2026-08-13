@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const maxManagedInstanceProbeBackoff = 30 * time.Minute
+const failedManagedInstanceProbeInterval = time.Hour
 
 const managedInstanceSyncInterval = 5 * time.Minute
 
@@ -641,15 +641,8 @@ func managedInstanceProbeDue(instance *model.ManagedInstance, now int64) bool {
 	if interval < 10*time.Second {
 		interval = time.Minute
 	}
-	failures := instance.ConsecutiveFailures
-	if failures > 0 {
-		if failures > 6 {
-			failures = 6
-		}
-		interval *= time.Duration(1 << failures)
-		if interval > maxManagedInstanceProbeBackoff {
-			interval = maxManagedInstanceProbeBackoff
-		}
+	if instance.ConsecutiveFailures > 0 {
+		return now >= instance.LastCheckedAt+int64(failedManagedInstanceProbeInterval/time.Second)
 	}
 	jitterWindow := int64(interval / 5 / time.Second)
 	jitter := int64(0)
