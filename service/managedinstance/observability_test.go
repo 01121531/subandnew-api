@@ -96,17 +96,17 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	requestedPages := make([]string, 0, 9)
 	var requestedPagesMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if strings.HasPrefix(request.URL.Path, "/api/v1/admin/accounts/") && strings.HasSuffix(request.URL.Path, "/usage") {
+		if strings.HasPrefix(request.URL.Path, "/api/v1/admin/accounts/") && strings.HasSuffix(request.URL.Path, "/stats") {
 			require.Equal(t, http.MethodGet, request.Method)
-			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			days, err := strconv.Atoi(request.URL.Query().Get("days"))
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, days, 1)
+			require.LessOrEqual(t, days, 90)
 			parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
 			id, err := strconv.ParseInt(parts[len(parts)-2], 10, 64)
 			require.NoError(t, err)
-			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"seven_day":{"window_stats":{"requests":%d,"tokens":%d,"cost":%.2f}}}}`, id*10, id*1000, float64(id)/10))
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"summary":{"total_requests":%d,"total_tokens":%d,"total_cost":%.2f}}}`, id*10, id*1000, float64(id)/10))
 			return
-		}
-		if request.URL.Path == "/api/v1/admin/accounts/today-stats/batch" {
-			t.Fatal("supported account usage endpoint must not use the legacy batch endpoint")
 		}
 		require.Equal(t, "/api/v1/admin/accounts", request.URL.Path)
 		require.Equal(t, "100", request.URL.Query().Get("page_size"))
@@ -120,7 +120,7 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 		case "2":
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":2,"name":"second","platform":"openai","type":"apikey","status":"active","schedulable":false,"created_at":"2026-08-02T10:00:00Z","error_message":"rate limited"}],"total":3,"page":2,"page_size":1,"pages":3}}`)
 		case "3":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":3,"name":"third"}],"total":3,"page":3,"page_size":1,"pages":3}}`)
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":3,"name":"third","created_at":"2026-08-03T10:00:00Z"}],"total":3,"page":3,"page_size":1,"pages":3}}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -183,17 +183,34 @@ func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedT
 	require.ElementsMatch(t, []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, requestedOffsets)
 }
 
-func TestCollectInventoryFallsBackToSub2APIBatchUsage(t *testing.T) {
+func TestCollectInventoryAggregatesLifetimeUsageForOldSub2APIAccount(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	createdAt := time.Now().AddDate(0, 0, -120).UTC()
+	usagePages := make([]string, 0, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/v1/admin/accounts":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":9,"name":"legacy"}],"total":1}}`)
-		case "/api/v1/admin/accounts/9/usage":
-			http.NotFound(response, request)
-		case "/api/v1/admin/accounts/today-stats/batch":
-			writeProbeJSON(response, `{"code":0,"data":{"stats":{"9":{"requests":4,"tokens":800,"cost":0.6}}}}`)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"items":[{"id":9,"name":"legacy","created_at":%q}],"total":1}}`, createdAt.Format(time.RFC3339)))
+		case "/api/v1/admin/usage":
+			require.Equal(t, "9", request.URL.Query().Get("account_id"))
+			require.Equal(t, createdAt.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Format("2006-01-02"), request.URL.Query().Get("start_date"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			page := request.URL.Query().Get("page")
+			usagePages = append(usagePages, page)
+			if page == "1" {
+				items := make([]map[string]any, usageRecordMaxPageSize)
+				for index := range items {
+					items[index] = map[string]any{"input_tokens": 2, "output_tokens": 1, "total_cost": 0.01, "account_rate_multiplier": 2}
+				}
+				encoded, err := json.Marshal(items)
+				require.NoError(t, err)
+				writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"items":%s,"total":1,"page":1,"page_size":%d}}`, encoded, usageRecordMaxPageSize))
+				return
+			}
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"input_tokens":5,"output_tokens":3,"cache_read_tokens":2,"actual_cost":0.5}],"total":1,"page":2,"page_size":100}}`)
+		case "/api/v1/admin/accounts/9/stats":
+			t.Fatal("accounts older than 90 days must use lifetime usage records")
 		default:
 			http.NotFound(response, request)
 		}
@@ -205,9 +222,10 @@ func TestCollectInventoryFallsBackToSub2APIBatchUsage(t *testing.T) {
 	require.NoError(t, err)
 	page := view.Data.(*InventoryPage)
 	require.Len(t, page.Items, 1)
-	require.Equal(t, 4.0, *page.Items[0].Requests)
-	require.Equal(t, 800.0, *page.Items[0].Tokens)
-	require.Equal(t, 0.6, *page.Items[0].Cost)
+	require.Equal(t, []string{"1", "2"}, usagePages)
+	require.Equal(t, float64(usageRecordMaxPageSize+1), *page.Items[0].Requests)
+	require.Equal(t, float64(usageRecordMaxPageSize*3+10), *page.Items[0].Tokens)
+	require.InDelta(t, float64(usageRecordMaxPageSize)*0.02+0.5, *page.Items[0].Cost, 0.000001)
 }
 
 func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {

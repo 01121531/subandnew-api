@@ -969,7 +969,7 @@ function AccountTable(props: {
     },
     {
       value: 'cost',
-      label: t(isChannel ? 'Used quota' : '7-day consumption'),
+      label: t(isChannel ? 'Used quota' : 'Total consumption'),
     },
     { value: 'last_activity', label: t('Last activity') },
   ]
@@ -1004,7 +1004,7 @@ function AccountTable(props: {
             <TableHead className='text-right'>
               {isConductor
                 ? '运行负载'
-                : t(isChannel ? 'Used quota' : '7-day consumption')}
+                : t(isChannel ? 'Used quota' : 'Total consumption')}
             </TableHead>
             <TableHead>{t('Last activity')}</TableHead>
             {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}

@@ -1204,38 +1204,29 @@ func enrichSub2AccountUsage(ctx context.Context, connector *Connector, credentia
 	if page == nil || len(page.Items) == 0 {
 		return
 	}
-	first, endpointAvailable := fetchSub2AccountUsage(ctx, connector, credential, page.Items[0].ID)
-	if !endpointAvailable {
-		enrichSub2AccountUsageBatch(ctx, connector, credential, page)
-		return
-	}
-	applySub2AccountUsage(&page.Items[0], first)
-	if len(page.Items) == 1 {
-		return
-	}
 
 	type usageResult struct {
 		Index int
 		Usage *sub2AccountUsage
 	}
 	const workerLimit = 12
-	workerCount := min(workerLimit, len(page.Items)-1)
+	workerCount := min(workerLimit, len(page.Items))
 	jobs := make(chan int)
-	results := make(chan usageResult, len(page.Items)-1)
+	results := make(chan usageResult, len(page.Items))
 	var workers sync.WaitGroup
 	for range workerCount {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
 			for index := range jobs {
-				usage, _ := fetchSub2AccountUsage(ctx, connector, credential, page.Items[index].ID)
+				usage := fetchSub2AccountLifetimeUsage(ctx, connector, credential, page.Items[index])
 				results <- usageResult{Index: index, Usage: usage}
 			}
 		}()
 	}
 	go func() {
 		defer close(jobs)
-		for index := 1; index < len(page.Items); index++ {
+		for index := range page.Items {
 			select {
 			case jobs <- index:
 			case <-ctx.Done():
@@ -1252,44 +1243,123 @@ func enrichSub2AccountUsage(ctx context.Context, connector *Connector, credentia
 	}
 }
 
-func fetchSub2AccountUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID int64) (*sub2AccountUsage, bool) {
-	if accountID <= 0 {
-		return nil, true
+func fetchSub2AccountLifetimeUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial, item InventoryItem) *sub2AccountUsage {
+	if item.ID <= 0 {
+		return nil
 	}
-	query := url.Values{}
-	query.Set("timezone", "Asia/Shanghai")
-	endpoint := "/api/v1/admin/accounts/" + strconv.FormatInt(accountID, 10) + "/usage?" + query.Encode()
-	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint, nil)
+	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
-		return nil, false
+		location = time.UTC
 	}
-	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
-		return nil, false
+	now := time.Now().In(location)
+	if item.CreatedAt > 0 {
+		created := time.Unix(item.CreatedAt, 0).In(location)
+		days := int(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, location).Sub(
+			time.Date(created.Year(), created.Month(), created.Day(), 0, 0, 0, 0, location),
+		).Hours()/24) + 1
+		if days < 1 {
+			days = 1
+		}
+		if days <= 90 {
+			if usage := fetchSub2AccountStats(ctx, connector, credential, item.ID, days); usage != nil {
+				return usage
+			}
+		}
 	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, false
+	return fetchSub2AccountUsageRecords(ctx, connector, credential, item.ID, item.CreatedAt, now, location)
+}
+
+func fetchSub2AccountStats(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID int64, days int) *sub2AccountUsage {
+	query := url.Values{"days": {strconv.Itoa(days)}}
+	endpoint := "/api/v1/admin/accounts/" + strconv.FormatInt(accountID, 10) + "/stats?" + query.Encode()
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint, nil)
+	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil
 	}
 	data, err := sub2EnvelopeData(response)
 	if err != nil {
-		return nil, true
+		return nil
 	}
 	var payload struct {
-		SevenDay *struct {
-			WindowStats struct {
-				Requests float64 `json:"requests"`
-				Tokens   float64 `json:"tokens"`
-				Cost     float64 `json:"cost"`
-			} `json:"window_stats"`
-		} `json:"seven_day"`
+		Summary *struct {
+			Requests float64 `json:"total_requests"`
+			Tokens   float64 `json:"total_tokens"`
+			Cost     float64 `json:"total_cost"`
+		} `json:"summary"`
 	}
-	if json.Unmarshal(data, &payload) != nil || payload.SevenDay == nil {
-		return nil, true
+	if json.Unmarshal(data, &payload) != nil || payload.Summary == nil {
+		return nil
 	}
-	return &sub2AccountUsage{
-		Requests: payload.SevenDay.WindowStats.Requests,
-		Tokens:   payload.SevenDay.WindowStats.Tokens,
-		Cost:     payload.SevenDay.WindowStats.Cost,
-	}, true
+	return &sub2AccountUsage{Requests: payload.Summary.Requests, Tokens: payload.Summary.Tokens, Cost: payload.Summary.Cost}
+}
+
+func fetchSub2AccountUsageRecords(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID int64, createdAt int64, now time.Time, location *time.Location) *sub2AccountUsage {
+	start := time.Unix(0, 0).In(location)
+	if createdAt > 0 {
+		start = time.Unix(createdAt, 0).In(location)
+	}
+	total := &sub2AccountUsage{}
+	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
+		query := url.Values{
+			"account_id": {strconv.FormatInt(accountID, 10)},
+			"start_date": {start.Format("2006-01-02")},
+			"end_date":   {now.AddDate(0, 0, 1).Format("2006-01-02")},
+			"timezone":   {location.String()},
+			"page":       {strconv.Itoa(pageNumber)},
+			"page_size":  {strconv.Itoa(usageRecordMaxPageSize)},
+		}
+		response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/admin/usage?"+query.Encode(), nil)
+		if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			return nil
+		}
+		page, err := decodeUsageRecordPage(model.ManagedInstanceKindSub2API, response.Body)
+		if err != nil {
+			return nil
+		}
+		if len(page.Items) == 0 {
+			return total
+		}
+		for _, raw := range page.Items {
+			tokens, cost, err := sub2AccountUsageRecordTotals(raw)
+			if err != nil {
+				return nil
+			}
+			total.Requests++
+			total.Tokens += tokens
+			total.Cost += cost
+		}
+		if len(page.Items) < page.PageSize {
+			return total
+		}
+	}
+	return nil
+}
+
+func sub2AccountUsageRecordTotals(raw json.RawMessage) (float64, float64, error) {
+	var item map[string]any
+	if json.Unmarshal(raw, &item) != nil {
+		return 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	value := func(key string) (float64, bool) {
+		return usageNumber(item[key])
+	}
+	number := func(key string) float64 {
+		result, _ := value(key)
+		return result
+	}
+	tokens := number("input_tokens") + number("output_tokens") + number("cache_read_tokens") + number("cache_creation_tokens")
+	baseCost, hasBaseCost := value("account_stats_cost")
+	if !hasBaseCost {
+		baseCost, hasBaseCost = value("total_cost")
+	}
+	if hasBaseCost {
+		multiplier := 1.0
+		if configured, ok := value("account_rate_multiplier"); ok {
+			multiplier = configured
+		}
+		return tokens, baseCost * multiplier, nil
+	}
+	return tokens, number("actual_cost"), nil
 }
 
 func applySub2AccountUsage(item *InventoryItem, usage *sub2AccountUsage) {
@@ -1300,43 +1370,6 @@ func applySub2AccountUsage(item *InventoryItem, usage *sub2AccountUsage) {
 	item.Tokens = &usage.Tokens
 	item.Cost = &usage.Cost
 	item.CostUnit = "usd"
-}
-
-func enrichSub2AccountUsageBatch(ctx context.Context, connector *Connector, credential *CredentialMaterial, page *InventoryPage) {
-	accountIDs := make([]int64, 0, len(page.Items))
-	for _, item := range page.Items {
-		if item.ID > 0 {
-			accountIDs = append(accountIDs, item.ID)
-		}
-	}
-	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodPost, "/api/v1/admin/accounts/today-stats/batch", map[string]any{"account_ids": accountIDs})
-	if err != nil {
-		return
-	}
-	data, err := sub2EnvelopeData(response)
-	if err != nil {
-		return
-	}
-	var payload struct {
-		Stats map[string]struct {
-			Requests float64 `json:"requests"`
-			Tokens   float64 `json:"tokens"`
-			Cost     float64 `json:"cost"`
-		} `json:"stats"`
-	}
-	if json.Unmarshal(data, &payload) != nil {
-		return
-	}
-	for index := range page.Items {
-		stats, ok := payload.Stats[strconv.FormatInt(page.Items[index].ID, 10)]
-		if !ok {
-			continue
-		}
-		page.Items[index].Requests = &stats.Requests
-		page.Items[index].Tokens = &stats.Tokens
-		page.Items[index].Cost = &stats.Cost
-		page.Items[index].CostUnit = "usd"
-	}
 }
 
 func summaryFromInventory(window TimeWindow, page *InventoryPage) *SummaryResult {
