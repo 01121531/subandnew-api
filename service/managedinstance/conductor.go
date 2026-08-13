@@ -355,7 +355,7 @@ func conductorOffset(cursor, kind string) (int, error) {
 		return 0, ErrInvalidInstance
 	}
 	offset, err := strconv.Atoi(strings.TrimPrefix(cursor, prefix))
-	if err != nil || offset < managedInstanceInventoryPageSize || offset >= managedInstanceInventoryMaxItems {
+	if err != nil || offset <= 0 || offset >= managedInstanceInventoryMaxItems {
 		return 0, ErrInvalidInstance
 	}
 	return offset, nil

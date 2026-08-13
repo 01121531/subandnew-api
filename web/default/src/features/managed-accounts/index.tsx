@@ -358,7 +358,7 @@ export function ManagedAccounts() {
     })),
   })
   const outputQueries = useQueries({
-    queries: instances.map((instance) => ({
+    queries: instances.map((instance, index) => ({
       queryKey: [
         'managed-account-output',
         instance.id,
@@ -388,6 +388,8 @@ export function ManagedAccounts() {
       retryDelay: FAILED_REFRESH_RETRY_MS,
       staleTime: INVENTORY_REFRESH_MS / 2,
       refetchInterval: INVENTORY_REFRESH_MS,
+      enabled:
+        inventoryQueries[index]?.data?.data.collection_status === 'succeeded',
     })),
   })
   const rows = useMemo<ResourceRow[]>(

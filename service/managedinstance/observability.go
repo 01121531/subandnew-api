@@ -28,8 +28,8 @@ const managedInstanceSnapshotSchemaVersion = 1
 const (
 	managedInstanceInventoryPageSize = 100
 	managedInstanceInventoryMaxItems = 10000
-	managedInstanceInventoryMaxPages = 100
-	managedInstanceInventoryWorkers  = 4
+	managedInstanceInventoryMaxPages = managedInstanceInventoryMaxItems
+	managedInstanceInventoryWorkers  = 8
 )
 
 type TimeWindow struct {
@@ -278,11 +278,7 @@ func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connecto
 		if strings.TrimSpace(cursor) != "" {
 			return nil, ErrInvalidInstance
 		}
-		headers, err := sub2APIAuthHeaders(ctx, connector, credential)
-		if err != nil {
-			return nil, err
-		}
-		response, err := connector.DoJSON(ctx, http.MethodGet, "/api/v1/user/profile", headers, nil)
+		response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/user/profile", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -317,15 +313,11 @@ func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connecto
 	if resourceKind != "account" {
 		return nil, ErrUnsupportedCapability
 	}
-	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
-	if err != nil {
-		return nil, err
-	}
 	endpoint, pageNumber, err := sub2InventoryEndpoint(cursor)
 	if err != nil {
 		return nil, err
 	}
-	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +330,7 @@ func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connecto
 		return nil, err
 	}
 	if includeAccountUsage {
-		enrichSub2AccountUsage(ctx, connector, headers, page)
+		enrichSub2AccountUsage(ctx, connector, credential, page)
 	}
 	if page.NextCursor == "" {
 		page.NextCursor = sub2NextPageCursor(data, pageNumber)
@@ -670,12 +662,7 @@ func collectInventory(ctx context.Context, instanceID int64, resourceKind string
 		page, collectionErr = collectCompleteInventory(ctx, inventoryAdapter, connector, credential, resourceKind, page)
 	}
 	if collectSub2Usage && collectionErr == nil {
-		headers, headerErr := sub2APIAuthHeaders(ctx, connector, credential)
-		if headerErr != nil {
-			collectionErr = headerErr
-		} else {
-			enrichSub2AccountUsage(ctx, connector, headers, page)
-		}
+		enrichSub2AccountUsage(ctx, connector, credential, page)
 	}
 	if cursor != "" {
 		view, _, err := observationView(instance.Id, observedAt, page, collectionErr)
@@ -777,14 +764,22 @@ func collectParallelInventory(ctx context.Context, adapter InstanceAdapter, conn
 		return nil, err
 	}
 
+	pageStride := parallelInventoryPageStride(first)
+	knownLastPage := parallelInventoryKnownLastPage(first.Total, pageStride)
 	exhausted := false
-	for firstPage := 2; firstPage <= managedInstanceInventoryMaxPages; firstPage += managedInstanceInventoryWorkers {
-		pageCount := min(managedInstanceInventoryWorkers, managedInstanceInventoryMaxPages-firstPage+1)
+	speculative := false
+	for firstPage := 2; firstPage <= managedInstanceInventoryMaxPages; {
+		pageCount := 1
+		if firstPage <= knownLastPage {
+			pageCount = min(managedInstanceInventoryWorkers, knownLastPage-firstPage+1)
+		} else if speculative {
+			pageCount = 1
+		}
 		results := make([]parallelInventoryPage, pageCount)
 		var workers sync.WaitGroup
 		for index := range pageCount {
 			pageNumber := firstPage + index
-			cursor := parallelInventoryCursor(adapter.Kind(), resourceKind, pageNumber)
+			cursor := parallelInventoryCursor(adapter.Kind(), resourceKind, pageNumber, pageStride)
 			workers.Add(1)
 			go func(resultIndex int) {
 				defer workers.Done()
@@ -795,13 +790,22 @@ func collectParallelInventory(ctx context.Context, adapter InstanceAdapter, conn
 
 		previousCount := len(combined.Items)
 		var batchErr error
+		emptyPageReached := false
 		for _, result := range results {
 			if result.err != nil {
 				if terminalInventoryPageError(result.err) {
+					emptyPageReached = true
 					continue
 				}
 				batchErr = result.err
 				continue
+			}
+			if result.page == nil || len(result.page.Items) == 0 {
+				emptyPageReached = true
+				continue
+			}
+			if emptyPageReached {
+				return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
 			}
 			if err := appendPage(result.page); err != nil {
 				return nil, err
@@ -817,6 +821,21 @@ func collectParallelInventory(ctx context.Context, adapter InstanceAdapter, conn
 		if batchErr != nil {
 			return nil, batchErr
 		}
+		wasSpeculative := speculative && firstPage > knownLastPage
+		if emptyPageReached {
+			exhausted = true
+			break
+		}
+		firstPage += pageCount
+		if estimated := parallelInventoryKnownLastPage(maxReportedTotal, pageStride); estimated > knownLastPage {
+			knownLastPage = estimated
+		}
+		if firstPage > knownLastPage {
+			speculative = true
+		}
+		if wasSpeculative {
+			knownLastPage = min(managedInstanceInventoryMaxPages, firstPage+managedInstanceInventoryWorkers-1)
+		}
 	}
 	if !exhausted || maxReportedTotal > len(combined.Items) {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
@@ -825,9 +844,23 @@ func collectParallelInventory(ctx context.Context, adapter InstanceAdapter, conn
 	return combined, nil
 }
 
-func parallelInventoryCursor(kind, resourceKind string, pageNumber int) string {
+func parallelInventoryPageStride(first *InventoryPage) int {
+	if first != nil && len(first.Items) > 0 {
+		return len(first.Items)
+	}
+	return 1
+}
+
+func parallelInventoryKnownLastPage(total, stride int) int {
+	if total <= 0 || stride <= 0 {
+		return 1
+	}
+	return max(1, (total+stride-1)/stride)
+}
+
+func parallelInventoryCursor(kind, resourceKind string, pageNumber, stride int) string {
 	if kind == model.ManagedInstanceKindConductor {
-		return fmt.Sprintf("conductor:%s:%d", resourceKind, (pageNumber-1)*managedInstanceInventoryPageSize)
+		return fmt.Sprintf("conductor:%s:%d", resourceKind, (pageNumber-1)*stride)
 	}
 	return fmt.Sprintf("sub2api:%d", pageNumber)
 }
@@ -1167,13 +1200,13 @@ type sub2AccountUsage struct {
 	Cost     float64
 }
 
-func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers http.Header, page *InventoryPage) {
+func enrichSub2AccountUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial, page *InventoryPage) {
 	if page == nil || len(page.Items) == 0 {
 		return
 	}
-	first, endpointAvailable := fetchSub2AccountUsage(ctx, connector, headers, page.Items[0].ID)
+	first, endpointAvailable := fetchSub2AccountUsage(ctx, connector, credential, page.Items[0].ID)
 	if !endpointAvailable {
-		enrichSub2AccountUsageBatch(ctx, connector, headers, page)
+		enrichSub2AccountUsageBatch(ctx, connector, credential, page)
 		return
 	}
 	applySub2AccountUsage(&page.Items[0], first)
@@ -1185,7 +1218,7 @@ func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers h
 		Index int
 		Usage *sub2AccountUsage
 	}
-	const workerLimit = 6
+	const workerLimit = 12
 	workerCount := min(workerLimit, len(page.Items)-1)
 	jobs := make(chan int)
 	results := make(chan usageResult, len(page.Items)-1)
@@ -1195,7 +1228,7 @@ func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers h
 		go func() {
 			defer workers.Done()
 			for index := range jobs {
-				usage, _ := fetchSub2AccountUsage(ctx, connector, headers, page.Items[index].ID)
+				usage, _ := fetchSub2AccountUsage(ctx, connector, credential, page.Items[index].ID)
 				results <- usageResult{Index: index, Usage: usage}
 			}
 		}()
@@ -1219,14 +1252,14 @@ func enrichSub2AccountUsage(ctx context.Context, connector *Connector, headers h
 	}
 }
 
-func fetchSub2AccountUsage(ctx context.Context, connector *Connector, headers http.Header, accountID int64) (*sub2AccountUsage, bool) {
+func fetchSub2AccountUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID int64) (*sub2AccountUsage, bool) {
 	if accountID <= 0 {
 		return nil, true
 	}
 	query := url.Values{}
 	query.Set("timezone", "Asia/Shanghai")
 	endpoint := "/api/v1/admin/accounts/" + strconv.FormatInt(accountID, 10) + "/usage?" + query.Encode()
-	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint, headers, nil)
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, false
 	}
@@ -1269,14 +1302,14 @@ func applySub2AccountUsage(item *InventoryItem, usage *sub2AccountUsage) {
 	item.CostUnit = "usd"
 }
 
-func enrichSub2AccountUsageBatch(ctx context.Context, connector *Connector, headers http.Header, page *InventoryPage) {
+func enrichSub2AccountUsageBatch(ctx context.Context, connector *Connector, credential *CredentialMaterial, page *InventoryPage) {
 	accountIDs := make([]int64, 0, len(page.Items))
 	for _, item := range page.Items {
 		if item.ID > 0 {
 			accountIDs = append(accountIDs, item.ID)
 		}
 	}
-	response, err := connector.DoJSON(ctx, http.MethodPost, "/api/v1/admin/accounts/today-stats/batch", headers, map[string]any{"account_ids": accountIDs})
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodPost, "/api/v1/admin/accounts/today-stats/batch", map[string]any{"account_ids": accountIDs})
 	if err != nil {
 		return
 	}

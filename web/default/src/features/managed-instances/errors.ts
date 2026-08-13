@@ -16,13 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AxiosError } from 'axios'
-
 const INSTANCE_CONNECTION_FAILED = 'instance_connection_failed'
+const REMOTE_DATA_UNAVAILABLE = 'remote_data_unavailable'
+
+function isConnectionMessage(message: unknown) {
+  return (
+    message === INSTANCE_CONNECTION_FAILED ||
+    message === REMOTE_DATA_UNAVAILABLE
+  )
+}
 
 export function isInstanceConnectionError(error: unknown) {
-  if (error instanceof AxiosError) {
-    return error.response?.data?.message === INSTANCE_CONNECTION_FAILED
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = error.response
+    if (response && typeof response === 'object' && 'data' in response) {
+      const data = response.data
+      if (data && typeof data === 'object' && 'message' in data) {
+        return isConnectionMessage(data.message)
+      }
+    }
   }
-  return error instanceof Error && error.message === INSTANCE_CONNECTION_FAILED
+  return error instanceof Error && isConnectionMessage(error.message)
 }

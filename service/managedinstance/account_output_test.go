@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
@@ -123,4 +124,35 @@ func TestCollectAccountOutputUsesRegularNewAPIAccountWithoutAdminFilter(t *testi
 	require.Equal(t, 4.0, result.TotalRequests)
 	require.Equal(t, 25.0, result.TotalTokens)
 	require.Equal(t, 2.0, result.TotalAmount)
+}
+
+func TestCollectAccountOutputReusesRecentInventorySnapshot(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/admin/accounts":
+			t.Fatal("recent inventory snapshot must prevent another account crawl")
+		case "/api/v1/admin/usage":
+			require.Equal(t, "7", request.URL.Query().Get("account_id"))
+			if request.URL.Query().Get("page") != "1" {
+				writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":1,"page":2,"page_size":100,"pages":1}}`)
+				return
+			}
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"input_tokens":10,"output_tokens":5,"actual_cost":0.25}],"total":1,"page":1,"page_size":100,"pages":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "secret"})
+	page := &InventoryPage{ResourceKind: "account", Total: 1, Items: []InventoryItem{{ID: 7, Name: "cached", CreatedAt: 150}}}
+	_, err := persistObservation(instance.Id, model.ManagedInstanceSnapshotTypeInventory, "account", common.GetTimestamp(), page, nil)
+	require.NoError(t, err)
+
+	view, err := CollectAccountOutput(context.Background(), instance.Id, TimeWindow{Start: 100, End: 200})
+	require.NoError(t, err)
+	result := view.Data.(*AccountOutputResult)
+	require.Equal(t, 1, result.AddedAccounts)
+	require.Equal(t, 15.0, result.TotalTokens)
 }

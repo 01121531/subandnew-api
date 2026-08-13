@@ -131,7 +131,7 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	view, err := CollectInventory(context.Background(), instance.Id, "account", "")
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, view.CollectionStatus)
-	require.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}, requestedPages)
+	require.ElementsMatch(t, []string{"1", "2", "3", "4"}, requestedPages)
 	page := view.Data.(*InventoryPage)
 	require.Equal(t, 3, page.Total)
 	require.Len(t, page.Items, 3)
@@ -163,9 +163,9 @@ func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedT
 		switch offset {
 		case "0":
 			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"1","label":"first","available":true}],"total":1}}`)
-		case "100":
+		case "1":
 			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"2","label":"second","available":true}],"total":1}}`)
-		case "200":
+		case "2":
 			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"2","label":"duplicate","available":true},{"account_id":"3","label":"third","available":true}],"total":1}}`)
 		default:
 			writeProbeJSON(response, `{"code":200,"data":{"accounts":[],"total":1}}`)
@@ -180,7 +180,7 @@ func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedT
 	require.Equal(t, 3, page.Total)
 	require.Len(t, page.Items, 3)
 	require.Equal(t, []int64{1, 2, 3}, []int64{page.Items[0].ID, page.Items[1].ID, page.Items[2].ID})
-	require.ElementsMatch(t, []string{"0", "100", "200", "300", "400", "500", "600", "700", "800"}, requestedOffsets)
+	require.ElementsMatch(t, []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}, requestedOffsets)
 }
 
 func TestCollectInventoryFallsBackToSub2APIBatchUsage(t *testing.T) {
