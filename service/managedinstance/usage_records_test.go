@@ -198,6 +198,7 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
 		require.Equal(t, "7", request.URL.Query().Get("account_id"))
 		require.Equal(t, "stream", request.URL.Query().Get("request_type"))
+		require.Equal(t, "true", request.URL.Query().Get("exact_total"))
 		require.Equal(t, "sub2-secret", request.Header.Get("x-api-key"))
 		writeProbeJSON(response, `{"code":0,"message":"success","data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
 	}))
@@ -220,6 +221,7 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
 		case "/api/v1/usage":
 			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
+			require.Equal(t, "true", request.URL.Query().Get("exact_total"))
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
 		case "/api/v1/usage/dashboard/snapshot-v2":
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))

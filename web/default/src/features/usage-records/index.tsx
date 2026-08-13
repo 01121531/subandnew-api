@@ -222,6 +222,7 @@ function requestFilters(
     page_size: String(PAGE_SIZE),
     [system === 'sub2api' ? 'page' : 'p']: String(page),
   }
+  if (system === 'sub2api') result.exact_total = 'true'
   Object.entries(filters).forEach(([key, value]) => {
     if (!value || (Array.isArray(value) && value.length === 0)) return
     if (system === 'new_api' && (key === 'start_time' || key === 'end_time')) {
