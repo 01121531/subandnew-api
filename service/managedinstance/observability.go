@@ -29,6 +29,7 @@ const (
 	managedInstanceInventoryPageSize = 100
 	managedInstanceInventoryMaxItems = 10000
 	managedInstanceInventoryMaxPages = 100
+	managedInstanceInventoryWorkers  = 4
 )
 
 type TimeWindow struct {
@@ -140,10 +141,13 @@ func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector
 		if json.Unmarshal(data, &profile) != nil || profile.ID <= 0 {
 			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(data, &fields)
+		createdAt, _ := firstJSONUnixTime(fields, "created_at", "created_time", "uploaded_at", "upload_time")
 		enabled := profile.Status == 1
 		return &InventoryPage{
 			ResourceKind: "user", Total: 1,
-			Items: []InventoryItem{{ID: profile.ID, Name: profile.Username, Type: strconv.Itoa(profile.Role), Status: strconv.Itoa(profile.Status), Enabled: &enabled}},
+			Items: []InventoryItem{{ID: profile.ID, Name: profile.Username, Type: strconv.Itoa(profile.Role), Status: strconv.Itoa(profile.Status), Enabled: &enabled, CreatedAt: createdAt}},
 		}, nil
 	}
 	resourceKind = normalizeResourceKind(resourceKind, "channel")
@@ -296,6 +300,9 @@ func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connecto
 		if json.Unmarshal(data, &profile) != nil || profile.ID <= 0 {
 			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(data, &fields)
+		createdAt, _ := firstJSONUnixTime(fields, "created_at", "created_time", "uploaded_at", "upload_time")
 		name := strings.TrimSpace(profile.Username)
 		if name == "" {
 			name = strings.TrimSpace(profile.Email)
@@ -303,7 +310,7 @@ func (adapter sub2APIAdapter) inventory(ctx context.Context, connector *Connecto
 		enabled := strings.EqualFold(profile.Status, "active") || strings.EqualFold(profile.Status, "enabled")
 		return &InventoryPage{
 			ResourceKind: "user", Total: 1,
-			Items: []InventoryItem{{ID: profile.ID, Name: name, Type: profile.Role, Status: profile.Status, Enabled: &enabled}},
+			Items: []InventoryItem{{ID: profile.ID, Name: name, Type: profile.Role, Status: profile.Status, Enabled: &enabled, CreatedAt: createdAt}},
 		}, nil
 	}
 	resourceKind = normalizeResourceKind(resourceKind, "account")
@@ -652,9 +659,23 @@ func collectInventory(ctx context.Context, instanceID int64, resourceKind string
 		return nil, err
 	}
 	observedAt := common.GetTimestamp()
-	page, collectionErr := adapter.Inventory(ctx, connector, credential, resourceKind, cursor)
+	inventoryAdapter := adapter
+	collectSub2Usage := false
+	if sub2Adapter, ok := adapter.(sub2APIAdapter); ok && cursor == "" && credentialAccessScope(credential) != model.ManagedInstanceAccessUser && normalizeResourceKind(resourceKind, "account") == "account" {
+		inventoryAdapter = sub2InventoryWithoutUsageAdapter{sub2Adapter}
+		collectSub2Usage = true
+	}
+	page, collectionErr := inventoryAdapter.Inventory(ctx, connector, credential, resourceKind, cursor)
 	if cursor == "" && collectionErr == nil {
-		page, collectionErr = collectCompleteInventory(ctx, adapter, connector, credential, resourceKind, page)
+		page, collectionErr = collectCompleteInventory(ctx, inventoryAdapter, connector, credential, resourceKind, page)
+	}
+	if collectSub2Usage && collectionErr == nil {
+		headers, headerErr := sub2APIAuthHeaders(ctx, connector, credential)
+		if headerErr != nil {
+			collectionErr = headerErr
+		} else {
+			enrichSub2AccountUsage(ctx, connector, headers, page)
+		}
 	}
 	if cursor != "" {
 		view, _, err := observationView(instance.Id, observedAt, page, collectionErr)
@@ -666,6 +687,9 @@ func collectInventory(ctx context.Context, instanceID int64, resourceKind string
 func collectCompleteInventory(ctx context.Context, adapter InstanceAdapter, connector *Connector, credential *CredentialMaterial, resourceKind string, first *InventoryPage) (*InventoryPage, error) {
 	if first == nil {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	if supportsParallelInventory(adapter, first.ResourceKind) {
+		return collectParallelInventory(ctx, adapter, connector, credential, resourceKind, first)
 	}
 	combined := &InventoryPage{
 		ResourceKind: first.ResourceKind,
@@ -703,6 +727,122 @@ func collectCompleteInventory(ctx context.Context, adapter InstanceAdapter, conn
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
 	}
 	return combined, nil
+}
+
+type sub2InventoryWithoutUsageAdapter struct{ sub2APIAdapter }
+
+func (adapter sub2InventoryWithoutUsageAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind, cursor string) (*InventoryPage, error) {
+	return adapter.inventory(ctx, connector, credential, resourceKind, cursor, false)
+}
+
+func supportsParallelInventory(adapter InstanceAdapter, resourceKind string) bool {
+	if resourceKind != "account" {
+		return false
+	}
+	return adapter.Kind() == model.ManagedInstanceKindSub2API || adapter.Kind() == model.ManagedInstanceKindConductor
+}
+
+type parallelInventoryPage struct {
+	page *InventoryPage
+	err  error
+}
+
+func collectParallelInventory(ctx context.Context, adapter InstanceAdapter, connector *Connector, credential *CredentialMaterial, resourceKind string, first *InventoryPage) (*InventoryPage, error) {
+	combined := &InventoryPage{ResourceKind: first.ResourceKind, Items: make([]InventoryItem, 0, max(first.Total, len(first.Items)))}
+	seenIDs := make(map[int64]struct{}, max(first.Total, len(first.Items)))
+	maxReportedTotal := first.Total
+	appendPage := func(page *InventoryPage) error {
+		if page == nil || page.ResourceKind != combined.ResourceKind {
+			return &ProbeError{Code: ProbeErrorInvalidResponse}
+		}
+		if page.Total > maxReportedTotal {
+			maxReportedTotal = page.Total
+		}
+		for _, item := range page.Items {
+			if item.ID <= 0 {
+				continue
+			}
+			if _, duplicate := seenIDs[item.ID]; duplicate {
+				continue
+			}
+			if len(combined.Items) >= managedInstanceInventoryMaxItems {
+				return &ProbeError{Code: ProbeErrorInvalidResponse}
+			}
+			seenIDs[item.ID] = struct{}{}
+			combined.Items = append(combined.Items, item)
+		}
+		return nil
+	}
+	if err := appendPage(first); err != nil {
+		return nil, err
+	}
+
+	exhausted := false
+	for firstPage := 2; firstPage <= managedInstanceInventoryMaxPages; firstPage += managedInstanceInventoryWorkers {
+		pageCount := min(managedInstanceInventoryWorkers, managedInstanceInventoryMaxPages-firstPage+1)
+		results := make([]parallelInventoryPage, pageCount)
+		var workers sync.WaitGroup
+		for index := range pageCount {
+			pageNumber := firstPage + index
+			cursor := parallelInventoryCursor(adapter.Kind(), resourceKind, pageNumber)
+			workers.Add(1)
+			go func(resultIndex int) {
+				defer workers.Done()
+				results[resultIndex].page, results[resultIndex].err = adapter.Inventory(ctx, connector, credential, resourceKind, cursor)
+			}(index)
+		}
+		workers.Wait()
+
+		previousCount := len(combined.Items)
+		var batchErr error
+		for _, result := range results {
+			if result.err != nil {
+				if terminalInventoryPageError(result.err) {
+					continue
+				}
+				batchErr = result.err
+				continue
+			}
+			if err := appendPage(result.page); err != nil {
+				return nil, err
+			}
+		}
+		if len(combined.Items) == previousCount {
+			if batchErr != nil && maxReportedTotal > len(combined.Items) {
+				return nil, batchErr
+			}
+			exhausted = true
+			break
+		}
+		if batchErr != nil {
+			return nil, batchErr
+		}
+	}
+	if !exhausted || maxReportedTotal > len(combined.Items) {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	combined.Total = len(combined.Items)
+	return combined, nil
+}
+
+func parallelInventoryCursor(kind, resourceKind string, pageNumber int) string {
+	if kind == model.ManagedInstanceKindConductor {
+		return fmt.Sprintf("conductor:%s:%d", resourceKind, (pageNumber-1)*managedInstanceInventoryPageSize)
+	}
+	return fmt.Sprintf("sub2api:%d", pageNumber)
+}
+
+func terminalInventoryPageError(err error) bool {
+	var probeErr *ProbeError
+	if !errors.As(err, &probeErr) {
+		return false
+	}
+	switch probeErr.StatusCode {
+	case http.StatusBadRequest, http.StatusNotFound, http.StatusRequestedRangeNotSatisfiable, http.StatusUnprocessableEntity:
+		return true
+	default:
+		return false
+	}
 }
 
 func newAPIPageNumber(cursor string) (int, error) {
@@ -992,7 +1132,7 @@ func normalizeInventoryItem(raw json.RawMessage) (InventoryItem, bool) {
 		return InventoryItem{}, false
 	}
 	status := firstJSONText(fields, "status", "state")
-	createdAt, _ := firstJSONUnixTime(fields, "created_at", "created_time")
+	createdAt, _ := firstJSONUnixTime(fields, "created_at", "created_time", "uploaded_at", "upload_time")
 	lastActivityAt, _ := firstJSONUnixTime(fields, "last_used_at", "test_time")
 	responseTime, hasResponseTime := firstJSONInt64(fields, "response_time")
 	usedQuota, hasUsedQuota := firstJSONFloat64(fields, "used_quota")

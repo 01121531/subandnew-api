@@ -216,6 +216,29 @@ export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
 }
 
+export interface ManagedInstanceAccountOutputItem {
+  account: ManagedInstanceInventoryItem
+  total_requests: number
+  total_tokens: number
+  amount: number
+  currency: string
+  collection_status: ManagedInstanceCollectionStatus
+  error_code?: string
+}
+
+export interface ManagedInstanceAccountOutput {
+  source_instance_id: number
+  kind: string
+  window: { start: number; end: number }
+  items: ManagedInstanceAccountOutputItem[]
+  added_accounts: number
+  collected_accounts: number
+  total_requests: number
+  total_tokens: number
+  total_amount: number
+  currency: string
+}
+
 export interface ManagedInstanceAlert {
   id: number
   instance_id: number

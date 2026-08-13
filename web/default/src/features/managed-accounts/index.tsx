@@ -20,11 +20,15 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
 import {
+  Calculator,
   CheckCircle2,
   CircleHelp,
+  CircleDollarSign,
+  DatabaseZap,
   RefreshCw,
   Search,
   Server,
+  UserPlus,
   Users,
   XCircle,
 } from 'lucide-react'
@@ -54,11 +58,19 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import {
+  createFleetPresetRange,
+  resolveFleetTimeRange,
+  type FleetTimeRange,
+} from '@/features/fleet-dashboard/time-range'
+import { FleetTimeRangeFilter } from '@/features/fleet-dashboard/time-range-filter'
+import {
   getManagedInstanceInventory,
+  getManagedInstanceAccountOutput,
   getManagedInstances,
 } from '@/features/managed-instances/api'
 import type {
   ManagedInstance,
+  ManagedInstanceAccountOutputItem,
   ManagedInstanceInventoryItem,
 } from '@/features/managed-instances/types'
 import { cn } from '@/lib/utils'
@@ -67,6 +79,10 @@ type AccountFamily = 'new_api' | 'sub2api' | 'conductor'
 type ResourceRow = {
   instance: ManagedInstance
   item: ManagedInstanceInventoryItem
+}
+type OutputRow = {
+  instance: ManagedInstance
+  output: ManagedInstanceAccountOutputItem
 }
 type SortDirection = 'asc' | 'desc'
 type AccountSortKey =
@@ -274,6 +290,9 @@ export function ManagedAccounts() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<AccountSortKey>('available')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
+    createFleetPresetRange(7)
+  )
 
   const instancesQuery = useQuery({
     queryKey: ['managed-account-instances'],
@@ -335,6 +354,39 @@ export function ManagedAccounts() {
       refetchInterval: INVENTORY_REFRESH_MS,
     })),
   })
+  const outputQueries = useQueries({
+    queries: instances.map((instance) => ({
+      queryKey: [
+        'managed-account-output',
+        instance.id,
+        timeRange.presetDays ?? 'custom',
+        timeRange.presetDays ? null : timeRange.start.getTime(),
+        timeRange.presetDays ? null : timeRange.end.getTime(),
+      ],
+      queryFn: async () => {
+        const resolved = resolveFleetTimeRange(timeRange)
+        const response = await getManagedInstanceAccountOutput(
+          instance.id,
+          {
+            start: Math.floor(resolved.start.getTime() / 1000),
+            end: Math.floor(resolved.end.getTime() / 1000),
+          },
+          { silent: true }
+        )
+        if (
+          response.data.collection_status !== 'succeeded' ||
+          !response.data.data
+        ) {
+          throw new Error(response.data.error_code || 'collection_failed')
+        }
+        return response
+      },
+      retry: 1,
+      retryDelay: FAILED_REFRESH_RETRY_MS,
+      staleTime: INVENTORY_REFRESH_MS / 2,
+      refetchInterval: INVENTORY_REFRESH_MS,
+    })),
+  })
   const rows = useMemo<ResourceRow[]>(
     () =>
       instances.flatMap((instance, index) => {
@@ -349,6 +401,47 @@ export function ManagedAccounts() {
       }),
     [instances, inventoryQueries]
   )
+  const outputRows = useMemo<OutputRow[]>(
+    () =>
+      instances.flatMap((instance, index) =>
+        (outputQueries[index]?.data?.data.data?.items ?? []).map((output) => ({
+          instance,
+          output,
+        }))
+      ),
+    [instances, outputQueries]
+  )
+  const outputTotals = useMemo(() => {
+    const collected = outputRows.filter(
+      ({ output }) => output.collection_status === 'succeeded'
+    )
+    const currencies = new Set(collected.map(({ output }) => output.currency))
+    const currency = currencies.size === 1 ? [...currencies][0] : 'mixed'
+    const amount =
+      currency === 'mixed'
+        ? null
+        : collected.reduce((sum, { output }) => sum + output.amount, 0)
+    return {
+      added: outputRows.length,
+      collected: collected.length,
+      requests: collected.reduce(
+        (sum, { output }) => sum + output.total_requests,
+        0
+      ),
+      tokens: collected.reduce(
+        (sum, { output }) => sum + output.total_tokens,
+        0
+      ),
+      amount,
+      average:
+        amount == null ||
+        collected.length !== outputRows.length ||
+        outputRows.length === 0
+          ? null
+          : amount / outputRows.length,
+      currency,
+    }
+  }, [outputRows])
   const normalizedSearch = search.trim().toLowerCase()
   const filteredRows = useMemo(() => {
     const filtered = normalizedSearch
@@ -391,7 +484,8 @@ export function ManagedAccounts() {
     : 0
   const isRefreshing =
     instancesQuery.isFetching ||
-    inventoryQueries.some((query) => query.isFetching)
+    inventoryQueries.some((query) => query.isFetching) ||
+    outputQueries.some((query) => query.isFetching)
 
   useEffect(() => {
     if (!instancesQuery.isSuccess || familyCounts[family] > 0) return
@@ -428,6 +522,7 @@ export function ManagedAccounts() {
   const refresh = () => {
     void instancesQuery.refetch()
     for (const query of inventoryQueries) void query.refetch()
+    for (const query of outputQueries) void query.refetch()
   }
 
   let content: ReactNode
@@ -446,6 +541,13 @@ export function ManagedAccounts() {
           unavailable={unavailable}
           unknown={unknown}
           coverage={coverage}
+        />
+        <AccountOutputPanel
+          family={family}
+          rows={outputRows}
+          totals={outputTotals}
+          loading={outputQueries.some((query) => query.isPending)}
+          error={outputQueries.some((query) => query.isError)}
         />
         <AccountTable
           family={family}
@@ -469,6 +571,7 @@ export function ManagedAccounts() {
         {t('Account management')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
+        <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
         <Button
           variant='outline'
           size='icon-sm'
@@ -635,6 +738,197 @@ function AccountSummary(props: {
         </Card>
       ))}
     </section>
+  )
+}
+
+function formatOutputAmount(value: number | null, currency: string) {
+  if (value == null || currency === 'mixed') return '--'
+  if (currency.toUpperCase() === 'USD') return exactCurrency.format(value)
+  return `${exactNumber.format(value)} ${currency || ''}`.trim()
+}
+
+function AccountOutputPanel(props: {
+  family: AccountFamily
+  rows: OutputRow[]
+  totals: {
+    added: number
+    collected: number
+    requests: number
+    tokens: number
+    amount: number | null
+    average: number | null
+    currency: string
+  }
+  loading: boolean
+  error: boolean
+}) {
+  const { t } = useTranslation()
+  const unsupported = props.family === 'conductor'
+  const summary = [
+    {
+      key: 'added',
+      label: t('Accounts added in selected period'),
+      value: props.totals.added,
+      icon: UserPlus,
+      tone: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
+    },
+    {
+      key: 'requests',
+      label: t('Output requests'),
+      value: formatOptionalNumber(props.totals.requests),
+      icon: Users,
+      tone: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    },
+    {
+      key: 'tokens',
+      label: t('Output tokens'),
+      value: formatOptionalNumber(props.totals.tokens),
+      icon: DatabaseZap,
+      tone: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    },
+    {
+      key: 'amount',
+      label: t('Total output amount'),
+      value: formatOutputAmount(props.totals.amount, props.totals.currency),
+      icon: CircleDollarSign,
+      tone: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
+    },
+    {
+      key: 'average',
+      label: t('Average output per account'),
+      value: formatOutputAmount(props.totals.average, props.totals.currency),
+      icon: Calculator,
+      tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    },
+  ]
+  let detailContent: ReactNode
+  if (unsupported) {
+    detailContent = (
+      <PanelEmpty
+        text={t('Conductor does not expose usage by upstream account')}
+      />
+    )
+  } else if (props.loading && props.rows.length === 0) {
+    detailContent = <TableSkeleton wide={false} />
+  } else if (props.rows.length === 0) {
+    detailContent = (
+      <PanelEmpty
+        text={
+          props.error
+            ? t('Account output data could not be loaded')
+            : t('No accounts were added in the selected period')
+        }
+      />
+    )
+  } else {
+    detailContent = (
+      <div className='overflow-x-auto'>
+        <AccountOutputTable family={props.family} rows={props.rows} />
+      </div>
+    )
+  }
+
+  return (
+    <Card className={PANEL_CLASS}>
+      <CardHeader className='border-border/70 border-b py-3.5'>
+        <CardTitle className='flex items-center gap-2'>
+          <CircleDollarSign className='text-muted-foreground size-4' />
+          {t('New account output')}
+        </CardTitle>
+        <p className='text-muted-foreground text-sm'>
+          {t(
+            'Output generated in the selected period by accounts added in that period'
+          )}
+        </p>
+      </CardHeader>
+      <CardContent className='p-0'>
+        <div className='bg-border grid grid-cols-2 gap-px border-b lg:grid-cols-3 xl:grid-cols-5'>
+          {summary.map((item) => (
+            <div key={item.key} className='bg-card min-h-24 p-4'>
+              <div className='flex items-start justify-between gap-2'>
+                <p className='text-muted-foreground text-xs font-medium'>
+                  {item.label}
+                </p>
+                <span
+                  className={cn(
+                    'flex size-7 shrink-0 items-center justify-center rounded-md',
+                    item.tone
+                  )}
+                >
+                  <item.icon className='size-3.5' />
+                </span>
+              </div>
+              <p className='mt-2 font-mono text-xl font-semibold tabular-nums'>
+                {unsupported && item.key !== 'added' ? '--' : item.value}
+              </p>
+            </div>
+          ))}
+        </div>
+        {detailContent}
+      </CardContent>
+    </Card>
+  )
+}
+
+function AccountOutputTable({
+  family,
+  rows,
+}: {
+  family: AccountFamily
+  rows: OutputRow[]
+}) {
+  const { t } = useTranslation()
+  const isChannel = family === 'new_api'
+  return (
+    <Table className='min-w-[860px]'>
+      <TableHeader className='bg-muted/35'>
+        <TableRow>
+          <TableHead className='ps-6'>
+            {t(isChannel ? 'Channel' : 'Account')}
+          </TableHead>
+          <TableHead>{t('Instance')}</TableHead>
+          <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
+          <TableHead className='text-right'>{t('Requests')}</TableHead>
+          <TableHead className='text-right'>{t('Tokens')}</TableHead>
+          <TableHead className='pe-6 text-right'>
+            {t('Output amount')}
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map(({ instance, output }) => (
+          <TableRow key={`${instance.id}:${output.account.id}`}>
+            <TableCell className='ps-6'>
+              <p className='max-w-52 truncate font-medium'>
+                {output.account.name || `#${output.account.id}`}
+              </p>
+              <p className='text-muted-foreground text-xs tabular-nums'>
+                #{output.account.id}
+              </p>
+            </TableCell>
+            <TableCell>{instance.name}</TableCell>
+            <TableCell className='whitespace-nowrap'>
+              {formatTimestamp(output.account.created_at)}
+            </TableCell>
+            <TableCell className='text-right tabular-nums'>
+              {output.collection_status === 'succeeded'
+                ? formatOptionalNumber(output.total_requests)
+                : '--'}
+            </TableCell>
+            <TableCell className='text-right tabular-nums'>
+              {output.collection_status === 'succeeded'
+                ? formatOptionalNumber(output.total_tokens)
+                : '--'}
+            </TableCell>
+            <TableCell className='pe-6 text-right font-medium tabular-nums'>
+              {output.collection_status === 'succeeded'
+                ? formatOutputAmount(output.amount, output.currency)
+                : t('Collection failed')}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   )
 }
 

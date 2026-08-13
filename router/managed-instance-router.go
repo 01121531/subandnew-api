@@ -53,6 +53,7 @@ var managedInstancePermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/:id/inventory", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceInventory},
 	{method: http.MethodGet, path: "/:id/metrics", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceMetrics},
 	{method: http.MethodGet, path: "/:id/realtime-metrics", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceRealtimeMetrics},
+	{method: http.MethodGet, path: "/:id/account-output", permission: authz.ManagedInstanceUsageView, handler: controller.GetManagedInstanceAccountOutput},
 	{method: http.MethodGet, path: "/:id/usage-records", permission: authz.ManagedInstanceUsageView, handler: controller.GetManagedInstanceUsageRecords},
 	{method: http.MethodGet, path: "/:id/usage-records/filter-options", permission: authz.ManagedInstanceUsageView, handler: controller.GetManagedInstanceUsageRecordFilterOptions},
 	{method: http.MethodGet, path: "/:id/usage-records/summary", permission: authz.ManagedInstanceUsageView, handler: controller.GetManagedInstanceUsageRecordSummary},

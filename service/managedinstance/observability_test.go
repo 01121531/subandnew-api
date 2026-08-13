@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,7 +93,8 @@ func TestCollectInventoryAggregatesNewAPIPagesIntoConflictBaseline(t *testing.T)
 func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
-	requestedPages := make([]string, 0, 3)
+	requestedPages := make([]string, 0, 9)
+	var requestedPagesMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if strings.HasPrefix(request.URL.Path, "/api/v1/admin/accounts/") && strings.HasSuffix(request.URL.Path, "/usage") {
 			require.Equal(t, http.MethodGet, request.Method)
@@ -109,7 +111,9 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 		require.Equal(t, "/api/v1/admin/accounts", request.URL.Path)
 		require.Equal(t, "100", request.URL.Query().Get("page_size"))
 		page := request.URL.Query().Get("page")
+		requestedPagesMu.Lock()
 		requestedPages = append(requestedPages, page)
+		requestedPagesMu.Unlock()
 		switch page {
 		case "1":
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"name":"first","platform":"claude","type":"oauth","status":"active","schedulable":true,"created_at":"2026-08-01T10:00:00Z","last_used_at":"2026-08-10T12:30:00Z"}],"total":3,"page":1,"page_size":1,"pages":3}}`)
@@ -127,7 +131,7 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	view, err := CollectInventory(context.Background(), instance.Id, "account", "")
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, view.CollectionStatus)
-	require.Equal(t, []string{"1", "2", "3"}, requestedPages)
+	require.ElementsMatch(t, []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}, requestedPages)
 	page := view.Data.(*InventoryPage)
 	require.Equal(t, 3, page.Total)
 	require.Len(t, page.Items, 3)
@@ -143,6 +147,40 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	require.Equal(t, "usd", page.Items[0].CostUnit)
 	require.False(t, *page.Items[1].Enabled)
 	require.Equal(t, "rate limited", page.Items[1].ErrorMessage)
+}
+
+func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedTotal(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	requestedOffsets := make([]string, 0, 9)
+	var requestedOffsetsMu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/accounts", request.URL.Path)
+		offset := request.URL.Query().Get("offset")
+		requestedOffsetsMu.Lock()
+		requestedOffsets = append(requestedOffsets, offset)
+		requestedOffsetsMu.Unlock()
+		switch offset {
+		case "0":
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"1","label":"first","available":true}],"total":1}}`)
+		case "100":
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"2","label":"second","available":true}],"total":1}}`)
+		case "200":
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"2","label":"duplicate","available":true},{"account_id":"3","label":"third","available":true}],"total":1}}`)
+		default:
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[],"total":1}}`)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "account", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Equal(t, 3, page.Total)
+	require.Len(t, page.Items, 3)
+	require.Equal(t, []int64{1, 2, 3}, []int64{page.Items[0].ID, page.Items[1].ID, page.Items[2].ID})
+	require.ElementsMatch(t, []string{"0", "100", "200", "300", "400", "500", "600", "700", "800"}, requestedOffsets)
 }
 
 func TestCollectInventoryFallsBackToSub2APIBatchUsage(t *testing.T) {

@@ -126,6 +126,19 @@ func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
 
+func GetManagedInstanceAccountOutput(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	result, err := managedinstance.CollectAccountOutput(c.Request.Context(), id, managedInstanceTimeWindow(c))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func GetManagedInstanceUsageRecords(c *gin.Context) {
 	id, ok := managedInstanceID(c)
 	if !ok {

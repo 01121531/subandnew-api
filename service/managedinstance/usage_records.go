@@ -45,6 +45,7 @@ type UsageRecordPage struct {
 type UsageRecordSummary struct {
 	SourceInstanceID int64   `json:"source_instance_id"`
 	Kind             string  `json:"kind"`
+	TotalRequests    float64 `json:"total_requests"`
 	TotalTokens      float64 `json:"total_tokens"`
 	Amount           float64 `json:"amount"`
 	Currency         string  `json:"currency"`
@@ -523,6 +524,7 @@ func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.
 		return nil, err
 	}
 	totalTokens := 0.0
+	totalRequests := 0.0
 	amount := 0.0
 	processed := 0
 	for _, variant := range variants {
@@ -541,6 +543,7 @@ func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.
 				return nil, ErrUsageExportTooLarge
 			}
 			for _, raw := range page.Items {
+				totalRequests += usageRecordRequestCount(client.instance.Kind, raw)
 				tokens, cost, err := usageRecordTotals(client.instance.Kind, raw)
 				if err != nil {
 					return nil, err
@@ -557,10 +560,23 @@ func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.
 	return &UsageRecordSummary{
 		SourceInstanceID: client.instance.Id,
 		Kind:             client.instance.Kind,
+		TotalRequests:    totalRequests,
 		TotalTokens:      totalTokens,
 		Amount:           amount,
 		Currency:         currency,
 	}, nil
+}
+
+func usageRecordRequestCount(kind string, raw json.RawMessage) float64 {
+	if kind != model.ManagedInstanceKindConductor {
+		return 1
+	}
+	var item map[string]any
+	if json.Unmarshal(raw, &item) != nil {
+		return 0
+	}
+	requests, _ := usageNumber(item["requests"])
+	return requests
 }
 
 func usageRecordTotals(kind string, raw json.RawMessage) (float64, float64, error) {
@@ -603,6 +619,7 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 	var payload struct {
 		Success bool `json:"success"`
 		Data    []struct {
+			Count     float64 `json:"count"`
 			TokenUsed float64 `json:"token_used"`
 			Quota     float64 `json:"quota"`
 		} `json:"data"`
@@ -612,8 +629,10 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 	}
 
 	totalTokens := 0.0
+	totalRequests := 0.0
 	quota := 0.0
 	for _, item := range payload.Data {
+		totalRequests += item.Count
 		totalTokens += item.TokenUsed
 		quota += item.Quota
 	}
@@ -621,6 +640,7 @@ func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Va
 	return &UsageRecordSummary{
 		SourceInstanceID: client.instance.Id,
 		Kind:             client.instance.Kind,
+		TotalRequests:    totalRequests,
 		TotalTokens:      totalTokens,
 		Amount:           amount,
 		Currency:         currency,
@@ -680,6 +700,7 @@ func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Valu
 		Code any `json:"code"`
 		Data struct {
 			Trend []struct {
+				Requests    float64 `json:"requests"`
 				TotalTokens float64 `json:"total_tokens"`
 				ActualCost  float64 `json:"actual_cost"`
 			} `json:"trend"`
@@ -689,14 +710,17 @@ func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Valu
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
 	}
 	totalTokens := 0.0
+	totalRequests := 0.0
 	amount := 0.0
 	for _, item := range payload.Data.Trend {
+		totalRequests += item.Requests
 		totalTokens += item.TotalTokens
 		amount += item.ActualCost
 	}
 	return &UsageRecordSummary{
 		SourceInstanceID: client.instance.Id,
 		Kind:             client.instance.Kind,
+		TotalRequests:    totalRequests,
 		TotalTokens:      totalTokens,
 		Amount:           amount,
 		Currency:         "USD",

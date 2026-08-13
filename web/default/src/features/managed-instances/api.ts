@@ -29,6 +29,7 @@ import type {
   ManagedInstanceCredentialInput,
   ManagedInstanceFilters,
   ManagedInstanceAlertList,
+  ManagedInstanceAccountOutput,
   ManagedInstanceInventoryPage,
   ManagedInstanceInput,
   ManagedInstanceList,
@@ -198,6 +199,28 @@ export async function getManagedInstanceRealtimeMetrics(
 > {
   const response = await api.get(
     `/api/managed-instances/${id}/realtime-metrics`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function getManagedInstanceAccountOutput(
+  id: number,
+  window: { start: number; end: number },
+  options?: { silent?: boolean }
+): Promise<
+  ApiResponse<ManagedInstanceObservation<ManagedInstanceAccountOutput>>
+> {
+  const params = new URLSearchParams({
+    start: String(window.start),
+    end: String(window.end),
+  })
+  const response = await api.get(
+    `/api/managed-instances/${id}/account-output?${params.toString()}`,
     {
       disableDuplicate: true,
       skipBusinessError: options?.silent,
