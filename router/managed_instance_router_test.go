@@ -20,6 +20,7 @@ func TestManagedInstancePermissionRoutes(t *testing.T) {
 		http.MethodPost + " /actions/batch":                              authz.ManagedInstanceBatchOperate,
 		http.MethodGet + " /actions/batch/:batch_id":                     authz.ManagedInstanceBatchOperate,
 		http.MethodGet + " /realtime-events":                             authz.ManagedInstanceUsageView,
+		http.MethodGet + " /realtime-history":                            authz.ManagedInstanceUsageView,
 		http.MethodGet + " /:id":                                         authz.ManagedInstanceView,
 		http.MethodGet + " /:id/inventory":                               authz.ManagedInstanceView,
 		http.MethodGet + " /:id/metrics":                                 authz.ManagedInstanceView,

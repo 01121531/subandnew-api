@@ -380,6 +380,9 @@ func Delete(id int64, actorID int) error {
 		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceSnapshot{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedRPMHistory{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("instance_id = ?", id).Delete(&model.ManagedInstanceAlert{}).Error; err != nil {
 			return err
 		}

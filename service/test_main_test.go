@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{},
 		&model.ManagedAccountSnapshot{},
+		&model.ManagedRPMHistory{},
 		&model.ManagedInstanceAlert{},
 		&model.ManagedUsageExport{},
 		&model.BillingFilterTemplate{},
@@ -71,7 +72,7 @@ func truncate(t *testing.T) {
 			"system_task_locks", "system_task_scope_locks", "system_tasks",
 			"managed_instance_operation_batch_items", "managed_instance_operation_batches",
 			"managed_instance_operations", "managed_instance_credentials",
-			"managed_instance_audits", "managed_instance_snapshots", "managed_account_snapshots",
+			"managed_instance_audits", "managed_instance_snapshots", "managed_account_snapshots", "managed_rpm_history",
 			"managed_instance_alerts", "managed_instances",
 			"managed_usage_exports",
 		} {

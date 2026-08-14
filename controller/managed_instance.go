@@ -227,6 +227,23 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 	}
 }
 
+func GetManagedInstanceRPMHistory(c *gin.Context) {
+	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	window := managedInstanceTimeWindow(c)
+	result, err := managedinstance.GetConductorRPMHistory(
+		c.Request.Context(), instanceIDs, c.Query("bucket"), window.Start, window.End,
+	)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func managedInstanceRealtimeIDs(raw string) ([]int64, error) {
 	parts := strings.Split(raw, ",")
 	seen := map[int64]struct{}{}

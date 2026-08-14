@@ -80,6 +80,7 @@ import { cn } from '@/lib/utils'
 import {
   getManagedAlerts,
   getManagedInstanceMetrics,
+  getManagedInstanceRPMHistory,
   getManagedInstanceRealtimeMetrics,
   getManagedInstances,
 } from '../managed-instances/api'
@@ -90,6 +91,7 @@ import type {
   ManagedInstance,
   ManagedInstanceAlert,
   ManagedInstanceSummary,
+  ManagedInstanceRPMHistoryBucket,
 } from '../managed-instances/types'
 import { useManagedInstanceRealtimeEvents } from '../managed-instances/use-realtime-events'
 import {
@@ -122,6 +124,12 @@ type DailyUsageData = {
   value: number
 }
 
+type RPMHistoryData = {
+  timestamp: number
+  rpm: number
+  samples: number
+}
+
 type HealthData = {
   key: string
   label: string
@@ -131,6 +139,7 @@ type HealthData = {
 
 const DASHBOARD_REFRESH_MS = 60_000
 const RPM_REFRESH_MS = 10_000
+const RPM_HISTORY_REFRESH_MS = 10_000
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
@@ -182,9 +191,30 @@ const trendTooltipDate = new Intl.DateTimeFormat(undefined, {
   day: '2-digit',
   timeZone: 'UTC',
 })
+const rpmMinuteTime = new Intl.DateTimeFormat(undefined, {
+  hour: '2-digit',
+  minute: '2-digit',
+})
+const rpmHourTime = new Intl.DateTimeFormat(undefined, {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+})
+const rpmTooltipTime = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+})
 
 const CONSUMPTION_CHART_CONFIG = {
   value: { label: 'Value', color: 'var(--chart-1)' },
+} satisfies ChartConfig
+
+const RPM_CHART_CONFIG = {
+  rpm: { label: 'RPM', color: 'var(--chart-2)' },
 } satisfies ChartConfig
 
 const HEALTH_CHART_CONFIG = {
@@ -354,6 +384,8 @@ export function FleetDashboard() {
   )
   const [timeRange, setTimeRange] = useState(initialPreferences.timeRange)
   const [metric, setMetric] = useState<MetricKey>(initialPreferences.metric)
+  const [rpmHistoryBucket, setRPMHistoryBucket] =
+    useState<ManagedInstanceRPMHistoryBucket>('minute')
 
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
@@ -396,6 +428,22 @@ export function FleetDashboard() {
     conductorInstanceIDs,
     ['rpm', 'status']
   )
+  const rpmHistoryQuery = useQuery({
+    queryKey: [
+      'fleet-dashboard-rpm-history',
+      conductorInstanceIDs.join(','),
+      rpmHistoryBucket,
+    ],
+    queryFn: () =>
+      getManagedInstanceRPMHistory(conductorInstanceIDs, rpmHistoryBucket, {
+        silent: true,
+      }),
+    enabled: family === 'conductor' && conductorInstanceIDs.length > 0,
+    retry: false,
+    staleTime: RPM_HISTORY_REFRESH_MS / 2,
+    refetchInterval: RPM_HISTORY_REFRESH_MS,
+    refetchIntervalInBackground: true,
+  })
   const alerts = alertsQuery.data?.data.items ?? EMPTY_ALERTS
   const metricQueries = useQueries({
     queries: instances.map((instance) => ({
@@ -670,6 +718,7 @@ export function FleetDashboard() {
     void alertsQuery.refetch()
     for (const query of metricQueries) void query.refetch()
     for (const query of rpmQueries) void query.refetch()
+    if (family === 'conductor') void rpmHistoryQuery.refetch()
   }
 
   const refreshRPM = () => {
@@ -719,6 +768,11 @@ export function FleetDashboard() {
           onMetricChange={setMetric}
           rpmRefreshing={rpmRefreshing}
           onRPMRefresh={refreshRPM}
+          rpmHistoryBucket={rpmHistoryBucket}
+          onRPMHistoryBucketChange={setRPMHistoryBucket}
+          rpmHistoryData={rpmHistoryQuery.data?.data.points ?? []}
+          rpmHistoryLoading={rpmHistoryQuery.isLoading}
+          rpmHistoryError={rpmHistoryQuery.isError}
         />
       </div>
     )
@@ -877,12 +931,26 @@ type DashboardContentProps = {
   onMetricChange: (metric: MetricKey) => void
   rpmRefreshing: boolean
   onRPMRefresh: () => void
+  rpmHistoryBucket: ManagedInstanceRPMHistoryBucket
+  onRPMHistoryBucketChange: (bucket: ManagedInstanceRPMHistoryBucket) => void
+  rpmHistoryData: RPMHistoryData[]
+  rpmHistoryLoading: boolean
+  rpmHistoryError: boolean
 }
 
 function DashboardContent(props: DashboardContentProps) {
   return (
     <div className='grid gap-4 pb-6'>
       <SummaryGrid {...props} />
+      {props.family === 'conductor' && (
+        <RPMHistoryPanel
+          bucket={props.rpmHistoryBucket}
+          onBucketChange={props.onRPMHistoryBucketChange}
+          data={props.rpmHistoryData}
+          loading={props.rpmHistoryLoading}
+          error={props.rpmHistoryError}
+        />
+      )}
       <DailyUsagePanel
         family={props.family}
         metric={props.metric}
@@ -907,6 +975,114 @@ function DashboardContent(props: DashboardContentProps) {
       />
       <PerformanceTable family={props.family} rows={props.rows} />
     </div>
+  )
+}
+
+function RPMHistoryPanel(props: {
+  bucket: ManagedInstanceRPMHistoryBucket
+  onBucketChange: (bucket: ManagedInstanceRPMHistoryBucket) => void
+  data: RPMHistoryData[]
+  loading: boolean
+  error: boolean
+}) {
+  const { t } = useTranslation()
+  const subtitle =
+    props.bucket === 'minute'
+      ? t('Average RPM per minute over the last 60 minutes')
+      : t('Average RPM per hour over the last 24 hours')
+  return (
+    <Card className={PANEL_CARD_CLASS}>
+      <CardHeader
+        className={cn(
+          PANEL_HEADER_CLASS,
+          'flex-row items-start justify-between gap-4 space-y-0'
+        )}
+      >
+        <div>
+          <CardTitle>{t('Real-time RPM trend')}</CardTitle>
+          <p className='text-muted-foreground mt-1 text-sm'>{subtitle}</p>
+        </div>
+        <SegmentedControl
+          value={props.bucket}
+          options={['minute', 'hour']}
+          getLabel={(value) => t(value === 'minute' ? 'By minute' : 'By hour')}
+          onChange={props.onBucketChange}
+        />
+      </CardHeader>
+      <CardContent className='py-4'>
+        {props.loading && props.data.length === 0 && (
+          <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
+            <RefreshCw className='size-4 animate-spin' aria-hidden='true' />
+            <span>{t('Data loading')}</span>
+          </div>
+        )}
+        {props.data.length > 0 && (
+          <ChartContainer
+            config={RPM_CHART_CONFIG}
+            className='aspect-auto h-[300px] w-full'
+          >
+            <LineChart
+              accessibilityLayer
+              data={props.data}
+              margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
+            >
+              <CartesianGrid vertical={false} strokeDasharray='3 3' />
+              <XAxis
+                dataKey='timestamp'
+                axisLine={false}
+                tickLine={false}
+                tickMargin={10}
+                minTickGap={36}
+                tickFormatter={(value: number) =>
+                  (props.bucket === 'minute'
+                    ? rpmMinuteTime
+                    : rpmHourTime
+                  ).format(new Date(value * 1000))
+                }
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                width={54}
+                domain={[0, 'auto']}
+                tickFormatter={(value: number) => formatMetric(value, false)}
+              />
+              <ChartTooltip
+                cursor={{ stroke: 'var(--color-border)' }}
+                content={
+                  <ChartTooltipContent
+                    indicator='line'
+                    labelFormatter={(label) =>
+                      rpmTooltipTime.format(new Date(Number(label) * 1000))
+                    }
+                    formatter={(value) => (
+                      <span className='font-mono font-medium tabular-nums'>
+                        {formatMetric(Number(value), false)} RPM
+                      </span>
+                    )}
+                  />
+                }
+              />
+              <Line
+                type='monotone'
+                dataKey='rpm'
+                name='RPM'
+                stroke='var(--color-rpm)'
+                strokeWidth={2.25}
+                dot={props.data.length <= 24}
+                activeDot={{ r: 4 }}
+              />
+            </LineChart>
+          </ChartContainer>
+        )}
+        {props.data.length === 0 && !props.loading && props.error && (
+          <PanelEmpty text={t('Failed to load')} />
+        )}
+        {props.data.length === 0 && !props.loading && !props.error && (
+          <PanelEmpty text={t('RPM history is being collected')} />
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -232,6 +232,7 @@ func (stream *conductorRealtimeStream) bootstrap() {
 
 func (stream *conductorRealtimeStream) run(ctx context.Context) {
 	gopool.Go(func() { stream.runSourceRefresh(ctx) })
+	gopool.Go(func() { stream.runHistorySampler(ctx) })
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {

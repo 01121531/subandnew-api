@@ -43,6 +43,8 @@ import type {
   ManagedInstanceOperationPlanInput,
   ManagedInstancePreflight,
   ManagedInstanceRealtimeMetrics,
+  ManagedInstanceRPMHistory,
+  ManagedInstanceRPMHistoryBucket,
   ManagedInstanceTask,
   ManagedInstanceSummary,
   ManagedConfigBinding,
@@ -207,6 +209,26 @@ export async function getManagedInstanceRealtimeMetrics(
 > {
   const response = await api.get(
     `/api/managed-instances/${id}/realtime-metrics`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function getManagedInstanceRPMHistory(
+  ids: number[],
+  bucket: ManagedInstanceRPMHistoryBucket,
+  options?: { silent?: boolean }
+): Promise<ApiResponse<ManagedInstanceRPMHistory>> {
+  const params = new URLSearchParams({
+    ids: ids.join(','),
+    bucket,
+  })
+  const response = await api.get(
+    `/api/managed-instances/realtime-history?${params.toString()}`,
     {
       disableDuplicate: true,
       skipBusinessError: options?.silent,

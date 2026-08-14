@@ -248,6 +248,21 @@ export interface ManagedInstanceRealtimeState {
   sources?: ManagedInstanceInventorySource[]
 }
 
+export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour'
+
+export interface ManagedInstanceRPMHistoryPoint {
+  timestamp: number
+  rpm: number
+  samples: number
+}
+
+export interface ManagedInstanceRPMHistory {
+  bucket: ManagedInstanceRPMHistoryBucket
+  start: number
+  end: number
+  points: ManagedInstanceRPMHistoryPoint[]
+}
+
 export interface ManagedInstanceAccountOutputItem {
   account: ManagedInstanceInventoryItem
   total_requests: number
