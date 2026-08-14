@@ -210,6 +210,16 @@ const rpmTooltipTime = new Intl.DateTimeFormat(undefined, {
   second: '2-digit',
 })
 
+function formatRPMTimestamp(
+  value: unknown,
+  formatter: Intl.DateTimeFormat
+): string {
+  const timestamp = Number(value)
+  if (!Number.isFinite(timestamp)) return ''
+  const date = new Date(timestamp * 1000)
+  return Number.isFinite(date.getTime()) ? formatter.format(date) : ''
+}
+
 const CONSUMPTION_CHART_CONFIG = {
   value: { label: 'Value', color: 'var(--chart-1)' },
 } satisfies ChartConfig
@@ -1104,10 +1114,12 @@ function DailyUsagePanel(props: {
                 tickMargin={10}
                 minTickGap={36}
                 tickFormatter={(value: number) =>
-                  (props.rpmHistoryBucket === 'minute'
-                    ? rpmMinuteTime
-                    : rpmHourTime
-                  ).format(new Date(value * 1000))
+                  formatRPMTimestamp(
+                    value,
+                    props.rpmHistoryBucket === 'minute'
+                      ? rpmMinuteTime
+                      : rpmHourTime
+                  )
                 }
               />
               <YAxis
@@ -1121,15 +1133,13 @@ function DailyUsagePanel(props: {
                 cursor={{ stroke: 'var(--color-border)' }}
                 content={
                   <ChartTooltipContent
-                    indicator='line'
-                    labelFormatter={(_, payload) => {
-                      const timestamp = Number(payload?.[0]?.payload?.timestamp)
-                      const date = new Date(timestamp * 1000)
-                      return Number.isFinite(timestamp) &&
-                        Number.isFinite(date.getTime())
-                        ? rpmTooltipTime.format(date)
-                        : ''
-                    }}
+                    indicator='dot'
+                    labelFormatter={(_, payload) =>
+                      formatRPMTimestamp(
+                        payload?.[0]?.payload?.timestamp,
+                        rpmTooltipTime
+                      )
+                    }
                     formatter={(value) => (
                       <span className='font-mono font-medium tabular-nums'>
                         {formatMetric(Number(value), false)} RPM
