@@ -424,6 +424,8 @@ func billingErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrExchangeRateUnavailable):
 		return "exchange_rate_unavailable"
+	case errors.Is(err, ErrInvalidDiscountRate):
+		return "invalid_discount_rate"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "target_timeout"
 	case errors.Is(err, gorm.ErrRecordNotFound):

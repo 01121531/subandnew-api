@@ -454,9 +454,11 @@ func prepareRule(input RuleInput, actorID int) (*model.BillingAlertRule, []Thres
 	if _, err := ResolveCycle(commonTimeNow(), input.Timezone, input.CycleType, string(input.CycleConfig)); err != nil {
 		return nil, nil, nil, err
 	}
-	if _, err := parseNonNegativeDecimal(input.DiscountRate); err != nil {
+	normalizedDiscountRate, err := NormalizeDiscountRate(input.DiscountRate)
+	if err != nil {
 		return nil, nil, nil, err
 	}
+	input.DiscountRate = normalizedDiscountRate
 	if !validExchangeMode(input.ExchangeMode) || !validSchedule(input.ScheduleType, input.ScheduleConfig) {
 		return nil, nil, nil, ErrInvalidBillingInput
 	}

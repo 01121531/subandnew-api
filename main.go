@@ -25,6 +25,7 @@ import (
 	"github.com/01121531/subandnew-api/router"
 	"github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/authz"
+	"github.com/01121531/subandnew-api/service/billingalert"
 	_ "github.com/01121531/subandnew-api/setting/performance_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -58,8 +59,24 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
-
 	systemupdate.RecoverInterruptedUpdate(common.Version)
+	if common.IsMasterNode {
+		repair, repairErr := billingalert.RepairLegacyDiscountRates()
+		if repairErr != nil {
+			common.FatalLog("failed to repair billing alert discount rates: " + repairErr.Error())
+			return
+		}
+		if repair.CorrectedTotal() > 0 {
+			common.SysLog(fmt.Sprintf(
+				"billing alert discount repair completed: rules=%d cycles=%d evaluations=%d events=%d",
+				repair.Rules, repair.Cycles, repair.Evaluations, repair.Events,
+			))
+		}
+		if repair.Invalid > 0 {
+			common.SysError(fmt.Sprintf("billing alert discount repair found %d invalid values", repair.Invalid))
+		}
+	}
+
 	common.SysLog("SubAndNew API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
 		gin.SetMode(gin.ReleaseMode)

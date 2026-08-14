@@ -319,7 +319,7 @@ func billingEmailContent(event *model.BillingAlertEvent, rule *model.BillingAler
 		"规则：" + ruleName,
 		"美元消耗：$" + event.USDTotal,
 		"人民币账单：¥" + event.CNYTotal,
-		"折扣比例：" + event.DiscountRate,
+		"折扣比例：" + billingDiscountDisplay(event.DiscountRate),
 		"USD/CNY 汇率：" + event.ExchangeRate,
 	}
 	if event.ErrorCode != "" {
@@ -335,4 +335,12 @@ func billingEmailContent(event *model.BillingAlertEvent, rule *model.BillingAler
 	}
 	htmlBody := "<div style=\"font-family:Arial,sans-serif;max-width:640px\"><h2>" + html.EscapeString(title) + "</h2><table style=\"border-collapse:collapse;width:100%\">" + rows.String() + "</table></div>"
 	return subject, textBody, htmlBody
+}
+
+func billingDiscountDisplay(value string) string {
+	formatted, err := billingalert.FormatDiscountPercent(value)
+	if err != nil {
+		return value
+	}
+	return formatted
 }

@@ -98,9 +98,13 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 			break
 		}
 		for _, event := range events {
+			discountRate, err := FormatDiscountPercent(event.DiscountRate)
+			if err != nil {
+				discountRate = event.DiscountRate
+			}
 			_ = writer.Write([]string{
 				event.EventType, event.InstanceName, event.InstanceKind, event.RuleName, event.ThresholdName,
-				event.Currency, event.Threshold, event.USDTotal, event.CNYTotal, event.DiscountRate,
+				event.Currency, event.Threshold, event.USDTotal, event.CNYTotal, discountRate,
 				event.ExchangeRate, event.ExchangeSource, event.ExchangeObservedDate, event.Recipients,
 				event.ErrorCode, time.Unix(event.CreatedAt, 0).Format(time.RFC3339),
 			})

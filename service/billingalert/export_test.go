@@ -53,5 +53,7 @@ func TestRunAlertExportCreatesReusableCSV(t *testing.T) {
 	require.Len(t, rows, 3)
 	require.Equal(t, "事件类型", rows[0][0])
 	require.Equal(t, "threshold", rows[1][0])
+	require.Equal(t, "80%", rows[1][9])
 	require.Equal(t, "monitor_recovery", rows[2][0])
+	require.Equal(t, "100%", rows[2][9])
 }

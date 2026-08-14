@@ -67,7 +67,7 @@ func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 		Timezone:     "Asia/Shanghai",
 		CycleType:    CycleNaturalMonth,
 		CycleConfig:  json.RawMessage(`{}`),
-		DiscountRate: "0.8",
+		DiscountRate: "55",
 		ExchangeMode: ExchangeModeLatest,
 		ScheduleType: ScheduleInterval,
 		ScheduleConfig: json.RawMessage(`{
@@ -83,6 +83,7 @@ func TestTemplateAndRuleRepositoryLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rule.Recipients, 1)
 	require.Equal(t, "ops@example.com", rule.Recipients[0])
+	require.Equal(t, "0.55", rule.DiscountRate)
 	require.Equal(t, []int64{instance.Id}, rule.InstanceIDs)
 	require.Len(t, rule.Thresholds, 1)
 

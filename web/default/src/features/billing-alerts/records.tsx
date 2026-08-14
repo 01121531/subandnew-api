@@ -40,6 +40,7 @@ import {
   listAlertRecordExports,
   listAlertRecords,
 } from './api'
+import { formatDiscountPercent } from './discount'
 
 const PAGE_SIZE = 20
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -240,7 +241,7 @@ export function BillingAlertRecords() {
                     <TableCell className='text-xs tabular-nums'>
                       <div>{item.exchange_rate || '—'}</div>
                       <div className='text-muted-foreground'>
-                        折扣 {item.discount_rate || '—'}
+                        折扣 {formatDiscountPercent(item.discount_rate)}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -384,7 +385,7 @@ export function BillingAlertRecords() {
                     ¥{selected.cny_total || '—'}
                   </Detail>
                   <Detail label='折扣比例'>
-                    {selected.discount_rate || '—'}
+                    {formatDiscountPercent(selected.discount_rate)}
                   </Detail>
                   <Detail label='USD/CNY 汇率'>
                     {selected.exchange_rate || '—'}

@@ -82,6 +82,10 @@ import {
   updateExchangeSettings,
   updateSMTPSettings,
 } from './api'
+import {
+  discountMultiplierToPercent,
+  discountPercentToMultiplier,
+} from './discount'
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -612,6 +616,7 @@ function RuleDialog({
     if (rule) {
       setInput({
         ...rule,
+        discount_rate: discountMultiplierToPercent(rule.discount_rate),
         cycle_config: parseJSON(rule.cycle_config, {}),
         schedule_config: parseJSON(rule.schedule_config, { seconds: 300 }),
         thresholds: rule.thresholds.map((threshold) => ({ ...threshold })),
@@ -669,9 +674,20 @@ function RuleDialog({
     if (input.thresholds.some((item) => !item.name.trim() || !item.amount)) {
       return toast.error('请完整填写预警档位')
     }
+    const discountPercent = Number(input.discount_rate)
+    const discountRate = discountPercentToMultiplier(input.discount_rate)
+    if (
+      !input.discount_rate.trim() ||
+      !Number.isFinite(discountPercent) ||
+      discountPercent < 0 ||
+      discountPercent > 100 ||
+      !discountRate
+    ) {
+      return toast.error('折扣比例必须在 0% 到 100% 之间')
+    }
     setBusy(true)
     try {
-      const payload = { ...input, recipients }
+      const payload = { ...input, discount_rate: discountRate, recipients }
       const signature = JSON.stringify(payload)
       if (!impact || previewSignature !== signature) {
         const preview = await previewBillingRule(rule?.id ?? null, payload)
@@ -820,9 +836,11 @@ function RuleDialog({
                   onChange={(e) => update('timezone', e.target.value)}
                 />
               </Field>
-              <Field label='折扣比例'>
+              <Field label='折扣比例 (%)'>
                 <Input
                   type='number'
+                  min='0'
+                  max='100'
                   step='0.01'
                   value={input.discount_rate}
                   onChange={(e) => update('discount_rate', e.target.value)}
@@ -1216,7 +1234,7 @@ function blankRule(templateId = 0): BillingRuleInput {
     timezone: 'Asia/Shanghai',
     cycle_type: 'natural_month',
     cycle_config: {},
-    discount_rate: '1',
+    discount_rate: '100',
     exchange_mode: 'latest',
     manual_exchange_rate: '',
     exchange_override: false,

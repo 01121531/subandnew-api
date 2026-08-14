@@ -9,6 +9,12 @@ import (
 const MoneyScale = 8
 
 var ErrInvalidDecimal = errors.New("invalid decimal value")
+var ErrInvalidDiscountRate = errors.New("invalid discount rate")
+
+var (
+	oneDecimal     = big.NewRat(1, 1)
+	hundredDecimal = big.NewRat(100, 1)
+)
 
 func CalculateCNY(usd string, discountRate string, exchangeRate string) (string, error) {
 	usdValue, err := parseNonNegativeDecimal(usd)
@@ -19,6 +25,9 @@ func CalculateCNY(usd string, discountRate string, exchangeRate string) (string,
 	if err != nil {
 		return "", err
 	}
+	if discountValue.Cmp(oneDecimal) > 0 {
+		return "", ErrInvalidDiscountRate
+	}
 	rateValue, err := parseNonNegativeDecimal(exchangeRate)
 	if err != nil {
 		return "", err
@@ -26,6 +35,35 @@ func CalculateCNY(usd string, discountRate string, exchangeRate string) (string,
 	result := new(big.Rat).Mul(usdValue, discountValue)
 	result.Mul(result, rateValue)
 	return formatDecimal(result, MoneyScale), nil
+}
+
+// NormalizeDiscountRate keeps the persisted/API representation as a 0..1
+// multiplier while accepting legacy percentage input such as "55".
+func NormalizeDiscountRate(value string) (string, error) {
+	parsed, err := parseNonNegativeDecimal(value)
+	if err != nil {
+		return "", err
+	}
+	if parsed.Cmp(hundredDecimal) > 0 {
+		return "", ErrInvalidDiscountRate
+	}
+	if parsed.Cmp(oneDecimal) > 0 {
+		parsed.Quo(parsed, hundredDecimal)
+	}
+	return formatCompactDecimal(parsed, MoneyScale), nil
+}
+
+func FormatDiscountPercent(value string) (string, error) {
+	normalized, err := NormalizeDiscountRate(value)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := parseNonNegativeDecimal(normalized)
+	if err != nil {
+		return "", err
+	}
+	parsed.Mul(parsed, hundredDecimal)
+	return formatCompactDecimal(parsed, MoneyScale) + "%", nil
 }
 
 func CompareDecimal(left string, right string) (int, error) {
@@ -80,4 +118,14 @@ func formatDecimal(value *big.Rat, scale int) string {
 		digits = "0" + digits
 	}
 	return digits[:len(digits)-scale] + "." + digits[len(digits)-scale:]
+}
+
+func formatCompactDecimal(value *big.Rat, scale int) string {
+	formatted := formatDecimal(value, scale)
+	formatted = strings.TrimRight(formatted, "0")
+	formatted = strings.TrimRight(formatted, ".")
+	if formatted == "" {
+		return "0"
+	}
+	return formatted
 }
