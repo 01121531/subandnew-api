@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConsumeConductorSSESupportsLargeSingleLine(t *testing.T) {
@@ -31,6 +32,62 @@ func TestConsumeConductorSSERejectsOversizedEvent(t *testing.T) {
 	if !errors.Is(err, ErrConnectorResponseLarge) {
 		t.Fatalf("consumeConductorSSEWithLimit() error = %v, want ErrConnectorResponseLarge", err)
 	}
+}
+
+func TestConsumeConductorSSEDecodedAppliesAccountsBeforeLargeIgnoredFieldsFinish(t *testing.T) {
+	reader, writer := io.Pipe()
+	applied := make(chan conductorRealtimeEnvelope, 1)
+	finished := make(chan error, 1)
+	go func() {
+		finished <- consumeConductorSSEDecoded(reader, func(envelope conductorRealtimeEnvelope) {
+			applied <- envelope
+		})
+	}()
+	go func() {
+		_, _ = io.WriteString(writer, `data: {"type":"account","data":{"kind":"snapshot","accounts":[{"account_id":"1","rpm_current":7}],"session_remaps":"`+strings.Repeat("x", 70*1024))
+	}()
+
+	select {
+	case envelope := <-applied:
+		if len(envelope.Data.Accounts) != 1 || envelope.Data.Accounts[0].RPMCurrent == nil || *envelope.Data.Accounts[0].RPMCurrent != 7 {
+			t.Fatalf("decoded accounts = %#v", envelope.Data.Accounts)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("account snapshot waited for ignored fields to finish")
+	}
+	_ = writer.Close()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("stream decoder did not stop after the source closed")
+	}
+}
+
+func TestDecodeConductorAccountInventoryStopsBeforeLargeIgnoredFields(t *testing.T) {
+	reader := &countingReader{Reader: strings.NewReader(
+		`{"code":200,"data":{"accounts":[{"account_id":"1","label":"one","rpm_current":3}],"total":1,"session_remaps":"` + strings.Repeat("x", 2<<20) + `"}}`,
+	)}
+	accounts, total, err := decodeConductorAccountInventory(reader, 200)
+	if err != nil {
+		t.Fatalf("decodeConductorAccountInventory() error = %v", err)
+	}
+	if total != 1 || len(accounts) != 1 || accounts[0].AccountID != "1" {
+		t.Fatalf("decoded inventory = total %d, accounts %#v", total, accounts)
+	}
+	if reader.readBytes >= 64*1024 {
+		t.Fatalf("decoder read %d bytes, expected it to stop before the large ignored field", reader.readBytes)
+	}
+}
+
+type countingReader struct {
+	io.Reader
+	readBytes int
+}
+
+func (reader *countingReader) Read(target []byte) (int, error) {
+	count, err := reader.Reader.Read(target)
+	reader.readBytes += count
+	return count, err
 }
 
 func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {

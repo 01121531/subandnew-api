@@ -60,6 +60,7 @@ type ConnectorPolicy struct {
 }
 
 type Connector struct {
+	instanceID   int64
 	baseURL      *url.URL
 	client       *http.Client
 	maxBodyBytes int64
@@ -185,7 +186,7 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 		return nil, err
 	}
 	client.Jar = jar
-	return &Connector{baseURL: baseURL, client: client, maxBodyBytes: policy.MaxBodyBytes}, nil
+	return &Connector{instanceID: instance.Id, baseURL: baseURL, client: client, maxBodyBytes: policy.MaxBodyBytes}, nil
 }
 
 func (c *Connector) DoJSON(ctx context.Context, method string, path string, headers http.Header, requestBody any) (*ConnectorResponse, error) {
@@ -239,6 +240,12 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 // OpenStream opens a long-lived response with the connector's SSRF, TLS, and
 // redirect policy. Callers own the returned body and must close it.
 func (c *Connector) OpenStream(ctx context.Context, method string, path string, headers http.Header) (*ConnectorStream, error) {
+	return c.OpenResponse(ctx, method, path, headers, "text/event-stream")
+}
+
+// OpenResponse opens a response body without the normal request timeout or
+// buffering limit. Callers must parse a bounded structure and close the body.
+func (c *Connector) OpenResponse(ctx context.Context, method string, path string, headers http.Header, accept string) (*ConnectorStream, error) {
 	if c == nil || c.client == nil || c.baseURL == nil {
 		return nil, errors.New("managed instance connector is nil")
 	}
@@ -253,7 +260,7 @@ func (c *Connector) OpenStream(ctx context.Context, method string, path string, 
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Accept", accept)
 	for key, values := range headers {
 		for _, value := range values {
 			request.Header.Add(key, value)

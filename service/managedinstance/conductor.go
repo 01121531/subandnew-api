@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -205,6 +206,36 @@ type conductorAccount struct {
 	} `json:"cause"`
 }
 
+func decodeConductorAccounts(decoder *json.Decoder) ([]conductorAccount, error) {
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('[') {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	accounts := make([]conductorAccount, 0, managedInstanceInventoryPageSize)
+	for decoder.More() {
+		if len(accounts) >= managedInstanceInventoryMaxItems {
+			return nil, ErrUsageExportTooLarge
+		}
+		var account conductorAccount
+		if err = decoder.Decode(&account); err != nil {
+			return nil, err
+		}
+		for _, value := range []string{
+			account.AccountID, account.Source, account.Email, account.Label, account.AuthType, account.SubscriptionType,
+			account.Status, account.Health, account.BlockedReason, account.UnavailableKind, account.DispatchState,
+		} {
+			if len(value) > usageRecordMaxTextValue {
+				return nil, ErrConnectorResponseLarge
+			}
+		}
+		accounts = append(accounts, account)
+	}
+	if _, err = decoder.Token(); err != nil {
+		return nil, err
+	}
+	return accounts, nil
+}
+
 func conductorAccountItem(account conductorAccount) (InventoryItem, bool) {
 	id, err := strconv.ParseInt(strings.TrimSpace(account.AccountID), 10, 64)
 	if err != nil || id <= 0 {
@@ -235,29 +266,126 @@ func conductorAccountInventory(ctx context.Context, connector *Connector, creden
 	if err != nil {
 		return nil, err
 	}
+	if connector != nil && connector.instanceID > 0 {
+		if state, ok := activeConductorRealtime(connector.instanceID); ok {
+			items := state.Accounts
+			if offset > len(items) {
+				offset = len(items)
+			}
+			end := min(offset+managedInstanceInventoryPageSize, len(items))
+			page := conductorInventoryPage("account", items[offset:end], len(items), offset)
+			page.Sources = append([]InventorySource(nil), state.Sources...)
+			return page, nil
+		}
+	}
 	query := url.Values{"offset": {strconv.Itoa(offset)}, "limit": {strconv.Itoa(managedInstanceInventoryPageSize)}}
-	response, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/accounts?"+query.Encode(), nil)
+	response, err := conductorOpenJSONResponse(ctx, connector, credential, "/api/v1/accounts?"+query.Encode())
 	if err != nil {
 		return nil, err
 	}
-	data, err := conductorEnvelopeData(response)
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, probeHTTPError(response.StatusCode)
+	}
+	accounts, total, err := decodeConductorAccountInventory(response.Body, response.StatusCode)
 	if err != nil {
 		return nil, err
 	}
-	var payload struct {
-		Accounts []conductorAccount `json:"accounts"`
-		Total    int                `json:"total"`
-	}
-	if json.Unmarshal(data, &payload) != nil || payload.Accounts == nil || payload.Total < 0 {
-		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
-	}
-	items := make([]InventoryItem, 0, len(payload.Accounts))
-	for _, account := range payload.Accounts {
+	items := make([]InventoryItem, 0, len(accounts))
+	for _, account := range accounts {
 		if item, ok := conductorAccountItem(account); ok {
 			items = append(items, item)
 		}
 	}
-	return conductorInventoryPage("account", items, payload.Total, offset), nil
+	return conductorInventoryPage("account", items, total, offset), nil
+}
+
+func conductorOpenJSONResponse(ctx context.Context, connector *Connector, credential *CredentialMaterial, path string) (*ConnectorStream, error) {
+	headers, err := conductorAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return nil, err
+	}
+	response, err := connector.OpenResponse(ctx, http.MethodGet, path, headers, "application/json")
+	if err != nil || credential.AuthType != "account_password" || response == nil || (response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden) {
+		return response, err
+	}
+	response.Body.Close()
+	invalidateConductorSession(connector, credential, strings.TrimPrefix(headers.Get("Authorization"), "Bearer "))
+	headers, err = conductorAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return nil, err
+	}
+	return connector.OpenResponse(ctx, http.MethodGet, path, headers, "application/json")
+}
+
+func decodeConductorAccountInventory(reader io.Reader, statusCode int) ([]conductorAccount, int, error) {
+	decoder := json.NewDecoder(reader)
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: statusCode}
+	}
+	code := 0
+	for decoder.More() {
+		key, keyErr := conductorJSONKey(decoder)
+		if keyErr != nil {
+			return nil, 0, keyErr
+		}
+		switch key {
+		case "code":
+			err = decoder.Decode(&code)
+		case "data":
+			accounts, total, dataErr := decodeConductorAccountInventoryData(decoder)
+			if dataErr != nil {
+				return nil, 0, dataErr
+			}
+			if code == http.StatusUnauthorized || code == http.StatusForbidden {
+				return nil, 0, probeHTTPError(code)
+			}
+			if code != 0 && code != http.StatusOK && code != http.StatusCreated {
+				return nil, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: statusCode}
+			}
+			return accounts, total, nil
+		default:
+			err = discardConductorJSONValue(decoder)
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	return nil, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: statusCode}
+}
+
+func decodeConductorAccountInventoryData(decoder *json.Decoder) ([]conductorAccount, int, error) {
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, 0, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	var accounts []conductorAccount
+	total := -1
+	for decoder.More() {
+		key, keyErr := conductorJSONKey(decoder)
+		if keyErr != nil {
+			return nil, 0, keyErr
+		}
+		switch key {
+		case "accounts":
+			accounts, err = decodeConductorAccounts(decoder)
+		case "total":
+			err = decoder.Decode(&total)
+		default:
+			err = discardConductorJSONValue(decoder)
+		}
+		if err != nil {
+			return nil, 0, err
+		}
+		if accounts != nil && total >= 0 {
+			if len(accounts) > managedInstanceInventoryMaxItems {
+				return nil, 0, ErrUsageExportTooLarge
+			}
+			return accounts, total, nil
+		}
+	}
+	return nil, 0, &ProbeError{Code: ProbeErrorInvalidResponse}
 }
 
 func conductorKeyInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {

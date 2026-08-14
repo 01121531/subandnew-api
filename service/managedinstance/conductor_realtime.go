@@ -23,9 +23,20 @@ import (
 const (
 	conductorRealtimeEventPath     = "/api/v1/system/events"
 	conductorRealtimeEventMaxBytes = 64 << 20
+	conductorRealtimeWireMaxBytes  = 256 << 20
 	conductorRealtimeCloseGrace    = time.Minute
 	conductorSourceRefreshInterval = time.Minute
 )
+
+type conductorRealtimeEnvelope struct {
+	Type string `json:"type"`
+	Data struct {
+		Kind string `json:"kind"`
+		conductorAccount
+		Account  *conductorAccount  `json:"account"`
+		Accounts []conductorAccount `json:"accounts"`
+	} `json:"data"`
+}
 
 type ConductorRealtimeState struct {
 	InstanceID        int64             `json:"instance_id"`
@@ -97,6 +108,19 @@ func CurrentConductorRealtime(instanceID int64) (ConductorRealtimeState, bool) {
 	defer stream.mu.Unlock()
 	state := stream.snapshotLocked()
 	return state, state.RPM.Value != nil
+}
+
+func activeConductorRealtime(instanceID int64) (ConductorRealtimeState, bool) {
+	stream := defaultConductorRealtimeHub.stream(instanceID, false)
+	if stream == nil {
+		return ConductorRealtimeState{}, false
+	}
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	if !stream.running || stream.observedAt == 0 {
+		return ConductorRealtimeState{}, false
+	}
+	return stream.snapshotLocked(), true
 }
 
 func (hub *conductorRealtimeHub) stream(instanceID int64, create bool) *conductorRealtimeStream {
@@ -267,8 +291,8 @@ func (stream *conductorRealtimeStream) consume(ctx context.Context) error {
 		return &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	stream.setStatus("connected", true, "")
-	return consumeConductorSSE(response.Body, func(payload []byte) {
-		stream.applyEvent(payload)
+	return consumeConductorSSEDecoded(response.Body, func(envelope conductorRealtimeEnvelope) {
+		stream.applyEnvelope(envelope)
 	})
 }
 
@@ -340,17 +364,243 @@ func readConductorSSELine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
 	}
 }
 
+// consumeConductorSSEDecoded decodes relevant account fields directly from the
+// stream. Conductor snapshots can contain very large session_remaps and
+// owner_settings values; decoding into the narrow envelope keeps those fields
+// out of memory and avoids reconnecting on an otherwise valid snapshot.
+func consumeConductorSSEDecoded(reader io.Reader, apply func(conductorRealtimeEnvelope)) error {
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	for {
+		field, hasValue, err := readConductorSSEField(buffered)
+		if err != nil {
+			return err
+		}
+		if !hasValue {
+			continue
+		}
+		line := &conductorSSELineReader{reader: buffered, maxBytes: conductorRealtimeWireMaxBytes}
+		if field != "data" {
+			if _, err = io.Copy(io.Discard, line); err != nil {
+				return err
+			}
+			continue
+		}
+		envelope, decodeErr := decodeConductorRealtimeEnvelope(line, apply)
+		_, drainErr := io.Copy(io.Discard, line)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if drainErr != nil {
+			return drainErr
+		}
+		if !envelope.applied && envelope.value.Type == "account" {
+			apply(envelope.value)
+		}
+	}
+}
+
+func readConductorSSEField(reader *bufio.Reader) (string, bool, error) {
+	name := make([]byte, 0, 16)
+	for len(name) <= 128 {
+		value, err := reader.ReadByte()
+		if err != nil {
+			return "", false, err
+		}
+		switch value {
+		case ':':
+			if next, peekErr := reader.Peek(1); peekErr == nil && len(next) == 1 && next[0] == ' ' {
+				_, _ = reader.ReadByte()
+			}
+			return string(name), true, nil
+		case '\n':
+			return strings.TrimSuffix(string(name), "\r"), false, nil
+		default:
+			name = append(name, value)
+		}
+	}
+	return "", false, &ProbeError{Code: ProbeErrorInvalidResponse}
+}
+
+type conductorSSELineReader struct {
+	reader    *bufio.Reader
+	pending   []byte
+	maxBytes  int
+	readBytes int
+	done      bool
+}
+
+func (reader *conductorSSELineReader) Read(target []byte) (int, error) {
+	if len(target) == 0 {
+		return 0, nil
+	}
+	for len(reader.pending) == 0 {
+		if reader.done {
+			return 0, io.EOF
+		}
+		fragment, err := reader.reader.ReadSlice('\n')
+		reader.readBytes += len(fragment)
+		if reader.readBytes > reader.maxBytes {
+			return 0, ErrConnectorResponseLarge
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			reader.done = true
+			fragment = bytes.TrimSuffix(fragment, []byte{'\n'})
+			fragment = bytes.TrimSuffix(fragment, []byte{'\r'})
+		}
+		reader.pending = fragment
+		if err != nil && !errors.Is(err, bufio.ErrBufferFull) && !errors.Is(err, io.EOF) {
+			return 0, err
+		}
+		if len(reader.pending) == 0 && reader.done {
+			return 0, io.EOF
+		}
+	}
+	count := copy(target, reader.pending)
+	reader.pending = reader.pending[count:]
+	return count, nil
+}
+
+type decodedConductorRealtimeEnvelope struct {
+	value   conductorRealtimeEnvelope
+	applied bool
+}
+
+var conductorDirectAccountFields = map[string]struct{}{
+	"account_id": {}, "source": {}, "email": {}, "label": {}, "auth_type": {}, "subscription_type": {},
+	"status": {}, "health": {}, "available": {}, "blocked": {}, "blocked_reason": {}, "unavailable_kind": {},
+	"dispatch_state": {}, "dispatch_state_changed_at": {}, "created_at": {}, "active_session_count": {},
+	"rpm_current": {}, "utilization_5h": {}, "utilization_7d": {}, "utilization_7d_oi": {}, "cause": {}, "_removed": {},
+}
+
+func decodeConductorRealtimeEnvelope(reader io.Reader, apply func(conductorRealtimeEnvelope)) (decodedConductorRealtimeEnvelope, error) {
+	result := decodedConductorRealtimeEnvelope{}
+	decoder := json.NewDecoder(reader)
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return result, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	for decoder.More() {
+		key, err := conductorJSONKey(decoder)
+		if err != nil {
+			return result, err
+		}
+		switch key {
+		case "type":
+			err = decoder.Decode(&result.value.Type)
+		case "data":
+			err = decodeConductorRealtimeData(decoder, &result, apply)
+		default:
+			err = discardConductorJSONValue(decoder)
+		}
+		if err != nil {
+			return result, err
+		}
+	}
+	_, err = decoder.Token()
+	return result, err
+}
+
+func decodeConductorRealtimeData(decoder *json.Decoder, result *decodedConductorRealtimeEnvelope, apply func(conductorRealtimeEnvelope)) error {
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	direct := map[string]json.RawMessage{}
+	for decoder.More() {
+		key, keyErr := conductorJSONKey(decoder)
+		if keyErr != nil {
+			return keyErr
+		}
+		switch key {
+		case "kind":
+			err = decoder.Decode(&result.value.Data.Kind)
+		case "accounts":
+			result.value.Data.Accounts, err = decodeConductorAccounts(decoder)
+			if err == nil && result.value.Type == "account" && result.value.Data.Kind != "" {
+				apply(result.value)
+				result.applied = true
+			}
+		case "account":
+			err = decoder.Decode(&result.value.Data.Account)
+		default:
+			if _, ok := conductorDirectAccountFields[key]; ok {
+				var raw json.RawMessage
+				err = decoder.Decode(&raw)
+				if len(raw) > conductorRealtimeEventMaxBytes {
+					return ErrConnectorResponseLarge
+				}
+				direct[key] = raw
+			} else {
+				err = discardConductorJSONValue(decoder)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if _, err = decoder.Token(); err != nil {
+		return err
+	}
+	if len(direct) > 0 {
+		encoded, marshalErr := json.Marshal(direct)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if unmarshalErr := json.Unmarshal(encoded, &result.value.Data.conductorAccount); unmarshalErr != nil {
+			return unmarshalErr
+		}
+	}
+	return nil
+}
+
+func conductorJSONKey(decoder *json.Decoder) (string, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", err
+	}
+	key, ok := token.(string)
+	if !ok {
+		return "", &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	return key, nil
+}
+
+func discardConductorJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	if delimiter != '{' && delimiter != '[' {
+		return &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	for decoder.More() {
+		if delimiter == '{' {
+			if _, err = conductorJSONKey(decoder); err != nil {
+				return err
+			}
+		}
+		if err = discardConductorJSONValue(decoder); err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token()
+	return err
+}
+
 func (stream *conductorRealtimeStream) applyEvent(payload []byte) {
-	envelope := struct {
-		Type string `json:"type"`
-		Data struct {
-			Kind string `json:"kind"`
-			conductorAccount
-			Account  *conductorAccount  `json:"account"`
-			Accounts []conductorAccount `json:"accounts"`
-		} `json:"data"`
-	}{}
+	envelope := conductorRealtimeEnvelope{}
 	if json.Unmarshal(payload, &envelope) != nil || envelope.Type != "account" {
+		return
+	}
+	stream.applyEnvelope(envelope)
+}
+
+func (stream *conductorRealtimeStream) applyEnvelope(envelope conductorRealtimeEnvelope) {
+	if envelope.Type != "account" {
 		return
 	}
 	stream.mu.Lock()
