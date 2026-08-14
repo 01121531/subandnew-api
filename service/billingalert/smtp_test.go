@@ -54,6 +54,33 @@ func TestSMTPSettingNeverReturnsPassword(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, loaded.PasswordStored)
 	require.Equal(t, "ops@example.com,admin@example.com", loaded.AlertRecipients)
+	require.Equal(t, 3, loaded.InstanceAlertFailureThreshold)
+}
+
+func TestSMTPSettingValidatesInstanceAlertFailureThreshold(t *testing.T) {
+	previous := model.DB
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.SMTPSetting{}))
+	model.DB = db
+	t.Cleanup(func() { model.DB = previous })
+
+	base := SMTPSettingInput{
+		Host: "smtp.example.com", Port: 587, Security: SMTPSecurityStartTLS,
+		FromAddress: "mailer@example.com", AlertRecipients: "ops@example.com",
+	}
+	view, err := UpdateSMTPSetting(base, 1)
+	require.NoError(t, err)
+	require.Equal(t, 3, view.InstanceAlertFailureThreshold)
+
+	base.InstanceAlertFailureThreshold = 100
+	view, err = UpdateSMTPSetting(base, 1)
+	require.NoError(t, err)
+	require.Equal(t, 100, view.InstanceAlertFailureThreshold)
+
+	base.InstanceAlertFailureThreshold = 101
+	_, err = UpdateSMTPSetting(base, 1)
+	require.ErrorIs(t, err, ErrInvalidBillingInput)
 }
 
 func TestParseRecipientListNormalizesAndRejectsInvalidValues(t *testing.T) {

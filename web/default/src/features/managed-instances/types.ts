@@ -52,6 +52,7 @@ export interface ManagedInstance {
   tls_verify: boolean
   request_timeout_seconds: number
   check_interval_seconds: number
+  alert_failure_threshold: number
   last_seen_at: number
   last_checked_at: number
   consecutive_failures: number
@@ -70,6 +71,7 @@ export interface ManagedInstanceInput {
   tls_verify: boolean
   request_timeout_seconds: number
   check_interval_seconds: number
+  alert_failure_threshold: number
   credential?: ManagedInstanceCredentialInput
 }
 
@@ -329,6 +331,18 @@ export interface ManagedInstanceAlert {
   first_seen_at: number
   last_seen_at: number
   resolved_at: number
+  email_status: 'pending' | 'retrying' | 'sent' | 'cancelled'
+  email_recipients: string
+  email_attempts: number
+  email_error: string
+  email_sent_at: number
+  email_next_retry_at: number
+  recovery_email_status: 'pending' | 'retrying' | 'sent' | 'cancelled'
+  recovery_email_recipients: string
+  recovery_email_attempts: number
+  recovery_email_error: string
+  recovery_email_sent_at: number
+  recovery_email_next_retry_at: number
 }
 
 export interface ManagedInstanceAlertList {

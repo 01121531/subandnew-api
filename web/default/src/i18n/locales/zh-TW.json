@@ -1421,6 +1421,17 @@
     "The target hostname could not be resolved by the control-plane server.": "控制平面伺服器無法解析目標網域。",
     "The control-plane server could not reach the target host or port.": "控制平面伺服器無法連線至目標主機或連接埠。",
     "Failed to add instance": "Failed to add instance",
-    "This instance already exists. Refresh the instance list.": "This instance already exists. Refresh the instance list."
+    "This instance already exists. Refresh the instance list.": "This instance already exists. Refresh the instance list.",
+    "Alert after consecutive failures": "Alert after consecutive failures",
+    "Use 0 to inherit the global email setting.": "Use 0 to inherit the global email setting.",
+    "Failure email": "Failure email",
+    "Recovery email": "Recovery email",
+    "Sent at {{time}}": "Sent at {{time}}",
+    "Next retry at {{time}}": "Next retry at {{time}}",
+    "Waiting for email delivery": "Waiting for email delivery",
+    "{{count}} attempts": "{{count}} attempts",
+    "Retrying": "Retrying",
+    "Sent": "Sent",
+    "Cancelled": "Cancelled"
   }
 }

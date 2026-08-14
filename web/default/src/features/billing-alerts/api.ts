@@ -124,6 +124,7 @@ export interface SMTPSetting {
   from_address: string
   reply_to: string
   alert_recipients: string
+  instance_alert_failure_threshold: number
   enabled: boolean
 }
 

@@ -1792,6 +1792,7 @@ function SMTPSettings() {
     from_address: '',
     reply_to: '',
     alert_recipients: '',
+    instance_alert_failure_threshold: 3,
     enabled: false,
   })
   const [testRecipient, setTestRecipient] = useState('')
@@ -1881,6 +1882,20 @@ function SMTPSettings() {
             onChange={(e) => set('alert_recipients', e.target.value)}
             placeholder='ops@example.com, admin@example.com'
           />
+        </Field>
+        <Field label='巡检失败通知阈值'>
+          <Input
+            type='number'
+            min={1}
+            max={100}
+            value={form.instance_alert_failure_threshold}
+            onChange={(e) =>
+              set('instance_alert_failure_threshold', Number(e.target.value))
+            }
+          />
+          <p className='text-muted-foreground mt-1 text-xs'>
+            普通连接错误连续达到此次数后发送邮件；认证、凭据和权限错误首次失败立即通知。
+          </p>
         </Field>
         <label className='flex items-center gap-2 text-sm'>
           <Switch

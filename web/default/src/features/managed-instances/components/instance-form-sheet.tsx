@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -78,6 +79,7 @@ const defaultValues: ManagedInstanceFormValues = {
   tls_verify: true,
   request_timeout_seconds: 10,
   check_interval_seconds: 60,
+  alert_failure_threshold: 0,
   labels: '',
   auth_type: 'account_password',
   access_scope: 'admin',
@@ -167,6 +169,7 @@ function toInput(
     tls_verify: autoDetect ? true : values.tls_verify,
     request_timeout_seconds: autoDetect ? 10 : values.request_timeout_seconds,
     check_interval_seconds: autoDetect ? 60 : values.check_interval_seconds,
+    alert_failure_threshold: autoDetect ? 0 : values.alert_failure_threshold,
   }
   if (values.secret.trim()) {
     input.credential = {
@@ -206,6 +209,7 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
       tls_verify: props.instance.tls_verify,
       request_timeout_seconds: props.instance.request_timeout_seconds,
       check_interval_seconds: props.instance.check_interval_seconds,
+      alert_failure_threshold: props.instance.alert_failure_threshold,
       labels: labelsToText(props.instance.labels),
       auth_type: props.instance.credential?.auth_type || 'bearer_pat',
       access_scope: props.instance.credential?.access_scope || 'admin',
@@ -440,6 +444,32 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
                     )}
                   />
                 </div>
+                <FormField
+                  control={form.control}
+                  name='alert_failure_threshold'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Alert after consecutive failures')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min={0}
+                          max={100}
+                          onChange={(event) =>
+                            field.onChange(event.target.valueAsNumber)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Use 0 to inherit the global email setting.')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <FormField
                   control={form.control}
                   name='labels'

@@ -34,7 +34,7 @@ func ProbeConnection(ctx context.Context, input CreateInput) (*PreflightResult, 
 	instance, err := buildInstance(
 		input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels,
 		input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds,
-		input.CheckIntervalSeconds, input.ActorID,
+		input.CheckIntervalSeconds, input.AlertFailureThreshold, input.ActorID,
 	)
 	if err != nil {
 		return nil, err

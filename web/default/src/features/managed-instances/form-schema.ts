@@ -34,6 +34,7 @@ export const managedInstanceFormSchema = z.object({
   tls_verify: z.boolean(),
   request_timeout_seconds: z.number().int().min(1).max(120),
   check_interval_seconds: z.number().int().min(10).max(86400),
+  alert_failure_threshold: z.number().int().min(0).max(100),
   labels: z.string(),
   auth_type: z.string(),
   access_scope: z.enum(['admin', 'user']),

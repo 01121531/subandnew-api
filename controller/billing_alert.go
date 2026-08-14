@@ -283,6 +283,11 @@ func UpdateBillingSMTPSettings(c *gin.Context) {
 		return
 	}
 	data, err := billingalert.UpdateSMTPSetting(input, c.GetInt("id"))
+	if err == nil && input.Enabled {
+		if retryErr := service.RetryManagedInstanceAlertEmailsNow(); retryErr != nil {
+			common.SysError("failed to wake managed instance alert email tasks: " + retryErr.Error())
+		}
+	}
 	billingAuditResult(c, "update", "smtp_settings", 1, err, gin.H{
 		"host": input.Host, "port": input.Port, "security": input.Security,
 		"username": input.Username, "from_address": input.FromAddress, "enabled": input.Enabled,

@@ -400,12 +400,96 @@ function AlertsContent({ alerts }: { alerts: ManagedInstanceAlert[] }) {
             <div className='text-muted-foreground mt-1 font-sans'>
               {t('{{count}} occurrences', { count: alert.occurrences })}
             </div>
+            <div className='mt-2 grid gap-1.5 font-sans'>
+              <AlertEmailDelivery
+                label={t('Failure email')}
+                status={alert.email_status}
+                attempts={alert.email_attempts}
+                recipients={alert.email_recipients}
+                error={alert.email_error}
+                sentAt={alert.email_sent_at}
+                nextRetryAt={alert.email_next_retry_at}
+              />
+              {alert.status === 'resolved' && alert.email_status === 'sent' && (
+                <AlertEmailDelivery
+                  label={t('Recovery email')}
+                  status={alert.recovery_email_status}
+                  attempts={alert.recovery_email_attempts}
+                  recipients={alert.recovery_email_recipients}
+                  error={alert.recovery_email_error}
+                  sentAt={alert.recovery_email_sent_at}
+                  nextRetryAt={alert.recovery_email_next_retry_at}
+                />
+              )}
+            </div>
           </div>
           <Badge variant={alert.status === 'open' ? 'destructive' : 'outline'}>
             {t(alert.status === 'open' ? 'Open' : 'Resolved')}
           </Badge>
         </div>
       ))}
+    </div>
+  )
+}
+
+function AlertEmailDelivery(props: {
+  label: string
+  status: ManagedInstanceAlert['email_status']
+  attempts: number
+  recipients: string
+  error: string
+  sentAt: number
+  nextRetryAt: number
+}) {
+  const { t } = useTranslation()
+  const labels = {
+    pending: t('Pending'),
+    retrying: t('Retrying'),
+    sent: t('Sent'),
+    cancelled: t('Cancelled'),
+  }
+  let detail = props.recipients || t('Waiting for email delivery')
+  if (props.error) {
+    detail = props.error
+  } else if (props.status === 'sent') {
+    detail = t('Sent at {{time}}', { time: formatTimestamp(props.sentAt) })
+  } else if (props.status === 'retrying') {
+    detail = t('Next retry at {{time}}', {
+      time: formatTimestamp(props.nextRetryAt),
+    })
+  }
+  return (
+    <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+      <span className='text-muted-foreground'>{props.label}</span>
+      <Badge
+        variant='outline'
+        className={cn(
+          'h-5 px-1.5 text-[11px]',
+          props.status === 'pending' &&
+            'border-amber-600/20 bg-amber-600/10 text-amber-700 dark:text-amber-400',
+          props.status === 'retrying' &&
+            'border-blue-600/20 bg-blue-600/10 text-blue-700 dark:text-blue-400',
+          props.status === 'sent' &&
+            'border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
+          props.status === 'cancelled' && 'text-muted-foreground'
+        )}
+      >
+        {labels[props.status]}
+      </Badge>
+      {props.attempts > 0 && (
+        <span className='text-muted-foreground tabular-nums'>
+          {t('{{count}} attempts', { count: props.attempts })}
+        </span>
+      )}
+      <span
+        className={cn(
+          'min-w-0 max-w-full truncate',
+          props.error ? 'text-destructive' : 'text-muted-foreground'
+        )}
+        title={detail}
+      >
+        {detail}
+      </span>
     </div>
   )
 }

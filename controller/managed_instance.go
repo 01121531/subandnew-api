@@ -37,6 +37,7 @@ type managedInstanceRequest struct {
 	TLSVerify             *bool                             `json:"tls_verify"`
 	RequestTimeoutSeconds int                               `json:"request_timeout_seconds"`
 	CheckIntervalSeconds  int                               `json:"check_interval_seconds"`
+	AlertFailureThreshold int                               `json:"alert_failure_threshold"`
 	Credential            *managedInstanceCredentialRequest `json:"credential"`
 }
 
@@ -769,6 +770,7 @@ func UpdateManagedInstance(c *gin.Context) {
 		Name: request.Name, Kind: request.Kind, BaseURL: request.BaseURL, Environment: request.Environment,
 		Labels: request.Labels, ManagementMode: request.ManagementMode, TLSVerify: tlsVerify,
 		RequestTimeoutSeconds: request.RequestTimeoutSeconds, CheckIntervalSeconds: request.CheckIntervalSeconds,
+		AlertFailureThreshold: request.AlertFailureThreshold,
 		ActorID:               c.GetInt("id"),
 		AllowConnectionChange: c.GetInt("role") >= common.RoleRootUser,
 		AllowWriteMode:        c.GetInt("role") >= common.RoleRootUser,
@@ -863,7 +865,8 @@ func managedInstanceCreateInput(request managedInstanceRequest, actorID int, all
 		Name: request.Name, Kind: request.Kind, BaseURL: request.BaseURL, Environment: request.Environment,
 		Labels: request.Labels, ManagementMode: request.ManagementMode, TLSVerify: tlsVerify,
 		RequestTimeoutSeconds: request.RequestTimeoutSeconds, CheckIntervalSeconds: request.CheckIntervalSeconds,
-		Credential: credentialInput(request.Credential), ActorID: actorID, AllowWriteMode: allowWriteMode,
+		AlertFailureThreshold: request.AlertFailureThreshold,
+		Credential:            credentialInput(request.Credential), ActorID: actorID, AllowWriteMode: allowWriteMode,
 	}
 }
 

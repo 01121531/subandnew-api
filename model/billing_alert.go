@@ -223,21 +223,22 @@ type ExchangeRateSetting struct {
 func (ExchangeRateSetting) TableName() string { return "exchange_rate_settings" }
 
 type SMTPSetting struct {
-	ID              int64  `json:"id" gorm:"primaryKey"`
-	Host            string `json:"host" gorm:"type:varchar(255);not null"`
-	Port            int    `json:"port" gorm:"not null;default:587"`
-	Security        string `json:"security" gorm:"type:varchar(16);not null;default:'starttls'"`
-	Username        string `json:"username" gorm:"type:varchar(320)"`
-	PasswordCipher  string `json:"-" gorm:"type:text"`
-	KeyVersion      string `json:"-" gorm:"type:varchar(32)"`
-	FromName        string `json:"from_name" gorm:"type:varchar(128)"`
-	FromAddress     string `json:"from_address" gorm:"type:varchar(320);not null"`
-	ReplyTo         string `json:"reply_to" gorm:"type:varchar(320)"`
-	AlertRecipients string `json:"alert_recipients" gorm:"type:text;not null;default:''"`
-	Enabled         bool   `json:"enabled" gorm:"not null;default:false"`
-	UpdatedBy       int    `json:"updated_by" gorm:"not null;default:0"`
-	CreatedAt       int64  `json:"created_at" gorm:"bigint;not null"`
-	UpdatedAt       int64  `json:"updated_at" gorm:"bigint;not null"`
+	ID                            int64  `json:"id" gorm:"primaryKey"`
+	Host                          string `json:"host" gorm:"type:varchar(255);not null"`
+	Port                          int    `json:"port" gorm:"not null;default:587"`
+	Security                      string `json:"security" gorm:"type:varchar(16);not null;default:'starttls'"`
+	Username                      string `json:"username" gorm:"type:varchar(320)"`
+	PasswordCipher                string `json:"-" gorm:"type:text"`
+	KeyVersion                    string `json:"-" gorm:"type:varchar(32)"`
+	FromName                      string `json:"from_name" gorm:"type:varchar(128)"`
+	FromAddress                   string `json:"from_address" gorm:"type:varchar(320);not null"`
+	ReplyTo                       string `json:"reply_to" gorm:"type:varchar(320)"`
+	AlertRecipients               string `json:"alert_recipients" gorm:"type:text;not null;default:''"`
+	InstanceAlertFailureThreshold int    `json:"instance_alert_failure_threshold" gorm:"not null;default:3"`
+	Enabled                       bool   `json:"enabled" gorm:"not null;default:false"`
+	UpdatedBy                     int    `json:"updated_by" gorm:"not null;default:0"`
+	CreatedAt                     int64  `json:"created_at" gorm:"bigint;not null"`
+	UpdatedAt                     int64  `json:"updated_at" gorm:"bigint;not null"`
 }
 
 func (SMTPSetting) TableName() string { return "smtp_settings" }

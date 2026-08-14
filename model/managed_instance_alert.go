@@ -19,23 +19,29 @@ const (
 )
 
 type ManagedInstanceAlert struct {
-	Id               int64  `json:"id" gorm:"primaryKey"`
-	InstanceId       int64  `json:"instance_id" gorm:"not null;index"`
-	AlertType        string `json:"alert_type" gorm:"type:varchar(32);not null;index"`
-	Status           string `json:"status" gorm:"type:varchar(16);not null;index"`
-	ErrorCode        string `json:"error_code" gorm:"type:varchar(64);not null"`
-	Occurrences      int    `json:"occurrences" gorm:"not null;default:1"`
-	FirstSeenAt      int64  `json:"first_seen_at" gorm:"bigint;not null;index"`
-	LastSeenAt       int64  `json:"last_seen_at" gorm:"bigint;not null;index"`
-	ResolvedAt       int64  `json:"resolved_at" gorm:"bigint;not null;default:0;index"`
-	EmailStatus      string `json:"email_status" gorm:"type:varchar(16);not null;default:'pending';index"`
-	EmailRecipients  string `json:"email_recipients" gorm:"type:text;not null;default:''"`
-	EmailAttempts    int    `json:"email_attempts" gorm:"not null;default:0"`
-	EmailError       string `json:"email_error" gorm:"type:text"`
-	EmailSentAt      int64  `json:"email_sent_at" gorm:"bigint;not null;default:0"`
-	EmailNextRetryAt int64  `json:"email_next_retry_at" gorm:"bigint;not null;default:0;index"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;not null"`
-	UpdatedAt        int64  `json:"updated_at" gorm:"bigint;not null;index"`
+	Id                       int64  `json:"id" gorm:"primaryKey"`
+	InstanceId               int64  `json:"instance_id" gorm:"not null;index"`
+	AlertType                string `json:"alert_type" gorm:"type:varchar(32);not null;index"`
+	Status                   string `json:"status" gorm:"type:varchar(16);not null;index"`
+	ErrorCode                string `json:"error_code" gorm:"type:varchar(64);not null"`
+	Occurrences              int    `json:"occurrences" gorm:"not null;default:1"`
+	FirstSeenAt              int64  `json:"first_seen_at" gorm:"bigint;not null;index"`
+	LastSeenAt               int64  `json:"last_seen_at" gorm:"bigint;not null;index"`
+	ResolvedAt               int64  `json:"resolved_at" gorm:"bigint;not null;default:0;index"`
+	EmailStatus              string `json:"email_status" gorm:"type:varchar(16);not null;default:'pending';index"`
+	EmailRecipients          string `json:"email_recipients" gorm:"type:text;not null;default:''"`
+	EmailAttempts            int    `json:"email_attempts" gorm:"not null;default:0"`
+	EmailError               string `json:"email_error" gorm:"type:text"`
+	EmailSentAt              int64  `json:"email_sent_at" gorm:"bigint;not null;default:0"`
+	EmailNextRetryAt         int64  `json:"email_next_retry_at" gorm:"bigint;not null;default:0;index"`
+	RecoveryEmailStatus      string `json:"recovery_email_status" gorm:"type:varchar(16);not null;default:'cancelled';index"`
+	RecoveryEmailRecipients  string `json:"recovery_email_recipients" gorm:"type:text;not null;default:''"`
+	RecoveryEmailAttempts    int    `json:"recovery_email_attempts" gorm:"not null;default:0"`
+	RecoveryEmailError       string `json:"recovery_email_error" gorm:"type:text"`
+	RecoveryEmailSentAt      int64  `json:"recovery_email_sent_at" gorm:"bigint;not null;default:0"`
+	RecoveryEmailNextRetryAt int64  `json:"recovery_email_next_retry_at" gorm:"bigint;not null;default:0;index"`
+	CreatedAt                int64  `json:"created_at" gorm:"bigint;not null"`
+	UpdatedAt                int64  `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 func (ManagedInstanceAlert) TableName() string { return "managed_instance_alerts" }
@@ -50,6 +56,9 @@ func (alert *ManagedInstanceAlert) BeforeCreate(_ *gorm.DB) error {
 	}
 	if alert.EmailStatus == "" {
 		alert.EmailStatus = ManagedInstanceAlertEmailPending
+	}
+	if alert.RecoveryEmailStatus == "" {
+		alert.RecoveryEmailStatus = ManagedInstanceAlertEmailCancelled
 	}
 	if alert.FirstSeenAt == 0 {
 		alert.FirstSeenAt = now

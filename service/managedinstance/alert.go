@@ -8,6 +8,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const defaultManagedInstanceAlertFailureThreshold = 3
+
 type AlertListFilter struct {
 	InstanceID int64
 	Status     string
@@ -58,7 +60,7 @@ func ListAlerts(filter AlertListFilter) (*AlertListResult, error) {
 
 func reconcileProbeFailureAlert(tx *gorm.DB, instance *model.ManagedInstance, status string, errorCode string, checkedAt int64, nextFailures int) error {
 	alertType := model.ManagedInstanceAlertTypeAvailability
-	thresholdReached := nextFailures >= 3
+	thresholdReached := nextFailures >= managedInstanceAlertFailureThreshold(tx, instance)
 	if status == model.ManagedInstanceStatusAuthFailed {
 		alertType = model.ManagedInstanceAlertTypeCredential
 		thresholdReached = true
@@ -90,6 +92,18 @@ func reconcileProbeFailureAlert(tx *gorm.DB, instance *model.ManagedInstance, st
 	}).Error
 }
 
+func managedInstanceAlertFailureThreshold(tx *gorm.DB, instance *model.ManagedInstance) int {
+	if instance != nil && instance.AlertFailureThreshold >= 1 && instance.AlertFailureThreshold <= 100 {
+		return instance.AlertFailureThreshold
+	}
+	var setting model.SMTPSetting
+	if err := tx.Select("instance_alert_failure_threshold").First(&setting, 1).Error; err == nil &&
+		setting.InstanceAlertFailureThreshold >= 1 && setting.InstanceAlertFailureThreshold <= 100 {
+		return setting.InstanceAlertFailureThreshold
+	}
+	return defaultManagedInstanceAlertFailureThreshold
+}
+
 func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt int64) error {
 	var alerts []model.ManagedInstanceAlert
 	if err := tx.Where("instance_id = ? AND status = ?", instance.Id, model.ManagedInstanceAlertStatusOpen).Find(&alerts).Error; err != nil {
@@ -103,6 +117,12 @@ func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt 
 		if alert.EmailStatus != model.ManagedInstanceAlertEmailSent {
 			updates["email_status"] = model.ManagedInstanceAlertEmailCancelled
 			updates["email_next_retry_at"] = 0
+			updates["recovery_email_status"] = model.ManagedInstanceAlertEmailCancelled
+			updates["recovery_email_next_retry_at"] = 0
+		} else if alert.RecoveryEmailStatus != model.ManagedInstanceAlertEmailSent {
+			updates["recovery_email_status"] = model.ManagedInstanceAlertEmailPending
+			updates["recovery_email_error"] = ""
+			updates["recovery_email_next_retry_at"] = checkedAt
 		}
 		if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ? AND status = ?", alert.Id, model.ManagedInstanceAlertStatusOpen).Updates(updates).Error; err != nil {
 			return err

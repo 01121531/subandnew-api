@@ -39,6 +39,7 @@ type CreateInput struct {
 	TLSVerify             bool
 	RequestTimeoutSeconds int
 	CheckIntervalSeconds  int
+	AlertFailureThreshold int
 	Credential            *CredentialInput
 	Preflight             *ProbeResult
 	ActorID               int
@@ -55,6 +56,7 @@ type UpdateInput struct {
 	TLSVerify             bool
 	RequestTimeoutSeconds int
 	CheckIntervalSeconds  int
+	AlertFailureThreshold int
 	ActorID               int
 	AllowConnectionChange bool
 	AllowWriteMode        bool
@@ -120,7 +122,7 @@ func RedactConnectionDetails(view *InstanceView) *InstanceView {
 }
 
 func Create(input CreateInput) (*InstanceView, error) {
-	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.ActorID)
+	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.AlertFailureThreshold, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +283,7 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 	if id <= 0 {
 		return nil, ErrInvalidInstance
 	}
-	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.ActorID)
+	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.AlertFailureThreshold, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +292,8 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 		"environment": instance.Environment, "labels": instance.Labels, "management_mode": instance.ManagementMode,
 		"tls_verify": instance.TLSVerify, "request_timeout_seconds": instance.RequestTimeoutSeconds,
 		"check_interval_seconds": instance.CheckIntervalSeconds, "updated_by": input.ActorID,
-		"updated_at": common.GetTimestamp(),
+		"alert_failure_threshold": instance.AlertFailureThreshold,
+		"updated_at":              common.GetTimestamp(),
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		var current model.ManagedInstance
@@ -400,7 +403,7 @@ func Delete(id int64, actorID int) error {
 	})
 }
 
-func buildInstance(name string, kind string, baseURL string, environment string, labels map[string]string, managementMode string, tlsVerify bool, requestTimeout int, checkInterval int, actorID int) (*model.ManagedInstance, error) {
+func buildInstance(name string, kind string, baseURL string, environment string, labels map[string]string, managementMode string, tlsVerify bool, requestTimeout int, checkInterval int, alertFailureThreshold int, actorID int) (*model.ManagedInstance, error) {
 	name = strings.TrimSpace(name)
 	kind = strings.TrimSpace(kind)
 	if name == "" || !validKind(kind) {
@@ -427,7 +430,7 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 	if checkInterval == 0 {
 		checkInterval = 60
 	}
-	if requestTimeout < 1 || requestTimeout > 120 || checkInterval < 10 || checkInterval > 86400 {
+	if requestTimeout < 1 || requestTimeout > 120 || checkInterval < 10 || checkInterval > 86400 || alertFailureThreshold < 0 || alertFailureThreshold > 100 {
 		return nil, ErrInvalidInstance
 	}
 	parsedURL, err := url.Parse(normalizedURL)
@@ -445,6 +448,7 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 		Name: name, Kind: kind, BaseURL: normalizedURL, Environment: environment, Labels: string(labelsJSON),
 		ManagementMode: managementMode, Status: model.ManagedInstanceStatusUnknown, TLSVerify: tlsVerify,
 		RequestTimeoutSeconds: requestTimeout, CheckIntervalSeconds: checkInterval, CreatedBy: actorID, UpdatedBy: actorID,
+		AlertFailureThreshold: alertFailureThreshold,
 	}, nil
 }
 

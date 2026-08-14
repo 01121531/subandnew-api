@@ -104,6 +104,7 @@ import {
 import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
+type TrendMetricKey = MetricKey | 'rpm'
 type FleetFamily = 'new_api' | 'sub2api' | 'conductor'
 
 type InstanceMetricRow = {
@@ -232,7 +233,8 @@ type FleetDashboardPreferences = {
   family: FleetFamily
   selectedInstances: Record<FleetFamily, string>
   timeRange: FleetTimeRange
-  metric: MetricKey
+  trendMetric: TrendMetricKey
+  consumptionMetric: MetricKey
 }
 
 function defaultDashboardPreferences(): FleetDashboardPreferences {
@@ -244,7 +246,8 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
       conductor: ALL_SITES_VALUE,
     },
     timeRange: createFleetPresetRange(7),
-    metric: 'requests',
+    trendMetric: 'requests',
+    consumptionMetric: 'requests',
   }
 }
 
@@ -254,6 +257,10 @@ function isFleetFamily(value: unknown): value is FleetFamily {
 
 function isMetricKey(value: unknown): value is MetricKey {
   return value === 'requests' || value === 'tokens' || value === 'quota'
+}
+
+function isTrendMetricKey(value: unknown): value is TrendMetricKey {
+  return isMetricKey(value) || value === 'rpm'
 }
 
 function isFleetPresetDays(value: unknown): value is FleetPresetDays {
@@ -271,6 +278,8 @@ function readDashboardPreferences(): FleetDashboardPreferences {
       selectedInstances?: Record<string, unknown>
       timeRange?: { start?: unknown; end?: unknown; presetDays?: unknown }
       metric?: unknown
+      trendMetric?: unknown
+      consumptionMetric?: unknown
     }
     const presetDays = isFleetPresetDays(parsed.timeRange?.presetDays)
       ? parsed.timeRange.presetDays
@@ -287,6 +296,10 @@ function readDashboardPreferences(): FleetDashboardPreferences {
     } else if (validCustomRange) {
       timeRange = { start, end, presetDays: null }
     }
+
+    const legacyMetric = isMetricKey(parsed.metric)
+      ? parsed.metric
+      : fallback.consumptionMetric
 
     return {
       family: isFleetFamily(parsed.family) ? parsed.family : fallback.family,
@@ -305,7 +318,12 @@ function readDashboardPreferences(): FleetDashboardPreferences {
             : ALL_SITES_VALUE,
       },
       timeRange,
-      metric: isMetricKey(parsed.metric) ? parsed.metric : fallback.metric,
+      trendMetric: isTrendMetricKey(parsed.trendMetric)
+        ? parsed.trendMetric
+        : legacyMetric,
+      consumptionMetric: isMetricKey(parsed.consumptionMetric)
+        ? parsed.consumptionMetric
+        : legacyMetric,
     }
   } catch {
     return fallback
@@ -383,9 +401,16 @@ export function FleetDashboard() {
     initialPreferences.selectedInstances
   )
   const [timeRange, setTimeRange] = useState(initialPreferences.timeRange)
-  const [metric, setMetric] = useState<MetricKey>(initialPreferences.metric)
+  const [trendMetric, setTrendMetric] = useState<TrendMetricKey>(
+    initialPreferences.trendMetric
+  )
+  const [consumptionMetric, setConsumptionMetric] = useState<MetricKey>(
+    initialPreferences.consumptionMetric
+  )
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
+  const effectiveTrendMetric =
+    family === 'conductor' || trendMetric !== 'rpm' ? trendMetric : 'requests'
 
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
@@ -438,7 +463,10 @@ export function FleetDashboard() {
       getManagedInstanceRPMHistory(conductorInstanceIDs, rpmHistoryBucket, {
         silent: true,
       }),
-    enabled: family === 'conductor' && conductorInstanceIDs.length > 0,
+    enabled:
+      family === 'conductor' &&
+      effectiveTrendMetric === 'rpm' &&
+      conductorInstanceIDs.length > 0,
     retry: false,
     staleTime: RPM_HISTORY_REFRESH_MS / 2,
     refetchInterval: RPM_HISTORY_REFRESH_MS,
@@ -611,26 +639,33 @@ export function FleetDashboard() {
   const chartData = useMemo(
     () =>
       [...rows]
-        .filter((row) => row[metric] != null)
-        .sort((a, b) => (b[metric] ?? 0) - (a[metric] ?? 0))
+        .filter((row) => row[consumptionMetric] != null)
+        .sort(
+          (a, b) => (b[consumptionMetric] ?? 0) - (a[consumptionMetric] ?? 0)
+        )
         .slice(0, 10)
-        .map((row) => ({ name: row.instance.name, value: row[metric] ?? 0 })),
-    [metric, rows]
+        .map((row) => ({
+          name: row.instance.name,
+          value: row[consumptionMetric] ?? 0,
+        })),
+    [consumptionMetric, rows]
   )
   const dailyUsageData = useMemo<DailyUsageData[]>(() => {
+    if (effectiveTrendMetric === 'rpm') return []
     const values = new Map<string, number>()
     for (const row of rows) {
       for (const point of row.summary?.trend ?? []) {
         values.set(
           point.date,
-          (values.get(point.date) ?? 0) + trendMetricValue(point, metric)
+          (values.get(point.date) ?? 0) +
+            trendMetricValue(point, effectiveTrendMetric)
         )
       }
     }
     return [...values.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, value]) => ({ date, value }))
-  }, [metric, rows])
+  }, [effectiveTrendMetric, rows])
   const dailyUsageLoading =
     metricQueries.some((query) => query.isPending) ||
     (dailyUsageData.length === 0 &&
@@ -706,10 +741,12 @@ export function FleetDashboard() {
           end: timeRange.end.toISOString(),
           presetDays: timeRange.presetDays,
         },
-        metric,
+        metric: consumptionMetric,
+        trendMetric,
+        consumptionMetric,
       })
     )
-  }, [family, metric, selectedInstances, timeRange])
+  }, [consumptionMetric, family, selectedInstances, timeRange, trendMetric])
 
   const lastObservedAt = Math.max(0, ...rows.map((row) => row.observedAt))
 
@@ -718,7 +755,9 @@ export function FleetDashboard() {
     void alertsQuery.refetch()
     for (const query of metricQueries) void query.refetch()
     for (const query of rpmQueries) void query.refetch()
-    if (family === 'conductor') void rpmHistoryQuery.refetch()
+    if (family === 'conductor' && effectiveTrendMetric === 'rpm') {
+      void rpmHistoryQuery.refetch()
+    }
   }
 
   const refreshRPM = () => {
@@ -764,8 +803,10 @@ export function FleetDashboard() {
           healthRate={healthRate}
           coverage={coverage}
           metricCoverage={metricCoverage}
-          metric={metric}
-          onMetricChange={setMetric}
+          trendMetric={effectiveTrendMetric}
+          onTrendMetricChange={setTrendMetric}
+          consumptionMetric={consumptionMetric}
+          onConsumptionMetricChange={setConsumptionMetric}
           rpmRefreshing={rpmRefreshing}
           onRPMRefresh={refreshRPM}
           rpmHistoryBucket={rpmHistoryBucket}
@@ -927,8 +968,10 @@ type DashboardContentProps = {
   healthRate: number
   coverage: number
   metricCoverage: number
-  metric: MetricKey
-  onMetricChange: (metric: MetricKey) => void
+  trendMetric: TrendMetricKey
+  onTrendMetricChange: (metric: TrendMetricKey) => void
+  consumptionMetric: MetricKey
+  onConsumptionMetricChange: (metric: MetricKey) => void
   rpmRefreshing: boolean
   onRPMRefresh: () => void
   rpmHistoryBucket: ManagedInstanceRPMHistoryBucket
@@ -942,29 +985,25 @@ function DashboardContent(props: DashboardContentProps) {
   return (
     <div className='grid gap-4 pb-6'>
       <SummaryGrid {...props} />
-      {props.family === 'conductor' && (
-        <RPMHistoryPanel
-          bucket={props.rpmHistoryBucket}
-          onBucketChange={props.onRPMHistoryBucketChange}
-          data={props.rpmHistoryData}
-          loading={props.rpmHistoryLoading}
-          error={props.rpmHistoryError}
-        />
-      )}
       <DailyUsagePanel
         family={props.family}
-        metric={props.metric}
+        metric={props.trendMetric}
         data={props.dailyUsageData}
         loading={props.dailyUsageLoading}
         error={props.dailyUsageError}
-        onMetricChange={props.onMetricChange}
+        onMetricChange={props.onTrendMetricChange}
+        rpmHistoryBucket={props.rpmHistoryBucket}
+        onRPMHistoryBucketChange={props.onRPMHistoryBucketChange}
+        rpmHistoryData={props.rpmHistoryData}
+        rpmHistoryLoading={props.rpmHistoryLoading}
+        rpmHistoryError={props.rpmHistoryError}
       />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
         <ConsumptionPanel
           family={props.family}
-          metric={props.metric}
+          metric={props.consumptionMetric}
           data={props.chartData}
-          onMetricChange={props.onMetricChange}
+          onMetricChange={props.onConsumptionMetricChange}
         />
         <HealthPanel data={props.healthData} total={props.instances.length} />
       </section>
@@ -978,18 +1017,33 @@ function DashboardContent(props: DashboardContentProps) {
   )
 }
 
-function RPMHistoryPanel(props: {
-  bucket: ManagedInstanceRPMHistoryBucket
-  onBucketChange: (bucket: ManagedInstanceRPMHistoryBucket) => void
-  data: RPMHistoryData[]
+function DailyUsagePanel(props: {
+  family: FleetFamily
+  metric: TrendMetricKey
+  data: DailyUsageData[]
   loading: boolean
   error: boolean
+  onMetricChange: (metric: TrendMetricKey) => void
+  rpmHistoryBucket: ManagedInstanceRPMHistoryBucket
+  onRPMHistoryBucketChange: (bucket: ManagedInstanceRPMHistoryBucket) => void
+  rpmHistoryData: RPMHistoryData[]
+  rpmHistoryLoading: boolean
+  rpmHistoryError: boolean
 }) {
   const { t } = useTranslation()
-  const subtitle =
-    props.bucket === 'minute'
-      ? t('Average RPM per minute over the last 60 minutes')
-      : t('Average RPM per hour over the last 24 hours')
+  const isRPM = props.family === 'conductor' && props.metric === 'rpm'
+  const usageMetric = props.metric === 'rpm' ? null : props.metric
+  let subtitle = t('Daily totals in the selected period')
+  if (isRPM) {
+    subtitle =
+      props.rpmHistoryBucket === 'minute'
+        ? t('Average RPM per minute over the last 60 minutes')
+        : t('Average RPM per hour over the last 24 hours')
+  }
+  const metricOptions: TrendMetricKey[] =
+    props.family === 'conductor'
+      ? ['requests', 'tokens', 'quota', 'rpm']
+      : ['requests', 'tokens', 'quota']
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader
@@ -999,31 +1053,47 @@ function RPMHistoryPanel(props: {
         )}
       >
         <div>
-          <CardTitle>{t('Real-time RPM trend')}</CardTitle>
+          <CardTitle>{t('Daily usage trend')}</CardTitle>
           <p className='text-muted-foreground mt-1 text-sm'>{subtitle}</p>
         </div>
-        <SegmentedControl
-          value={props.bucket}
-          options={['minute', 'hour']}
-          getLabel={(value) => t(value === 'minute' ? 'By minute' : 'By hour')}
-          onChange={props.onBucketChange}
-        />
+        <div className='flex flex-wrap items-center justify-end gap-2'>
+          <SegmentedControl
+            value={props.metric}
+            options={metricOptions}
+            getLabel={(value) =>
+              value === 'rpm' ? 'RPM' : t(metricLabel(value, props.family))
+            }
+            onChange={props.onMetricChange}
+          />
+          {isRPM && (
+            <SegmentedControl
+              value={props.rpmHistoryBucket}
+              options={['minute', 'hour']}
+              getLabel={(value) =>
+                t(value === 'minute' ? 'By minute' : 'By hour')
+              }
+              onChange={props.onRPMHistoryBucketChange}
+            />
+          )}
+        </div>
       </CardHeader>
       <CardContent className='py-4'>
-        {props.loading && props.data.length === 0 && (
-          <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
-            <RefreshCw className='size-4 animate-spin' aria-hidden='true' />
-            <span>{t('Data loading')}</span>
-          </div>
-        )}
-        {props.data.length > 0 && (
+        {isRPM &&
+          props.rpmHistoryLoading &&
+          props.rpmHistoryData.length === 0 && (
+            <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
+              <RefreshCw className='size-4 animate-spin' aria-hidden='true' />
+              <span>{t('Data loading')}</span>
+            </div>
+          )}
+        {isRPM && props.rpmHistoryData.length > 0 && (
           <ChartContainer
             config={RPM_CHART_CONFIG}
             className='aspect-auto h-[300px] w-full'
           >
             <LineChart
               accessibilityLayer
-              data={props.data}
+              data={props.rpmHistoryData}
               margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
             >
               <CartesianGrid vertical={false} strokeDasharray='3 3' />
@@ -1034,7 +1104,7 @@ function RPMHistoryPanel(props: {
                 tickMargin={10}
                 minTickGap={36}
                 tickFormatter={(value: number) =>
-                  (props.bucket === 'minute'
+                  (props.rpmHistoryBucket === 'minute'
                     ? rpmMinuteTime
                     : rpmHourTime
                   ).format(new Date(value * 1000))
@@ -1074,61 +1144,29 @@ function RPMHistoryPanel(props: {
                 name='RPM'
                 stroke='var(--color-rpm)'
                 strokeWidth={2.25}
-                dot={props.data.length <= 24}
+                dot={props.rpmHistoryData.length <= 24}
                 activeDot={{ r: 4 }}
               />
             </LineChart>
           </ChartContainer>
         )}
-        {props.data.length === 0 && !props.loading && props.error && (
-          <PanelEmpty text={t('Failed to load')} />
-        )}
-        {props.data.length === 0 && !props.loading && !props.error && (
-          <PanelEmpty text={t('RPM history is being collected')} />
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function DailyUsagePanel(props: {
-  family: FleetFamily
-  metric: MetricKey
-  data: DailyUsageData[]
-  loading: boolean
-  error: boolean
-  onMetricChange: (metric: MetricKey) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <Card className={PANEL_CARD_CLASS}>
-      <CardHeader
-        className={cn(
-          PANEL_HEADER_CLASS,
-          'flex-row items-start justify-between gap-4 space-y-0'
-        )}
-      >
-        <div>
-          <CardTitle>{t('Daily usage trend')}</CardTitle>
-          <p className='text-muted-foreground mt-1 text-sm'>
-            {t('Daily totals in the selected period')}
-          </p>
-        </div>
-        <SegmentedControl
-          value={props.metric}
-          options={['requests', 'tokens', 'quota']}
-          getLabel={(value) => t(metricLabel(value, props.family))}
-          onChange={props.onMetricChange}
-        />
-      </CardHeader>
-      <CardContent className='py-4'>
-        {props.loading && (
+        {isRPM &&
+          props.rpmHistoryData.length === 0 &&
+          !props.rpmHistoryLoading &&
+          props.rpmHistoryError && <PanelEmpty text={t('Failed to load')} />}
+        {isRPM &&
+          props.rpmHistoryData.length === 0 &&
+          !props.rpmHistoryLoading &&
+          !props.rpmHistoryError && (
+            <PanelEmpty text={t('RPM history is being collected')} />
+          )}
+        {usageMetric && props.loading && (
           <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
             <RefreshCw className='size-4 animate-spin' aria-hidden='true' />
             <span>{t('Data loading')}</span>
           </div>
         )}
-        {!props.loading && props.data.length > 0 && (
+        {usageMetric && !props.loading && props.data.length > 0 && (
           <ChartContainer
             config={CONSUMPTION_CHART_CONFIG}
             className='aspect-auto h-[300px] w-full'
@@ -1152,7 +1190,7 @@ function DailyUsagePanel(props: {
                 tickLine={false}
                 width={54}
                 tickFormatter={(value: number) =>
-                  formatUsageMetric(props.metric, value, props.family)
+                  formatUsageMetric(usageMetric, value, props.family)
                 }
               />
               <ChartTooltip
@@ -1166,7 +1204,7 @@ function DailyUsagePanel(props: {
                     formatter={(value) => (
                       <span className='font-mono font-medium tabular-nums'>
                         {formatUsageMetric(
-                          props.metric,
+                          usageMetric,
                           Number(value),
                           props.family,
                           false
@@ -1179,7 +1217,7 @@ function DailyUsagePanel(props: {
               <Line
                 type='monotone'
                 dataKey='value'
-                name={t(metricLabel(props.metric, props.family))}
+                name={t(metricLabel(usageMetric, props.family))}
                 stroke='var(--color-value)'
                 strokeWidth={2.25}
                 dot={props.data.length <= 14}
@@ -1188,12 +1226,15 @@ function DailyUsagePanel(props: {
             </LineChart>
           </ChartContainer>
         )}
-        {!props.loading && props.error && (
+        {usageMetric && !props.loading && props.error && (
           <PanelEmpty text={t('Failed to load')} />
         )}
-        {!props.loading && !props.error && props.data.length === 0 && (
-          <PanelEmpty text={t('No daily usage data for this period')} />
-        )}
+        {usageMetric &&
+          !props.loading &&
+          !props.error &&
+          props.data.length === 0 && (
+            <PanelEmpty text={t('No daily usage data for this period')} />
+          )}
       </CardContent>
     </Card>
   )
@@ -1537,6 +1578,7 @@ function AlertsPanel(props: {
                   {t(alert.error_code || alert.alert_type)} ·{' '}
                   {t('{{count}} occurrences', { count: alert.occurrences })}
                 </p>
+                <AlertEmailStatus alert={alert} />
               </div>
             </div>
           )
@@ -1563,6 +1605,51 @@ function AlertsPanel(props: {
       </CardHeader>
       <CardContent className='py-4'>{content}</CardContent>
     </Card>
+  )
+}
+
+function AlertEmailStatus({ alert }: { alert: ManagedInstanceAlert }) {
+  const { t } = useTranslation()
+  const labels = {
+    pending: t('Pending'),
+    retrying: t('Retrying'),
+    sent: t('Sent'),
+    cancelled: t('Cancelled'),
+  }
+  const detail =
+    alert.email_error ||
+    (alert.email_status === 'sent'
+      ? t('Sent at {{time}}', {
+          time: new Date(alert.email_sent_at * 1000).toLocaleString(),
+        })
+      : alert.email_recipients || t('Waiting for email delivery'))
+  return (
+    <div className='mt-1.5 flex min-w-0 items-center gap-1.5'>
+      <span className='text-muted-foreground text-[11px]'>
+        {t('Failure email')}
+      </span>
+      <Badge
+        variant='outline'
+        className={cn(
+          'h-5 px-1.5 text-[11px]',
+          alert.email_status === 'pending' &&
+            'border-amber-600/20 bg-amber-600/10 text-amber-700 dark:text-amber-400',
+          alert.email_status === 'retrying' &&
+            'border-blue-600/20 bg-blue-600/10 text-blue-700 dark:text-blue-400',
+          alert.email_status === 'sent' &&
+            'border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
+          alert.email_status === 'cancelled' && 'text-muted-foreground'
+        )}
+        title={detail}
+      >
+        {labels[alert.email_status]}
+      </Badge>
+      {alert.email_attempts > 0 && (
+        <span className='text-muted-foreground text-[11px] tabular-nums'>
+          {t('{{count}} attempts', { count: alert.email_attempts })}
+        </span>
+      )}
+    </div>
   )
 }
 

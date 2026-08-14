@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestProbeNewAPIUsesBearerPAT(t *testing.T) {
@@ -463,6 +465,56 @@ func TestProbeAvailabilityAlertThresholdDeduplicatesAndResolves(t *testing.T) {
 	alerts, err := ListAlerts(AlertListFilter{InstanceID: instance.Id, Status: model.ManagedInstanceAlertStatusResolved})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), alerts.Total)
+}
+
+func TestManagedInstanceAlertFailureThresholdUsesGlobalAndInstanceOverride(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	require.NoError(t, db.Create(&model.SMTPSetting{
+		ID: 1, Host: "smtp.example.com", FromAddress: "ops@example.com",
+		InstanceAlertFailureThreshold: 5,
+	}).Error)
+	instance := &model.ManagedInstance{
+		Name: "inherit-threshold", Kind: model.ManagedInstanceKindNewAPI,
+		BaseURL: "https://inherit.example.com", AlertFailureThreshold: 0,
+	}
+	require.NoError(t, db.Create(instance).Error)
+	require.Equal(t, 5, managedInstanceAlertFailureThreshold(db, instance))
+
+	instance.AlertFailureThreshold = 2
+	require.Equal(t, 2, managedInstanceAlertFailureThreshold(db, instance))
+
+	instance.AlertFailureThreshold = 101
+	require.NoError(t, db.Model(&model.SMTPSetting{}).Where("id = ?", 1).
+		Update("instance_alert_failure_threshold", 0).Error)
+	require.Equal(t, defaultManagedInstanceAlertFailureThreshold, managedInstanceAlertFailureThreshold(db, instance))
+}
+
+func TestResolveProbeAlertQueuesRecoveryOnlyAfterFailureEmailSent(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := &model.ManagedInstance{Name: "recover", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://recover.example.com"}
+	require.NoError(t, db.Create(instance).Error)
+
+	sent := &model.ManagedInstanceAlert{
+		InstanceId: instance.Id, AlertType: model.ManagedInstanceAlertTypeAvailability,
+		Status: model.ManagedInstanceAlertStatusOpen, ErrorCode: "connector_failed",
+		EmailStatus: model.ManagedInstanceAlertEmailSent,
+	}
+	pending := &model.ManagedInstanceAlert{
+		InstanceId: instance.Id, AlertType: model.ManagedInstanceAlertTypeCredential,
+		Status: model.ManagedInstanceAlertStatusOpen, ErrorCode: "permission_denied",
+		EmailStatus: model.ManagedInstanceAlertEmailPending,
+	}
+	require.NoError(t, db.Create(sent).Error)
+	require.NoError(t, db.Create(pending).Error)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		return resolveProbeAlerts(tx, instance, common.GetTimestamp())
+	}))
+
+	require.NoError(t, db.First(sent, sent.Id).Error)
+	require.Equal(t, model.ManagedInstanceAlertEmailPending, sent.RecoveryEmailStatus)
+	require.NoError(t, db.First(pending, pending.Id).Error)
+	require.Equal(t, model.ManagedInstanceAlertEmailCancelled, pending.EmailStatus)
+	require.Equal(t, model.ManagedInstanceAlertEmailCancelled, pending.RecoveryEmailStatus)
 }
 
 func TestEnsureDataConnectionCoalescesFailedPageProbes(t *testing.T) {

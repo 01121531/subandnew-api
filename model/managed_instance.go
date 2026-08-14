@@ -40,6 +40,7 @@ type ManagedInstance struct {
 	TLSVerify             bool   `json:"tls_verify" gorm:"not null;default:true"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds" gorm:"not null;default:10"`
 	CheckIntervalSeconds  int    `json:"check_interval_seconds" gorm:"not null;default:60"`
+	AlertFailureThreshold int    `json:"alert_failure_threshold" gorm:"not null;default:0"`
 	LastSeenAt            int64  `json:"last_seen_at" gorm:"bigint;not null;default:0;index"`
 	LastCheckedAt         int64  `json:"last_checked_at" gorm:"bigint;not null;default:0;index"`
 	ConsecutiveFailures   int    `json:"consecutive_failures" gorm:"not null;default:0"`
