@@ -68,6 +68,9 @@ const queryClient = new QueryClient({
       },
       // Keep focused tabs from silently re-running heavy pages like logs.
       refetchOnWindowFocus: false,
+      // Monitoring pages must continue their configured polling cadence while
+      // the browser tab is in the background.
+      refetchIntervalInBackground: true,
       staleTime: 10 * 1000, // 10s
     },
     mutations: {

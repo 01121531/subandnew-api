@@ -88,7 +88,7 @@ export function useManagedInstanceRealtimeEvents(
       controller = null
     }
     const connect = () => {
-      if (disposed || document.visibilityState !== 'visible') return
+      if (disposed) return
       stop()
       const currentController = new AbortController()
       controller = currentController
@@ -112,20 +112,9 @@ export function useManagedInstanceRealtimeEvents(
         void error
       })
     }
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        attempts = 0
-        connect()
-      } else {
-        stop()
-        setStatus('idle')
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibilityChange)
     connect()
     return () => {
       disposed = true
-      document.removeEventListener('visibilitychange', onVisibilityChange)
       stop()
     }
   }, [generation, idsKey, topicsKey])

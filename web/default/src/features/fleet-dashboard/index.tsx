@@ -458,7 +458,6 @@ export function FleetDashboard() {
       enabled: instance.kind !== 'conductor',
       staleTime: RPM_REFRESH_MS / 2,
       refetchInterval: RPM_REFRESH_MS,
-      refetchIntervalInBackground: false,
     })),
   })
   const rows = useMemo<InstanceMetricRow[]>(

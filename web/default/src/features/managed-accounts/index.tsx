@@ -404,7 +404,6 @@ export function ManagedAccounts() {
           ? 3_000
           : INVENTORY_REFRESH_MS
       },
-      refetchIntervalInBackground: false,
     })),
   })
   const rows = useMemo<ResourceRow[]>(
