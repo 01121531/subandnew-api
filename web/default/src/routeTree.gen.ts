@@ -34,6 +34,7 @@ import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedBillingAlertsIndexRouteImport } from './routes/_authenticated/billing-alerts/index'
 import { Route as AuthenticatedBillingAlertRecordsIndexRouteImport } from './routes/_authenticated/billing-alert-records/index'
 import { Route as AuthenticatedAccountManagementIndexRouteImport } from './routes/_authenticated/account-management/index'
+import { Route as AuthenticatedSystemSettingsInspectionAlertsRouteImport } from './routes/_authenticated/system-settings/inspection-alerts'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedSystemSettingsSiteIndexRouteImport } from './routes/_authenticated/system-settings/site/index'
@@ -175,6 +176,12 @@ const AuthenticatedAccountManagementIndexRoute =
     path: '/account-management/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSystemSettingsInspectionAlertsRoute =
+  AuthenticatedSystemSettingsInspectionAlertsRouteImport.update({
+    id: '/inspection-alerts',
+    path: '/inspection-alerts',
+    getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
+  } as any)
 const AuthenticatedInstancesIdRoute =
   AuthenticatedInstancesIdRouteImport.update({
     id: '/instances/$id',
@@ -227,6 +234,7 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
@@ -257,6 +265,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/account-management': typeof AuthenticatedAccountManagementIndexRoute
   '/billing-alert-records': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts': typeof AuthenticatedBillingAlertsIndexRoute
@@ -291,6 +300,7 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
+  '/_authenticated/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/_authenticated/account-management/': typeof AuthenticatedAccountManagementIndexRoute
   '/_authenticated/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/_authenticated/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
@@ -324,6 +334,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/errors/$error'
     | '/instances/$id'
+    | '/system-settings/inspection-alerts'
     | '/account-management/'
     | '/billing-alert-records/'
     | '/billing-alerts/'
@@ -354,6 +365,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/errors/$error'
     | '/instances/$id'
+    | '/system-settings/inspection-alerts'
     | '/account-management'
     | '/billing-alert-records'
     | '/billing-alerts'
@@ -387,6 +399,7 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/_authenticated/errors/$error'
     | '/_authenticated/instances/$id'
+    | '/_authenticated/system-settings/inspection-alerts'
     | '/_authenticated/account-management/'
     | '/_authenticated/billing-alert-records/'
     | '/_authenticated/billing-alerts/'
@@ -594,6 +607,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAccountManagementIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/system-settings/inspection-alerts': {
+      id: '/_authenticated/system-settings/inspection-alerts'
+      path: '/inspection-alerts'
+      fullPath: '/system-settings/inspection-alerts'
+      preLoaderRoute: typeof AuthenticatedSystemSettingsInspectionAlertsRouteImport
+      parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
+    }
     '/_authenticated/instances/$id': {
       id: '/_authenticated/instances/$id'
       path: '/instances/$id'
@@ -656,6 +676,7 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
 )
 
 interface AuthenticatedSystemSettingsRouteRouteChildren {
+  AuthenticatedSystemSettingsInspectionAlertsRoute: typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   AuthenticatedSystemSettingsIndexRoute: typeof AuthenticatedSystemSettingsIndexRoute
   AuthenticatedSystemSettingsAuthSectionRoute: typeof AuthenticatedSystemSettingsAuthSectionRoute
   AuthenticatedSystemSettingsSiteSectionRoute: typeof AuthenticatedSystemSettingsSiteSectionRoute
@@ -665,6 +686,8 @@ interface AuthenticatedSystemSettingsRouteRouteChildren {
 
 const AuthenticatedSystemSettingsRouteRouteChildren: AuthenticatedSystemSettingsRouteRouteChildren =
   {
+    AuthenticatedSystemSettingsInspectionAlertsRoute:
+      AuthenticatedSystemSettingsInspectionAlertsRoute,
     AuthenticatedSystemSettingsIndexRoute:
       AuthenticatedSystemSettingsIndexRoute,
     AuthenticatedSystemSettingsAuthSectionRoute:

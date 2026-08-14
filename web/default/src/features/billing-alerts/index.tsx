@@ -61,7 +61,6 @@ import {
   type BillingTemplate,
   type BillingThreshold,
   type RuleImpact,
-  type SMTPSetting,
   type TemplateImpact,
   createBillingRule,
   createBillingTemplate,
@@ -69,23 +68,21 @@ import {
   deleteBillingTemplate,
   evaluateBillingRule,
   getExchangeSettings,
-  getSMTPSettings,
   listBillingRules,
   listBillingTemplates,
   listExchangeRates,
   previewBillingRule,
   previewBillingTemplate,
   refreshExchangeRate,
-  testSMTPSettings,
   updateBillingRule,
   updateBillingTemplate,
   updateExchangeSettings,
-  updateSMTPSettings,
 } from './api'
 import {
   discountMultiplierToPercent,
   discountPercentToMultiplier,
 } from './discount'
+import { SMTPSettings } from './smtp-settings'
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -1771,165 +1768,6 @@ function ExchangeSettings() {
           </TableBody>
         </Table>
       </div>
-    </div>
-  )
-}
-
-function SMTPSettings() {
-  const query = useQuery({
-    queryKey: ['smtp-settings'],
-    queryFn: getSMTPSettings,
-  })
-  const [form, setForm] = useState<SMTPSetting & { password: string }>({
-    id: 1,
-    host: '',
-    port: 587,
-    security: 'starttls',
-    username: '',
-    password: '',
-    password_stored: false,
-    from_name: '',
-    from_address: '',
-    reply_to: '',
-    alert_recipients: '',
-    instance_alert_failure_threshold: 3,
-    enabled: false,
-  })
-  const [testRecipient, setTestRecipient] = useState('')
-  useEffect(() => {
-    if (query.data?.data) setForm({ ...query.data.data, password: '' })
-  }, [query.data])
-  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
-    setForm((current) => ({ ...current, [key]: value }))
-  const save = async () => {
-    try {
-      await updateSMTPSettings(form)
-      toast.success('邮件设置已保存')
-      set('password', '')
-      await query.refetch()
-    } catch {
-      toast.error('保存邮件设置失败')
-    }
-  }
-  const test = async () => {
-    try {
-      await testSMTPSettings(testRecipient)
-      toast.success('测试邮件已发送')
-    } catch {
-      toast.error('测试邮件发送失败，请检查 SMTP 配置')
-    }
-  }
-  return (
-    <div className='grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]'>
-      <section className='grid gap-4 sm:grid-cols-2'>
-        <Field label='SMTP 主机'>
-          <Input
-            value={form.host}
-            onChange={(e) => set('host', e.target.value)}
-          />
-        </Field>
-        <Field label='端口'>
-          <Input
-            type='number'
-            value={form.port}
-            onChange={(e) => set('port', Number(e.target.value))}
-          />
-        </Field>
-        <Field label='安全方式'>
-          <NativeSelect
-            value={form.security}
-            onChange={(e) => set('security', e.target.value)}
-          >
-            <NativeSelectOption value='starttls'>STARTTLS</NativeSelectOption>
-            <NativeSelectOption value='tls'>TLS / SSL</NativeSelectOption>
-            <NativeSelectOption value='none'>无加密</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        <Field label='用户名'>
-          <Input
-            value={form.username}
-            onChange={(e) => set('username', e.target.value)}
-          />
-        </Field>
-        <Field label={form.password_stored ? '密码（留空保持不变）' : '密码'}>
-          <Input
-            type='password'
-            value={form.password}
-            onChange={(e) => set('password', e.target.value)}
-          />
-        </Field>
-        <Field label='发件人名称'>
-          <Input
-            value={form.from_name}
-            onChange={(e) => set('from_name', e.target.value)}
-          />
-        </Field>
-        <Field label='发件邮箱'>
-          <Input
-            value={form.from_address}
-            onChange={(e) => set('from_address', e.target.value)}
-          />
-        </Field>
-        <Field label='回复邮箱'>
-          <Input
-            value={form.reply_to}
-            onChange={(e) => set('reply_to', e.target.value)}
-          />
-        </Field>
-        <Field label='实例巡检通知收件人'>
-          <Input
-            value={form.alert_recipients}
-            onChange={(e) => set('alert_recipients', e.target.value)}
-            placeholder='ops@example.com, admin@example.com'
-          />
-        </Field>
-        <Field label='巡检失败通知阈值'>
-          <Input
-            type='number'
-            min={1}
-            max={100}
-            value={form.instance_alert_failure_threshold}
-            onChange={(e) =>
-              set('instance_alert_failure_threshold', Number(e.target.value))
-            }
-          />
-          <p className='text-muted-foreground mt-1 text-xs'>
-            普通连接错误连续达到此次数后发送邮件；认证、凭据和权限错误首次失败立即通知。
-          </p>
-        </Field>
-        <label className='flex items-center gap-2 text-sm'>
-          <Switch
-            checked={form.enabled}
-            onCheckedChange={(value) => set('enabled', value)}
-          />
-          启用邮件发送
-        </label>
-        <div className='sm:col-span-2'>
-          <Button onClick={() => void save()}>保存邮件设置</Button>
-        </div>
-      </section>
-      <aside className='bg-muted/30 h-fit rounded-lg border p-4'>
-        <h3 className='mb-1 font-medium'>发送测试邮件</h3>
-        <p className='text-muted-foreground mb-4 text-xs'>
-          先保存设置，再验证连接、认证与投递。
-        </p>
-        <div className='space-y-3'>
-          <Input
-            value={testRecipient}
-            onChange={(e) => setTestRecipient(e.target.value)}
-            placeholder='recipient@example.com'
-          />
-          <Button
-            variant='outline'
-            className='w-full'
-            disabled={!testRecipient}
-            onClick={() => void test()}
-          >
-            <Mail />
-            发送测试
-          </Button>
-        </div>
-      </aside>
     </div>
   )
 }
