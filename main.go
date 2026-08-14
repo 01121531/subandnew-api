@@ -97,6 +97,7 @@ func main() {
 
 	// Run only handlers registered by the control-plane task packages.
 	service.StartSystemTaskRunner()
+	service.StartManagedConductorRealtimeCollector()
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
@@ -187,6 +188,9 @@ func main() {
 		if closeErr := srv.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
 			common.SysError(fmt.Sprintf("failed to close active server connections: %v", closeErr))
 		}
+	}
+	if err := service.StopManagedConductorRealtimeCollector(ctx); err != nil {
+		common.SysError("managed conductor realtime collector did not stop before shutdown deadline: " + err.Error())
 	}
 	if err := service.StopSystemTaskRunner(ctx); err != nil {
 		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())
