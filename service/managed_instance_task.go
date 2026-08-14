@@ -496,21 +496,12 @@ func (managedInstanceSyncHandler) Run(ctx context.Context, task *model.SystemTas
 	}
 
 	guard := managedInstanceTaskCommitGuard(task.TaskID, runnerID)
-	inventory, err := managedinstance.CollectInventoryWithCommitGuard(ctx, payload.InstanceID, "auto", "", guard)
-	if err != nil {
-		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedInstanceProbeErrorCode(err))
-		return
-	}
 	summary, err := managedinstance.CollectSummaryWithCommitGuard(ctx, payload.InstanceID, managedinstance.TimeWindow{}, guard)
 	if err != nil {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedInstanceProbeErrorCode(err))
 		return
 	}
-	result := map[string]any{"inventory": inventory, "summary": summary}
-	if inventory.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
-		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, result, inventory.ErrorCode)
-		return
-	}
+	result := map[string]any{"summary": summary}
 	if summary.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, result, summary.ErrorCode)
 		return

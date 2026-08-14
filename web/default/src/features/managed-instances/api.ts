@@ -30,6 +30,9 @@ import type {
   ManagedInstanceFilters,
   ManagedInstanceAlertList,
   ManagedInstanceAccountOutput,
+  ManagedAccountRangeInput,
+  ManagedAccountRefreshView,
+  ManagedAccountSnapshotView,
   ManagedInstanceInventoryPage,
   ManagedInstanceInput,
   ManagedInstanceList,
@@ -228,6 +231,48 @@ export async function getManagedInstanceAccountOutput(
     `/api/managed-instances/${id}/account-output?${params.toString()}`,
     {
       disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+function managedAccountRangeParams(input: ManagedAccountRangeInput) {
+  const params = new URLSearchParams()
+  if (input.preset_days) params.set('preset_days', String(input.preset_days))
+  if (input.start) params.set('start', String(input.start))
+  if (input.end) params.set('end', String(input.end))
+  if (input.timezone) params.set('timezone', input.timezone)
+  return params
+}
+
+export async function getManagedAccountSnapshot(
+  id: number,
+  input: ManagedAccountRangeInput,
+  options?: { silent?: boolean }
+): Promise<ApiResponse<ManagedAccountSnapshotView>> {
+  const params = managedAccountRangeParams(input)
+  const response = await api.get(
+    `/api/managed-instances/${id}/account-management/snapshot?${params.toString()}`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function refreshManagedAccountSnapshot(
+  id: number,
+  input: ManagedAccountRangeInput & { force?: boolean },
+  options?: { silent?: boolean }
+): Promise<ApiResponse<ManagedAccountRefreshView>> {
+  const response = await api.post(
+    `/api/managed-instances/${id}/account-management/refresh`,
+    input,
+    {
       skipBusinessError: options?.silent,
       skipErrorHandler: options?.silent,
     }

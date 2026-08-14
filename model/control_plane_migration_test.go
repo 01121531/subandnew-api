@@ -29,6 +29,7 @@ var expectedControlPlaneTables = []string{
 	"custom_oauth_providers",
 	"exchange_rate_settings",
 	"exchange_rates",
+	"managed_account_snapshots",
 	"managed_config_templates",
 	"managed_instance_alerts",
 	"managed_instance_audits",

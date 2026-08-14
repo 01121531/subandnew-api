@@ -22,6 +22,7 @@ const (
 
 	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
+	SystemTaskTypeManagedAccountSync   = "managed_account_sync"
 	SystemTaskTypeManagedUsageExport   = "managed_usage_export"
 	SystemTaskTypeBillingAlertScan     = "billing_alert_scan"
 	SystemTaskTypeBillingAlertEvaluate = "billing_alert_evaluate"
@@ -654,6 +655,10 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 		if task.Type == SystemTaskTypeManagedUsageExport {
 			return RequeueExpiredManagedUsageExportLease(tx, taskID, now)
 		}
+		if task.Type == SystemTaskTypeManagedAccountSync {
+			return tx.Model(&SystemTask{}).Where("id = ? AND status = ?", task.ID, SystemTaskStatusRunning).
+				Updates(map[string]any{"status": SystemTaskStatusPending, "locked_by": "", "error": "", "updated_at": now}).Error
+		}
 		taskUpdate := tx.Model(&SystemTask{}).Where("id = ? AND status = ?", task.ID, SystemTaskStatusRunning).
 			Updates(map[string]any{
 				"status": SystemTaskStatusFailed, "active_key": nil,
@@ -706,6 +711,27 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 			InstanceId: operation.InstanceId, ActorId: actorID, Action: "operation_complete",
 			Outcome: outcome, Details: string(details), CreatedAt: now,
 		}).Error
+	})
+}
+
+func RequeueSystemTask(taskID string, lockedBy string) error {
+	now := common.GetTimestamp()
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := RequireValidSystemTaskLease(tx, taskID, lockedBy, now); err != nil {
+			return err
+		}
+		var task SystemTask
+		if err := tx.Select("scope_key").Where("task_id = ? AND status = ?", taskID, SystemTaskStatusRunning).First(&task).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&SystemTask{}).Where("task_id = ? AND status = ?", taskID, SystemTaskStatusRunning).
+			Updates(map[string]any{"status": SystemTaskStatusPending, "locked_by": "", "error": "", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if task.ScopeKey == "" {
+			return tx.Where("task_id = ? AND locked_by = ?", taskID, lockedBy).Delete(&SystemTaskLock{}).Error
+		}
+		return tx.Where("task_id = ? AND locked_by = ?", taskID, lockedBy).Delete(&SystemTaskScopeLock{}).Error
 	})
 }
 

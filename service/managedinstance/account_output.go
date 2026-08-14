@@ -13,7 +13,7 @@ import (
 )
 
 const accountOutputCollectionTimeout = 30 * time.Second
-const accountOutputInventorySnapshotTTL = 3 * time.Minute
+const accountOutputInventorySnapshotTTL = 65 * time.Minute
 
 type AccountOutputItem struct {
 	Account          InventoryItem `json:"account"`

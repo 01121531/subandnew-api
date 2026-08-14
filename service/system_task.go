@@ -304,6 +304,9 @@ func runSystemTaskScheduler() {
 		if err := billingalert.CleanupExpiredAlertExports(); err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("billing alert export cleanup failed: %v", err))
 		}
+		if err := cleanupManagedAccountCustomSnapshots(common.GetTimestamp()); err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed account snapshot cleanup failed: %v", err))
+		}
 	}
 	managedUsageExportCleanupMu.Unlock()
 	now := common.GetTimestamp()
@@ -347,6 +350,7 @@ func runSystemTaskScheduler() {
 	}
 	scheduleDueManagedInstanceProbes(now)
 	scheduleDueManagedInstanceSyncs(now)
+	scheduleDueManagedAccountSyncs(now)
 	resumeManagedInstanceOperationBatches()
 }
 

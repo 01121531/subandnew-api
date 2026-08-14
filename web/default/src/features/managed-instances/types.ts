@@ -239,6 +239,39 @@ export interface ManagedInstanceAccountOutput {
   currency: string
 }
 
+export interface ManagedAccountRangeInput {
+  preset_days?: 1 | 7 | 14 | 30
+  start?: number
+  end?: number
+  timezone?: string
+}
+
+export interface ManagedAccountSnapshotSection<T> {
+  observation?: ManagedInstanceObservation<T>
+  last_attempt_at: number
+  last_attempt_status: ManagedInstanceCollectionStatus | ''
+  last_error_code?: string
+}
+
+export interface ManagedAccountSnapshotView {
+  range: {
+    range_key: string
+    preset_days: number
+    start: number
+    end: number
+    timezone: string
+  }
+  inventory: ManagedAccountSnapshotSection<ManagedInstanceInventoryPage>
+  account_output: ManagedAccountSnapshotSection<ManagedInstanceAccountOutput>
+  refresh_recommended: boolean
+  task?: ManagedInstanceTask
+}
+
+export interface ManagedAccountRefreshView {
+  enqueued: boolean
+  task?: ManagedInstanceTask
+}
+
 export interface ManagedInstanceAlert {
   id: number
   instance_id: number

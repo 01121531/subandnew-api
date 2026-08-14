@@ -37,6 +37,14 @@ type managedInstanceRequest struct {
 	Credential            *managedInstanceCredentialRequest `json:"credential"`
 }
 
+type managedAccountRefreshRequest struct {
+	PresetDays int    `json:"preset_days"`
+	Start      int64  `json:"start"`
+	End        int64  `json:"end"`
+	Timezone   string `json:"timezone"`
+	Force      bool   `json:"force"`
+}
+
 func ListManagedInstances(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -142,6 +150,50 @@ func GetManagedInstanceAccountOutput(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	presetDays, _ := strconv.Atoi(c.Query("preset_days"))
+	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
+	accountRange, err := service.NormalizeManagedAccountRange(presetDays, start, end, c.Query("timezone"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	result, err := service.GetManagedAccountSnapshot(id, accountRange)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func RefreshManagedInstanceAccountManagement(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok {
+		return
+	}
+	request := managedAccountRefreshRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	accountRange, err := service.NormalizeManagedAccountRange(request.PresetDays, request.Start, request.End, request.Timezone)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	result, err := service.EnqueueManagedAccountRefresh(id, c.GetInt("id"), accountRange, request.Force)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": result})
 }
 
 func GetManagedInstanceUsageRecords(c *gin.Context) {

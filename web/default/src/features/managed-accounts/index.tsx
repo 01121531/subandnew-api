@@ -21,6 +21,7 @@ import { Link } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
 import {
   Calculator,
+  AlertTriangle,
   CheckCircle2,
   CircleHelp,
   CircleDollarSign,
@@ -32,7 +33,7 @@ import {
   Users,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -64,14 +65,15 @@ import {
 } from '@/features/fleet-dashboard/time-range'
 import { FleetTimeRangeFilter } from '@/features/fleet-dashboard/time-range-filter'
 import {
-  getManagedInstanceInventory,
-  getManagedInstanceAccountOutput,
+  getManagedAccountSnapshot,
   getManagedInstances,
+  refreshManagedAccountSnapshot,
 } from '@/features/managed-instances/api'
 import { InstanceConnectionAlert } from '@/features/managed-instances/components/instance-connection-alert'
 import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type {
   ManagedInstance,
+  ManagedAccountRangeInput,
   ManagedInstanceAccountOutputItem,
   ManagedInstanceInventoryItem,
 } from '@/features/managed-instances/types'
@@ -295,6 +297,10 @@ export function ManagedAccounts() {
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
     createFleetPresetRange(7)
   )
+  const automaticRefreshes = useRef(new Set<string>())
+  const [submittingRefreshes, setSubmittingRefreshes] = useState<Set<number>>(
+    () => new Set()
+  )
 
   const instancesQuery = useQuery({
     queryKey: ['managed-account-instances'],
@@ -332,89 +338,67 @@ export function ManagedAccounts() {
     [allInstances]
   )
 
-  const inventoryQueries = useQueries({
+  const accountRangeInput = useMemo<ManagedAccountRangeInput>(() => {
+    if (timeRange.presetDays) {
+      return {
+        preset_days: timeRange.presetDays,
+        timezone: 'Asia/Shanghai',
+      }
+    }
+    const resolved = resolveFleetTimeRange(timeRange)
+    return {
+      start: Math.floor(resolved.start.getTime() / 1000),
+      end: Math.floor(resolved.end.getTime() / 1000),
+      timezone: 'Asia/Shanghai',
+    }
+  }, [timeRange])
+  const rangeQueryKey = timeRange.presetDays
+    ? `preset-${timeRange.presetDays}`
+    : `${accountRangeInput.start}-${accountRangeInput.end}`
+
+  const snapshotQueries = useQueries({
     queries: instances.map((instance) => ({
-      queryKey: ['managed-account-inventory', instance.id],
-      queryFn: async () => {
-        const response = await getManagedInstanceInventory(
-          instance.id,
-          'auto',
-          '',
-          { silent: true }
-        )
-        const observation = response.data
-        if (
-          observation.collection_status !== 'succeeded' ||
-          !observation.data
-        ) {
-          throw new Error(observation.error_code || 'collection_failed')
-        }
-        return response
-      },
+      queryKey: ['managed-account-snapshot', instance.id, rangeQueryKey],
+      queryFn: () =>
+        getManagedAccountSnapshot(instance.id, accountRangeInput, {
+          silent: true,
+        }),
       retry: 1,
       retryDelay: FAILED_REFRESH_RETRY_MS,
       staleTime: INVENTORY_REFRESH_MS / 2,
-      refetchInterval: INVENTORY_REFRESH_MS,
-    })),
-  })
-  const outputQueries = useQueries({
-    queries: instances.map((instance, index) => ({
-      queryKey: [
-        'managed-account-output',
-        instance.id,
-        timeRange.presetDays ?? 'custom',
-        timeRange.presetDays ? null : timeRange.start.getTime(),
-        timeRange.presetDays ? null : timeRange.end.getTime(),
-      ],
-      queryFn: async () => {
-        const resolved = resolveFleetTimeRange(timeRange)
-        const response = await getManagedInstanceAccountOutput(
-          instance.id,
-          {
-            start: Math.floor(resolved.start.getTime() / 1000),
-            end: Math.floor(resolved.end.getTime() / 1000),
-          },
-          { silent: true }
-        )
-        if (
-          response.data.collection_status !== 'succeeded' ||
-          !response.data.data
-        ) {
-          throw new Error(response.data.error_code || 'collection_failed')
-        }
-        return response
+      refetchInterval: (query: { state: { data?: unknown } }) => {
+        const response = query.state.data as
+          | { data?: { task?: { status: string } } }
+          | undefined
+        const task = response?.data?.task
+        return task && ['pending', 'running'].includes(task.status)
+          ? 3_000
+          : INVENTORY_REFRESH_MS
       },
-      retry: 1,
-      retryDelay: FAILED_REFRESH_RETRY_MS,
-      staleTime: INVENTORY_REFRESH_MS / 2,
-      refetchInterval: INVENTORY_REFRESH_MS,
-      enabled:
-        inventoryQueries[index]?.data?.data.collection_status === 'succeeded',
+      refetchIntervalInBackground: false,
     })),
   })
   const rows = useMemo<ResourceRow[]>(
     () =>
       instances.flatMap((instance, index) => {
-        const observation = inventoryQueries[index]?.data?.data
-        if (
-          observation?.collection_status !== 'succeeded' ||
-          !observation.data
-        ) {
+        const observation =
+          snapshotQueries[index]?.data?.data.inventory.observation
+        if (!observation?.data) {
           return []
         }
         return observation.data.items.map((item) => ({ instance, item }))
       }),
-    [instances, inventoryQueries]
+    [instances, snapshotQueries]
   )
   const outputRows = useMemo<OutputRow[]>(
     () =>
       instances.flatMap((instance, index) =>
-        (outputQueries[index]?.data?.data.data?.items ?? []).map((output) => ({
-          instance,
-          output,
-        }))
+        (
+          snapshotQueries[index]?.data?.data.account_output.observation?.data
+            ?.items ?? []
+        ).map((output) => ({ instance, output }))
       ),
-    [instances, outputQueries]
+    [instances, snapshotQueries]
   )
   const outputTotals = useMemo(() => {
     const collected = outputRows.filter(
@@ -470,19 +454,36 @@ export function ManagedAccounts() {
       compareResourceRows(left, right, sortKey, sortDirection)
     )
   }, [normalizedSearch, rows, sortDirection, sortKey])
-  const loading = inventoryQueries.some((query) => query.isPending)
-  const error = inventoryQueries.some((query) => {
-    const observation = query.data?.data
-    return (
-      query.isError ||
-      (observation != null && observation.collection_status !== 'succeeded')
-    )
+  const hasActiveTask = snapshotQueries.some((query) => {
+    const task = query.data?.data.task
+    return task && ['pending', 'running'].includes(task.status)
   })
-  const connectionFailed = [...inventoryQueries, ...outputQueries].some(
-    (query) => isInstanceConnectionError(query.error)
+  const refreshNeeded = snapshotQueries.some(
+    (query) => query.data?.data.refresh_recommended
   )
-  const collectedInstances = inventoryQueries.filter(
-    (query) => query.data?.data.collection_status === 'succeeded'
+  const loading = snapshotQueries.some(
+    (query, index) =>
+      query.isPending ||
+      (!query.data?.data.inventory.observation &&
+        (query.data?.data.refresh_recommended ||
+          submittingRefreshes.has(instances[index]?.id) ||
+          Boolean(query.data?.data.task)))
+  )
+  const error = snapshotQueries.some(
+    (query) =>
+      query.isError ||
+      (query.data?.data.inventory.last_attempt_status === 'failed' &&
+        !query.data.data.inventory.observation)
+  )
+  const connectionFailed = snapshotQueries.some(
+    (query) =>
+      isInstanceConnectionError(query.error) ||
+      ['instance_connection_failed', 'remote_data_unavailable'].includes(
+        query.data?.data.inventory.last_error_code ?? ''
+      )
+  )
+  const collectedInstances = snapshotQueries.filter(
+    (query) => query.data?.data.inventory.observation?.data
   ).length
   const available = rows.filter((row) => row.item.enabled === true).length
   const unavailable = rows.filter((row) => row.item.enabled === false).length
@@ -492,8 +493,34 @@ export function ManagedAccounts() {
     : 0
   const isRefreshing =
     instancesQuery.isFetching ||
-    inventoryQueries.some((query) => query.isFetching) ||
-    outputQueries.some((query) => query.isFetching)
+    snapshotQueries.some((query) => query.isFetching) ||
+    hasActiveTask ||
+    submittingRefreshes.size > 0
+  const isCollecting =
+    refreshNeeded || hasActiveTask || submittingRefreshes.size > 0
+  const outputLoading = snapshotQueries.some(
+    (query, index) =>
+      !query.data?.data.account_output.observation &&
+      (query.isPending ||
+        query.data?.data.refresh_recommended ||
+        submittingRefreshes.has(instances[index]?.id) ||
+        Boolean(query.data?.data.task))
+  )
+  const outputError = snapshotQueries.some(
+    (query) =>
+      query.isError ||
+      (query.data?.data.account_output.last_attempt_status === 'failed' &&
+        !query.data.data.account_output.observation)
+  )
+  const cacheObservedAt = snapshotQueries
+    .map((query) => query.data?.data.inventory.observation?.observed_at ?? 0)
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right)[0]
+  const cacheRefreshFailed = snapshotQueries.some(
+    (query) =>
+      query.data?.data.inventory.last_attempt_status === 'failed' ||
+      query.data?.data.account_output.last_attempt_status === 'failed'
+  )
 
   useEffect(() => {
     if (!instancesQuery.isSuccess || familyCounts[family] > 0) return
@@ -527,10 +554,53 @@ export function ManagedAccounts() {
     )
   }, [family, selectedInstances])
 
+  useEffect(() => {
+    instances.forEach((instance, index) => {
+      const snapshot = snapshotQueries[index]?.data?.data
+      const key = `${instance.id}:${rangeQueryKey}`
+      if (
+        !snapshot?.refresh_recommended ||
+        snapshot.task ||
+        automaticRefreshes.current.has(key)
+      ) {
+        return
+      }
+      automaticRefreshes.current.add(key)
+      setSubmittingRefreshes((current) => new Set(current).add(instance.id))
+      void refreshManagedAccountSnapshot(
+        instance.id,
+        { ...accountRangeInput, force: false },
+        { silent: true }
+      )
+        .then(() => snapshotQueries[index]?.refetch())
+        .finally(() => {
+          setSubmittingRefreshes((current) => {
+            const next = new Set(current)
+            next.delete(instance.id)
+            return next
+          })
+        })
+    })
+  }, [accountRangeInput, instances, rangeQueryKey, snapshotQueries])
+
   const refresh = () => {
     void instancesQuery.refetch()
-    for (const query of inventoryQueries) void query.refetch()
-    for (const query of outputQueries) void query.refetch()
+    instances.forEach((instance, index) => {
+      setSubmittingRefreshes((current) => new Set(current).add(instance.id))
+      void refreshManagedAccountSnapshot(
+        instance.id,
+        { ...accountRangeInput, force: true },
+        { silent: true }
+      )
+        .then(() => snapshotQueries[index]?.refetch())
+        .finally(() => {
+          setSubmittingRefreshes((current) => {
+            const next = new Set(current)
+            next.delete(instance.id)
+            return next
+          })
+        })
+    })
   }
 
   let content: ReactNode
@@ -546,6 +616,12 @@ export function ManagedAccounts() {
         {connectionFailed && (
           <InstanceConnectionAlert onRetry={refresh} retrying={isRefreshing} />
         )}
+        <AccountCacheStatus
+          observedAt={cacheObservedAt}
+          refreshing={isCollecting}
+          failed={cacheRefreshFailed}
+          hasData={collectedInstances > 0}
+        />
         <AccountSummary
           total={rows.length}
           available={available}
@@ -557,8 +633,8 @@ export function ManagedAccounts() {
           family={family}
           rows={outputRows}
           totals={outputTotals}
-          loading={outputQueries.some((query) => query.isPending)}
-          error={outputQueries.some((query) => query.isError)}
+          loading={outputLoading}
+          error={outputError}
         />
         <AccountTable
           family={family}
@@ -676,6 +752,59 @@ export function ManagedAccounts() {
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>
+  )
+}
+
+function AccountCacheStatus(props: {
+  observedAt?: number
+  refreshing: boolean
+  failed: boolean
+  hasData: boolean
+}) {
+  const { t } = useTranslation()
+  let Icon = CheckCircle2
+  let tone = 'border-success/25 bg-success/5 text-success'
+  if (props.failed) {
+    Icon = AlertTriangle
+    tone = 'border-warning/35 bg-warning/5 text-warning'
+  } else if (props.refreshing) {
+    Icon = RefreshCw
+    tone = 'border-primary/25 bg-primary/5 text-primary'
+  }
+  let label = t('Account snapshot is up to date')
+  if (!props.hasData && props.refreshing) {
+    label = t('Collecting account data for the first time')
+  } else if (props.failed && props.hasData) {
+    label = t('Refresh failed; showing the last successful account snapshot')
+  } else if (props.failed) {
+    label = t('Account data collection failed')
+  } else if (props.refreshing) {
+    label = t('Updating account data in the background')
+  }
+  return (
+    <div
+      className={cn(
+        'flex min-h-10 flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm',
+        tone
+      )}
+    >
+      <span className='flex min-w-0 items-center gap-2 font-medium'>
+        <Icon
+          className={cn(
+            'size-4 shrink-0',
+            props.refreshing && !props.failed && 'animate-spin'
+          )}
+        />
+        <span className='truncate'>{label}</span>
+      </span>
+      {props.observedAt ? (
+        <Badge variant='outline' className='bg-background/70 tabular-nums'>
+          {t('Collected at {{time}}', {
+            time: formatTimestamp(props.observedAt),
+          })}
+        </Badge>
+      ) : null}
+    </div>
   )
 }
 
