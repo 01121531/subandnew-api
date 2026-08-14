@@ -30,6 +30,8 @@ import {
   RefreshCw,
   Server,
   ServerOff,
+  UserCheck,
+  Users,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -109,6 +111,8 @@ type InstanceMetricRow = {
   collected: boolean
   requests: number | null
   rpm: number | null
+  accountsAvailable: number | null
+  accountsTotal: number | null
   tokens: number | null
   quota: number | null
 }
@@ -480,6 +484,14 @@ export function FleetDashboard() {
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
+          accountsAvailable:
+            instance.kind === 'conductor' && streamed?.observed_at
+              ? streamed.accounts_available
+              : null,
+          accountsTotal:
+            instance.kind === 'conductor' && streamed?.observed_at
+              ? streamed.accounts_total
+              : null,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
         }
@@ -491,6 +503,14 @@ export function FleetDashboard() {
     () => ({
       requests: rows.reduce((sum, row) => sum + (row.requests ?? 0), 0),
       rpm: rows.reduce((sum, row) => sum + (row.rpm ?? 0), 0),
+      accountsAvailable: rows.reduce(
+        (sum, row) => sum + (row.accountsAvailable ?? 0),
+        0
+      ),
+      accountsTotal: rows.reduce(
+        (sum, row) => sum + (row.accountsTotal ?? 0),
+        0
+      ),
       tokens: rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
       quota: rows.reduce((sum, row) => sum + (row.quota ?? 0), 0),
       collected: rows.filter((row) => row.collected).length,
@@ -499,6 +519,7 @@ export function FleetDashboard() {
       ).length,
       requestsReady: rows.filter((row) => row.requests != null).length,
       rpmReady: rows.filter((row) => row.rpm != null).length,
+      accountsReady: rows.filter((row) => row.accountsTotal != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
@@ -828,12 +849,15 @@ type DashboardContentProps = {
   totals: {
     requests: number
     rpm: number
+    accountsAvailable: number
+    accountsTotal: number
     tokens: number
     quota: number
     collected: number
     metricReady: number
     requestsReady: number
     rpmReady: number
+    accountsReady: number
     tokensReady: number
     quotaReady: number
     healthy: number
@@ -1016,7 +1040,10 @@ function SummaryGrid(props: DashboardContentProps) {
   return (
     <section
       aria-label={t('Fleet summary')}
-      className='bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3 xl:grid-cols-7'
+      className={cn(
+        'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
+        props.family === 'conductor' ? 'xl:grid-cols-9' : 'xl:grid-cols-7'
+      )}
     >
       <MetricCard
         icon={CheckCircle2}
@@ -1059,6 +1086,34 @@ function SummaryGrid(props: DashboardContentProps) {
           </Button>
         }
       />
+      {props.family === 'conductor' && (
+        <MetricCard
+          icon={UserCheck}
+          label={t('Available accounts')}
+          value={formatMetric(
+            props.totals.accountsReady ? props.totals.accountsAvailable : null,
+            false
+          )}
+          detail={t('Real-time across {{count}} instances', {
+            count: props.totals.accountsReady,
+          })}
+          tone='success'
+        />
+      )}
+      {props.family === 'conductor' && (
+        <MetricCard
+          icon={Users}
+          label={t('Total accounts')}
+          value={formatMetric(
+            props.totals.accountsReady ? props.totals.accountsTotal : null,
+            false
+          )}
+          detail={t('Real-time across {{count}} instances', {
+            count: props.totals.accountsReady,
+          })}
+          tone='blue'
+        />
+      )}
       <MetricCard
         icon={DatabaseZap}
         label={t('Tokens')}
@@ -1369,6 +1424,16 @@ function PerformanceTable({
                 <TableHead>{t('Status')}</TableHead>
                 <TableHead className='text-right'>{t('Requests')}</TableHead>
                 <TableHead className='text-right'>RPM</TableHead>
+                {family === 'conductor' && (
+                  <TableHead className='text-right'>
+                    {t('Available accounts')}
+                  </TableHead>
+                )}
+                {family === 'conductor' && (
+                  <TableHead className='text-right'>
+                    {t('Total accounts')}
+                  </TableHead>
+                )}
                 <TableHead className='text-right'>{t('Tokens')}</TableHead>
                 <TableHead className='text-right'>
                   {t(metricLabel('quota', family))}
@@ -1405,6 +1470,16 @@ function PerformanceTable({
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.rpm, false)}
                   </TableCell>
+                  {family === 'conductor' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.accountsAvailable, false)}
+                    </TableCell>
+                  )}
+                  {family === 'conductor' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.accountsTotal, false)}
+                    </TableCell>
+                  )}
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.tokens, false)}
                   </TableCell>

@@ -104,8 +104,8 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 		]}}
 	`))
 	state := conductorRealtimeTestState(stream)
-	if state.AccountsTotal != 4 || state.AccountsReporting != 2 {
-		t.Fatalf("snapshot counts = total %d, reporting %d; want 4, 2", state.AccountsTotal, state.AccountsReporting)
+	if state.AccountsTotal != 4 || state.AccountsAvailable != 3 || state.AccountsReporting != 2 {
+		t.Fatalf("snapshot counts = total %d, available %d, reporting %d; want 4, 3, 2", state.AccountsTotal, state.AccountsAvailable, state.AccountsReporting)
 	}
 	if state.RPM.Value == nil || *state.RPM.Value != 10 {
 		t.Fatalf("snapshot RPM = %v, want 10", state.RPM.Value)
@@ -125,8 +125,8 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 
 	stream.applyEvent([]byte(`{"type":"account","data":{"account":{"account_id":"2","_removed":true}}}`))
 	state = conductorRealtimeTestState(stream)
-	if state.AccountsTotal != 3 || state.AccountsReporting != 1 {
-		t.Fatalf("removal counts = total %d, reporting %d; want 3, 1", state.AccountsTotal, state.AccountsReporting)
+	if state.AccountsTotal != 3 || state.AccountsAvailable != 2 || state.AccountsReporting != 1 {
+		t.Fatalf("removal counts = total %d, available %d, reporting %d; want 3, 2, 1", state.AccountsTotal, state.AccountsAvailable, state.AccountsReporting)
 	}
 }
 

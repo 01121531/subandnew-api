@@ -46,6 +46,7 @@ type ConductorRealtimeState struct {
 	ErrorCode         string            `json:"error_code,omitempty"`
 	RPM               MetricSample      `json:"rpm"`
 	AccountsTotal     int               `json:"accounts_total"`
+	AccountsAvailable int               `json:"accounts_available"`
 	AccountsReporting int               `json:"accounts_reporting"`
 	ActiveSessions    int               `json:"active_sessions"`
 	Accounts          []InventoryItem   `json:"accounts"`
@@ -710,6 +711,9 @@ func (stream *conductorRealtimeStream) snapshotLocked() ConductorRealtimeState {
 		if account.RPM != nil && *account.RPM >= 0 {
 			state.AccountsReporting++
 		}
+		if account.Enabled != nil && *account.Enabled {
+			state.AccountsAvailable++
+		}
 		if account.ActiveSessions != nil && *account.ActiveSessions >= 0 {
 			state.ActiveSessions += *account.ActiveSessions
 		}
@@ -754,7 +758,7 @@ func (stream *conductorRealtimeStream) broadcastLocked(eventType string, state C
 func conductorRealtimeMetrics(instanceID int64) *RealtimeMetricsResult {
 	state, ok := CurrentConductorRealtime(instanceID)
 	result := &RealtimeMetricsResult{
-		RPM: state.RPM, AccountsTotal: state.AccountsTotal, AccountsReporting: state.AccountsReporting,
+		RPM: state.RPM, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable, AccountsReporting: state.AccountsReporting,
 		ActiveSessions: state.ActiveSessions, StreamStatus: state.StreamStatus, Stale: state.Stale,
 	}
 	if !ok {

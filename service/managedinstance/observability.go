@@ -118,6 +118,7 @@ type SummaryResult struct {
 type RealtimeMetricsResult struct {
 	RPM               MetricSample `json:"rpm"`
 	AccountsTotal     int          `json:"accounts_total,omitempty"`
+	AccountsAvailable int          `json:"accounts_available,omitempty"`
 	AccountsReporting int          `json:"accounts_reporting,omitempty"`
 	ActiveSessions    int          `json:"active_sessions,omitempty"`
 	StreamStatus      string       `json:"stream_status,omitempty"`

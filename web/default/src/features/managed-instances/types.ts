@@ -226,6 +226,7 @@ export interface ManagedInstanceSummary {
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
   accounts_total?: number
+  accounts_available?: number
   accounts_reporting?: number
   active_sessions?: number
   stream_status?: string
@@ -240,6 +241,7 @@ export interface ManagedInstanceRealtimeState {
   error_code?: string
   rpm: ManagedInstanceMetricSample
   accounts_total: number
+  accounts_available: number
   accounts_reporting: number
   active_sessions: number
   accounts?: ManagedInstanceInventoryItem[]
