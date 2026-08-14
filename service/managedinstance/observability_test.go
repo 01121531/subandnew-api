@@ -155,6 +155,10 @@ func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedT
 	requestedOffsets := make([]string, 0, 9)
 	var requestedOffsetsMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/ws-clients" {
+			writeProbeJSON(response, `{"code":200,"data":[]}`)
+			return
+		}
 		require.Equal(t, "/api/v1/accounts", request.URL.Path)
 		offset := request.URL.Query().Get("offset")
 		requestedOffsetsMu.Lock()

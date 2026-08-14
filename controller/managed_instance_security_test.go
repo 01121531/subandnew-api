@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -25,4 +26,33 @@ func TestRotateManagedInstanceCredentialRequiresRoot(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "root access is required")
+}
+
+func TestManagedInstanceRealtimeIDs(t *testing.T) {
+	ids, err := managedInstanceRealtimeIDs("3, 1,3,2")
+	require.NoError(t, err)
+	require.Equal(t, []int64{3, 1, 2}, ids)
+
+	_, err = managedInstanceRealtimeIDs("0,1")
+	require.Error(t, err)
+	_, err = managedInstanceRealtimeIDs(strings.Repeat("1,", 101) + "2")
+	require.NoError(t, err, "duplicate IDs do not count toward the 100 instance limit")
+
+	unique := make([]string, 101)
+	for index := range unique {
+		unique[index] = strconv.Itoa(index + 1)
+	}
+	_, err = managedInstanceRealtimeIDs(strings.Join(unique, ","))
+	require.Error(t, err)
+}
+
+func TestManagedInstanceRealtimeTopics(t *testing.T) {
+	topics, err := managedInstanceRealtimeTopics("rpm,accounts,rpm")
+	require.NoError(t, err)
+	require.Len(t, topics, 2)
+	require.Contains(t, topics, "rpm")
+	require.Contains(t, topics, "accounts")
+
+	_, err = managedInstanceRealtimeTopics("rpm,secrets")
+	require.Error(t, err)
 }

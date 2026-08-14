@@ -89,6 +89,7 @@ import type {
   ManagedInstanceAlert,
   ManagedInstanceSummary,
 } from '../managed-instances/types'
+import { useManagedInstanceRealtimeEvents } from '../managed-instances/use-realtime-events'
 import {
   createFleetPresetRange,
   FLEET_TIME_PRESETS,
@@ -380,6 +381,17 @@ export function FleetDashboard() {
     () => (selectedInstance ? [selectedInstance] : familyInstances),
     [familyInstances, selectedInstance]
   )
+  const conductorInstanceIDs = useMemo(
+    () =>
+      instances
+        .filter((instance) => instance.kind === 'conductor')
+        .map((instance) => instance.id),
+    [instances]
+  )
+  const conductorRealtime = useManagedInstanceRealtimeEvents(
+    conductorInstanceIDs,
+    ['rpm', 'status']
+  )
   const alerts = alertsQuery.data?.data.items ?? EMPTY_ALERTS
   const metricQueries = useQueries({
     queries: instances.map((instance) => ({
@@ -443,6 +455,7 @@ export function FleetDashboard() {
         return response
       },
       retry: false,
+      enabled: instance.kind !== 'conductor',
       staleTime: RPM_REFRESH_MS / 2,
       refetchInterval: RPM_REFRESH_MS,
       refetchIntervalInBackground: false,
@@ -453,11 +466,18 @@ export function FleetDashboard() {
       instances.map((instance, index) => {
         const observation = metricQueries[index]?.data?.data
         const summary = observation?.data
-        const realtime = rpmQueries[index]?.data?.data?.data
+        const streamed = conductorRealtime.states[instance.id]
+        const realtime =
+          instance.kind === 'conductor'
+            ? streamed
+            : rpmQueries[index]?.data?.data?.data
         return {
           instance,
           summary,
-          observedAt: observation?.observed_at ?? 0,
+          observedAt: Math.max(
+            observation?.observed_at ?? 0,
+            streamed?.observed_at ?? 0
+          ),
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
@@ -465,7 +485,7 @@ export function FleetDashboard() {
           quota: metricValue(summary?.cost),
         }
       }),
-    [instances, metricQueries, rpmQueries]
+    [conductorRealtime.states, instances, metricQueries, rpmQueries]
   )
 
   const totals = useMemo(
@@ -633,9 +653,12 @@ export function FleetDashboard() {
   }
 
   const refreshRPM = () => {
+    conductorRealtime.reconnect()
     for (const query of rpmQueries) void query.refetch()
   }
-  const rpmRefreshing = rpmQueries.some((query) => query.isFetching)
+  const rpmRefreshing =
+    rpmQueries.some((query) => query.isFetching) ||
+    ['connecting', 'reconnecting'].includes(conductorRealtime.status)
 
   const handleFamilyChange = (nextFamily: FleetFamily) => {
     setFamily(nextFamily)

@@ -71,6 +71,12 @@ type ConnectorResponse struct {
 	Body       []byte
 }
 
+type ConnectorStream struct {
+	StatusCode int
+	Header     http.Header
+	Body       io.ReadCloser
+}
+
 func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
 	allowed, err := parseAllowedCIDRs(os.Getenv(managedInstanceAllowedCIDRsEnv))
 	if err != nil {
@@ -228,6 +234,38 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 		return nil, ErrConnectorResponseLarge
 	}
 	return &ConnectorResponse{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: responseBody}, nil
+}
+
+// OpenStream opens a long-lived response with the connector's SSRF, TLS, and
+// redirect policy. Callers own the returned body and must close it.
+func (c *Connector) OpenStream(ctx context.Context, method string, path string, headers http.Header) (*ConnectorStream, error) {
+	if c == nil || c.client == nil || c.baseURL == nil {
+		return nil, errors.New("managed instance connector is nil")
+	}
+	relativeURL, err := url.Parse(path)
+	if err != nil || relativeURL.IsAbs() || relativeURL.Host != "" {
+		return nil, errors.New("managed instance connector path is invalid")
+	}
+	requestURL := *c.baseURL
+	requestURL.Path = strings.TrimRight(c.baseURL.Path, "/") + "/" + strings.TrimLeft(relativeURL.Path, "/")
+	requestURL.RawQuery = relativeURL.RawQuery
+	request, err := http.NewRequestWithContext(ctx, method, requestURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "text/event-stream")
+	for key, values := range headers {
+		for _, value := range values {
+			request.Header.Add(key, value)
+		}
+	}
+	client := *c.client
+	client.Timeout = 0
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	return &ConnectorStream{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: response.Body}, nil
 }
 
 func (c *Connector) resetCookies() error {

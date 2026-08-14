@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const managedInstanceSnapshotSchemaVersion = 1
+const managedInstanceSnapshotSchemaVersion = 2
 
 const (
 	managedInstanceInventoryPageSize = 100
@@ -42,6 +42,7 @@ type InventoryItem struct {
 	Name                 string   `json:"name"`
 	Type                 string   `json:"type,omitempty"`
 	Platform             string   `json:"platform,omitempty"`
+	SourceID             string   `json:"source_id,omitempty"`
 	Group                string   `json:"group,omitempty"`
 	Status               string   `json:"status,omitempty"`
 	Enabled              *bool    `json:"enabled,omitempty"`
@@ -66,11 +67,21 @@ type InventoryItem struct {
 	CacheCreatePricePerM *float64 `json:"cache_create_price_per_m,omitempty"`
 }
 
+type InventorySource struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	URL          string `json:"url,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Enabled      *bool  `json:"enabled,omitempty"`
+	AccountCount *int   `json:"account_count,omitempty"`
+}
+
 type InventoryPage struct {
-	ResourceKind string          `json:"resource_kind"`
-	Items        []InventoryItem `json:"items"`
-	Total        int             `json:"total"`
-	NextCursor   string          `json:"next_cursor,omitempty"`
+	ResourceKind string            `json:"resource_kind"`
+	Items        []InventoryItem   `json:"items"`
+	Sources      []InventorySource `json:"sources,omitempty"`
+	Total        int               `json:"total"`
+	NextCursor   string            `json:"next_cursor,omitempty"`
 }
 
 type ResourceSummary struct {
@@ -105,7 +116,12 @@ type SummaryResult struct {
 }
 
 type RealtimeMetricsResult struct {
-	RPM MetricSample `json:"rpm"`
+	RPM               MetricSample `json:"rpm"`
+	AccountsTotal     int          `json:"accounts_total,omitempty"`
+	AccountsReporting int          `json:"accounts_reporting,omitempty"`
+	ActiveSessions    int          `json:"active_sessions,omitempty"`
+	StreamStatus      string       `json:"stream_status,omitempty"`
+	Stale             bool         `json:"stale,omitempty"`
 }
 
 type ObservationView struct {
@@ -664,6 +680,9 @@ func collectInventory(ctx context.Context, instanceID int64, resourceKind string
 	if collectSub2Usage && collectionErr == nil {
 		enrichSub2AccountUsage(ctx, connector, credential, page)
 	}
+	if instance.Kind == model.ManagedInstanceKindConductor && collectionErr == nil && normalizeResourceKind(resourceKind, "account") == "account" {
+		enrichConductorInventorySources(ctx, connector, credential, page)
+	}
 	if cursor != "" {
 		view, _, err := observationView(instance.Id, observedAt, page, collectionErr)
 		return view, err
@@ -968,7 +987,7 @@ func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*Observation
 	case model.ManagedInstanceKindSub2API:
 		result.RPM = sub2CurrentRPM(ctx, connector, credential)
 	case model.ManagedInstanceKindConductor:
-		result.RPM = conductorCurrentRPM(ctx, connector, credential)
+		result = conductorRealtimeMetrics(instance.Id)
 	}
 	view, _, err := observationView(instance.Id, common.GetTimestamp(), result, nil)
 	return view, err

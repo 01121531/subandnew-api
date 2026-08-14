@@ -26,6 +26,9 @@ import {
   CircleHelp,
   CircleDollarSign,
   DatabaseZap,
+  Gauge,
+  Network,
+  RadioTower,
   RefreshCw,
   Search,
   Server,
@@ -40,6 +43,13 @@ import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -76,13 +86,21 @@ import type {
   ManagedAccountRangeInput,
   ManagedInstanceAccountOutputItem,
   ManagedInstanceInventoryItem,
+  ManagedInstanceInventorySource,
+  ManagedInstanceRealtimeState,
 } from '@/features/managed-instances/types'
+import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
 import { cn } from '@/lib/utils'
 
 type AccountFamily = 'new_api' | 'sub2api' | 'conductor'
 type ResourceRow = {
   instance: ManagedInstance
   item: ManagedInstanceInventoryItem
+  source?: ManagedInstanceInventorySource
+}
+type SourceRow = {
+  instance: ManagedInstance
+  source: ManagedInstanceInventorySource
 }
 type OutputRow = {
   instance: ManagedInstance
@@ -325,6 +343,17 @@ export function ManagedAccounts() {
     () => (selectedInstance ? [selectedInstance] : familyInstances),
     [familyInstances, selectedInstance]
   )
+  const conductorInstanceIDs = useMemo(
+    () =>
+      instances
+        .filter((instance) => instance.kind === 'conductor')
+        .map((instance) => instance.id),
+    [instances]
+  )
+  const conductorRealtime = useManagedInstanceRealtimeEvents(
+    conductorInstanceIDs,
+    ['rpm', 'accounts', 'sources', 'status']
+  )
   const familyCounts = useMemo(
     () => ({
       new_api: allInstances.filter((item) => belongsToFamily(item, 'new_api'))
@@ -381,15 +410,68 @@ export function ManagedAccounts() {
   const rows = useMemo<ResourceRow[]>(
     () =>
       instances.flatMap((instance, index) => {
-        const observation =
-          snapshotQueries[index]?.data?.data.inventory.observation
-        if (!observation?.data) {
-          return []
-        }
-        return observation.data.items.map((item) => ({ instance, item }))
+        const snapshotPage =
+          snapshotQueries[index]?.data?.data.inventory.observation?.data
+        const realtime = conductorRealtime.states[instance.id]
+        const useRealtime =
+          instance.kind === 'conductor' &&
+          realtime != null &&
+          realtime.observed_at > 0 &&
+          realtime.accounts != null
+        const items = useRealtime
+          ? (realtime.accounts ?? [])
+          : snapshotPage?.items
+        const sources = useRealtime
+          ? (realtime.sources ?? snapshotPage?.sources ?? [])
+          : (snapshotPage?.sources ?? [])
+        if (!items) return []
+        const sourceByID = new Map(sources.map((source) => [source.id, source]))
+        return items.map((item) => ({
+          instance,
+          item,
+          source: item.source_id ? sourceByID.get(item.source_id) : undefined,
+        }))
       }),
-    [instances, snapshotQueries]
+    [conductorRealtime.states, instances, snapshotQueries]
   )
+  const conductorSources = useMemo<SourceRow[]>(() => {
+    const seen = new Set<string>()
+    return instances.flatMap((instance, index) => {
+      if (instance.kind !== 'conductor') return []
+      const realtime = conductorRealtime.states[instance.id]
+      const snapshotSources =
+        snapshotQueries[index]?.data?.data.inventory.observation?.data
+          ?.sources ?? []
+      const sources = realtime?.sources ?? snapshotSources
+      return sources.flatMap((source) => {
+        const key = `${instance.id}:${source.id}`
+        if (seen.has(key)) return []
+        seen.add(key)
+        return [{ instance, source }]
+      })
+    })
+  }, [conductorRealtime.states, instances, snapshotQueries])
+  const conductorStats = useMemo(() => {
+    const validRPMRows = rows.filter(
+      ({ item }) => item.rpm != null && item.rpm >= 0
+    )
+    return {
+      nodes: conductorSources.length,
+      connectedNodes: conductorSources.filter(({ source }) =>
+        isConnectedSource(source.status)
+      ).length,
+      configuredAccounts: conductorSources.reduce(
+        (sum, { source }) => sum + Math.max(0, source.account_count ?? 0),
+        0
+      ),
+      rpm: validRPMRows.reduce((sum, { item }) => sum + (item.rpm ?? 0), 0),
+      reportingAccounts: validRPMRows.length,
+      activeSessions: rows.reduce(
+        (sum, { item }) => sum + Math.max(0, item.active_sessions ?? 0),
+        0
+      ),
+    }
+  }, [conductorSources, rows])
   const outputRows = useMemo<OutputRow[]>(
     () =>
       instances.flatMap((instance, index) =>
@@ -434,7 +516,7 @@ export function ManagedAccounts() {
   const normalizedSearch = search.trim().toLowerCase()
   const filteredRows = useMemo(() => {
     const filtered = normalizedSearch
-      ? rows.filter(({ instance, item }) =>
+      ? rows.filter(({ instance, item, source }) =>
           [
             item.id,
             item.name,
@@ -442,6 +524,8 @@ export function ManagedAccounts() {
             item.type,
             item.group,
             item.status,
+            source?.name,
+            source?.status,
             instance.name,
           ]
             .filter(Boolean)
@@ -512,8 +596,17 @@ export function ManagedAccounts() {
       (query.data?.data.account_output.last_attempt_status === 'failed' &&
         !query.data.data.account_output.observation)
   )
-  const cacheObservedAt = snapshotQueries
-    .map((query) => query.data?.data.inventory.observation?.observed_at ?? 0)
+  const cacheObservedAt = instances
+    .map((instance, index) => {
+      const realtime = conductorRealtime.states[instance.id]
+      if (instance.kind === 'conductor' && realtime?.observed_at) {
+        return realtime.observed_at
+      }
+      return (
+        snapshotQueries[index]?.data?.data.inventory.observation?.observed_at ??
+        0
+      )
+    })
     .filter((value) => value > 0)
     .sort((left, right) => left - right)[0]
   const cacheRefreshFailed = snapshotQueries.some(
@@ -584,6 +677,7 @@ export function ManagedAccounts() {
   }, [accountRangeInput, instances, rangeQueryKey, snapshotQueries])
 
   const refresh = () => {
+    conductorRealtime.reconnect()
     void instancesQuery.refetch()
     instances.forEach((instance, index) => {
       setSubmittingRefreshes((current) => new Set(current).add(instance.id))
@@ -622,6 +716,19 @@ export function ManagedAccounts() {
           failed={cacheRefreshFailed}
           hasData={collectedInstances > 0}
         />
+        {family === 'conductor' && (
+          <ConductorRealtimeStatus
+            status={conductorRealtime.status}
+            states={conductorRealtime.states}
+            instanceCount={instances.length}
+          />
+        )}
+        {family === 'conductor' && (
+          <ConductorNodeSummary
+            sources={conductorSources}
+            stats={conductorStats}
+          />
+        )}
         <AccountSummary
           total={rows.length}
           available={available}
@@ -804,6 +911,124 @@ function AccountCacheStatus(props: {
           })}
         </Badge>
       ) : null}
+    </div>
+  )
+}
+
+function ConductorRealtimeStatus(props: {
+  status: string
+  states: Record<number, ManagedInstanceRealtimeState>
+  instanceCount: number
+}) {
+  const states = Object.values(props.states)
+  const connected =
+    props.instanceCount > 0 &&
+    states.length === props.instanceCount &&
+    states.every((state) => state.stream_status === 'connected' && !state.stale)
+  const observedAt = states.reduce(
+    (latest, state) => Math.max(latest, state.observed_at ?? 0),
+    0
+  )
+  const reconnecting = ['connecting', 'reconnecting', 'error'].includes(
+    props.status
+  )
+  let statusLabel = 'Conductor 实时账号数据连接中'
+  if (connected) {
+    statusLabel = 'Conductor 实时账号流已连接'
+  } else if (states.length) {
+    statusLabel = '实时流正在重连，当前展示最后一次实时数据'
+  }
+  return (
+    <div
+      className={cn(
+        'flex min-h-10 flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm',
+        connected
+          ? 'border-success/25 bg-success/5 text-success'
+          : 'border-warning/35 bg-warning/5 text-warning'
+      )}
+    >
+      <span className='flex min-w-0 items-center gap-2 font-medium'>
+        <RadioTower
+          className={cn('size-4 shrink-0', reconnecting && 'animate-pulse')}
+        />
+        <span>{statusLabel}</span>
+      </span>
+      {observedAt > 0 && (
+        <Badge variant='outline' className='bg-background/70 tabular-nums'>
+          更新于 {formatTimestamp(observedAt)}
+        </Badge>
+      )}
+    </div>
+  )
+}
+
+function ConductorNodeSummary(props: {
+  sources: SourceRow[]
+  stats: {
+    nodes: number
+    connectedNodes: number
+    configuredAccounts: number
+    rpm: number
+    reportingAccounts: number
+    activeSessions: number
+  }
+}) {
+  const items = [
+    {
+      label: '工作节点',
+      value: exactNumber.format(props.stats.nodes),
+      hint: `${props.stats.connectedNodes} 个已连接`,
+      icon: Network,
+      tone: 'bg-primary/10 text-primary',
+    },
+    {
+      label: '节点配置账号',
+      value: exactNumber.format(props.stats.configuredAccounts),
+      hint: `来自 ${props.sources.length} 个节点配置`,
+      icon: Server,
+      tone: 'bg-success/10 text-success',
+    },
+    {
+      label: '实时总 RPM',
+      value: exactNumber.format(props.stats.rpm),
+      hint: `${props.stats.reportingAccounts} 个账号参与统计`,
+      icon: Gauge,
+      tone: 'bg-warning/10 text-warning',
+    },
+    {
+      label: '活跃会话',
+      value: exactNumber.format(props.stats.activeSessions),
+      hint: '所有实时账号汇总',
+      icon: DatabaseZap,
+      tone: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    },
+  ]
+  return (
+    <div className='border-border/80 bg-card grid overflow-hidden rounded-lg border shadow-xs sm:grid-cols-2 xl:grid-cols-4'>
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className='border-border/70 flex min-h-28 items-start justify-between gap-3 border-b p-4 sm:odd:border-r xl:border-b-0 xl:not-last:border-r'
+        >
+          <div className='min-w-0'>
+            <p className='text-muted-foreground text-sm'>{item.label}</p>
+            <p className='mt-2 text-2xl font-semibold tabular-nums'>
+              {item.value}
+            </p>
+            <p className='text-muted-foreground mt-1 truncate text-xs'>
+              {item.hint}
+            </p>
+          </div>
+          <span
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-md',
+              item.tone
+            )}
+          >
+            <item.icon className='size-4' />
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1078,6 +1303,7 @@ function AccountTable(props: {
   onSortDirectionChange: (direction: SortDirection) => void
 }) {
   const { t } = useTranslation()
+  const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
   const isChannel = props.family === 'new_api'
   const isConductor = props.family === 'conductor'
   const showsSurvival = !isChannel && !isConductor
@@ -1120,7 +1346,7 @@ function AccountTable(props: {
             </TableHead>
             <TableHead>{t('Instance')}</TableHead>
             <TableHead>
-              {t('Platform')} / {t('Type')}
+              {isConductor ? '工作节点' : `${t('Platform')} / ${t('Type')}`}
             </TableHead>
             <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
             <TableHead className='text-right'>
@@ -1134,7 +1360,7 @@ function AccountTable(props: {
           </TableRow>
         </TableHeader>
         <TableBody className='[&>tr]:h-16'>
-          {props.rows.map(({ instance, item }) => {
+          {props.rows.map(({ instance, item, source }) => {
             const descriptors = [item.platform, item.type, item.group].filter(
               (value, index, values): value is string =>
                 Boolean(value) && values.indexOf(value) === index
@@ -1164,9 +1390,19 @@ function AccountTable(props: {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <span className='block max-w-44 truncate text-sm'>
-                    {descriptors.join(' / ') || '--'}
-                  </span>
+                  {isConductor ? (
+                    <SourceCell
+                      source={source}
+                      sourceID={item.source_id}
+                      onOpen={(nextSource) =>
+                        setSelectedSource({ instance, source: nextSource })
+                      }
+                    />
+                  ) : (
+                    <span className='block max-w-44 truncate text-sm'>
+                      {descriptors.join(' / ') || '--'}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className='text-muted-foreground whitespace-nowrap'>
                   {formatTimestamp(item.created_at)}
@@ -1314,8 +1550,119 @@ function AccountTable(props: {
         </div>
       )}
       <CardContent className='overflow-x-auto px-0'>{content}</CardContent>
+      <SourceDetailsDialog
+        selected={selectedSource}
+        onOpenChange={(open) => !open && setSelectedSource(null)}
+      />
     </Card>
   )
+}
+
+function SourceCell(props: {
+  source?: ManagedInstanceInventorySource
+  sourceID?: string
+  onOpen: (source: ManagedInstanceInventorySource) => void
+}) {
+  if (!props.source && !props.sourceID) {
+    return <span className='text-muted-foreground text-sm'>--</span>
+  }
+  const source =
+    props.source ??
+    ({
+      id: props.sourceID ?? 'unknown',
+      name: `未知节点 #${props.sourceID ?? 'unknown'}`,
+      status: 'unknown',
+    } satisfies ManagedInstanceInventorySource)
+  const connected = isConnectedSource(source.status)
+  let statusTone = 'bg-muted-foreground/50'
+  if (connected) statusTone = 'bg-success'
+  else if (source.status) statusTone = 'bg-warning'
+  return (
+    <button
+      type='button'
+      className='hover:bg-muted/70 focus-visible:ring-ring flex max-w-48 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none'
+      onClick={() => props.onOpen(source)}
+    >
+      <span className={cn('size-2 shrink-0 rounded-full', statusTone)} />
+      <span className='min-w-0'>
+        <span className='block truncate text-sm font-medium'>
+          {source.name}
+        </span>
+        <span className='text-muted-foreground block truncate text-xs'>
+          {connected ? '已连接' : source.status || '状态未知'}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function SourceDetailsDialog(props: {
+  selected: SourceRow | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const source = props.selected?.source
+  let enabledLabel = '未知'
+  if (source?.enabled === true) enabledLabel = '已启用'
+  else if (source?.enabled === false) enabledLabel = '已停用'
+  return (
+    <Dialog open={Boolean(source)} onOpenChange={props.onOpenChange}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle className='flex items-center gap-2'>
+            <Network className='text-muted-foreground size-4' />
+            {source?.name ?? '工作节点'}
+          </DialogTitle>
+          <DialogDescription>
+            {props.selected?.instance.name} 的 Conductor 工作节点，只读信息
+          </DialogDescription>
+        </DialogHeader>
+        {source && (
+          <div className='grid gap-3 rounded-lg border p-4'>
+            <SourceDetail label='节点 ID' value={source.id} mono />
+            <SourceDetail
+              label='连接状态'
+              value={
+                isConnectedSource(source.status)
+                  ? '已连接'
+                  : source.status || '未知'
+              }
+            />
+            <SourceDetail label='启用状态' value={enabledLabel} />
+            <SourceDetail
+              label='配置账号数'
+              value={exactNumber.format(source.account_count ?? 0)}
+            />
+            <SourceDetail
+              label='内部 WS 地址'
+              value={source.url || '--'}
+              mono
+            />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SourceDetail(props: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className='grid gap-1 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-start'>
+      <span className='text-muted-foreground text-sm'>{props.label}</span>
+      <span
+        className={cn(
+          'break-all text-sm',
+          props.mono && 'font-mono text-xs leading-5'
+        )}
+      >
+        {props.value}
+      </span>
+    </div>
+  )
+}
+
+function isConnectedSource(status?: string) {
+  const normalized = status?.trim().toLowerCase()
+  return ['connected', 'healthy', 'online', 'ready'].includes(normalized ?? '')
 }
 
 function formatOptionalNumber(value?: number) {

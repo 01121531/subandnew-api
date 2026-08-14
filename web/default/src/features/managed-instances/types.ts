@@ -150,6 +150,7 @@ export interface ManagedInstanceInventoryItem {
   name: string
   type?: string
   platform?: string
+  source_id?: string
   group?: string
   status?: string
   enabled?: boolean
@@ -174,9 +175,19 @@ export interface ManagedInstanceInventoryItem {
   cache_create_price_per_m?: number
 }
 
+export interface ManagedInstanceInventorySource {
+  id: string
+  name: string
+  url?: string
+  status?: string
+  enabled?: boolean
+  account_count?: number
+}
+
 export interface ManagedInstanceInventoryPage {
   resource_kind: string
   items: ManagedInstanceInventoryItem[]
+  sources?: ManagedInstanceInventorySource[]
   total: number
   next_cursor?: string
 }
@@ -214,6 +225,25 @@ export interface ManagedInstanceSummary {
 
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
+  accounts_total?: number
+  accounts_reporting?: number
+  active_sessions?: number
+  stream_status?: string
+  stale?: boolean
+}
+
+export interface ManagedInstanceRealtimeState {
+  instance_id: number
+  observed_at: number
+  stream_status: string
+  stale: boolean
+  error_code?: string
+  rpm: ManagedInstanceMetricSample
+  accounts_total: number
+  accounts_reporting: number
+  active_sessions: number
+  accounts?: ManagedInstanceInventoryItem[]
+  sources?: ManagedInstanceInventorySource[]
 }
 
 export interface ManagedInstanceAccountOutputItem {

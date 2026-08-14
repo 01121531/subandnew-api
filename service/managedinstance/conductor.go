@@ -178,6 +178,58 @@ func (adapter conductorAdapter) Inventory(ctx context.Context, connector *Connec
 	}
 }
 
+type conductorAccount struct {
+	AccountID              string  `json:"account_id"`
+	Source                 string  `json:"source"`
+	Email                  string  `json:"email"`
+	Label                  string  `json:"label"`
+	AuthType               string  `json:"auth_type"`
+	SubscriptionType       string  `json:"subscription_type"`
+	Status                 string  `json:"status"`
+	Health                 string  `json:"health"`
+	Available              bool    `json:"available"`
+	Blocked                bool    `json:"blocked"`
+	BlockedReason          string  `json:"blocked_reason"`
+	UnavailableKind        string  `json:"unavailable_kind"`
+	DispatchState          string  `json:"dispatch_state"`
+	DispatchStateChangedAt int64   `json:"dispatch_state_changed_at"`
+	CreatedAt              int64   `json:"created_at"`
+	ActiveSessionCount     int     `json:"active_session_count"`
+	RPMCurrent             *int    `json:"rpm_current"`
+	Utilization5H          float64 `json:"utilization_5h"`
+	Utilization7D          float64 `json:"utilization_7d"`
+	Utilization7DOI        float64 `json:"utilization_7d_oi"`
+	Removed                bool    `json:"_removed"`
+	Cause                  struct {
+		StatusNote any `json:"status_note"`
+	} `json:"cause"`
+}
+
+func conductorAccountItem(account conductorAccount) (InventoryItem, bool) {
+	id, err := strconv.ParseInt(strings.TrimSpace(account.AccountID), 10, 64)
+	if err != nil || id <= 0 {
+		return InventoryItem{}, false
+	}
+	name := strings.TrimSpace(account.Label)
+	if name == "" {
+		name = strings.TrimSpace(account.Email)
+	}
+	status := firstNonEmpty(account.Health, account.Status, account.DispatchState)
+	enabled := account.Available && !account.Blocked
+	errorMessage := firstNonEmpty(account.BlockedReason, account.UnavailableKind)
+	if errorMessage == "" && account.Cause.StatusNote != nil {
+		errorMessage = strings.TrimSpace(fmt.Sprint(account.Cause.StatusNote))
+	}
+	activeSessions := account.ActiveSessionCount
+	u5, u7, u7oi := account.Utilization5H, account.Utilization7D, account.Utilization7DOI
+	return InventoryItem{
+		ID: id, Name: name, Type: account.AuthType, Platform: account.Source, SourceID: strings.TrimSpace(account.Source), Group: account.SubscriptionType,
+		Status: status, Enabled: &enabled, CreatedAt: account.CreatedAt, LastActivityAt: account.DispatchStateChangedAt,
+		ActiveSessions: &activeSessions, RPM: account.RPMCurrent, Utilization5H: &u5, Utilization7D: &u7, Utilization7DOI: &u7oi,
+		ErrorMessage: errorMessage,
+	}, true
+}
+
 func conductorAccountInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {
 	offset, err := conductorOffset(cursor, "account")
 	if err != nil {
@@ -193,60 +245,17 @@ func conductorAccountInventory(ctx context.Context, connector *Connector, creden
 		return nil, err
 	}
 	var payload struct {
-		Accounts []struct {
-			AccountID              string  `json:"account_id"`
-			Source                 string  `json:"source"`
-			Email                  string  `json:"email"`
-			Label                  string  `json:"label"`
-			AuthType               string  `json:"auth_type"`
-			SubscriptionType       string  `json:"subscription_type"`
-			Status                 string  `json:"status"`
-			Health                 string  `json:"health"`
-			Available              bool    `json:"available"`
-			Blocked                bool    `json:"blocked"`
-			BlockedReason          string  `json:"blocked_reason"`
-			UnavailableKind        string  `json:"unavailable_kind"`
-			DispatchState          string  `json:"dispatch_state"`
-			DispatchStateChangedAt int64   `json:"dispatch_state_changed_at"`
-			CreatedAt              int64   `json:"created_at"`
-			ActiveSessionCount     int     `json:"active_session_count"`
-			RPMCurrent             int     `json:"rpm_current"`
-			Utilization5H          float64 `json:"utilization_5h"`
-			Utilization7D          float64 `json:"utilization_7d"`
-			Utilization7DOI        float64 `json:"utilization_7d_oi"`
-			Cause                  struct {
-				StatusNote any `json:"status_note"`
-			} `json:"cause"`
-		} `json:"accounts"`
-		Total int `json:"total"`
+		Accounts []conductorAccount `json:"accounts"`
+		Total    int                `json:"total"`
 	}
 	if json.Unmarshal(data, &payload) != nil || payload.Accounts == nil || payload.Total < 0 {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	items := make([]InventoryItem, 0, len(payload.Accounts))
 	for _, account := range payload.Accounts {
-		id, parseErr := strconv.ParseInt(account.AccountID, 10, 64)
-		if parseErr != nil || id <= 0 {
-			continue
+		if item, ok := conductorAccountItem(account); ok {
+			items = append(items, item)
 		}
-		name := strings.TrimSpace(account.Label)
-		if name == "" {
-			name = strings.TrimSpace(account.Email)
-		}
-		status := firstNonEmpty(account.Health, account.Status, account.DispatchState)
-		enabled := account.Available && !account.Blocked
-		errorMessage := firstNonEmpty(account.BlockedReason, account.UnavailableKind)
-		if errorMessage == "" && account.Cause.StatusNote != nil {
-			errorMessage = strings.TrimSpace(fmt.Sprint(account.Cause.StatusNote))
-		}
-		activeSessions, rpm := account.ActiveSessionCount, account.RPMCurrent
-		u5, u7, u7oi := account.Utilization5H, account.Utilization7D, account.Utilization7DOI
-		items = append(items, InventoryItem{
-			ID: id, Name: name, Type: account.AuthType, Platform: account.Source, Group: account.SubscriptionType,
-			Status: status, Enabled: &enabled, CreatedAt: account.CreatedAt, LastActivityAt: account.DispatchStateChangedAt,
-			ActiveSessions: &activeSessions, RPM: &rpm, Utilization5H: &u5, Utilization7D: &u7, Utilization7DOI: &u7oi,
-			ErrorMessage: errorMessage,
-		})
 	}
 	return conductorInventoryPage("account", items, payload.Total, offset), nil
 }
@@ -359,6 +368,22 @@ func conductorWSClientInventory(ctx context.Context, connector *Connector, crede
 	if strings.TrimSpace(cursor) != "" {
 		return nil, ErrInvalidInstance
 	}
+	sources, err := conductorInventorySources(ctx, connector, credential)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]InventoryItem, 0, len(sources))
+	for _, source := range sources {
+		id, parseErr := strconv.ParseInt(source.ID, 10, 64)
+		if parseErr != nil || id <= 0 {
+			continue
+		}
+		items = append(items, InventoryItem{ID: id, Name: source.Name, Type: source.URL, Status: source.Status, Enabled: source.Enabled, AccountCount: source.AccountCount})
+	}
+	return &InventoryPage{ResourceKind: "ws_client", Items: items, Sources: sources, Total: len(items)}, nil
+}
+
+func conductorInventorySources(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]InventorySource, error) {
 	response, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/ws-clients", nil)
 	if err != nil {
 		return nil, err
@@ -378,15 +403,36 @@ func conductorWSClientInventory(ctx context.Context, connector *Connector, crede
 	if json.Unmarshal(data, &clients) != nil || clients == nil {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
-	items := make([]InventoryItem, 0, len(clients))
+	sources := make([]InventorySource, 0, len(clients))
 	for _, client := range clients {
 		if client.ID <= 0 {
 			continue
 		}
 		enabled, count := client.Enabled, client.AccountCount
-		items = append(items, InventoryItem{ID: client.ID, Name: client.Name, Type: client.URL, Status: client.Health, Enabled: &enabled, AccountCount: &count})
+		sources = append(sources, InventorySource{ID: strconv.FormatInt(client.ID, 10), Name: client.Name, URL: client.URL, Status: client.Health, Enabled: &enabled, AccountCount: &count})
 	}
-	return &InventoryPage{ResourceKind: "ws_client", Items: items, Total: len(items)}, nil
+	return sources, nil
+}
+
+func enrichConductorInventorySources(ctx context.Context, connector *Connector, credential *CredentialMaterial, page *InventoryPage) {
+	if page == nil || page.ResourceKind != "account" {
+		return
+	}
+	sources, err := conductorInventorySources(ctx, connector, credential)
+	if err != nil {
+		return
+	}
+	page.Sources = sources
+	byID := make(map[string]InventorySource, len(sources))
+	for _, source := range sources {
+		byID[source.ID] = source
+	}
+	for index := range page.Items {
+		source, ok := byID[page.Items[index].SourceID]
+		if ok && strings.TrimSpace(source.Name) != "" {
+			page.Items[index].Platform = source.Name
+		}
+	}
 }
 
 func conductorPriceInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {

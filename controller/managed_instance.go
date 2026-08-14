@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -135,6 +138,140 @@ func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
+	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "invalid instance ids"})
+		return
+	}
+	topics, err := managedInstanceRealtimeTopics(c.Query("topics"))
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "invalid realtime topics"})
+		return
+	}
+	type subscription struct {
+		events      <-chan managedinstance.ConductorRealtimeEvent
+		unsubscribe func()
+	}
+	subscriptions := make([]subscription, 0, len(instanceIDs))
+	for _, instanceID := range instanceIDs {
+		events, unsubscribe, subscribeErr := managedinstance.SubscribeConductorRealtime(instanceID)
+		if subscribeErr != nil {
+			for _, item := range subscriptions {
+				item.unsubscribe()
+			}
+			managedInstanceError(c, subscribeErr)
+			return
+		}
+		subscriptions = append(subscriptions, subscription{events: events, unsubscribe: unsubscribe})
+	}
+	defer func() {
+		for _, item := range subscriptions {
+			item.unsubscribe()
+		}
+	}()
+
+	streamContext, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	merged := make(chan managedinstance.ConductorRealtimeEvent, 128)
+	for _, item := range subscriptions {
+		events := item.events
+		go func() {
+			for {
+				select {
+				case <-streamContext.Done():
+					return
+				case event, ok := <-events:
+					if !ok {
+						return
+					}
+					select {
+					case merged <- event:
+					case <-streamContext.Done():
+						return
+					default:
+					}
+				}
+			}
+		}()
+	}
+
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	c.Writer.Flush()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-streamContext.Done():
+			return
+		case <-heartbeat.C:
+			_, _ = c.Writer.WriteString(": heartbeat\n\n")
+			c.Writer.Flush()
+		case event := <-merged:
+			if _, ok := topics[event.Type]; !ok {
+				continue
+			}
+			payload, marshalErr := json.Marshal(event.State)
+			if marshalErr != nil {
+				continue
+			}
+			_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, payload)
+			c.Writer.Flush()
+		}
+	}
+}
+
+func managedInstanceRealtimeIDs(raw string) ([]int64, error) {
+	parts := strings.Split(raw, ",")
+	seen := map[int64]struct{}{}
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(part, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) > 100 {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+	}
+	if len(ids) == 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	return ids, nil
+}
+
+func managedInstanceRealtimeTopics(raw string) (map[string]struct{}, error) {
+	allowed := map[string]struct{}{"rpm": {}, "accounts": {}, "sources": {}, "status": {}}
+	if strings.TrimSpace(raw) == "" {
+		return allowed, nil
+	}
+	topics := map[string]struct{}{}
+	for _, topic := range strings.Split(raw, ",") {
+		topic = strings.TrimSpace(topic)
+		if _, ok := allowed[topic]; !ok {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		topics[topic] = struct{}{}
+	}
+	if len(topics) == 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	return topics, nil
 }
 
 func GetManagedInstanceAccountOutput(c *gin.Context) {

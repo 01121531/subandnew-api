@@ -49,6 +49,7 @@ var managedInstancePermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/actions/batch/plan", permission: authz.ManagedInstanceBatchOperate, handler: controller.PlanManagedInstanceBatchOperation},
 	{method: http.MethodPost, path: "/actions/batch", permission: authz.ManagedInstanceBatchOperate, handler: controller.ExecuteManagedInstanceBatchOperation},
 	{method: http.MethodGet, path: "/actions/batch/:batch_id", permission: authz.ManagedInstanceBatchOperate, handler: controller.GetManagedInstanceBatchOperation},
+	{method: http.MethodGet, path: "/realtime-events", permission: authz.ManagedInstanceUsageView, handler: controller.StreamManagedInstanceRealtimeEvents},
 	{method: http.MethodGet, path: "/:id", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstance},
 	{method: http.MethodGet, path: "/:id/inventory", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceInventory},
 	{method: http.MethodGet, path: "/:id/metrics", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceMetrics},
