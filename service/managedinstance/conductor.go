@@ -171,6 +171,8 @@ func (adapter conductorAdapter) Inventory(ctx context.Context, connector *Connec
 		return conductorWSClientInventory(ctx, connector, credential, cursor)
 	case "price":
 		return conductorPriceInventory(ctx, connector, credential, cursor)
+	case "api_key":
+		return conductorKeyInventory(ctx, connector, credential, cursor)
 	default:
 		return nil, ErrUnsupportedCapability
 	}
@@ -247,6 +249,73 @@ func conductorAccountInventory(ctx context.Context, connector *Connector, creden
 		})
 	}
 	return conductorInventoryPage("account", items, payload.Total, offset), nil
+}
+
+func conductorKeyInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {
+	if strings.TrimSpace(cursor) != "" {
+		return nil, ErrInvalidInstance
+	}
+	usersResponse, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/users", nil)
+	if err != nil {
+		return nil, err
+	}
+	usersData, err := conductorEnvelopeData(usersResponse)
+	if err != nil {
+		return nil, err
+	}
+	var users []struct {
+		ID       int64  `json:"id"`
+		Username string `json:"username"`
+	}
+	if json.Unmarshal(usersData, &users) != nil || users == nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: usersResponse.StatusCode}
+	}
+	items := make([]InventoryItem, 0)
+	for _, user := range users {
+		if user.ID <= 0 {
+			continue
+		}
+		query := url.Values{"user_id": {strconv.FormatInt(user.ID, 10)}}
+		response, requestErr := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/keys?"+query.Encode(), nil)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		data, decodeErr := conductorEnvelopeData(response)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		var keys []struct {
+			ID        int64  `json:"id"`
+			Name      string `json:"name"`
+			IsActive  bool   `json:"is_active"`
+			ExpiresAt string `json:"expires_at"`
+			CreatedAt string `json:"created_at"`
+			Settings  struct {
+				SelectionStrategy string `json:"selection_strategy"`
+			} `json:"settings"`
+		}
+		if json.Unmarshal(data, &keys) != nil || keys == nil {
+			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		for _, key := range keys {
+			if key.ID <= 0 {
+				continue
+			}
+			enabled := key.IsActive
+			status := "disabled"
+			if enabled {
+				status = "active"
+			}
+			items = append(items, InventoryItem{
+				ID: key.ID, Name: key.Name, Type: key.Settings.SelectionStrategy, Group: user.Username,
+				Status: status, Enabled: &enabled, CreatedAt: parseConductorTime(key.CreatedAt),
+			})
+			if len(items) >= managedInstanceInventoryMaxItems {
+				return nil, ErrUsageExportTooLarge
+			}
+		}
+	}
+	return &InventoryPage{ResourceKind: "api_key", Items: items, Total: len(items)}, nil
 }
 
 func conductorUserInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {

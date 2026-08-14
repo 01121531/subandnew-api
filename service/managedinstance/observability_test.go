@@ -450,6 +450,39 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 	require.Equal(t, 12.0, *realtime.RPM.Value)
 }
 
+func TestConductorSummaryUsesReportTotalsAndDailyRows(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/system/health":
+			writeProbeJSON(response, `{"code":200,"data":{"status":"ok","accounts_total":2,"accounts_available":2,"accounts_paused":0,"accounts_rejected":0}}`)
+		case "/api/v1/reports/usage":
+			require.Equal(t, "date", request.URL.Query().Get("group_by"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("tz"))
+			writeProbeJSON(response, `{"code":200,"data":{"rows":[{"date":"2026-08-13","requests":3,"input_tokens":10,"output_tokens":20,"cache_read_tokens":30,"cache_creation_tokens":40,"cost":1.25}],"summary":{"requests":3,"input_tokens":10,"output_tokens":20,"cache_read_tokens":30,"cache_creation_tokens":40,"cost":1.25},"total":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{
+		Start: time.Date(2026, 8, 12, 0, 0, 0, 0, location).Unix(),
+		End:   time.Date(2026, 8, 14, 0, 0, 0, 0, location).Unix(),
+	})
+	require.NoError(t, err)
+	summary := view.Data.(*SummaryResult)
+	require.Equal(t, 3.0, *summary.Requests.Value)
+	require.Equal(t, 100.0, *summary.Tokens.Value)
+	require.Equal(t, 1.25, *summary.Cost.Value)
+	require.Len(t, summary.Trend, 3)
+	require.Equal(t, "2026-08-13", summary.Trend[1].Date)
+	require.Equal(t, 3.0, summary.Trend[1].Requests)
+}
+
 func TestConductorAdditionalInventories(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
@@ -462,6 +495,9 @@ func TestConductorAdditionalInventories(t *testing.T) {
 			writeProbeJSON(response, `{"code":200,"data":[{"id":2,"name":"worker","url":"ws://worker","enabled":true,"health":"healthy","account_count":4}]}`)
 		case "/api/v1/prices":
 			writeProbeJSON(response, `{"code":200,"data":[{"id":3,"model":"gpt-5","input_price_per_m":1.2,"output_price_per_m":4.8,"cache_read_price_per_m":0.3,"cache_create_price_per_m":1.5,"note":"current"}]}`)
+		case "/api/v1/keys":
+			require.Equal(t, "1", request.URL.Query().Get("user_id"))
+			writeProbeJSON(response, `{"code":200,"data":[{"id":4,"user_id":1,"key":"must-not-be-exposed","name":"primary-key","is_active":true,"created_at":"2026-08-02T10:00:00Z","settings":{"selection_strategy":"round_robin"}}]}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -484,6 +520,13 @@ func TestConductorAdditionalInventories(t *testing.T) {
 	require.NoError(t, err)
 	pricePage := prices.Data.(*InventoryPage)
 	require.InDelta(t, 4.8, *pricePage.Items[0].OutputPricePerM, 0.000001)
+
+	keys, err := CollectInventory(context.Background(), instance.Id, "api_key", "")
+	require.NoError(t, err)
+	keyPage := keys.Data.(*InventoryPage)
+	require.Equal(t, "primary-key", keyPage.Items[0].Name)
+	require.Equal(t, "root", keyPage.Items[0].Group)
+	require.NotContains(t, fmt.Sprint(keyPage.Items[0]), "must-not-be-exposed")
 }
 
 func TestCollectInventoryPersistsFailureWithoutSyntheticCounts(t *testing.T) {

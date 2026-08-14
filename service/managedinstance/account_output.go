@@ -85,8 +85,8 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 		AddedAccounts:    len(items),
 	}
 	if instance.Kind == model.ManagedInstanceKindConductor {
-		for index, item := range items {
-			result.Items[index] = AccountOutputItem{Account: item, CollectionStatus: model.ManagedInstanceCollectionUnsupported}
+		if err := collectConductorAccountOutput(ctx, connector, credential, result, items, window); err != nil {
+			return nil, err
 		}
 		view, _, viewErr := observationView(instance.Id, common.GetTimestamp(), result, nil)
 		return view, viewErr
@@ -139,6 +139,49 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 	}
 	view, _, err := observationView(instance.Id, common.GetTimestamp(), result, nil)
 	return view, err
+}
+
+func collectConductorAccountOutput(ctx context.Context, connector *Connector, credential *CredentialMaterial, result *AccountOutputResult, items []InventoryItem, window TimeWindow) error {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.UTC
+	}
+	from := time.Unix(window.Start, 0).In(location).Format("2006-01-02")
+	to := time.Unix(window.End, 0).In(location).Format("2006-01-02")
+	report, err := conductorUsageReport(ctx, connector, credential, "account", from, to, location.String(), "")
+	if err != nil {
+		return err
+	}
+	usageByAccount := make(map[int64]conductorReportMetrics, len(report.Rows))
+	for _, row := range report.Rows {
+		accountID, parseErr := strconv.ParseInt(row.AccountID, 10, 64)
+		if parseErr != nil || accountID <= 0 {
+			continue
+		}
+		current := usageByAccount[accountID]
+		current.Requests += row.Requests
+		current.InputTokens += row.InputTokens
+		current.OutputTokens += row.OutputTokens
+		current.CacheReadTokens += row.CacheReadTokens
+		current.CacheCreationTokens += row.CacheCreationTokens
+		current.Cache5MTokens += row.Cache5MTokens
+		current.Cache1HTokens += row.Cache1HTokens
+		current.Cost += row.Cost
+		usageByAccount[accountID] = current
+	}
+	result.Currency = "USD"
+	for index, item := range items {
+		metrics := usageByAccount[item.ID]
+		result.Items[index] = AccountOutputItem{
+			Account: item, TotalRequests: metrics.Requests, TotalTokens: metrics.totalTokens(), Amount: metrics.Cost,
+			Currency: "USD", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		}
+		result.CollectedAccounts++
+		result.TotalRequests += metrics.Requests
+		result.TotalTokens += metrics.totalTokens()
+		result.TotalAmount += metrics.Cost
+	}
+	return nil
 }
 
 func recentAccountInventorySnapshot(instanceID int64, resourceKind string) (*InventoryPage, bool) {

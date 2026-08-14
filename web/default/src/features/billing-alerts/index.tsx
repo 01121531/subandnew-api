@@ -1791,6 +1791,7 @@ function SMTPSettings() {
     from_name: '',
     from_address: '',
     reply_to: '',
+    alert_recipients: '',
     enabled: false,
   })
   const [testRecipient, setTestRecipient] = useState('')
@@ -1872,6 +1873,13 @@ function SMTPSettings() {
           <Input
             value={form.reply_to}
             onChange={(e) => set('reply_to', e.target.value)}
+          />
+        </Field>
+        <Field label='实例巡检通知收件人'>
+          <Input
+            value={form.alert_recipients}
+            onChange={(e) => set('alert_recipients', e.target.value)}
+            placeholder='ops@example.com, admin@example.com'
           />
         </Field>
         <label className='flex items-center gap-2 text-sm'>

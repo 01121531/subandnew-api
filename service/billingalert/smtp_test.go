@@ -40,7 +40,7 @@ func TestSMTPSettingNeverReturnsPassword(t *testing.T) {
 	view, err := UpdateSMTPSetting(SMTPSettingInput{
 		Host: "smtp.example.com", Port: 587, Security: SMTPSecurityStartTLS,
 		Username: "mailer@example.com", Password: "do-not-return",
-		FromAddress: "mailer@example.com", Enabled: true,
+		FromAddress: "mailer@example.com", AlertRecipients: "ops@example.com,OPS@example.com;admin@example.com", Enabled: true,
 	}, 1)
 	require.NoError(t, err)
 	require.True(t, view.PasswordStored)
@@ -53,4 +53,13 @@ func TestSMTPSettingNeverReturnsPassword(t *testing.T) {
 	loaded, err := GetSMTPSetting()
 	require.NoError(t, err)
 	require.True(t, loaded.PasswordStored)
+	require.Equal(t, "ops@example.com,admin@example.com", loaded.AlertRecipients)
+}
+
+func TestParseRecipientListNormalizesAndRejectsInvalidValues(t *testing.T) {
+	recipients, err := ParseRecipientList("ops@example.com; admin@example.com\nOPS@example.com")
+	require.NoError(t, err)
+	require.Equal(t, []string{"ops@example.com", "admin@example.com"}, recipients)
+	_, err = ParseRecipientList("not-an-email")
+	require.ErrorIs(t, err, ErrInvalidBillingInput)
 }

@@ -124,8 +124,7 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	if instanceID <= 0 || accountRange.RangeKey == "" {
 		return nil, managedinstance.ErrInvalidInstance
 	}
-	instance, err := managedinstance.Get(instanceID)
-	if err != nil {
+	if _, err := managedinstance.Get(instanceID); err != nil {
 		return nil, err
 	}
 	_ = backfillManagedAccountInventory(instanceID)
@@ -158,11 +157,8 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 		response := task.ToResponse()
 		view.Task = &response
 	}
-	outputRequired := instance.Kind != model.ManagedInstanceKindConductor
 	view.RefreshRecommended = managedAccountSectionNeedsRefresh(inventory, now)
-	if outputRequired {
-		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
-	}
+	view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
 	return view, nil
 }
 
@@ -468,17 +464,10 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 }
 
 func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
-	instance, err := managedinstance.Get(payload.InstanceID)
-	if err != nil {
-		return true
-	}
-	if instance.Kind == model.ManagedInstanceKindConductor {
-		return false
-	}
 	failed := false
 	for _, days := range managedAccountPresetDays {
 		accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
-		accountRange, err = resolvedManagedAccountRange(accountRange, time.Now())
+		accountRange, err := resolvedManagedAccountRange(accountRange, time.Now())
 		if err != nil {
 			failed = true
 			continue
@@ -625,10 +614,8 @@ func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[s
 		return false
 	}
 	required := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
-	if instance.Kind != model.ManagedInstanceKindConductor {
-		for _, days := range managedAccountPresetDays {
-			required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
-		}
+	for _, days := range managedAccountPresetDays {
+		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
 	}
 	for _, key := range required {
 		attemptedAt := latest[key]

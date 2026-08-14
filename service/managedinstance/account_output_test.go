@@ -78,12 +78,20 @@ func TestCollectAccountOutputUsesSub2AccountFilter(t *testing.T) {
 	require.Equal(t, 1.25, result.TotalAmount)
 }
 
-func TestCollectAccountOutputMarksConductorAccountUsageUnsupported(t *testing.T) {
+func TestCollectAccountOutputUsesConductorAccountReport(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/accounts", request.URL.Path)
-		writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"9","label":"conductor-account","created_at":150,"available":true}],"total":1}}`)
+		switch request.URL.Path {
+		case "/api/v1/accounts":
+			writeProbeJSON(response, `{"code":200,"data":{"accounts":[{"account_id":"9","label":"conductor-account","created_at":150,"available":true}],"total":1}}`)
+		case "/api/v1/reports/usage":
+			require.Equal(t, "account", request.URL.Query().Get("group_by"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("tz"))
+			writeProbeJSON(response, `{"code":200,"data":{"rows":[{"account_id":"9","requests":4,"input_tokens":10,"output_tokens":20,"cache_read_tokens":30,"cache_creation_tokens":40,"cache_5m_tokens":35,"cache_1h_tokens":5,"cost":1.25}],"summary":{"requests":4,"input_tokens":10,"output_tokens":20,"cache_read_tokens":30,"cache_creation_tokens":40,"cost":1.25},"total":1,"active_accounts":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
@@ -92,7 +100,12 @@ func TestCollectAccountOutputMarksConductorAccountUsageUnsupported(t *testing.T)
 	require.NoError(t, err)
 	result := view.Data.(*AccountOutputResult)
 	require.Equal(t, 1, result.AddedAccounts)
-	require.Equal(t, model.ManagedInstanceCollectionUnsupported, result.Items[0].CollectionStatus)
+	require.Equal(t, 1, result.CollectedAccounts)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, result.Items[0].CollectionStatus)
+	require.Equal(t, 4.0, result.TotalRequests)
+	require.Equal(t, 100.0, result.TotalTokens)
+	require.Equal(t, 1.25, result.TotalAmount)
+	require.Equal(t, "USD", result.Currency)
 }
 
 func TestCollectAccountOutputUsesRegularNewAPIAccountWithoutAdminFilter(t *testing.T) {

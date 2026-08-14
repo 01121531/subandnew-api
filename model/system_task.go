@@ -20,15 +20,16 @@ const (
 	SystemTaskStatusFailed    SystemTaskStatus = "failed"
 	SystemTaskStatusCancelled SystemTaskStatus = "cancelled"
 
-	SystemTaskTypeManagedInstanceProbe = "managed_instance_probe"
-	SystemTaskTypeManagedInstanceSync  = "managed_instance_sync"
-	SystemTaskTypeManagedAccountSync   = "managed_account_sync"
-	SystemTaskTypeManagedUsageExport   = "managed_usage_export"
-	SystemTaskTypeBillingAlertScan     = "billing_alert_scan"
-	SystemTaskTypeBillingAlertEvaluate = "billing_alert_evaluate"
-	SystemTaskTypeBillingEmailDelivery = "billing_email_delivery"
-	SystemTaskTypeExchangeRateRefresh  = "exchange_rate_refresh"
-	SystemTaskTypeBillingAlertExport   = "billing_alert_export"
+	SystemTaskTypeManagedInstanceProbe      = "managed_instance_probe"
+	SystemTaskTypeManagedInstanceSync       = "managed_instance_sync"
+	SystemTaskTypeManagedAccountSync        = "managed_account_sync"
+	SystemTaskTypeManagedInstanceAlertEmail = "managed_instance_alert_email"
+	SystemTaskTypeManagedUsageExport        = "managed_usage_export"
+	SystemTaskTypeBillingAlertScan          = "billing_alert_scan"
+	SystemTaskTypeBillingAlertEvaluate      = "billing_alert_evaluate"
+	SystemTaskTypeBillingEmailDelivery      = "billing_email_delivery"
+	SystemTaskTypeExchangeRateRefresh       = "exchange_rate_refresh"
+	SystemTaskTypeBillingAlertExport        = "billing_alert_export"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

@@ -301,6 +301,28 @@ func TestConductorUsageRecordsSummaryOptionsAndSessionReuse(t *testing.T) {
 	require.Equal(t, int32(3), usageCount.Load())
 }
 
+func TestCollectConductorKeyUsageUsesKeyReportWithoutExposingSecret(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/reports/keys", request.URL.Path)
+		require.Equal(t, "total", request.URL.Query().Get("group_by"))
+		require.Equal(t, "2", request.URL.Query().Get("key_id"))
+		require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("tz"))
+		writeProbeJSON(response, `{"code":200,"data":{"rows":[{"key_id":2,"key_name":"primary","user_id":1,"username":"root","requests":4,"input_tokens":10,"output_tokens":20,"cache_read_tokens":30,"cache_creation_tokens":40,"cost":0.5}],"summary":{"requests":4},"total":1}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	result, err := CollectConductorKeyUsage(context.Background(), instance.Id, 2, TimeWindow{Start: 1_786_032_000, End: 1_786_636_800}, "Asia/Shanghai")
+	require.NoError(t, err)
+	require.Equal(t, int64(2), result.KeyID)
+	require.Equal(t, "primary", result.KeyName)
+	require.Equal(t, 4.0, result.TotalRequests)
+	require.Equal(t, 100.0, result.TotalTokens)
+	require.Equal(t, 0.5, result.Amount)
+	require.NotContains(t, fmt.Sprint(result), "secret")
+}
+
 func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

@@ -127,6 +127,10 @@ func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	conductorLatest := map[string]int64{
 		managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): now,
 	}
+	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now, 3_600))
+	for _, days := range managedAccountPresetDays {
+		conductorLatest[managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days))] = now
+	}
 	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now, 3_600))
 }
 

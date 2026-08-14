@@ -96,10 +96,15 @@ func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt 
 		return err
 	}
 	for _, alert := range alerts {
-		if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ? AND status = ?", alert.Id, model.ManagedInstanceAlertStatusOpen).Updates(map[string]any{
+		updates := map[string]any{
 			"status": model.ManagedInstanceAlertStatusResolved, "resolved_at": checkedAt,
 			"last_seen_at": checkedAt, "updated_at": checkedAt,
-		}).Error; err != nil {
+		}
+		if alert.EmailStatus != model.ManagedInstanceAlertEmailSent {
+			updates["email_status"] = model.ManagedInstanceAlertEmailCancelled
+			updates["email_next_retry_at"] = 0
+		}
+		if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ? AND status = ?", alert.Id, model.ManagedInstanceAlertStatusOpen).Updates(updates).Error; err != nil {
 			return err
 		}
 		if err := writeAuditOutcome(tx, instance.Id, 0, "alert_resolve", "succeeded", map[string]any{

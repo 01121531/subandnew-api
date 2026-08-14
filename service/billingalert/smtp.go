@@ -35,31 +35,33 @@ var (
 )
 
 type SMTPSettingInput struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	Security    string `json:"security"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	FromName    string `json:"from_name"`
-	FromAddress string `json:"from_address"`
-	ReplyTo     string `json:"reply_to"`
-	Enabled     bool   `json:"enabled"`
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
+	Security        string `json:"security"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	FromName        string `json:"from_name"`
+	FromAddress     string `json:"from_address"`
+	ReplyTo         string `json:"reply_to"`
+	AlertRecipients string `json:"alert_recipients"`
+	Enabled         bool   `json:"enabled"`
 }
 
 type SMTPSettingView struct {
-	ID             int64  `json:"id"`
-	Host           string `json:"host"`
-	Port           int    `json:"port"`
-	Security       string `json:"security"`
-	Username       string `json:"username"`
-	PasswordStored bool   `json:"password_stored"`
-	FromName       string `json:"from_name"`
-	FromAddress    string `json:"from_address"`
-	ReplyTo        string `json:"reply_to"`
-	Enabled        bool   `json:"enabled"`
-	UpdatedBy      int    `json:"updated_by"`
-	CreatedAt      int64  `json:"created_at"`
-	UpdatedAt      int64  `json:"updated_at"`
+	ID              int64  `json:"id"`
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
+	Security        string `json:"security"`
+	Username        string `json:"username"`
+	PasswordStored  bool   `json:"password_stored"`
+	FromName        string `json:"from_name"`
+	FromAddress     string `json:"from_address"`
+	ReplyTo         string `json:"reply_to"`
+	AlertRecipients string `json:"alert_recipients"`
+	Enabled         bool   `json:"enabled"`
+	UpdatedBy       int    `json:"updated_by"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
 }
 
 type SMTPTestInput struct {
@@ -96,8 +98,9 @@ func UpdateSMTPSetting(input SMTPSettingInput, actorID int) (*SMTPSettingView, e
 	input.FromName = strings.TrimSpace(input.FromName)
 	input.FromAddress = strings.TrimSpace(input.FromAddress)
 	input.ReplyTo = strings.TrimSpace(input.ReplyTo)
+	alertRecipients, recipientsErr := ParseRecipientList(input.AlertRecipients)
 	if actorID <= 0 || input.Host == "" || input.Port <= 0 || input.Port > 65535 ||
-		!validSMTPSecurity(input.Security) || !validEmail(input.FromAddress) || input.ReplyTo != "" && !validEmail(input.ReplyTo) {
+		!validSMTPSecurity(input.Security) || !validEmail(input.FromAddress) || input.ReplyTo != "" && !validEmail(input.ReplyTo) || recipientsErr != nil {
 		return nil, ErrInvalidBillingInput
 	}
 	var current model.SMTPSetting
@@ -124,7 +127,8 @@ func UpdateSMTPSetting(input SMTPSettingInput, actorID int) (*SMTPSettingView, e
 		ID: 1, Host: input.Host, Port: input.Port, Security: input.Security,
 		Username: input.Username, PasswordCipher: passwordCipher, KeyVersion: keyVersion,
 		FromName: input.FromName, FromAddress: input.FromAddress, ReplyTo: input.ReplyTo,
-		Enabled: input.Enabled, UpdatedBy: actorID,
+		AlertRecipients: strings.Join(alertRecipients, ","),
+		Enabled:         input.Enabled, UpdatedBy: actorID,
 	}
 	setting.CreatedAt = current.CreatedAt
 	setting.UpdatedAt = time.Now().Unix()
@@ -166,6 +170,42 @@ func SendSMTPMessage(ctx context.Context, message SMTPMessage) error {
 	}
 	raw := buildSMTPMessage(setting, message)
 	return deliverSMTP(ctx, setting, password, message.Recipients, raw)
+}
+
+func ManagedInstanceAlertRecipients() ([]string, error) {
+	var setting model.SMTPSetting
+	if err := model.DB.First(&setting, 1).Error; err != nil || !setting.Enabled {
+		return nil, ErrSMTPNotConfigured
+	}
+	recipients, err := ParseRecipientList(setting.AlertRecipients)
+	if err != nil || len(recipients) == 0 {
+		return nil, ErrSMTPNotConfigured
+	}
+	return recipients, nil
+}
+
+func ParseRecipientList(value string) ([]string, error) {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r'
+	})
+	seen := make(map[string]struct{}, len(parts))
+	recipients := make([]string, 0, len(parts))
+	for _, part := range parts {
+		recipient := strings.TrimSpace(part)
+		if recipient == "" {
+			continue
+		}
+		if !validEmail(recipient) {
+			return nil, ErrInvalidBillingInput
+		}
+		key := strings.ToLower(recipient)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, nil
 }
 
 func loadSMTPSetting(requireEnabled bool) (*model.SMTPSetting, string, error) {
@@ -324,7 +364,7 @@ func smtpSettingView(setting *model.SMTPSetting) *SMTPSettingView {
 	return &SMTPSettingView{
 		ID: setting.ID, Host: setting.Host, Port: setting.Port, Security: setting.Security,
 		Username: setting.Username, PasswordStored: setting.PasswordCipher != "", FromName: setting.FromName,
-		FromAddress: setting.FromAddress, ReplyTo: setting.ReplyTo, Enabled: setting.Enabled,
+		FromAddress: setting.FromAddress, ReplyTo: setting.ReplyTo, AlertRecipients: setting.AlertRecipients, Enabled: setting.Enabled,
 		UpdatedBy: setting.UpdatedBy, CreatedAt: setting.CreatedAt, UpdatedAt: setting.UpdatedAt,
 	}
 }

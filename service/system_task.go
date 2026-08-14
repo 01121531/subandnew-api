@@ -351,6 +351,7 @@ func runSystemTaskScheduler() {
 	scheduleDueManagedInstanceProbes(now)
 	scheduleDueManagedInstanceSyncs(now)
 	scheduleDueManagedAccountSyncs(now)
+	enqueueDueManagedInstanceAlertEmails(now)
 	resumeManagedInstanceOperationBatches()
 }
 

@@ -152,6 +152,26 @@ func GetManagedInstanceAccountOutput(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
 
+func GetManagedInstanceConductorKeyUsage(c *gin.Context) {
+	id, ok := managedInstanceID(c)
+	if !ok || !managedInstanceDataReady(c, id) {
+		return
+	}
+	keyID, err := strconv.ParseInt(c.Query("key_id"), 10, 64)
+	if err != nil || keyID <= 0 {
+		managedInstanceError(c, managedinstance.ErrInvalidInstance)
+		return
+	}
+	window := managedInstanceTimeWindow(c)
+	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ConductorKeyUsageResult, error) {
+		return managedinstance.CollectConductorKeyUsage(c.Request.Context(), id, keyID, window, c.Query("timezone"))
+	})
+	if !ok {
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
 	id, ok := managedInstanceID(c)
 	if !ok {

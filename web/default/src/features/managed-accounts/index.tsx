@@ -903,7 +903,6 @@ function AccountOutputPanel(props: {
   error: boolean
 }) {
   const { t } = useTranslation()
-  const unsupported = props.family === 'conductor'
   const summary = [
     {
       key: 'added',
@@ -942,13 +941,7 @@ function AccountOutputPanel(props: {
     },
   ]
   let detailContent: ReactNode
-  if (unsupported) {
-    detailContent = (
-      <PanelEmpty
-        text={t('Conductor does not expose usage by upstream account')}
-      />
-    )
-  } else if (props.loading && props.rows.length === 0) {
+  if (props.loading && props.rows.length === 0) {
     detailContent = <TableSkeleton wide={false} />
   } else if (props.rows.length === 0) {
     detailContent = (
@@ -999,7 +992,7 @@ function AccountOutputPanel(props: {
                 </span>
               </div>
               <p className='mt-2 font-mono text-xl font-semibold tabular-nums'>
-                {unsupported && item.key !== 'added' ? '--' : item.value}
+                {item.value}
               </p>
             </div>
           ))}

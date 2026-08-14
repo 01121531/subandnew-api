@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/01121531/subandnew-api/model"
 )
 
 type conductorPrice struct {
@@ -61,6 +63,148 @@ type conductorUsageAggregate struct {
 	Tokens   float64
 	Cost     float64
 	Trend    []UsageTrendPoint
+}
+
+type conductorReportMetrics struct {
+	Requests            float64 `json:"requests"`
+	InputTokens         float64 `json:"input_tokens"`
+	OutputTokens        float64 `json:"output_tokens"`
+	CacheReadTokens     float64 `json:"cache_read_tokens"`
+	CacheCreationTokens float64 `json:"cache_creation_tokens"`
+	Cache5MTokens       float64 `json:"cache_5m_tokens"`
+	Cache1HTokens       float64 `json:"cache_1h_tokens"`
+	Cost                float64 `json:"cost"`
+}
+
+func (metrics conductorReportMetrics) totalTokens() float64 {
+	return metrics.InputTokens + metrics.OutputTokens + metrics.CacheReadTokens + metrics.CacheCreationTokens
+}
+
+type conductorReportRow struct {
+	conductorReportMetrics
+	AccountID string `json:"account_id"`
+	Label     string `json:"label"`
+	Email     string `json:"email"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Model     string `json:"model"`
+	Date      string `json:"date"`
+	KeyID     int64  `json:"key_id"`
+	KeyName   string `json:"key_name"`
+}
+
+type conductorReportPayload struct {
+	Rows    []conductorReportRow   `json:"rows"`
+	Summary conductorReportMetrics `json:"summary"`
+	Total   int                    `json:"total"`
+}
+
+type ConductorKeyUsageResult struct {
+	SourceInstanceID int64      `json:"source_instance_id"`
+	Kind             string     `json:"kind"`
+	Window           TimeWindow `json:"window"`
+	Timezone         string     `json:"timezone"`
+	KeyID            int64      `json:"key_id"`
+	KeyName          string     `json:"key_name"`
+	UserID           int64      `json:"user_id"`
+	Username         string     `json:"username"`
+	TotalRequests    float64    `json:"total_requests"`
+	TotalTokens      float64    `json:"total_tokens"`
+	Amount           float64    `json:"amount"`
+	Currency         string     `json:"currency"`
+}
+
+func conductorUsageReport(ctx context.Context, connector *Connector, credential *CredentialMaterial, groupBy, from, to, timezone, search string) (*conductorReportPayload, error) {
+	query := url.Values{
+		"group_by": {groupBy},
+		"from":     {from},
+		"to":       {to},
+		"tz":       {timezone},
+		"search":   {search},
+	}
+	path := "/api/v1/reports/usage?" + query.Encode()
+	var response *ConnectorResponse
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		response, err = conductorDoJSON(ctx, connector, credential, http.MethodGet, path, nil)
+		if err == nil && response != nil && response.StatusCode != http.StatusBadGateway && response.StatusCode != http.StatusServiceUnavailable && response.StatusCode != http.StatusGatewayTimeout {
+			break
+		}
+		if attempt == 0 {
+			select {
+			case <-time.After(200 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if response == nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	data, err := conductorEnvelopeData(response)
+	if err != nil {
+		return nil, err
+	}
+	var payload conductorReportPayload
+	if json.Unmarshal(data, &payload) != nil || payload.Total < 0 || payload.Total > 0 && payload.Rows == nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return &payload, nil
+}
+
+func CollectConductorKeyUsage(ctx context.Context, instanceID int64, keyID int64, window TimeWindow, timezone string) (*ConductorKeyUsageResult, error) {
+	instance, _, connector, credential, err := observationClient(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if instance.Kind != model.ManagedInstanceKindConductor || keyID <= 0 {
+		return nil, ErrInvalidInstance
+	}
+	if window.End == 0 {
+		window.End = time.Now().Unix()
+	}
+	if window.Start == 0 {
+		window.Start = window.End - 7*86400
+	}
+	if window.Start < 0 || window.Start >= window.End {
+		return nil, ErrInvalidInstance
+	}
+	if timezone == "" {
+		timezone = "Asia/Shanghai"
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return nil, ErrInvalidInstance
+	}
+	query := url.Values{
+		"group_by": {"total"}, "key_id": {strconv.FormatInt(keyID, 10)},
+		"from": {time.Unix(window.Start, 0).In(location).Format("2006-01-02")},
+		"to":   {time.Unix(window.End, 0).In(location).Format("2006-01-02")}, "tz": {timezone},
+	}
+	response, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/reports/keys?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	data, err := conductorEnvelopeData(response)
+	if err != nil {
+		return nil, err
+	}
+	var payload conductorReportPayload
+	if json.Unmarshal(data, &payload) != nil || payload.Total < 0 || len(payload.Rows) > 1 {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	row := conductorReportRow{KeyID: keyID}
+	if len(payload.Rows) == 1 {
+		row = payload.Rows[0]
+	}
+	return &ConductorKeyUsageResult{
+		SourceInstanceID: instance.Id, Kind: instance.Kind, Window: window, Timezone: timezone,
+		KeyID: keyID, KeyName: row.KeyName, UserID: row.UserID, Username: row.Username,
+		TotalRequests: row.Requests, TotalTokens: row.totalTokens(), Amount: row.Cost, Currency: "USD",
+	}, nil
 }
 
 func conductorPrices(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]conductorPrice, error) {
@@ -169,6 +313,23 @@ func conductorUsageAggregateForWindow(ctx context.Context, connector *Connector,
 	}
 	from := time.Unix(window.Start, 0).In(location).Format("2006-01-02")
 	to := time.Unix(window.End, 0).In(location).Format("2006-01-02")
+	if report, reportErr := conductorUsageReport(ctx, connector, credential, "date", from, to, location.String(), ""); reportErr == nil {
+		result := &conductorUsageAggregate{
+			Requests: report.Summary.Requests,
+			Tokens:   report.Summary.totalTokens(),
+			Cost:     report.Summary.Cost,
+		}
+		for _, row := range report.Rows {
+			if row.Date == "" {
+				continue
+			}
+			result.Trend = append(result.Trend, UsageTrendPoint{
+				Date: row.Date, Requests: row.Requests, Tokens: row.totalTokens(), Cost: row.Cost,
+			})
+		}
+		sort.Slice(result.Trend, func(left, right int) bool { return result.Trend[left].Date < result.Trend[right].Date })
+		return result, nil
+	}
 	rows, err := conductorUsageRows(ctx, connector, credential, from, to, location.String(), "", "")
 	if err != nil {
 		return nil, err
@@ -245,27 +406,45 @@ func conductorUsageRecordItems(ctx context.Context, client *usageRecordClient, q
 
 func conductorUsageFilterOptions(ctx context.Context, client *usageRecordClient, query url.Values) (*UsageRecordFilterOptions, error) {
 	result := &UsageRecordFilterOptions{SourceInstanceID: client.instance.Id, Kind: client.instance.Kind, Fields: map[string][]UsageRecordFilterOption{}}
-	usersResponse, usersErr := conductorDoJSON(ctx, client.connector, client.credential, http.MethodGet, "/api/v1/users", nil)
-	if usersErr == nil {
-		usersData, decodeErr := conductorEnvelopeData(usersResponse)
-		var users []struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
+	timezone := query.Get("timezone")
+	if timezone == "" {
+		timezone = "Asia/Shanghai"
+	}
+	ownerReport, ownerErr := conductorUsageReport(ctx, client.connector, client.credential, "owner", query.Get("start_date"), query.Get("end_date"), timezone, "")
+	if ownerErr == nil {
+		for _, owner := range ownerReport.Rows {
+			if owner.UserID > 0 {
+				result.Fields["user_id"] = append(result.Fields["user_id"], UsageRecordFilterOption{Value: strconv.FormatInt(owner.UserID, 10), Label: fmt.Sprintf("%s (#%d)", owner.Username, owner.UserID)})
+			}
 		}
-		if decodeErr == nil && json.Unmarshal(usersData, &users) == nil {
-			for _, user := range users {
-				if user.ID <= 0 {
-					continue
+	} else {
+		usersResponse, usersErr := conductorDoJSON(ctx, client.connector, client.credential, http.MethodGet, "/api/v1/users", nil)
+		if usersErr == nil {
+			usersData, decodeErr := conductorEnvelopeData(usersResponse)
+			var users []struct {
+				ID       int64  `json:"id"`
+				Username string `json:"username"`
+			}
+			if decodeErr == nil && json.Unmarshal(usersData, &users) == nil {
+				for _, user := range users {
+					if user.ID > 0 {
+						result.Fields["user_id"] = append(result.Fields["user_id"], UsageRecordFilterOption{Value: strconv.FormatInt(user.ID, 10), Label: fmt.Sprintf("%s (#%d)", user.Username, user.ID)})
+					}
 				}
-				result.Fields["user_id"] = append(result.Fields["user_id"], UsageRecordFilterOption{Value: strconv.FormatInt(user.ID, 10), Label: fmt.Sprintf("%s (#%d)", user.Username, user.ID)})
 			}
 		}
 	}
-	prices, err := conductorPrices(ctx, client.connector, client.credential)
-	if err == nil {
+	modelReport, modelErr := conductorUsageReport(ctx, client.connector, client.credential, "model", query.Get("start_date"), query.Get("end_date"), timezone, "")
+	if modelErr == nil {
+		for _, modelRow := range modelReport.Rows {
+			if modelName := strings.TrimSpace(modelRow.Model); modelName != "" {
+				result.Fields["model"] = append(result.Fields["model"], UsageRecordFilterOption{Value: modelName, Label: modelName})
+			}
+		}
+	} else if prices, priceErr := conductorPrices(ctx, client.connector, client.credential); priceErr == nil {
 		for _, price := range prices {
-			if strings.TrimSpace(price.Model) != "" {
-				result.Fields["model"] = append(result.Fields["model"], UsageRecordFilterOption{Value: price.Model, Label: price.Model})
+			if modelName := strings.TrimSpace(price.Model); modelName != "" {
+				result.Fields["model"] = append(result.Fields["model"], UsageRecordFilterOption{Value: modelName, Label: modelName})
 			}
 		}
 	}
