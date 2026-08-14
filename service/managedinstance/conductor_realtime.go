@@ -45,6 +45,7 @@ type ConductorRealtimeState struct {
 	Stale             bool              `json:"stale"`
 	ErrorCode         string            `json:"error_code,omitempty"`
 	RPM               MetricSample      `json:"rpm"`
+	RPMCapacity       MetricSample      `json:"rpm_capacity"`
 	AccountsTotal     int               `json:"accounts_total"`
 	AccountsAvailable int               `json:"accounts_available"`
 	AccountsReporting int               `json:"accounts_reporting"`
@@ -66,18 +67,19 @@ type conductorRealtimeSubscriber struct {
 type conductorRealtimeStream struct {
 	instanceID int64
 
-	mu          sync.Mutex
-	accounts    map[int64]InventoryItem
-	sources     map[string]InventorySource
-	observedAt  int64
-	status      string
-	stale       bool
-	errorCode   string
-	revision    uint64
-	running     bool
-	cancel      context.CancelFunc
-	closeTimer  *time.Timer
-	subscribers map[uint64]*conductorRealtimeSubscriber
+	mu            sync.Mutex
+	accounts      map[int64]InventoryItem
+	sources       map[string]InventorySource
+	observedAt    int64
+	status        string
+	stale         bool
+	errorCode     string
+	rpmPerAccount *float64
+	revision      uint64
+	running       bool
+	cancel        context.CancelFunc
+	closeTimer    *time.Timer
+	subscribers   map[uint64]*conductorRealtimeSubscriber
 }
 
 type conductorRealtimeHub struct {
@@ -659,14 +661,25 @@ func (stream *conductorRealtimeStream) refreshSources(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	sources, err := conductorInventorySources(ctx, connector, credential)
-	if err != nil {
+	sources, sourcesErr := conductorInventorySources(ctx, connector, credential)
+	rpmPerAccount, capacityErr := conductorRPMCapacityPerAccount(ctx, connector, credential)
+	if sourcesErr != nil && capacityErr != nil {
 		return
 	}
 	stream.mu.Lock()
-	stream.replaceSourcesLocked(sources)
+	if sourcesErr == nil {
+		stream.replaceSourcesLocked(sources)
+	}
+	if capacityErr == nil {
+		stream.rpmPerAccount = &rpmPerAccount
+	}
 	state := stream.snapshotLocked()
-	stream.broadcastLocked("sources", state)
+	if sourcesErr == nil {
+		stream.broadcastLocked("sources", state)
+	}
+	if capacityErr == nil {
+		stream.broadcastLocked("rpm", state)
+	}
 	stream.mu.Unlock()
 }
 
@@ -702,6 +715,7 @@ func (stream *conductorRealtimeStream) snapshotLocked() ConductorRealtimeState {
 	state := ConductorRealtimeState{
 		InstanceID: stream.instanceID, ObservedAt: stream.observedAt, StreamStatus: stream.status,
 		Stale: stream.stale, ErrorCode: stream.errorCode, RPM: unsupportedMetric("request/min"),
+		RPMCapacity: unsupportedMetric("request/min"),
 	}
 	state.Accounts = make([]InventoryItem, 0, len(stream.accounts))
 	for _, account := range stream.accounts {
@@ -729,6 +743,10 @@ func (stream *conductorRealtimeStream) snapshotLocked() ConductorRealtimeState {
 			}
 		}
 		state.RPM = supportedMetric(total, "request/min")
+	}
+	if stream.rpmPerAccount != nil && *stream.rpmPerAccount >= 0 && stream.observedAt != 0 {
+		perAccount := *stream.rpmPerAccount
+		state.RPMCapacity = supportedMetric(float64(state.AccountsAvailable)*perAccount, "request/min")
 	}
 	state.Sources = make([]InventorySource, 0, len(stream.sources))
 	for _, source := range stream.sources {
@@ -759,7 +777,7 @@ func (stream *conductorRealtimeStream) broadcastLocked(eventType string, state C
 func conductorRealtimeMetrics(instanceID int64) *RealtimeMetricsResult {
 	state, ok := CurrentConductorRealtime(instanceID)
 	result := &RealtimeMetricsResult{
-		RPM: state.RPM, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable, AccountsReporting: state.AccountsReporting,
+		RPM: state.RPM, RPMCapacity: state.RPMCapacity, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable, AccountsReporting: state.AccountsReporting,
 		ActiveSessions: state.ActiveSessions, StreamStatus: state.StreamStatus, Stale: state.Stale,
 	}
 	if !ok {

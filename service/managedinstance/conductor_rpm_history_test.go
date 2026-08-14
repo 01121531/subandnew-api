@@ -19,16 +19,24 @@ func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
 	start := int64(1_786_593_600)
 	ctx := context.Background()
 	for _, sample := range []struct {
-		instanceID int64
-		at         int64
-		rpm        float64
+		instanceID  int64
+		at          int64
+		rpm         float64
+		capacity    float64
+		hasCapacity bool
 	}{
-		{instances[0].Id, start + 10, 10},
-		{instances[0].Id, start + 20, 20},
-		{instances[1].Id, start + 30, 5},
-		{instances[0].Id, start + 70, 30},
+		{instances[0].Id, start + 10, 10, 400, true},
+		{instances[0].Id, start + 20, 20, 400, true},
+		{instances[1].Id, start + 30, 5, 800, true},
+		{instances[0].Id, start + 70, 30, 0, false},
 	} {
-		if err := recordConductorRPMSample(ctx, sample.instanceID, sample.at, sample.rpm); err != nil {
+		var err error
+		if sample.hasCapacity {
+			err = recordConductorRPMSample(ctx, sample.instanceID, sample.at, sample.rpm, sample.capacity)
+		} else {
+			err = recordConductorRPMSample(ctx, sample.instanceID, sample.at, sample.rpm)
+		}
+		if err != nil {
 			t.Fatalf("record sample: %v", err)
 		}
 	}
@@ -40,6 +48,9 @@ func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
 	if len(minute.Points) != 2 || minute.Points[0].RPM != 20 || minute.Points[1].RPM != 30 {
 		t.Fatalf("minute points = %#v, want RPM 20 and 30", minute.Points)
 	}
+	if minute.Points[0].Capacity == nil || *minute.Points[0].Capacity != 1200 || minute.Points[1].Capacity != nil {
+		t.Fatalf("minute capacities = %#v, want 1200 then nil", minute.Points)
+	}
 
 	hour, err := GetConductorRPMHistory(ctx, []int64{instances[0].Id, instances[1].Id}, ConductorRPMBucketHour, start, start+3600)
 	if err != nil {
@@ -47,6 +58,9 @@ func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
 	}
 	if len(hour.Points) != 1 || hour.Points[0].RPM != 25 {
 		t.Fatalf("hour points = %#v, want RPM 25", hour.Points)
+	}
+	if hour.Points[0].Capacity == nil || *hour.Points[0].Capacity != 1200 {
+		t.Fatalf("hour capacity = %#v, want 1200", hour.Points[0].Capacity)
 	}
 }
 

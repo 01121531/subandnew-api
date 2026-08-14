@@ -22,9 +22,10 @@ const (
 )
 
 type ConductorRPMHistoryPoint struct {
-	Timestamp int64   `json:"timestamp"`
-	RPM       float64 `json:"rpm"`
-	Samples   int     `json:"samples"`
+	Timestamp int64    `json:"timestamp"`
+	RPM       float64  `json:"rpm"`
+	Capacity  *float64 `json:"capacity"`
+	Samples   int      `json:"samples"`
 }
 
 type ConductorRPMHistoryResult struct {
@@ -59,24 +60,39 @@ func (stream *conductorRealtimeStream) sampleRPM(ctx context.Context) {
 	if state.StreamStatus != "connected" || state.Stale || state.RPM.Value == nil || state.RPM.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 		return
 	}
+	if state.RPMCapacity.Value != nil && state.RPMCapacity.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
+		_ = recordConductorRPMSample(ctx, stream.instanceID, common.GetTimestamp(), *state.RPM.Value, *state.RPMCapacity.Value)
+		return
+	}
 	_ = recordConductorRPMSample(ctx, stream.instanceID, common.GetTimestamp(), *state.RPM.Value)
 }
 
-func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64) error {
+func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacities ...float64) error {
 	if model.DB == nil || instanceID <= 0 || observedAt <= 0 || rpm < 0 {
 		return ErrInvalidInstance
+	}
+	capacity := 0.0
+	hasCapacity := len(capacities) > 0 && capacities[0] >= 0
+	if hasCapacity {
+		capacity = capacities[0]
 	}
 	bucketStart := observedAt - observedAt%60
 	now := common.GetTimestamp()
 	update := func() *gorm.DB {
+		updates := map[string]any{
+			"rpm_sum":      gorm.Expr("rpm_sum + ?", rpm),
+			"sample_count": gorm.Expr("sample_count + 1"),
+			"rpm_last":     rpm,
+			"updated_at":   now,
+		}
+		if hasCapacity {
+			updates["capacity_sum"] = gorm.Expr("capacity_sum + ?", capacity)
+			updates["capacity_sample_count"] = gorm.Expr("capacity_sample_count + 1")
+			updates["capacity_last"] = capacity
+		}
 		return model.DB.WithContext(ctx).Model(&model.ManagedRPMHistory{}).
 			Where("instance_id = ? AND bucket_start = ?", instanceID, bucketStart).
-			Updates(map[string]any{
-				"rpm_sum":      gorm.Expr("rpm_sum + ?", rpm),
-				"sample_count": gorm.Expr("sample_count + 1"),
-				"rpm_last":     rpm,
-				"updated_at":   now,
-			})
+			Updates(updates)
 	}
 	query := update()
 	if query.Error != nil {
@@ -87,6 +103,11 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 	}
 	history := &model.ManagedRPMHistory{
 		InstanceID: instanceID, BucketStart: bucketStart, RPMSum: rpm, SampleCount: 1, RPMLast: rpm,
+	}
+	if hasCapacity {
+		history.CapacitySum = capacity
+		history.CapacitySampleCount = 1
+		history.CapacityLast = capacity
 	}
 	createErr := model.DB.WithContext(ctx).Create(history).Error
 	if createErr == nil {
@@ -150,15 +171,22 @@ func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket str
 		Order("bucket_start asc").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	points := aggregateConductorRPMHistory(rows, bucket, start, end)
+	points := aggregateConductorRPMHistory(rows, bucket, start, end, len(instanceIDs))
 	return &ConductorRPMHistoryResult{Bucket: bucket, Start: start, End: end, Points: points}, nil
 }
 
-func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string, start int64, end int64) []ConductorRPMHistoryPoint {
+func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string, start int64, end int64, expectedInstances ...int) []ConductorRPMHistoryPoint {
 	type aggregate struct {
-		sum     float64
-		count   int
-		samples int
+		sum              float64
+		count            int
+		samples          int
+		capacitySum      float64
+		capacityCount    int
+		capacityComplete bool
+	}
+	expected := 0
+	if len(expectedInstances) > 0 {
+		expected = expectedInstances[0]
 	}
 	minutes := map[int64]*aggregate{}
 	for _, row := range rows {
@@ -172,6 +200,13 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		}
 		minute.sum += row.RPMSum / float64(row.SampleCount)
 		minute.samples += row.SampleCount
+		if row.CapacitySampleCount > 0 {
+			minute.capacitySum += row.CapacitySum / float64(row.CapacitySampleCount)
+			minute.capacityCount++
+		}
+	}
+	for _, minute := range minutes {
+		minute.capacityComplete = minute.capacityCount > 0 && (expected == 0 || minute.capacityCount == expected)
 	}
 	aggregates := minutes
 	if bucket == ConductorRPMBucketHour {
@@ -186,6 +221,10 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			value.sum += minute.sum
 			value.count++
 			value.samples += minute.samples
+			if minute.capacityComplete {
+				value.capacitySum += minute.capacitySum
+				value.capacityCount++
+			}
 		}
 	}
 	points := make([]ConductorRPMHistoryPoint, 0, len(aggregates))
@@ -194,7 +233,15 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		if bucket == ConductorRPMBucketHour && value.count > 0 {
 			rpm /= float64(value.count)
 		}
-		points = append(points, ConductorRPMHistoryPoint{Timestamp: timestamp, RPM: rpm, Samples: value.samples})
+		var capacity *float64
+		if bucket == ConductorRPMBucketMinute && value.capacityComplete {
+			capacityValue := value.capacitySum
+			capacity = &capacityValue
+		} else if bucket == ConductorRPMBucketHour && value.capacityCount > 0 {
+			capacityValue := value.capacitySum / float64(value.capacityCount)
+			capacity = &capacityValue
+		}
+		points = append(points, ConductorRPMHistoryPoint{Timestamp: timestamp, RPM: rpm, Capacity: capacity, Samples: value.samples})
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
 	return points

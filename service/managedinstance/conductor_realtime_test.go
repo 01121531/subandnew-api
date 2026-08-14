@@ -93,6 +93,8 @@ func (reader *countingReader) Read(target []byte) (int, error) {
 func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 	stream := newConductorRealtimeTestStream(42)
 	stream.sources["1"] = InventorySource{ID: "1", Name: "worker-a", Status: "Connected"}
+	capacityPerAccount := 400.0
+	stream.rpmPerAccount = &capacityPerAccount
 
 	stream.applyEvent([]byte(`{
 		"type":"account",
@@ -109,6 +111,9 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 	}
 	if state.RPM.Value == nil || *state.RPM.Value != 10 {
 		t.Fatalf("snapshot RPM = %v, want 10", state.RPM.Value)
+	}
+	if state.RPMCapacity.Value == nil || *state.RPMCapacity.Value != 1200 {
+		t.Fatalf("snapshot RPM capacity = %v, want 1200", state.RPMCapacity.Value)
 	}
 	if state.ActiveSessions != 5 {
 		t.Fatalf("active sessions = %d, want 5", state.ActiveSessions)
@@ -127,6 +132,25 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 	state = conductorRealtimeTestState(stream)
 	if state.AccountsTotal != 3 || state.AccountsAvailable != 2 || state.AccountsReporting != 1 {
 		t.Fatalf("removal counts = total %d, available %d, reporting %d; want 3, 2, 1", state.AccountsTotal, state.AccountsAvailable, state.AccountsReporting)
+	}
+	if state.RPMCapacity.Value == nil || *state.RPMCapacity.Value != 800 {
+		t.Fatalf("RPM capacity after removal = %v, want 800", state.RPMCapacity.Value)
+	}
+}
+
+func TestConductorRPMCapacityFromQuota(t *testing.T) {
+	capacity, ok := conductorRPMCapacityFromData([]byte(`{"per_account":{"min_interval_ms":400}}`))
+	if !ok || capacity != 400 {
+		t.Fatalf("capacity = %v, ok = %v; want 400, true", capacity, ok)
+	}
+	for _, payload := range []string{
+		`{"per_account":{"min_interval_ms":0}}`,
+		`{"per_account":{}}`,
+		`not-json`,
+	} {
+		if value, valid := conductorRPMCapacityFromData([]byte(payload)); valid {
+			t.Fatalf("invalid payload %q returned capacity %v", payload, value)
+		}
 	}
 }
 

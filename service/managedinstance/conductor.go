@@ -683,6 +683,34 @@ func conductorCurrentRPM(ctx context.Context, connector *Connector, credential *
 	return unsupportedMetric("request/min")
 }
 
+func conductorRPMCapacityPerAccount(ctx context.Context, connector *Connector, credential *CredentialMaterial) (float64, error) {
+	response, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/system/quota", nil)
+	if err != nil {
+		return 0, err
+	}
+	data, err := conductorEnvelopeData(response)
+	if err != nil {
+		return 0, err
+	}
+	capacity, ok := conductorRPMCapacityFromData(data)
+	if !ok {
+		return 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return capacity, nil
+}
+
+func conductorRPMCapacityFromData(data []byte) (float64, bool) {
+	var quota struct {
+		PerAccount struct {
+			Capacity float64 `json:"min_interval_ms"`
+		} `json:"per_account"`
+	}
+	if json.Unmarshal(data, &quota) != nil || quota.PerAccount.Capacity <= 0 {
+		return 0, false
+	}
+	return quota.PerAccount.Capacity, true
+}
+
 func conductorRecordedUsage(ctx context.Context, connector *Connector, credential *CredentialMaterial) (float64, bool) {
 	response, err := conductorDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/system/stats", nil)
 	if err != nil {

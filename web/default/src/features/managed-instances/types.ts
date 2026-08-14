@@ -227,6 +227,7 @@ export interface ManagedInstanceSummary {
 
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
+  rpm_capacity: ManagedInstanceMetricSample
   accounts_total?: number
   accounts_available?: number
   accounts_reporting?: number
@@ -242,6 +243,7 @@ export interface ManagedInstanceRealtimeState {
   stale: boolean
   error_code?: string
   rpm: ManagedInstanceMetricSample
+  rpm_capacity: ManagedInstanceMetricSample
   accounts_total: number
   accounts_available: number
   accounts_reporting: number
@@ -255,6 +257,7 @@ export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour'
 export interface ManagedInstanceRPMHistoryPoint {
   timestamp: number
   rpm: number
+  capacity: number | null
   samples: number
 }
 

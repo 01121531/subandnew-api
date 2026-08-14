@@ -54,6 +54,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -114,6 +116,7 @@ type InstanceMetricRow = {
   collected: boolean
   requests: number | null
   rpm: number | null
+  rpmCapacity: number | null
   accountsAvailable: number | null
   accountsTotal: number | null
   tokens: number | null
@@ -128,6 +131,7 @@ type DailyUsageData = {
 type RPMHistoryData = {
   timestamp: number
   rpm: number
+  capacity: number | null
   samples: number
 }
 
@@ -225,7 +229,8 @@ const CONSUMPTION_CHART_CONFIG = {
 } satisfies ChartConfig
 
 const RPM_CHART_CONFIG = {
-  rpm: { label: 'RPM', color: 'var(--chart-2)' },
+  rpm: { label: '实时 RPM', color: 'var(--chart-2)' },
+  capacity: { label: '最大容量', color: 'var(--chart-3)' },
 } satisfies ChartConfig
 
 const HEALTH_CHART_CONFIG = {
@@ -570,6 +575,7 @@ export function FleetDashboard() {
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
+          rpmCapacity: metricValue(realtime?.rpm_capacity),
           accountsAvailable:
             instance.kind === 'conductor' && streamed?.observed_at
               ? streamed.accounts_available
@@ -589,6 +595,7 @@ export function FleetDashboard() {
     () => ({
       requests: rows.reduce((sum, row) => sum + (row.requests ?? 0), 0),
       rpm: rows.reduce((sum, row) => sum + (row.rpm ?? 0), 0),
+      rpmCapacity: rows.reduce((sum, row) => sum + (row.rpmCapacity ?? 0), 0),
       accountsAvailable: rows.reduce(
         (sum, row) => sum + (row.accountsAvailable ?? 0),
         0
@@ -605,6 +612,7 @@ export function FleetDashboard() {
       ).length,
       requestsReady: rows.filter((row) => row.requests != null).length,
       rpmReady: rows.filter((row) => row.rpm != null).length,
+      rpmCapacityReady: rows.filter((row) => row.rpmCapacity != null).length,
       accountsReady: rows.filter((row) => row.accountsTotal != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
@@ -954,6 +962,7 @@ type DashboardContentProps = {
   totals: {
     requests: number
     rpm: number
+    rpmCapacity: number
     accountsAvailable: number
     accountsTotal: number
     tokens: number
@@ -962,6 +971,7 @@ type DashboardContentProps = {
     metricReady: number
     requestsReady: number
     rpmReady: number
+    rpmCapacityReady: number
     accountsReady: number
     tokensReady: number
     quotaReady: number
@@ -1140,23 +1150,54 @@ function DailyUsagePanel(props: {
                         rpmTooltipTime
                       )
                     }
-                    formatter={(value) => (
-                      <span className='font-mono font-medium tabular-nums'>
-                        {formatMetric(Number(value), false)} RPM
-                      </span>
-                    )}
+                    formatter={(value, name, item) => {
+                      const point = item.payload as RPMHistoryData
+                      const utilization =
+                        point.capacity != null && point.capacity > 0
+                          ? (point.rpm / point.capacity) * 100
+                          : null
+                      return (
+                        <div className='flex w-full min-w-44 items-center gap-2'>
+                          <span
+                            className='size-2 shrink-0 rounded-sm'
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className='text-muted-foreground flex-1'>
+                            {String(name)}
+                          </span>
+                          <span className='font-mono font-medium tabular-nums'>
+                            {formatMetric(Number(value), false)} RPM
+                            {name === '最大容量' && utilization != null
+                              ? ` · 占用 ${utilization.toFixed(1)}%`
+                              : ''}
+                          </span>
+                        </div>
+                      )
+                    }}
                   />
                 }
               />
               <Line
                 type='monotone'
                 dataKey='rpm'
-                name='RPM'
+                name='实时 RPM'
                 stroke='var(--color-rpm)'
                 strokeWidth={2.25}
                 dot={props.rpmHistoryData.length <= 24}
                 activeDot={{ r: 4 }}
               />
+              <Line
+                type='stepAfter'
+                dataKey='capacity'
+                name='最大容量'
+                stroke='var(--color-capacity)'
+                strokeWidth={2}
+                strokeDasharray='7 5'
+                dot={false}
+                activeDot={{ r: 4 }}
+                connectNulls={false}
+              />
+              <ChartLegend content={<ChartLegendContent />} />
             </LineChart>
           </ChartContainer>
         )}
@@ -1268,6 +1309,16 @@ function SummaryGrid(props: DashboardContentProps) {
   })} · ${t('Auto-refreshing every {{seconds}}s', {
     seconds: RPM_REFRESH_MS / 1000,
   })}`
+  const capacityReady =
+    props.family === 'conductor' &&
+    props.instances.length > 0 &&
+    props.totals.rpmCapacityReady === props.instances.length
+  const rpmValue = props.totals.rpmReady
+    ? `${formatMetric(props.totals.rpm)} / ${capacityReady ? formatMetric(props.totals.rpmCapacity) : '--'}`
+    : `-- / ${capacityReady ? formatMetric(props.totals.rpmCapacity) : '--'}`
+  const rpmCapacityDetail = capacityReady
+    ? `${props.totals.rpmCapacity > 0 ? ((props.totals.rpm / props.totals.rpmCapacity) * 100).toFixed(1) : '0.0'}% · ${formatMetric(props.totals.accountsAvailable, false)} 个可用账号`
+    : '最大容量数据加载中'
 
   return (
     <section
@@ -1301,8 +1352,12 @@ function SummaryGrid(props: DashboardContentProps) {
       <MetricCard
         icon={Radio}
         label='RPM'
-        value={formatMetric(props.totals.rpmReady ? props.totals.rpm : null)}
-        detail={rpmDetail}
+        value={
+          props.family === 'conductor'
+            ? rpmValue
+            : formatMetric(props.totals.rpmReady ? props.totals.rpm : null)
+        }
+        detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
         tone='success'
         action={
           <Button
