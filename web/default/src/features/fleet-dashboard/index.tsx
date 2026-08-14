@@ -1052,9 +1052,14 @@ function RPMHistoryPanel(props: {
                 content={
                   <ChartTooltipContent
                     indicator='line'
-                    labelFormatter={(label) =>
-                      rpmTooltipTime.format(new Date(Number(label) * 1000))
-                    }
+                    labelFormatter={(_, payload) => {
+                      const timestamp = Number(payload?.[0]?.payload?.timestamp)
+                      const date = new Date(timestamp * 1000)
+                      return Number.isFinite(timestamp) &&
+                        Number.isFinite(date.getTime())
+                        ? rpmTooltipTime.format(date)
+                        : ''
+                    }}
                     formatter={(value) => (
                       <span className='font-mono font-medium tabular-nums'>
                         {formatMetric(Number(value), false)} RPM
