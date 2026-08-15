@@ -79,6 +79,33 @@ func TestDecodeConductorAccountInventoryStopsBeforeLargeIgnoredFields(t *testing
 	}
 }
 
+func TestConductorAccountItemNormalizesUnixTimestamps(t *testing.T) {
+	tests := []struct {
+		name         string
+		createdAt    int64
+		lastActivity int64
+	}{
+		{name: "seconds", createdAt: 1786632336, lastActivity: 1786635936},
+		{name: "milliseconds", createdAt: 1786632336000, lastActivity: 1786635936000},
+		{name: "microseconds", createdAt: 1786632336000000, lastActivity: 1786635936000000},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			item, ok := conductorAccountItem(conductorAccount{
+				AccountID:              "1",
+				CreatedAt:              test.createdAt,
+				DispatchStateChangedAt: test.lastActivity,
+			})
+			if !ok {
+				t.Fatal("conductorAccountItem() rejected a valid account")
+			}
+			if item.CreatedAt != 1786632336 || item.LastActivityAt != 1786635936 {
+				t.Fatalf("timestamps = (%d, %d), want (1786632336, 1786635936)", item.CreatedAt, item.LastActivityAt)
+			}
+		})
+	}
+}
+
 type countingReader struct {
 	io.Reader
 	readBytes int

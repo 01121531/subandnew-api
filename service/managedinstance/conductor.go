@@ -255,10 +255,20 @@ func conductorAccountItem(account conductorAccount) (InventoryItem, bool) {
 	u5, u7, u7oi := account.Utilization5H, account.Utilization7D, account.Utilization7DOI
 	return InventoryItem{
 		ID: id, Name: name, Type: account.AuthType, Platform: account.Source, SourceID: strings.TrimSpace(account.Source), Group: account.SubscriptionType,
-		Status: status, Enabled: &enabled, CreatedAt: account.CreatedAt, LastActivityAt: account.DispatchStateChangedAt,
+		Status: status, Enabled: &enabled, CreatedAt: normalizeConductorUnixTime(account.CreatedAt), LastActivityAt: normalizeConductorUnixTime(account.DispatchStateChangedAt),
 		ActiveSessions: &activeSessions, RPM: account.RPMCurrent, Utilization5H: &u5, Utilization7D: &u7, Utilization7DOI: &u7oi,
 		ErrorMessage: errorMessage,
 	}, true
+}
+
+func normalizeConductorUnixTime(value int64) int64 {
+	if value <= 0 {
+		return 0
+	}
+	for value > 100_000_000_000 {
+		value /= 1000
+	}
+	return value
 }
 
 func conductorAccountInventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, cursor string) (*InventoryPage, error) {

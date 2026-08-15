@@ -23,6 +23,7 @@ import {
   Calculator,
   AlertTriangle,
   CheckCircle2,
+  Clock3,
   CircleHelp,
   CircleDollarSign,
   DatabaseZap,
@@ -194,14 +195,23 @@ function familyLabel(family: AccountFamily) {
   return 'New API'
 }
 
+function normalizeTimestampSeconds(value?: number) {
+  if (!value || !Number.isFinite(value) || value <= 0) return null
+  let normalized = value
+  while (normalized > 100_000_000_000) normalized /= 1000
+  return normalized
+}
+
 function formatTimestamp(value?: number) {
-  if (!value) return '--'
-  const date = new Date(value * 1000)
+  const normalized = normalizeTimestampSeconds(value)
+  if (normalized == null) return '--'
+  const date = new Date(normalized * 1000)
   return Number.isNaN(date.getTime()) ? '--' : accountDateTime.format(date)
 }
 
 function getSurvivalSeconds(item: ManagedInstanceInventoryItem) {
-  if (!item.created_at) return null
+  const createdAt = normalizeTimestampSeconds(item.created_at)
+  if (createdAt == null) return null
 
   let end: number | undefined
   if (item.enabled === true) {
@@ -209,8 +219,9 @@ function getSurvivalSeconds(item: ManagedInstanceInventoryItem) {
   } else if (item.enabled === false) {
     end = item.last_activity_at
   }
-  if (!end || end < item.created_at) return null
-  return end - item.created_at
+  const normalizedEnd = normalizeTimestampSeconds(end)
+  if (normalizedEnd == null || normalizedEnd < createdAt) return null
+  return normalizedEnd - createdAt
 }
 
 function compareSortValues(
@@ -571,6 +582,17 @@ export function ManagedAccounts() {
   const available = rows.filter((row) => row.item.enabled === true).length
   const unavailable = rows.filter((row) => row.item.enabled === false).length
   const unknown = rows.length - available - unavailable
+  const unavailableSurvival = rows.flatMap(({ item }) => {
+    if (item.enabled !== false) return []
+    const seconds = getSurvivalSeconds(item)
+    return seconds == null ? [] : [seconds]
+  })
+  const averageUnavailableSurvival = unavailableSurvival.length
+    ? Math.round(
+        unavailableSurvival.reduce((sum, seconds) => sum + seconds, 0) /
+          unavailableSurvival.length
+      )
+    : null
   const coverage = instances.length
     ? Math.round((collectedInstances / instances.length) * 100)
     : 0
@@ -734,6 +756,9 @@ export function ManagedAccounts() {
           unavailable={unavailable}
           unknown={unknown}
           coverage={coverage}
+          showAverageSurvival={family !== 'new_api'}
+          averageUnavailableSurvival={averageUnavailableSurvival}
+          survivalSampleCount={unavailableSurvival.length}
         />
         <AccountOutputPanel
           family={family}
@@ -1038,6 +1063,9 @@ function AccountSummary(props: {
   unavailable: number
   unknown: number
   coverage: number
+  showAverageSurvival: boolean
+  averageUnavailableSurvival: number | null
+  survivalSampleCount: number
 }) {
   const { t } = useTranslation()
   const items = [
@@ -1074,8 +1102,25 @@ function AccountSummary(props: {
       className: 'bg-warning/10 text-warning',
     },
   ]
+  if (props.showAverageSurvival) {
+    items.splice(3, 0, {
+      key: 'average-unavailable-survival',
+      label: t('Average unavailable survival time'),
+      value: formatSurvivalDuration(props.averageUnavailableSurvival, t),
+      hint: t('{{count}} accounts included', {
+        count: props.survivalSampleCount,
+      }),
+      icon: Clock3,
+      className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
+    })
+  }
   return (
-    <section className='grid grid-cols-2 gap-3 xl:grid-cols-4'>
+    <section
+      className={cn(
+        'grid grid-cols-2 gap-3',
+        props.showAverageSurvival ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
+      )}
+    >
       {items.map((item) => (
         <Card key={item.key} className='gap-0 rounded-lg py-0 shadow-xs'>
           <CardContent className='flex min-h-28 items-start justify-between gap-3 p-4'>
@@ -1305,7 +1350,7 @@ function AccountTable(props: {
   const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
   const isChannel = props.family === 'new_api'
   const isConductor = props.family === 'conductor'
-  const showsSurvival = !isChannel && !isConductor
+  const showsSurvival = !isChannel
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -1330,6 +1375,9 @@ function AccountTable(props: {
   let emptyText = t(isChannel ? 'No channel data' : 'No account data')
   if (props.searching) emptyText = t('No matching accounts or channels')
   if (props.error) emptyText = t('Account data could not be loaded')
+  let tableMinWidth = 'min-w-[1140px]'
+  if (isChannel) tableMinWidth = 'min-w-[980px]'
+  else if (isConductor) tableMinWidth = 'min-w-[1280px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -1337,7 +1385,7 @@ function AccountTable(props: {
     content = <PanelEmpty text={emptyText} />
   } else {
     content = (
-      <Table className={cn(isChannel ? 'min-w-[980px]' : 'min-w-[1140px]')}>
+      <Table className={tableMinWidth}>
         <TableHeader className='bg-muted/35'>
           <TableRow>
             <TableHead className='ps-6'>

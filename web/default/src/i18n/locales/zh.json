@@ -1331,6 +1331,8 @@
     "Available resources": "可用资源",
     "Ready for scheduling": "当前可正常使用",
     "Unavailable resources": "不可用资源",
+    "Average unavailable survival time": "不可用账号平均存活时长",
+    "{{count}} accounts included": "{{count}} 个账号参与计算",
     "Disabled or unschedulable": "已停用或暂不可调度",
     "Selected site coverage": "所选站点采集覆盖率",
     "Search accounts or channels": "搜索账号或渠道",

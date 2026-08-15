@@ -1331,6 +1331,8 @@
     "Available resources": "Available resources",
     "Ready for scheduling": "Ready for scheduling",
     "Unavailable resources": "Unavailable resources",
+    "Average unavailable survival time": "Average unavailable survival time",
+    "{{count}} accounts included": "{{count}} accounts included",
     "Disabled or unschedulable": "Disabled or unschedulable",
     "Selected site coverage": "Selected site coverage",
     "Search accounts or channels": "Search accounts or channels",
