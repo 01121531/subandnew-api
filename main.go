@@ -98,6 +98,7 @@ func main() {
 	// Run only handlers registered by the control-plane task packages.
 	service.StartSystemTaskRunner()
 	service.StartManagedConductorRealtimeCollector()
+	service.StartManagedSub2RealtimeCollector()
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {

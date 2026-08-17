@@ -417,6 +417,60 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	require.Equal(t, 17.0, *realtime.RPM.Value)
 }
 
+func TestCollectRealtimeMetricsVerifiesSub2ZeroRPMWithRecentUsage(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/admin/dashboard/snapshot-v2":
+			writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":0}}}`)
+		case "/api/v1/admin/usage":
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"items":[{"id":1,"created_at":%d}],"total":1,"page":1,"page_size":100,"pages":1}}`, time.Now().Unix()))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := view.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 1.0, *realtime.RPM.Value)
+}
+
+func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var failing atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if failing.Load() {
+			http.Error(response, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		require.Equal(t, "/api/v1/admin/dashboard/snapshot-v2", request.URL.Path)
+		writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":9}}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
+
+	state, err := RefreshSub2Realtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 9.0, *state.RPM.Value)
+	failing.Store(true)
+	state, err = RefreshSub2Realtime(context.Background(), instance.Id)
+	require.Error(t, err)
+	require.True(t, state.Stale)
+	require.Equal(t, 9.0, *state.RPM.Value)
+
+	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := view.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 9.0, *realtime.RPM.Value)
+	require.True(t, realtime.Stale)
+	require.Equal(t, "reconnecting", realtime.StreamStatus)
+}
+
 func TestConductorInventoryAndSummary(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

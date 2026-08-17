@@ -514,7 +514,9 @@ func sub2CurrentRPM(ctx context.Context, connector *Connector, credential *Crede
 	response, requestErr := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
 	if requestErr == nil && response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
 		if value, ok := findRPMValue(response.Body); ok && value >= 0 {
-			return supportedMetric(value, "request/min")
+			if value > 0 {
+				return supportedMetric(value, "request/min")
+			}
 		}
 	}
 	if value, ok := sub2RPMFromRecentUsage(ctx, connector, credential); ok {
@@ -1046,15 +1048,24 @@ func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*Observation
 		return nil, err
 	}
 	result := &RealtimeMetricsResult{RPM: unsupportedMetric("request/min")}
+	observedAt := common.GetTimestamp()
 	switch instance.Kind {
 	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
 		result.RPM = newAPICurrentRPM(ctx, connector, instance.Kind, credential)
 	case model.ManagedInstanceKindSub2API:
-		result.RPM = sub2CurrentRPM(ctx, connector, credential)
+		cached, cachedAt, ok := sub2RealtimeMetrics(instance.Id)
+		if !ok {
+			_, _ = RefreshSub2Realtime(ctx, instance.Id)
+			cached, cachedAt, ok = sub2RealtimeMetrics(instance.Id)
+		}
+		if ok {
+			result = cached
+			observedAt = cachedAt
+		}
 	case model.ManagedInstanceKindConductor:
 		result = conductorRealtimeMetrics(instance.Id)
 	}
-	view, _, err := observationView(instance.Id, common.GetTimestamp(), result, nil)
+	view, _, err := observationView(instance.Id, observedAt, result, nil)
 	return view, err
 }
 
