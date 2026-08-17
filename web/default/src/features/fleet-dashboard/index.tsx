@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
@@ -144,6 +144,8 @@ type HealthData = {
 const DASHBOARD_REFRESH_MS = 60_000
 const RPM_REFRESH_MS = 10_000
 const RPM_HISTORY_REFRESH_MS = 10_000
+const DASHBOARD_ERROR_RETRY_MS = 15_000
+const DASHBOARD_RETRY_COUNT = 3
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
@@ -163,6 +165,10 @@ const KPI_SKELETON_KEYS = [
   'quota',
   'coverage',
 ]
+
+function retryDelay(attemptIndex: number): number {
+  return Math.min(1000 * 2 ** attemptIndex, DASHBOARD_ERROR_RETRY_MS)
+}
 
 const compactNumber = new Intl.NumberFormat(undefined, {
   notation: 'compact',
@@ -438,7 +444,14 @@ export function FleetDashboard() {
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
-    refetchInterval: DASHBOARD_REFRESH_MS,
+    placeholderData: keepPreviousData,
+    retry: DASHBOARD_RETRY_COUNT,
+    retryDelay,
+    refetchInterval: (query) =>
+      query.state.status === 'error'
+        ? DASHBOARD_ERROR_RETRY_MS
+        : DASHBOARD_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -485,9 +498,14 @@ export function FleetDashboard() {
       family === 'conductor' &&
       effectiveTrendMetric === 'rpm' &&
       conductorInstanceIDs.length > 0,
-    retry: false,
+    placeholderData: keepPreviousData,
+    retry: DASHBOARD_RETRY_COUNT,
+    retryDelay,
     staleTime: RPM_HISTORY_REFRESH_MS / 2,
-    refetchInterval: RPM_HISTORY_REFRESH_MS,
+    refetchInterval: (query) =>
+      query.state.status === 'error'
+        ? DASHBOARD_ERROR_RETRY_MS
+        : RPM_HISTORY_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
   const metricQueries = useQueries({
@@ -529,10 +547,12 @@ export function FleetDashboard() {
         }
         return response
       },
-      retry: 1,
-      retryDelay: DASHBOARD_REFRESH_MS,
+      placeholderData: keepPreviousData,
+      retry: DASHBOARD_RETRY_COUNT,
+      retryDelay,
       staleTime: DASHBOARD_REFRESH_MS / 2,
       refetchInterval: DASHBOARD_REFRESH_MS,
+      refetchIntervalInBackground: true,
     })),
   })
   const rpmQueries = useQueries({
@@ -543,19 +563,27 @@ export function FleetDashboard() {
           silent: true,
         })
         const observation = response.data
+        const realtime = observation.data
+        const hasRealtimeData =
+          realtime?.rpm.collection_status === 'succeeded' ||
+          realtime?.accounts_collection_status === 'succeeded' ||
+          realtime?.today_cost?.collection_status === 'succeeded'
         if (
           observation.collection_status !== 'succeeded' ||
-          !observation.data ||
-          observation.data.rpm.collection_status !== 'succeeded'
+          !realtime ||
+          !hasRealtimeData
         ) {
           throw new Error(observation.error_code || 'rpm_unavailable')
         }
         return response
       },
-      retry: false,
+      placeholderData: keepPreviousData,
+      retry: DASHBOARD_RETRY_COUNT,
+      retryDelay,
       enabled: instance.kind !== 'conductor',
       staleTime: RPM_REFRESH_MS / 2,
       refetchInterval: RPM_REFRESH_MS,
+      refetchIntervalInBackground: true,
     })),
   })
   const rows = useMemo<InstanceMetricRow[]>(
@@ -808,7 +836,7 @@ export function FleetDashboard() {
   let content: ReactNode
   if (instancesQuery.isLoading) {
     content = <DashboardSkeleton />
-  } else if (instancesQuery.isError) {
+  } else if (instancesQuery.isError && !instancesQuery.data) {
     content = <DashboardError onRetry={refresh} />
   } else if (instances.length === 0) {
     content = <EmptyFleet family={family} />
