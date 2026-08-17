@@ -213,13 +213,10 @@ func collectAccountOutputItem(ctx context.Context, client *usageRecordClient, it
 	}
 	query := url.Values{}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
-		location, err := time.LoadLocation("Asia/Shanghai")
-		if err != nil {
-			location = time.UTC
-		}
+		location, timezone := summaryLocation(window.Timezone)
 		query.Set("start_date", time.Unix(window.Start, 0).In(location).Format("2006-01-02"))
 		query.Set("end_date", time.Unix(window.End, 0).In(location).Format("2006-01-02"))
-		query.Set("timezone", location.String())
+		query.Set("timezone", timezone)
 		if credentialAccessScope(client.credential) != model.ManagedInstanceAccessUser {
 			query.Set("account_id", strconv.FormatInt(item.ID, 10))
 		}

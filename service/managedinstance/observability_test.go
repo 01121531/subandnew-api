@@ -259,22 +259,29 @@ func TestCollectSummaryMarksUnavailableMetricsInsteadOfZero(t *testing.T) {
 func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
-	start := time.Date(2026, time.August, 8, 10, 0, 0, 0, time.UTC).Unix()
-	end := start + 24*60*60
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	start := time.Date(2026, time.August, 8, 0, 0, 0, 0, location).Unix()
+	end := time.Date(2026, time.August, 9, 12, 0, 0, 0, location).Unix()
 	var accountUsageRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "admin-secret", request.Header.Get("x-api-key"))
 		switch request.URL.Path {
 		case "/api/v1/admin/accounts":
 			writeProbeJSON(response, `{"code":0,"data":[{"id":9,"name":"upstream-a","status":"active"}]}`)
+		case "/api/v1/admin/usage/stats":
+			require.Equal(t, "2026-08-08", request.URL.Query().Get("start_date"))
+			require.Equal(t, "2026-08-09", request.URL.Query().Get("end_date"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			writeProbeJSON(response, `{"code":0,"data":{"total_requests":12,"total_tokens":2000,"total_actual_cost":2}}`)
 		case "/api/v1/admin/dashboard/snapshot-v2":
 			require.Equal(t, "2026-08-08", request.URL.Query().Get("start_date"))
 			require.Equal(t, "2026-08-09", request.URL.Query().Get("end_date"))
-			require.Equal(t, "UTC", request.URL.Query().Get("timezone"))
-			require.Equal(t, "day", request.URL.Query().Get("granularity"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			require.Equal(t, "hour", request.URL.Query().Get("granularity"))
 			require.Equal(t, "false", request.URL.Query().Get("include_stats"))
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
-			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-08","requests":7,"total_tokens":1250,"actual_cost":1.25},{"date":"2026-08-09","requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-07 16:00","requests":7,"total_tokens":1250,"actual_cost":1.25},{"date":"2026-08-08 16:00","requests":5,"total_tokens":750,"actual_cost":0.75}]}}`)
 		case "/api/v1/admin/accounts/9/usage", "/api/v1/admin/accounts/today-stats/batch":
 			accountUsageRequests.Add(1)
 			http.NotFound(response, request)
@@ -285,7 +292,7 @@ func TestCollectSummaryAggregatesSub2APIUsageData(t *testing.T) {
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
 
-	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: end})
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: end, Timezone: "Asia/Shanghai"})
 	require.NoError(t, err)
 	summary := view.Data.(*SummaryResult)
 	require.Equal(t, 12.0, *summary.Requests.Value)
@@ -312,11 +319,13 @@ func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
 		case "/api/v1/user/profile":
 			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
 			writeProbeJSON(response, `{"code":0,"data":{"id":42,"email":"user@example.com","username":"User","role":"user","status":"active"}}`)
+		case "/api/v1/usage/stats":
+			writeProbeJSON(response, `{"code":0,"data":{"total_requests":3,"total_tokens":500,"total_actual_cost":0.25}}`)
 		case "/api/v1/usage/dashboard/snapshot-v2":
 			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
-			require.Equal(t, "day", request.URL.Query().Get("granularity"))
-			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-08","requests":3,"total_tokens":500,"actual_cost":0.25}]}}`)
-		case "/api/v1/admin/accounts", "/api/v1/admin/dashboard/snapshot-v2":
+			require.Equal(t, "hour", request.URL.Query().Get("granularity"))
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"date":"2026-08-07 16:00","requests":3,"total_tokens":500,"actual_cost":0.25}]}}`)
+		case "/api/v1/admin/accounts", "/api/v1/admin/usage/stats", "/api/v1/admin/dashboard/snapshot-v2":
 			t.Fatal("regular account collection must not call an administrator endpoint")
 		default:
 			http.NotFound(response, request)

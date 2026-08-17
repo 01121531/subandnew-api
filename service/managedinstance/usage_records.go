@@ -40,6 +40,9 @@ type UsageRecordPage struct {
 	Total            int64             `json:"total"`
 	Page             int               `json:"page"`
 	PageSize         int               `json:"page_size"`
+	HasMore          bool              `json:"has_more"`
+	TotalIsExact     bool              `json:"total_is_exact"`
+	pages            int
 }
 
 type UsageRecordSummary struct {
@@ -102,7 +105,7 @@ func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (
 		return nil, err
 	}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
-		query.Del("exact_total")
+		query.Set("exact_total", "false")
 	}
 	return client.list(ctx, query)
 }
@@ -125,12 +128,21 @@ func GetUsageRecordFilterOptions(ctx context.Context, instanceID int64, input ur
 	if client.instance.Kind == model.ManagedInstanceKindConductor {
 		return conductorUsageFilterOptions(ctx, client, query)
 	}
+	if client.instance.Kind == model.ManagedInstanceKindSub2API {
+		query.Set("exact_total", "false")
+	}
 	setUsageRecordPage(query, client.instance.Kind, 1, usageRecordMaxPageSize)
 	page, err := client.listTarget(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	return usageRecordOptionsFromPage(client.instance, page), nil
+	options := usageRecordOptionsFromPage(client.instance, page)
+	if client.instance.Kind == model.ManagedInstanceKindSub2API {
+		if models, modelErr := client.sub2ModelFilterOptions(ctx, query); modelErr == nil {
+			options.Fields["model"] = mergeUsageRecordFilterOptions(options.Fields["model"], models)
+		}
+	}
+	return options, nil
 }
 
 func GetUsageRecordSummary(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordSummary, error) {
@@ -389,9 +401,10 @@ func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*U
 	requestedSize := integerValue(query.Get("page_size"), usageRecordPageSize)
 	needed := requestedPage * requestedSize
 	type variantResult struct {
-		items []json.RawMessage
-		total int64
-		err   error
+		items        []json.RawMessage
+		total        int64
+		totalIsExact bool
+		err          error
 	}
 	results := make([]variantResult, len(variants))
 	semaphore := make(chan struct{}, 6)
@@ -402,19 +415,21 @@ func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*U
 			defer group.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[index].items, results[index].total, results[index].err = client.collectUsageVariant(ctx, variant, needed)
+			results[index].items, results[index].total, results[index].totalIsExact, results[index].err = client.collectUsageVariant(ctx, variant, needed)
 		}(index, variant)
 	}
 	group.Wait()
 
 	items := make([]json.RawMessage, 0, needed*len(variants))
 	var total int64
+	totalIsExact := true
 	for _, result := range results {
 		if result.err != nil {
 			return nil, result.err
 		}
 		items = append(items, result.items...)
 		total += result.total
+		totalIsExact = totalIsExact && result.totalIsExact
 	}
 	sortUsageRecordItems(items, client.instance.Kind, query.Get("sort_by"), query.Get("sort_order"))
 	start := (requestedPage - 1) * requestedSize
@@ -429,12 +444,14 @@ func (client *usageRecordClient) list(ctx context.Context, query url.Values) (*U
 		SourceInstanceID: client.instance.Id,
 		Kind:             client.instance.Kind,
 		Items:            items[start:end], Total: total, Page: requestedPage, PageSize: requestedSize,
+		HasMore: end < len(items) || total > int64(end), TotalIsExact: totalIsExact,
 	}, nil
 }
 
-func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query url.Values, needed int) ([]json.RawMessage, int64, error) {
+func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query url.Values, needed int) ([]json.RawMessage, int64, bool, error) {
 	items := make([]json.RawMessage, 0, needed)
 	var total int64
+	totalIsExact := true
 	for pageNumber := 1; len(items) < needed; pageNumber++ {
 		pageSize := needed - len(items)
 		if pageSize > usageRecordMaxPageSize {
@@ -444,20 +461,27 @@ func (client *usageRecordClient) collectUsageVariant(ctx context.Context, query 
 		setUsageRecordPage(pageQuery, client.instance.Kind, pageNumber, pageSize)
 		page, err := client.listTarget(ctx, pageQuery)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, false, err
 		}
 		total = page.Total
+		totalIsExact = page.TotalIsExact
 		items = append(items, page.Items...)
-		if len(page.Items) == 0 || int64(len(items)) >= total {
+		if len(page.Items) == 0 || !page.HasMore {
 			break
 		}
 	}
-	return items, total, nil
+	return items, total, totalIsExact, nil
 }
 
 func (client *usageRecordClient) listTarget(ctx context.Context, query url.Values) (*UsageRecordPage, error) {
 	if client.instance.Kind == model.ManagedInstanceKindConductor {
-		return conductorUsageRecordPage(ctx, client, query)
+		page, err := conductorUsageRecordPage(ctx, client, query)
+		if err != nil {
+			return nil, err
+		}
+		page.TotalIsExact = true
+		page.HasMore = page.Total > int64(page.Page*page.PageSize)
+		return page, nil
 	}
 	var endpoint string
 	var response *ConnectorResponse
@@ -487,15 +511,29 @@ func (client *usageRecordClient) listTarget(ctx context.Context, query url.Value
 	}
 	page.SourceInstanceID = client.instance.Id
 	page.Kind = client.instance.Kind
+	page.TotalIsExact = client.instance.Kind != model.ManagedInstanceKindSub2API || query.Get("exact_total") == "true"
+	page.HasMore = page.pages > page.Page || page.Total > int64(page.Page*page.PageSize)
 	return page, nil
 }
 
 func (client *usageRecordClient) summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	if client.instance.Kind == model.ManagedInstanceKindSub2API {
+		if sub2StatsSupportsQuery(query) {
+			summary, err := client.sub2StatsSummary(ctx, query)
+			if err == nil {
+				return summary, nil
+			}
+			if !sub2StatsFallbackAllowed(err) {
+				return nil, err
+			}
+		}
+		if hasUsageRecordDetailFilters(query) {
+			return client.filteredSummary(ctx, query)
+		}
+		return client.sub2SnapshotSummary(ctx, query)
+	}
 	if hasUsageRecordDetailFilters(query) {
 		return client.filteredSummary(ctx, query)
-	}
-	if client.instance.Kind == model.ManagedInstanceKindSub2API {
-		return client.sub2Summary(ctx, query)
 	}
 	if client.instance.Kind == model.ManagedInstanceKindConductor {
 		return client.filteredSummary(ctx, query)
@@ -550,6 +588,9 @@ func (client *usageRecordClient) filteredSummary(ctx context.Context, query url.
 				}
 				totalTokens += tokens
 				amount += cost
+			}
+			if !page.HasMore {
+				break
 			}
 		}
 	}
@@ -666,7 +707,7 @@ func (client *usageRecordClient) newAPIQuotaAmount(ctx context.Context, quota fl
 	return amount, currency
 }
 
-func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+func (client *usageRecordClient) sub2SnapshotSummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
 	summaryQuery := url.Values{}
 	for _, key := range []string{"start_date", "end_date", "timezone"} {
 		if value := query.Get(key); value != "" {
@@ -727,12 +768,145 @@ func (client *usageRecordClient) sub2Summary(ctx context.Context, query url.Valu
 	}, nil
 }
 
+type sub2UsageStatsData struct {
+	TotalRequests   float64 `json:"total_requests"`
+	TotalTokens     float64 `json:"total_tokens"`
+	TotalActualCost float64 `json:"total_actual_cost"`
+}
+
+func (client *usageRecordClient) sub2StatsSummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	variants, err := usageRecordQueryVariants(query)
+	if err != nil {
+		return nil, err
+	}
+	result := &UsageRecordSummary{SourceInstanceID: client.instance.Id, Kind: client.instance.Kind, Currency: "USD"}
+	for _, variant := range variants {
+		stats, statsErr := fetchSub2UsageStats(ctx, client.connector, client.credential, variant)
+		if statsErr != nil {
+			return nil, statsErr
+		}
+		result.TotalRequests += stats.TotalRequests
+		result.TotalTokens += stats.TotalTokens
+		result.Amount += stats.TotalActualCost
+	}
+	return result, nil
+}
+
+func fetchSub2UsageStats(ctx context.Context, connector *Connector, credential *CredentialMaterial, query url.Values) (*sub2UsageStatsData, error) {
+	statsQuery := cloneURLValues(query)
+	for _, key := range []string{"p", "page", "page_size", "sort_by", "sort_order", "exact_total"} {
+		statsQuery.Del(key)
+	}
+	endpoint := "/api/v1/admin/usage/stats"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/stats"
+	}
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint+"?"+statsQuery.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Code any                `json:"code"`
+		Data sub2UsageStatsData `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil || !sub2SuccessCode(payload.Code) {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return &payload.Data, nil
+}
+
+func sub2StatsSupportsQuery(query url.Values) bool {
+	for _, key := range []string{"group_id", "request_id"} {
+		if len(query[key]) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func sub2StatsFallbackAllowed(err error) bool {
+	var probeErr *ProbeError
+	if !errors.As(err, &probeErr) {
+		return false
+	}
+	return probeErr.StatusCode == http.StatusNotFound || probeErr.StatusCode == http.StatusMethodNotAllowed || probeErr.StatusCode == http.StatusNotImplemented
+}
+
+func (client *usageRecordClient) sub2ModelFilterOptions(ctx context.Context, query url.Values) ([]UsageRecordFilterOption, error) {
+	modelQuery := url.Values{"model_source": {"requested"}}
+	for _, key := range []string{"start_date", "end_date", "timezone"} {
+		if value := query.Get(key); value != "" {
+			modelQuery.Set(key, value)
+		}
+	}
+	endpoint := "/api/v1/admin/dashboard/models"
+	if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/dashboard/models"
+	}
+	response, err := sub2APIDoJSON(ctx, client.connector, client.credential, http.MethodGet, endpoint+"?"+modelQuery.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Code any             `json:"code"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil || !sub2SuccessCode(payload.Code) {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	type modelItem struct {
+		Model string `json:"model"`
+	}
+	items := make([]modelItem, 0)
+	if err := json.Unmarshal(payload.Data, &items); err != nil {
+		var container struct {
+			Models []modelItem `json:"models"`
+		}
+		if containerErr := json.Unmarshal(payload.Data, &container); containerErr != nil {
+			return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		items = container.Models
+	}
+	options := make([]UsageRecordFilterOption, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item.Model)
+		if value != "" {
+			options = append(options, UsageRecordFilterOption{Value: value, Label: value})
+		}
+	}
+	return options, nil
+}
+
+func mergeUsageRecordFilterOptions(groups ...[]UsageRecordFilterOption) []UsageRecordFilterOption {
+	values := map[string]string{}
+	for _, group := range groups {
+		for _, option := range group {
+			if value := strings.TrimSpace(option.Value); value != "" {
+				values[value] = option.Label
+			}
+		}
+	}
+	result := make([]UsageRecordFilterOption, 0, len(values))
+	for value, label := range values {
+		result = append(result, UsageRecordFilterOption{Value: value, Label: label})
+	}
+	sort.Slice(result, func(left int, right int) bool { return result[left].Label < result[right].Label })
+	return result
+}
+
 func decodeUsageRecordPage(kind string, body []byte) (*UsageRecordPage, error) {
 	data := struct {
 		Items    []json.RawMessage `json:"items"`
 		Total    int64             `json:"total"`
 		Page     int               `json:"page"`
 		PageSize int               `json:"page_size"`
+		Pages    int               `json:"pages"`
 	}{}
 	if kind == model.ManagedInstanceKindSub2API {
 		var envelope struct {
@@ -754,7 +928,7 @@ func decodeUsageRecordPage(kind string, body []byte) (*UsageRecordPage, error) {
 	if data.Items == nil || data.Total < 0 || data.Page <= 0 || data.PageSize <= 0 {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
 	}
-	return &UsageRecordPage{Items: data.Items, Total: data.Total, Page: data.Page, PageSize: data.PageSize}, nil
+	return &UsageRecordPage{Items: data.Items, Total: data.Total, Page: data.Page, PageSize: data.PageSize, pages: data.Pages}, nil
 }
 
 func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error) {
@@ -792,13 +966,13 @@ func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error
 		return nil, fmt.Errorf("%w: invalid usage record pagination", ErrInvalidInstance)
 	}
 	setUsageRecordPage(query, kind, page, pageSize)
-	if kind == model.ManagedInstanceKindConductor {
+	if kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor {
 		location, _ := time.LoadLocation("Asia/Shanghai")
 		now := time.Now().In(location)
-		if query.Get("end_date") == "" {
+		if kind == model.ManagedInstanceKindConductor && query.Get("end_date") == "" {
 			query.Set("end_date", now.Format("2006-01-02"))
 		}
-		if query.Get("start_date") == "" {
+		if kind == model.ManagedInstanceKindConductor && query.Get("start_date") == "" {
 			query.Set("start_date", now.AddDate(0, 0, -1).Format("2006-01-02"))
 		}
 		if query.Get("timezone") == "" {

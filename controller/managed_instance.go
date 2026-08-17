@@ -873,7 +873,7 @@ func managedInstanceCreateInput(request managedInstanceRequest, actorID int, all
 func managedInstanceTimeWindow(c *gin.Context) managedinstance.TimeWindow {
 	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
 	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
-	return managedinstance.TimeWindow{Start: start, End: end}
+	return managedinstance.TimeWindow{Start: start, End: end, Timezone: c.Query("timezone")}
 }
 
 func managedInstanceDataReady(c *gin.Context, instanceID int64) bool {

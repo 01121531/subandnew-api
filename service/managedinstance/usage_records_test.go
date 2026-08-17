@@ -87,9 +87,16 @@ func TestUsageRecordFilterOptionsComeFromNativeUsageFields(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
-		require.Equal(t, "100", request.URL.Query().Get("page_size"))
-		writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"user_id":11,"user":{"email":"user@example.com"},"api_key_id":12,"api_key":{"name":"primary"},"account_id":13,"account":{"name":"openai-main"},"group_id":14,"group":{"name":"default"},"model":"gpt-5","request_id":"req-1"}],"total":1,"page":1,"page_size":100}}`)
+		switch request.URL.Path {
+		case "/api/v1/admin/usage":
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"user_id":11,"user":{"email":"user@example.com"},"api_key_id":12,"api_key":{"name":"primary"},"account_id":13,"account":{"name":"openai-main"},"group_id":14,"group":{"name":"default"},"model":"gpt-5","request_id":"req-1"}],"total":1,"page":1,"page_size":100,"pages":1}}`)
+		case "/api/v1/admin/dashboard/models":
+			require.Equal(t, "requested", request.URL.Query().Get("model_source"))
+			writeProbeJSON(response, `{"code":0,"data":[{"model":"gpt-5"},{"model":"claude-opus"}]}`)
+		default:
+			http.NotFound(response, request)
+		}
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "secret"})
@@ -98,7 +105,7 @@ func TestUsageRecordFilterOptionsComeFromNativeUsageFields(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "11", options.Fields["user_id"][0].Value)
 	require.Equal(t, "user@example.com (#11)", options.Fields["user_id"][0].Label)
-	require.Equal(t, "gpt-5", options.Fields["model"][0].Value)
+	require.Equal(t, []UsageRecordFilterOption{{Value: "claude-opus", Label: "claude-opus"}, {Value: "gpt-5", Label: "gpt-5"}}, options.Fields["model"])
 }
 
 func TestListUsageRecordsUsesNativeNewAPIContract(t *testing.T) {
@@ -200,9 +207,9 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
 		require.Equal(t, "7", request.URL.Query().Get("account_id"))
 		require.Equal(t, "stream", request.URL.Query().Get("request_type"))
-		require.Empty(t, request.URL.Query().Get("exact_total"))
+		require.Equal(t, "false", request.URL.Query().Get("exact_total"))
 		require.Equal(t, "sub2-secret", request.Header.Get("x-api-key"))
-		writeProbeJSON(response, `{"code":0,"message":"success","data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
+		writeProbeJSON(response, `{"code":0,"message":"success","data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":21,"page":1,"page_size":20,"pages":2}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
@@ -210,8 +217,28 @@ func TestListUsageRecordsUsesNativeSub2Contract(t *testing.T) {
 	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"account_id": {"7"}, "request_type": {"stream"}, "exact_total": {"true"}})
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceKindSub2API, page.Kind)
-	require.Equal(t, int64(1), page.Total)
+	require.Equal(t, int64(21), page.Total)
 	require.Len(t, page.Items, 1)
+	require.True(t, page.HasMore)
+	require.False(t, page.TotalIsExact)
+}
+
+func TestListUsageRecordsMarksFinalSub2PageWithoutExactTotal(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
+		require.Equal(t, "2", request.URL.Query().Get("page"))
+		writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":21}],"total":21,"page":2,"page_size":20,"pages":2}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
+
+	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"page": {"2"}})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.False(t, page.HasMore)
+	require.False(t, page.TotalIsExact)
 }
 
 func TestConductorUsageRecordsSummaryOptionsAndSessionReuse(t *testing.T) {
@@ -332,12 +359,14 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 			writeProbeJSON(response, `{"code":0,"data":{"access_token":"user-token"}}`)
 		case "/api/v1/usage":
 			require.Equal(t, "Bearer user-token", request.Header.Get("Authorization"))
-			require.Empty(t, request.URL.Query().Get("exact_total"))
+			require.Equal(t, "false", request.URL.Query().Get("exact_total"))
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":4,"model":"claude-sonnet-4"}],"total":1,"page":1,"page_size":20,"pages":1}}`)
-		case "/api/v1/usage/dashboard/snapshot-v2":
-			require.Equal(t, "true", request.URL.Query().Get("include_trend"))
-			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"total_tokens":30,"actual_cost":0.5}]}}`)
-		case "/api/v1/admin/usage", "/api/v1/admin/dashboard/snapshot-v2":
+		case "/api/v1/usage/stats":
+			writeProbeJSON(response, `{"code":0,"data":{"total_requests":2,"total_tokens":30,"total_actual_cost":0.5}}`)
+		case "/api/v1/usage/dashboard/models":
+			require.Equal(t, "requested", request.URL.Query().Get("model_source"))
+			writeProbeJSON(response, `{"code":0,"data":{"models":[{"model":"claude-sonnet-4"}]}}`)
+		case "/api/v1/admin/usage", "/api/v1/admin/usage/stats", "/api/v1/admin/dashboard/models", "/api/v1/admin/dashboard/snapshot-v2":
 			t.Fatal("regular account usage must not call an administrator endpoint")
 		default:
 			http.NotFound(response, request)
@@ -352,11 +381,15 @@ func TestRegularSub2AccountUsesUserUsageEndpoints(t *testing.T) {
 	page, err := ListUsageRecords(context.Background(), instance.Id, url.Values{"exact_total": {"true"}})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), page.Total)
+	options, err := GetUsageRecordFilterOptions(context.Background(), instance.Id, nil)
+	require.NoError(t, err)
+	require.Equal(t, "claude-sonnet-4", options.Fields["model"][0].Value)
 
 	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
 		"start_date": {"2026-08-01"}, "end_date": {"2026-08-07"}, "timezone": {"Asia/Shanghai"},
 	})
 	require.NoError(t, err)
+	require.Equal(t, 2.0, summary.TotalRequests)
 	require.Equal(t, 30.0, summary.TotalTokens)
 	require.Equal(t, 0.5, summary.Amount)
 }
@@ -453,18 +486,16 @@ func TestGetUsageRecordSummaryUsesNativeNewAPIData(t *testing.T) {
 	require.Equal(t, "USD", summary.Currency)
 }
 
-func TestGetUsageRecordSummaryUsesNativeSub2Dashboard(t *testing.T) {
+func TestGetUsageRecordSummaryUsesNativeSub2Stats(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/admin/dashboard/snapshot-v2", request.URL.Path)
+		require.Equal(t, "/api/v1/admin/usage/stats", request.URL.Path)
 		require.Equal(t, "2026-08-01", request.URL.Query().Get("start_date"))
 		require.Equal(t, "2026-08-07", request.URL.Query().Get("end_date"))
 		require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
-		require.Equal(t, "hour", request.URL.Query().Get("granularity"))
-		require.Equal(t, "false", request.URL.Query().Get("include_stats"))
 		require.Equal(t, "sub2-secret", request.Header.Get("x-api-key"))
-		writeProbeJSON(response, `{"code":0,"data":{"trend":[{"total_tokens":10,"actual_cost":0.15},{"total_tokens":20,"actual_cost":0.35}]}}`)
+		writeProbeJSON(response, `{"code":0,"data":{"total_requests":12,"total_tokens":30,"total_cost":9,"total_actual_cost":0.5,"total_account_cost":12}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
@@ -474,28 +505,46 @@ func TestGetUsageRecordSummaryUsesNativeSub2Dashboard(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceKindSub2API, summary.Kind)
+	require.Equal(t, 12.0, summary.TotalRequests)
 	require.Equal(t, 30.0, summary.TotalTokens)
 	require.InDelta(t, 0.5, summary.Amount, 0.000001)
 	require.Equal(t, "USD", summary.Currency)
 }
 
-func TestGetUsageRecordSummaryAggregatesFilteredSub2Records(t *testing.T) {
+func TestGetUsageRecordSummaryFallsBackWhenSub2StatsAreUnavailable(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
+		switch request.URL.Path {
+		case "/api/v1/admin/usage/stats":
+			http.NotFound(response, request)
+		case "/api/v1/admin/dashboard/snapshot-v2":
+			writeProbeJSON(response, `{"code":0,"data":{"trend":[{"requests":4,"total_tokens":30,"actual_cost":0.5}]}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+		"start_date": {"2026-08-01"}, "end_date": {"2026-08-07"}, "timezone": {"Asia/Shanghai"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4.0, summary.TotalRequests)
+	require.Equal(t, 30.0, summary.TotalTokens)
+	require.InDelta(t, 0.5, summary.Amount, 0.000001)
+}
+
+func TestGetUsageRecordSummaryUsesSub2StatsForSupportedFilters(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/usage/stats", request.URL.Path)
 		require.Equal(t, "7", request.URL.Query().Get("account_id"))
 		require.Equal(t, "claude-sonnet", request.URL.Query().Get("model"))
-		require.Equal(t, "100", request.URL.Query().Get("page_size"))
-		require.Empty(t, request.URL.Query().Get("exact_total"))
-		switch request.URL.Query().Get("page") {
-		case "1":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"input_tokens":10,"output_tokens":5,"cache_read_tokens":2,"cache_creation_tokens":1,"actual_cost":0.25},{"input_tokens":7,"output_tokens":3,"actual_cost":0.75}],"total":1,"page":1,"page_size":100}}`)
-		case "2":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[],"total":1,"page":2,"page_size":100}}`)
-		default:
-			t.Fatalf("unexpected usage page %s", request.URL.Query().Get("page"))
-		}
+		require.Empty(t, request.URL.Query().Get("page_size"))
+		writeProbeJSON(response, `{"code":0,"data":{"total_requests":2,"total_tokens":28,"total_actual_cost":1}}`)
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
@@ -506,9 +555,34 @@ func TestGetUsageRecordSummaryAggregatesFilteredSub2Records(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, model.ManagedInstanceKindSub2API, summary.Kind)
+	require.Equal(t, 2.0, summary.TotalRequests)
 	require.Equal(t, 28.0, summary.TotalTokens)
 	require.InDelta(t, 1.0, summary.Amount, 0.000001)
 	require.Equal(t, "USD", summary.Currency)
+}
+
+func TestGetUsageRecordSummaryScansSub2RecordsForUnsupportedStatsFilters(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/v1/admin/usage", request.URL.Path)
+		require.Equal(t, "14", request.URL.Query().Get("group_id"))
+		switch request.URL.Query().Get("page") {
+		case "1":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"input_tokens":10,"output_tokens":5,"cache_read_tokens":2,"cache_creation_tokens":1,"actual_cost":0.25}],"total":1,"page":1,"page_size":100,"pages":1}}`)
+		default:
+			t.Fatalf("unexpected usage page %s", request.URL.Query().Get("page"))
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "sub2-secret"})
+
+	summary, err := GetUsageRecordSummary(context.Background(), instance.Id, url.Values{
+		"start_date": {"2026-08-01"}, "end_date": {"2026-08-07"}, "timezone": {"Asia/Shanghai"}, "group_id": {"14"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 18.0, summary.TotalTokens)
+	require.InDelta(t, 0.25, summary.Amount, 0.000001)
 }
 
 func TestGetUsageRecordSummaryAggregatesFilteredNewAPIRecords(t *testing.T) {

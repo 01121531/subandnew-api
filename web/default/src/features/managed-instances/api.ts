@@ -181,13 +181,14 @@ export async function getManagedInstanceInventory(
 
 export async function getManagedInstanceMetrics(
   id: number,
-  window?: { start: number; end: number },
+  window?: { start: number; end: number; timezone?: string },
   options?: { silent?: boolean }
 ): Promise<ApiResponse<ManagedInstanceObservation<ManagedInstanceSummary>>> {
   const params = window
     ? new URLSearchParams({
         start: String(window.start),
         end: String(window.end),
+        ...(window.timezone ? { timezone: window.timezone } : {}),
       })
     : null
   const response = await api.get(

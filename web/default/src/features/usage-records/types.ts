@@ -29,11 +29,14 @@ export interface UsageRecordPage {
   total: number
   page: number
   page_size: number
+  has_more: boolean
+  total_is_exact: boolean
 }
 
 export interface UsageRecordSummary {
   source_instance_id: number
   kind: ManagedInstance['kind']
+  total_requests: number
   total_tokens: number
   amount: number
   currency: 'USD' | 'quota'

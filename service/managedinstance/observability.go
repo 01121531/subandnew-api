@@ -33,8 +33,9 @@ const (
 )
 
 type TimeWindow struct {
-	Start int64 `json:"start"`
-	End   int64 `json:"end"`
+	Start    int64  `json:"start"`
+	End      int64  `json:"end"`
+	Timezone string `json:"timezone,omitempty"`
 }
 
 type InventoryItem struct {
@@ -364,56 +365,41 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 		return nil, err
 	}
 	summary := summaryFromInventory(window, page)
-
-	headers, err := sub2APIAuthHeaders(ctx, connector, credential)
-	if err != nil {
-		return summary, nil
-	}
+	location, timezone := summaryLocation(window.Timezone)
 	query := url.Values{}
-	query.Set("start_date", time.Unix(window.Start, 0).UTC().Format("2006-01-02"))
-	query.Set("end_date", time.Unix(window.End, 0).UTC().Format("2006-01-02"))
-	query.Set("timezone", "UTC")
-	query.Set("granularity", "day")
-	query.Set("include_stats", "false")
-	query.Set("include_trend", "true")
-	query.Set("include_model_stats", "false")
-	query.Set("include_group_stats", "false")
-	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
-	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
-		endpoint = "/api/v1/usage/dashboard/snapshot-v2"
-		query.Del("include_stats")
-		query.Set("include_trend", "true")
-	}
-	response, err := connector.DoJSON(ctx, http.MethodGet, endpoint+"?"+query.Encode(), headers, nil)
-	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return summary, nil
-	}
+	query.Set("start_date", time.Unix(window.Start, 0).In(location).Format("2006-01-02"))
+	query.Set("end_date", time.Unix(window.End, 0).In(location).Format("2006-01-02"))
+	query.Set("timezone", timezone)
 
-	var payload struct {
-		Code any `json:"code"`
-		Data struct {
-			Trend *[]struct {
-				Date        string  `json:"date"`
-				Requests    float64 `json:"requests"`
-				TotalTokens float64 `json:"total_tokens"`
-				ActualCost  float64 `json:"actual_cost"`
-			} `json:"trend"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(response.Body, &payload); err != nil || !sub2SuccessCode(payload.Code) || payload.Data.Trend == nil {
-		return summary, nil
-	}
+	var stats *sub2UsageStatsData
+	var trend []sub2UsageTrendItem
+	var statsErr error
+	var trendErr error
+	var requests sync.WaitGroup
+	requests.Add(2)
+	go func() {
+		defer requests.Done()
+		stats, statsErr = fetchSub2UsageStats(ctx, connector, credential, query)
+	}()
+	go func() {
+		defer requests.Done()
+		trend, trendErr = fetchSub2UsageTrend(ctx, connector, credential, query)
+	}()
+	requests.Wait()
 
-	requests := 0.0
-	tokens := 0.0
-	cost := 0.0
 	daily := make(map[string]UsageTrendPoint)
-	for _, item := range *payload.Data.Trend {
-		requests += item.Requests
-		tokens += item.TotalTokens
-		cost += item.ActualCost
-		date := normalizeTrendDate(item.Date)
-		if date != "" {
+	trendRequests := 0.0
+	trendTokens := 0.0
+	trendCost := 0.0
+	if trendErr == nil {
+		for _, item := range trend {
+			trendRequests += item.Requests
+			trendTokens += item.TotalTokens
+			trendCost += item.ActualCost
+			date := sub2TrendLocalDate(item.Date, location)
+			if date == "" {
+				continue
+			}
 			point := daily[date]
 			point.Date = date
 			point.Requests += item.Requests
@@ -421,12 +407,87 @@ func (adapter sub2APIAdapter) Summary(ctx context.Context, connector *Connector,
 			point.Cost += item.ActualCost
 			daily[date] = point
 		}
+		summary.Trend = fillDailyTrendInLocation(window, daily, location)
 	}
-	summary.Requests = supportedMetric(requests, "request")
-	summary.Tokens = supportedMetric(tokens, "token")
-	summary.Cost = supportedMetric(cost, "usd")
-	summary.Trend = fillDailyTrend(window, daily)
+	if statsErr == nil {
+		summary.Requests = supportedMetric(stats.TotalRequests, "request")
+		summary.Tokens = supportedMetric(stats.TotalTokens, "token")
+		summary.Cost = supportedMetric(stats.TotalActualCost, "usd")
+	} else if trendErr == nil {
+		summary.Requests = supportedMetric(trendRequests, "request")
+		summary.Tokens = supportedMetric(trendTokens, "token")
+		summary.Cost = supportedMetric(trendCost, "usd")
+	}
 	return summary, nil
+}
+
+type sub2UsageTrendItem struct {
+	Date        string  `json:"date"`
+	Requests    float64 `json:"requests"`
+	TotalTokens float64 `json:"total_tokens"`
+	ActualCost  float64 `json:"actual_cost"`
+}
+
+func fetchSub2UsageTrend(ctx context.Context, connector *Connector, credential *CredentialMaterial, rangeQuery url.Values) ([]sub2UsageTrendItem, error) {
+	query := cloneURLValues(rangeQuery)
+	query.Set("granularity", "hour")
+	query.Set("include_stats", "false")
+	query.Set("include_trend", "true")
+	query.Set("include_model_stats", "false")
+	query.Set("include_group_stats", "false")
+	query.Set("include_users_trend", "false")
+	endpoint := "/api/v1/admin/dashboard/snapshot-v2"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		endpoint = "/api/v1/usage/dashboard/snapshot-v2"
+	}
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Code any `json:"code"`
+		Data struct {
+			Trend *[]sub2UsageTrendItem `json:"trend"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body, &payload); err != nil || !sub2SuccessCode(payload.Code) || payload.Data.Trend == nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return *payload.Data.Trend, nil
+}
+
+func summaryLocation(value string) (*time.Location, string) {
+	timezone := strings.TrimSpace(value)
+	if timezone == "" {
+		timezone = "Asia/Shanghai"
+	}
+	location, err := time.LoadLocation(timezone)
+	if err == nil {
+		return location, timezone
+	}
+	location, _ = time.LoadLocation("Asia/Shanghai")
+	return location, "Asia/Shanghai"
+}
+
+func sub2TrendLocalDate(value string, location *time.Location) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.In(location).Format("2006-01-02")
+		}
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02T15:04:05", "2006-01-02T15:04"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
+			return parsed.In(location).Format("2006-01-02")
+		}
+	}
+	return normalizeTrendDate(value)
 }
 
 func sub2CurrentRPM(ctx context.Context, connector *Connector, credential *CredentialMaterial) MetricSample {

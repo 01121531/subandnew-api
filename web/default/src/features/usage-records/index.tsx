@@ -473,7 +473,7 @@ export function UsageRecords() {
   const remotePageSize = Math.max(1, result?.page_size ?? PAGE_SIZE)
   const hasNextPage = usesDateOnly(system)
     ? result?.page === page &&
-      (records.length >= remotePageSize || page < totalPages)
+      (result.has_more ?? records.length >= remotePageSize)
     : page < totalPages
   const filters = filtersForSystem(system)
 

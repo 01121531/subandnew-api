@@ -420,6 +420,8 @@ export function FleetDashboard() {
   )
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
+  const dashboardTimezone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
   let effectiveTrendMetric = trendMetric
   if (
     family === 'conductor' &&
@@ -503,6 +505,7 @@ export function FleetDashboard() {
           {
             start: Math.floor(resolvedRange.start.getTime() / 1000),
             end: Math.floor(resolvedRange.end.getTime() / 1000),
+            timezone: dashboardTimezone,
           },
           { silent: true }
         )
