@@ -118,15 +118,17 @@ type SummaryResult struct {
 }
 
 type RealtimeMetricsResult struct {
-	RPM                 MetricSample `json:"rpm"`
-	RPMCapacity         MetricSample `json:"rpm_capacity"`
-	AccountsTotal       int          `json:"accounts_total,omitempty"`
-	AccountsAvailable   int          `json:"accounts_available,omitempty"`
-	AccountsRateLimited int          `json:"accounts_rate_limited,omitempty"`
-	AccountsReporting   int          `json:"accounts_reporting,omitempty"`
-	ActiveSessions      int          `json:"active_sessions,omitempty"`
-	StreamStatus        string       `json:"stream_status,omitempty"`
-	Stale               bool         `json:"stale,omitempty"`
+	RPM                      MetricSample `json:"rpm"`
+	RPMCapacity              MetricSample `json:"rpm_capacity"`
+	TodayCost                MetricSample `json:"today_cost"`
+	AccountsTotal            int          `json:"accounts_total,omitempty"`
+	AccountsAvailable        int          `json:"accounts_available,omitempty"`
+	AccountsRateLimited      int          `json:"accounts_rate_limited,omitempty"`
+	AccountsCollectionStatus string       `json:"accounts_collection_status,omitempty"`
+	AccountsReporting        int          `json:"accounts_reporting,omitempty"`
+	ActiveSessions           int          `json:"active_sessions,omitempty"`
+	StreamStatus             string       `json:"stream_status,omitempty"`
+	Stale                    bool         `json:"stale,omitempty"`
 }
 
 type ObservationView struct {
@@ -1286,7 +1288,22 @@ func normalizeInventoryItem(raw json.RawMessage) (InventoryItem, bool) {
 		CreatedAt: createdAt, LastActivityAt: lastActivityAt, Cost: costValue, CostUnit: costUnit,
 		Balance: balanceValue, ResponseTimeMS: responseTimeValue,
 		ErrorMessage: firstJSONText(fields, "error_message", "error"),
+		RateLimited:  normalizedRateLimited(fields, status),
 	}, true
+}
+
+func normalizedRateLimited(fields map[string]json.RawMessage, status string) bool {
+	values := []string{status}
+	for _, key := range []string{"state", "unavailable_kind", "unavailable_reason", "blocked_reason", "schedulable_reason", "error_message", "last_error", "error", "reason"} {
+		values = append(values, firstJSONText(fields, key))
+	}
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(normalized, "rate_limited") || strings.Contains(normalized, "rate limited") {
+			return true
+		}
+	}
+	return false
 }
 
 type sub2AccountUsage struct {

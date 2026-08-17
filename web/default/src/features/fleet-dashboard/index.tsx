@@ -117,6 +117,7 @@ type InstanceMetricRow = {
   accountsAvailable: number | null
   accountsRateLimited: number | null
   accountsTotal: number | null
+  todayCost: number | null
   tokens: number | null
   quota: number | null
 }
@@ -563,10 +564,14 @@ export function FleetDashboard() {
         const observation = metricQueries[index]?.data?.data
         const summary = observation?.data
         const streamed = conductorRealtime.states[instance.id]
+        const polledRealtime = rpmQueries[index]?.data?.data?.data
         const realtime =
+          instance.kind === 'conductor' ? streamed : polledRealtime
+        const accountsReady =
           instance.kind === 'conductor'
-            ? streamed
-            : rpmQueries[index]?.data?.data?.data
+            ? Boolean(streamed?.observed_at)
+            : instance.kind === 'sub2api' &&
+              polledRealtime?.accounts_collection_status === 'succeeded'
         return {
           instance,
           summary,
@@ -578,17 +583,16 @@ export function FleetDashboard() {
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
           rpmCapacity: metricValue(realtime?.rpm_capacity),
-          accountsAvailable:
-            instance.kind === 'conductor' && streamed?.observed_at
-              ? streamed.accounts_available
-              : null,
-          accountsRateLimited:
-            instance.kind === 'conductor' && streamed?.observed_at
-              ? streamed.accounts_rate_limited
-              : null,
-          accountsTotal:
-            instance.kind === 'conductor' && streamed?.observed_at
-              ? streamed.accounts_total
+          accountsAvailable: accountsReady
+            ? (realtime?.accounts_available ?? 0)
+            : null,
+          accountsRateLimited: accountsReady
+            ? (realtime?.accounts_rate_limited ?? 0)
+            : null,
+          accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
+          todayCost:
+            instance.kind === 'sub2api'
+              ? metricValue(polledRealtime?.today_cost)
               : null,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
@@ -614,6 +618,7 @@ export function FleetDashboard() {
         (sum, row) => sum + (row.accountsTotal ?? 0),
         0
       ),
+      todayCost: rows.reduce((sum, row) => sum + (row.todayCost ?? 0), 0),
       tokens: rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
       quota: rows.reduce((sum, row) => sum + (row.quota ?? 0), 0),
       collected: rows.filter((row) => row.collected).length,
@@ -627,6 +632,7 @@ export function FleetDashboard() {
       accountsRateLimitedReady: rows.filter(
         (row) => row.accountsRateLimited != null
       ).length,
+      todayCostReady: rows.filter((row) => row.todayCost != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
@@ -973,6 +979,7 @@ type DashboardContentProps = {
     accountsAvailable: number
     accountsRateLimited: number
     accountsTotal: number
+    todayCost: number
     tokens: number
     quota: number
     collected: number
@@ -982,6 +989,7 @@ type DashboardContentProps = {
     rpmCapacityReady: number
     accountsReady: number
     accountsRateLimitedReady: number
+    todayCostReady: number
     tokensReady: number
     quotaReady: number
     healthy: number
@@ -1320,13 +1328,17 @@ function SummaryGrid(props: DashboardContentProps) {
   const rpmCapacityDetail = capacityReady
     ? `${props.totals.rpmCapacity > 0 ? ((props.totals.rpm / props.totals.rpmCapacity) * 100).toFixed(1) : '0.0'}% · ${formatMetric(props.totals.accountsAvailable, false)} 个可用账号`
     : '最大容量数据加载中'
+  const showsAccountMetrics =
+    props.family === 'conductor' || props.family === 'sub2api'
 
   return (
     <section
       aria-label={t('Fleet summary')}
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
-        props.family === 'conductor' ? 'xl:grid-cols-7' : 'xl:grid-cols-6'
+        props.family === 'conductor' && 'xl:grid-cols-7',
+        props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
+        props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
       <MetricCard
@@ -1339,7 +1351,7 @@ function SummaryGrid(props: DashboardContentProps) {
         })}
         tone={availabilityTone}
       />
-      {props.family !== 'conductor' && (
+      {props.family === 'new_api' && (
         <MetricCard
           icon={Activity}
           label={t('Requests')}
@@ -1376,7 +1388,7 @@ function SummaryGrid(props: DashboardContentProps) {
           </Button>
         }
       />
-      {props.family === 'conductor' && (
+      {showsAccountMetrics && (
         <MetricCard
           icon={UserCheck}
           label={t('Available accounts')}
@@ -1390,7 +1402,7 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='success'
         />
       )}
-      {props.family === 'conductor' && (
+      {showsAccountMetrics && (
         <MetricCard
           icon={AlertTriangle}
           label={t('Rate-limited accounts')}
@@ -1406,7 +1418,7 @@ function SummaryGrid(props: DashboardContentProps) {
           tone={props.totals.accountsRateLimited ? 'amber' : 'success'}
         />
       )}
-      {props.family === 'conductor' && (
+      {showsAccountMetrics && (
         <MetricCard
           icon={Users}
           label={t('Total accounts')}
@@ -1420,7 +1432,7 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='blue'
         />
       )}
-      {props.family !== 'conductor' && (
+      {props.family === 'new_api' && (
         <MetricCard
           icon={DatabaseZap}
           label={t('Tokens')}
@@ -1446,6 +1458,21 @@ function SummaryGrid(props: DashboardContentProps) {
         }
         tone='amber'
       />
+      {props.family === 'sub2api' && (
+        <MetricCard
+          icon={CircleDollarSign}
+          label={t('Today consumption')}
+          value={formatUsageMetric(
+            'quota',
+            props.totals.todayCostReady ? props.totals.todayCost : null,
+            props.family
+          )}
+          detail={t('Real-time across {{count}} instances', {
+            count: props.totals.todayCostReady,
+          })}
+          tone='violet'
+        />
+      )}
       <MetricCard
         icon={Gauge}
         label={t('Metric coverage')}
@@ -1628,7 +1655,8 @@ function PerformanceTable({
   rows: InstanceMetricRow[]
 }) {
   const { t } = useTranslation()
-  const sortMetric = family === 'conductor' ? 'quota' : 'requests'
+  const sortMetric = family === 'new_api' ? 'requests' : 'quota'
+  const showsAccountMetrics = family === 'conductor' || family === 'sub2api'
   const sortedRows = [...rows]
     .sort((a, b) => (b[sortMetric] ?? -1) - (a[sortMetric] ?? -1))
     .slice(0, 12)
@@ -1658,22 +1686,32 @@ function PerformanceTable({
               <TableRow>
                 <TableHead className='ps-6'>{t('Instance')}</TableHead>
                 <TableHead>{t('Status')}</TableHead>
-                {family !== 'conductor' && (
+                {family === 'new_api' && (
                   <TableHead className='text-right'>{t('Requests')}</TableHead>
                 )}
                 <TableHead className='text-right'>RPM</TableHead>
-                {family === 'conductor' && (
+                {showsAccountMetrics && (
                   <TableHead className='text-right'>
                     {t('Available accounts')}
                   </TableHead>
                 )}
-                {family === 'conductor' && (
+                {showsAccountMetrics && (
                   <TableHead className='text-right'>
                     {t('Total accounts')}
                   </TableHead>
                 )}
-                {family !== 'conductor' && (
+                {showsAccountMetrics && (
+                  <TableHead className='text-right'>
+                    {t('Rate-limited accounts')}
+                  </TableHead>
+                )}
+                {family === 'new_api' && (
                   <TableHead className='text-right'>{t('Tokens')}</TableHead>
+                )}
+                {family === 'sub2api' && (
+                  <TableHead className='text-right'>
+                    {t('Today consumption')}
+                  </TableHead>
                 )}
                 <TableHead className='text-right'>
                   {t(metricLabel('quota', family))}
@@ -1704,7 +1742,7 @@ function PerformanceTable({
                   <TableCell>
                     <StatusBadge status={row.instance.status} />
                   </TableCell>
-                  {family !== 'conductor' && (
+                  {family === 'new_api' && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.requests, false)}
                     </TableCell>
@@ -1712,19 +1750,29 @@ function PerformanceTable({
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.rpm, false)}
                   </TableCell>
-                  {family === 'conductor' && (
+                  {showsAccountMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.accountsAvailable, false)}
                     </TableCell>
                   )}
-                  {family === 'conductor' && (
+                  {showsAccountMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.accountsTotal, false)}
                     </TableCell>
                   )}
-                  {family !== 'conductor' && (
+                  {showsAccountMetrics && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.accountsRateLimited, false)}
+                    </TableCell>
+                  )}
+                  {family === 'new_api' && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.tokens, false)}
+                    </TableCell>
+                  )}
+                  {family === 'sub2api' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatUsageMetric('quota', row.todayCost, family, false)}
                     </TableCell>
                   )}
                   <TableCell className='text-right font-mono text-xs tabular-nums'>

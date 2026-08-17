@@ -229,9 +229,11 @@ export interface ManagedInstanceSummary {
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  today_cost: ManagedInstanceMetricSample
   accounts_total?: number
   accounts_available?: number
   accounts_rate_limited?: number
+  accounts_collection_status?: string
   accounts_reporting?: number
   active_sessions?: number
   stream_status?: string

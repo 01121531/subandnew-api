@@ -147,6 +147,7 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	require.Equal(t, "usd", page.Items[0].CostUnit)
 	require.False(t, *page.Items[1].Enabled)
 	require.Equal(t, "rate limited", page.Items[1].ErrorMessage)
+	require.True(t, page.Items[1].RateLimited)
 }
 
 func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedTotal(t *testing.T) {
@@ -403,10 +404,20 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/v1/admin/dashboard/snapshot-v2", request.URL.Path)
-		require.Equal(t, "true", request.URL.Query().Get("include_stats"))
-		require.Equal(t, "false", request.URL.Query().Get("include_trend"))
-		writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":17}}}`)
+		switch request.URL.Path {
+		case "/api/v1/admin/dashboard/snapshot-v2":
+			require.Equal(t, "true", request.URL.Query().Get("include_stats"))
+			require.Equal(t, "false", request.URL.Query().Get("include_trend"))
+			writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":17}}}`)
+		case "/api/v1/admin/accounts":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true},{"id":2,"status":"active","unavailable_kind":"upstream_rate_limited"},{"id":3,"status":"expired"}],"total":3,"page":1,"page_size":100,"pages":1}}`)
+		case "/api/v1/admin/usage/stats":
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			require.Equal(t, request.URL.Query().Get("start_date"), request.URL.Query().Get("end_date"))
+			writeProbeJSON(response, `{"code":0,"data":{"total_actual_cost":12.34}}`)
+		default:
+			http.NotFound(response, request)
+		}
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
@@ -415,6 +426,11 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)
 	require.Equal(t, 17.0, *realtime.RPM.Value)
+	require.Equal(t, 3, realtime.AccountsTotal)
+	require.Equal(t, 1, realtime.AccountsAvailable)
+	require.Equal(t, 1, realtime.AccountsRateLimited)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.AccountsCollectionStatus)
+	require.Equal(t, 12.34, *realtime.TodayCost.Value)
 }
 
 func TestCollectRealtimeMetricsVerifiesSub2ZeroRPMWithRecentUsage(t *testing.T) {
@@ -448,8 +464,16 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 			http.Error(response, "temporary failure", http.StatusBadGateway)
 			return
 		}
-		require.Equal(t, "/api/v1/admin/dashboard/snapshot-v2", request.URL.Path)
-		writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":9}}}`)
+		switch request.URL.Path {
+		case "/api/v1/admin/dashboard/snapshot-v2":
+			writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":9}}}`)
+		case "/api/v1/admin/accounts":
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true}],"total":1,"page":1,"page_size":100,"pages":1}}`)
+		case "/api/v1/admin/usage/stats":
+			writeProbeJSON(response, `{"code":0,"data":{"total_actual_cost":3.5}}`)
+		default:
+			http.NotFound(response, request)
+		}
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
@@ -457,11 +481,20 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	state, err := RefreshSub2Realtime(context.Background(), instance.Id)
 	require.NoError(t, err)
 	require.Equal(t, 9.0, *state.RPM.Value)
+	require.Equal(t, 1, state.AccountsAvailable)
+	require.Equal(t, 3.5, *state.TodayCost.Value)
+	sub2RealtimeCache.Lock()
+	cached := sub2RealtimeCache.states[instance.Id]
+	cached.LastDetailsAttemptAt = 0
+	sub2RealtimeCache.states[instance.Id] = cached
+	sub2RealtimeCache.Unlock()
 	failing.Store(true)
 	state, err = RefreshSub2Realtime(context.Background(), instance.Id)
 	require.Error(t, err)
 	require.True(t, state.Stale)
 	require.Equal(t, 9.0, *state.RPM.Value)
+	require.Equal(t, 1, state.AccountsAvailable)
+	require.Equal(t, 3.5, *state.TodayCost.Value)
 
 	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
