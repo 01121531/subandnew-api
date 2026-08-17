@@ -1389,6 +1389,22 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {props.family === 'conductor' && (
         <MetricCard
+          icon={AlertTriangle}
+          label={t('Rate-limited accounts')}
+          value={formatMetric(
+            props.totals.accountsRateLimitedReady
+              ? props.totals.accountsRateLimited
+              : null,
+            false
+          )}
+          detail={t('Real-time across {{count}} instances', {
+            count: props.totals.accountsRateLimitedReady,
+          })}
+          tone={props.totals.accountsRateLimited ? 'amber' : 'success'}
+        />
+      )}
+      {props.family === 'conductor' && (
+        <MetricCard
           icon={Users}
           label={t('Total accounts')}
           value={formatMetric(
@@ -1427,22 +1443,6 @@ function SummaryGrid(props: DashboardContentProps) {
         }
         tone='amber'
       />
-      {props.family === 'conductor' && (
-        <MetricCard
-          icon={AlertTriangle}
-          label={t('Rate-limited accounts')}
-          value={formatMetric(
-            props.totals.accountsRateLimitedReady
-              ? props.totals.accountsRateLimited
-              : null,
-            false
-          )}
-          detail={t('Real-time across {{count}} instances', {
-            count: props.totals.accountsRateLimitedReady,
-          })}
-          tone={props.totals.accountsRateLimited ? 'amber' : 'success'}
-        />
-      )}
       <MetricCard
         icon={Gauge}
         label={t('Metric coverage')}
