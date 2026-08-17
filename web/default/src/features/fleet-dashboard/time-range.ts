@@ -33,6 +33,7 @@ export type FleetTimeRange = {
 
 export function createFleetPresetRange(days: FleetPresetDays): FleetTimeRange {
   const end = new Date()
+  end.setHours(23, 59, 59, 999)
   const start = new Date(end)
   start.setHours(0, 0, 0, 0)
   start.setDate(start.getDate() - (days - 1))
