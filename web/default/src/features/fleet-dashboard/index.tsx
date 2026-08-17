@@ -435,7 +435,7 @@ export function FleetDashboard() {
     (trendMetric === 'requests' || trendMetric === 'tokens')
   ) {
     effectiveTrendMetric = 'quota'
-  } else if (family !== 'conductor' && trendMetric === 'rpm') {
+  } else if (family === 'new_api' && trendMetric === 'rpm') {
     effectiveTrendMetric = 'requests'
   }
   const effectiveConsumptionMetric =
@@ -480,6 +480,16 @@ export function FleetDashboard() {
         .map((instance) => instance.id),
     [instances]
   )
+  const rpmHistoryInstanceIDs = useMemo(
+    () =>
+      instances
+        .filter(
+          (instance) =>
+            instance.kind === 'conductor' || instance.kind === 'sub2api'
+        )
+        .map((instance) => instance.id),
+    [instances]
+  )
   const conductorRealtime = useManagedInstanceRealtimeEvents(
     conductorInstanceIDs,
     ['rpm', 'accounts', 'status']
@@ -487,17 +497,17 @@ export function FleetDashboard() {
   const rpmHistoryQuery = useQuery({
     queryKey: [
       'fleet-dashboard-rpm-history',
-      conductorInstanceIDs.join(','),
+      rpmHistoryInstanceIDs.join(','),
       rpmHistoryBucket,
     ],
     queryFn: () =>
-      getManagedInstanceRPMHistory(conductorInstanceIDs, rpmHistoryBucket, {
+      getManagedInstanceRPMHistory(rpmHistoryInstanceIDs, rpmHistoryBucket, {
         silent: true,
       }),
     enabled:
-      family === 'conductor' &&
+      family !== 'new_api' &&
       effectiveTrendMetric === 'rpm' &&
-      conductorInstanceIDs.length > 0,
+      rpmHistoryInstanceIDs.length > 0,
     placeholderData: keepPreviousData,
     retry: DASHBOARD_RETRY_COUNT,
     retryDelay,
@@ -816,7 +826,7 @@ export function FleetDashboard() {
     void instancesQuery.refetch()
     for (const query of metricQueries) void query.refetch()
     for (const query of rpmQueries) void query.refetch()
-    if (family === 'conductor' && effectiveTrendMetric === 'rpm') {
+    if (family !== 'new_api' && effectiveTrendMetric === 'rpm') {
       void rpmHistoryQuery.refetch()
     }
   }
@@ -1088,7 +1098,7 @@ function DailyUsagePanel(props: {
   rpmHistoryError: boolean
 }) {
   const { t } = useTranslation()
-  const isRPM = props.family === 'conductor' && props.metric === 'rpm'
+  const isRPM = props.family !== 'new_api' && props.metric === 'rpm'
   const usageMetric = props.metric === 'rpm' ? null : props.metric
   let subtitle = t('Daily totals in the selected period')
   if (isRPM) {
@@ -1097,10 +1107,9 @@ function DailyUsagePanel(props: {
         ? t('Average RPM per minute over the last 60 minutes')
         : t('Average RPM per hour over the last 24 hours')
   }
-  const metricOptions: TrendMetricKey[] =
-    props.family === 'conductor'
-      ? ['quota', 'rpm']
-      : ['requests', 'tokens', 'quota']
+  let metricOptions: TrendMetricKey[] = ['requests', 'tokens', 'quota']
+  if (props.family === 'conductor') metricOptions = ['quota', 'rpm']
+  else if (props.family === 'sub2api') metricOptions.push('rpm')
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader
@@ -1223,17 +1232,19 @@ function DailyUsagePanel(props: {
                 dot={props.rpmHistoryData.length <= 24}
                 activeDot={{ r: 4 }}
               />
-              <Line
-                type='stepAfter'
-                dataKey='capacity'
-                name='最大容量'
-                stroke='var(--color-capacity)'
-                strokeWidth={2}
-                strokeDasharray='7 5'
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls={false}
-              />
+              {props.family === 'conductor' && (
+                <Line
+                  type='stepAfter'
+                  dataKey='capacity'
+                  name='最大容量'
+                  stroke='var(--color-capacity)'
+                  strokeWidth={2}
+                  strokeDasharray='7 5'
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                />
+              )}
               <ChartLegend content={<ChartLegendContent />} />
             </LineChart>
           </ChartContainer>

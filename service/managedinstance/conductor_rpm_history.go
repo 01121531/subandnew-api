@@ -123,6 +123,10 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 	return nil
 }
 
+func RecordManagedRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64) error {
+	return recordConductorRPMSample(ctx, instanceID, observedAt, rpm)
+}
+
 func cleanupConductorRPMHistory(ctx context.Context, now int64) {
 	if model.DB == nil {
 		return
@@ -132,6 +136,10 @@ func cleanupConductorRPMHistory(ctx context.Context, now int64) {
 }
 
 func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket string, start int64, end int64) (*ConductorRPMHistoryResult, error) {
+	return GetManagedRPMHistory(ctx, instanceIDs, bucket, start, end)
+}
+
+func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket string, start int64, end int64) (*ConductorRPMHistoryResult, error) {
 	bucket = strings.TrimSpace(strings.ToLower(bucket))
 	if bucket != ConductorRPMBucketMinute && bucket != ConductorRPMBucketHour {
 		return nil, ErrInvalidInstance
@@ -140,13 +148,15 @@ func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket str
 	if len(instanceIDs) == 0 || len(instanceIDs) > 100 {
 		return nil, ErrInvalidInstance
 	}
-	var conductorCount int64
+	var supportedCount int64
 	if err := model.DB.WithContext(ctx).Model(&model.ManagedInstance{}).
-		Where("id IN ? AND kind = ?", instanceIDs, model.ManagedInstanceKindConductor).
-		Count(&conductorCount).Error; err != nil {
+		Where("id IN ? AND kind IN ?", instanceIDs, []string{
+			model.ManagedInstanceKindConductor,
+			model.ManagedInstanceKindSub2API,
+		}).Count(&supportedCount).Error; err != nil {
 		return nil, err
 	}
-	if conductorCount != int64(len(instanceIDs)) {
+	if supportedCount != int64(len(instanceIDs)) {
 		return nil, ErrUnsupportedCapability
 	}
 	if end <= 0 {

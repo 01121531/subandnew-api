@@ -114,7 +114,15 @@ func refreshManagedSub2RealtimeInstances(ctx context.Context, instanceIDs []int6
 		gopool.Go(func() {
 			defer workers.Done()
 			for instanceID := range jobs {
-				_, _ = refresh(ctx, instanceID)
+				state, err := refresh(ctx, instanceID)
+				if err != nil || state.Stale || state.RPM.Value == nil || state.RPM.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+					continue
+				}
+				observedAt := state.ObservedAt
+				if observedAt <= 0 {
+					observedAt = common.GetTimestamp()
+				}
+				_ = managedinstance.RecordManagedRPMSample(ctx, instanceID, observedAt, *state.RPM.Value)
 			}
 		})
 	}

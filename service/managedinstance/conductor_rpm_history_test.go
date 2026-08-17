@@ -75,3 +75,26 @@ func TestConductorRPMHistoryRejectsNonConductorInstances(t *testing.T) {
 		t.Fatalf("error = %v, want ErrUnsupportedCapability", err)
 	}
 }
+
+func TestManagedRPMHistorySupportsSub2WithoutCapacity(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := model.ManagedInstance{Name: "sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"}
+	if err := db.Create(&instance).Error; err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	start := int64(1_786_593_600)
+	if err := RecordManagedRPMSample(context.Background(), instance.Id, start+10, 42); err != nil {
+		t.Fatalf("record sample: %v", err)
+	}
+
+	history, err := GetManagedRPMHistory(context.Background(), []int64{instance.Id}, ConductorRPMBucketMinute, start, start+60)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(history.Points) != 1 || history.Points[0].RPM != 42 {
+		t.Fatalf("points = %#v, want one 42 RPM point", history.Points)
+	}
+	if history.Points[0].Capacity != nil {
+		t.Fatalf("capacity = %#v, want nil", history.Points[0].Capacity)
+	}
+}

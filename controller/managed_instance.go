@@ -235,7 +235,7 @@ func GetManagedInstanceRPMHistory(c *gin.Context) {
 		return
 	}
 	window := managedInstanceTimeWindow(c)
-	result, err := managedinstance.GetConductorRPMHistory(
+	result, err := managedinstance.GetManagedRPMHistory(
 		c.Request.Context(), instanceIDs, c.Query("bucket"), window.Start, window.End,
 	)
 	if err != nil {

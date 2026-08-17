@@ -48,3 +48,28 @@ func TestManagedSub2RealtimeCollectorSelectsSub2InstancesAndLimitsConcurrency(t 
 	require.LessOrEqual(t, maxActive.Load(), int32(managedSub2RealtimeWorkers))
 	require.Equal(t, map[int64]int{instances[0].Id: 1, instances[2].Id: 1, instances[3].Id: 1}, refreshed)
 }
+
+func TestManagedSub2RealtimeCollectorRecordsSuccessfulRPM(t *testing.T) {
+	truncate(t)
+	instance := model.ManagedInstance{Name: "sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"}
+	require.NoError(t, model.DB.Create(&instance).Error)
+	rpm := 37.0
+	observedAt := time.Now().Unix()
+
+	refreshManagedSub2RealtimeInstances(context.Background(), []int64{instance.Id}, func(_ context.Context, instanceID int64) (managedinstance.Sub2RealtimeState, error) {
+		return managedinstance.Sub2RealtimeState{
+			InstanceID: instanceID,
+			ObservedAt: observedAt,
+			RPM: managedinstance.MetricSample{
+				Value:            &rpm,
+				Unit:             "request/min",
+				CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+		}, nil
+	})
+
+	var history model.ManagedRPMHistory
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
+	require.Equal(t, rpm, history.RPMSum)
+	require.Equal(t, 1, history.SampleCount)
+}
