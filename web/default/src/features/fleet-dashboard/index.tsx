@@ -420,8 +420,17 @@ export function FleetDashboard() {
   )
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
-  const effectiveTrendMetric =
-    family === 'conductor' || trendMetric !== 'rpm' ? trendMetric : 'requests'
+  let effectiveTrendMetric = trendMetric
+  if (
+    family === 'conductor' &&
+    (trendMetric === 'requests' || trendMetric === 'tokens')
+  ) {
+    effectiveTrendMetric = 'quota'
+  } else if (family !== 'conductor' && trendMetric === 'rpm') {
+    effectiveTrendMetric = 'requests'
+  }
+  const effectiveConsumptionMetric =
+    family === 'conductor' ? 'quota' : consumptionMetric
 
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
@@ -651,16 +660,18 @@ export function FleetDashboard() {
   const chartData = useMemo(
     () =>
       [...rows]
-        .filter((row) => row[consumptionMetric] != null)
+        .filter((row) => row[effectiveConsumptionMetric] != null)
         .sort(
-          (a, b) => (b[consumptionMetric] ?? 0) - (a[consumptionMetric] ?? 0)
+          (a, b) =>
+            (b[effectiveConsumptionMetric] ?? 0) -
+            (a[effectiveConsumptionMetric] ?? 0)
         )
         .slice(0, 10)
         .map((row) => ({
           name: row.instance.name,
-          value: row[consumptionMetric] ?? 0,
+          value: row[effectiveConsumptionMetric] ?? 0,
         })),
-    [consumptionMetric, rows]
+    [effectiveConsumptionMetric, rows]
   )
   const dailyUsageData = useMemo<DailyUsageData[]>(() => {
     if (effectiveTrendMetric === 'rpm') return []
@@ -695,7 +706,11 @@ export function FleetDashboard() {
     ? Math.round((totals.collected / instances.length) * 100)
     : 0
   const metricCoverage = instances.length
-    ? Math.round((totals.metricReady / instances.length) * 100)
+    ? Math.round(
+        ((family === 'conductor' ? totals.quotaReady : totals.metricReady) /
+          instances.length) *
+          100
+      )
     : 0
   const healthRate = instances.length
     ? Math.round((totals.healthy / instances.length) * 1000) / 10
@@ -812,7 +827,7 @@ export function FleetDashboard() {
           metricCoverage={metricCoverage}
           trendMetric={effectiveTrendMetric}
           onTrendMetricChange={setTrendMetric}
-          consumptionMetric={consumptionMetric}
+          consumptionMetric={effectiveConsumptionMetric}
           onConsumptionMetricChange={setConsumptionMetric}
           rpmRefreshing={rpmRefreshing}
           onRPMRefresh={refreshRPM}
@@ -1045,7 +1060,7 @@ function DailyUsagePanel(props: {
   }
   const metricOptions: TrendMetricKey[] =
     props.family === 'conductor'
-      ? ['requests', 'tokens', 'quota', 'rpm']
+      ? ['quota', 'rpm']
       : ['requests', 'tokens', 'quota']
   return (
     <Card className={PANEL_CARD_CLASS}>
@@ -1308,7 +1323,7 @@ function SummaryGrid(props: DashboardContentProps) {
       aria-label={t('Fleet summary')}
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
-        props.family === 'conductor' ? 'xl:grid-cols-9' : 'xl:grid-cols-6'
+        props.family === 'conductor' ? 'xl:grid-cols-7' : 'xl:grid-cols-6'
       )}
     >
       <MetricCard
@@ -1321,17 +1336,19 @@ function SummaryGrid(props: DashboardContentProps) {
         })}
         tone={availabilityTone}
       />
-      <MetricCard
-        icon={Activity}
-        label={t('Requests')}
-        value={formatMetric(
-          props.totals.requestsReady ? props.totals.requests : null
-        )}
-        detail={t('Across {{count}} instances', {
-          count: props.totals.requestsReady,
-        })}
-        tone='blue'
-      />
+      {props.family !== 'conductor' && (
+        <MetricCard
+          icon={Activity}
+          label={t('Requests')}
+          value={formatMetric(
+            props.totals.requestsReady ? props.totals.requests : null
+          )}
+          detail={t('Across {{count}} instances', {
+            count: props.totals.requestsReady,
+          })}
+          tone='blue'
+        />
+      )}
       <MetricCard
         icon={Radio}
         label='RPM'
@@ -1384,17 +1401,19 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='blue'
         />
       )}
-      <MetricCard
-        icon={DatabaseZap}
-        label={t('Tokens')}
-        value={formatMetric(
-          props.totals.tokensReady ? props.totals.tokens : null
-        )}
-        detail={t('Across {{count}} instances', {
-          count: props.totals.tokensReady,
-        })}
-        tone='violet'
-      />
+      {props.family !== 'conductor' && (
+        <MetricCard
+          icon={DatabaseZap}
+          label={t('Tokens')}
+          value={formatMetric(
+            props.totals.tokensReady ? props.totals.tokens : null
+          )}
+          detail={t('Across {{count}} instances', {
+            count: props.totals.tokensReady,
+          })}
+          tone='violet'
+        />
+      )}
       <MetricCard
         icon={CircleDollarSign}
         label={costLabel}
@@ -1429,7 +1448,10 @@ function SummaryGrid(props: DashboardContentProps) {
         label={t('Metric coverage')}
         value={`${props.metricCoverage}%`}
         detail={t('{{count}} metrics available', {
-          count: props.totals.metricReady,
+          count:
+            props.family === 'conductor'
+              ? props.totals.quotaReady
+              : props.totals.metricReady,
         })}
         tone='neutral'
       />
@@ -1458,12 +1480,14 @@ function ConsumptionPanel(props: {
             {t('Top instances in the selected period')}
           </p>
         </div>
-        <SegmentedControl
-          value={props.metric}
-          options={['requests', 'tokens', 'quota']}
-          getLabel={(value) => t(metricLabel(value, props.family))}
-          onChange={props.onMetricChange}
-        />
+        {props.family !== 'conductor' && (
+          <SegmentedControl
+            value={props.metric}
+            options={['requests', 'tokens', 'quota']}
+            getLabel={(value) => t(metricLabel(value, props.family))}
+            onChange={props.onMetricChange}
+          />
+        )}
       </CardHeader>
       <CardContent className='py-4'>
         {props.data.length ? (
@@ -1601,8 +1625,9 @@ function PerformanceTable({
   rows: InstanceMetricRow[]
 }) {
   const { t } = useTranslation()
+  const sortMetric = family === 'conductor' ? 'quota' : 'requests'
   const sortedRows = [...rows]
-    .sort((a, b) => (b.requests ?? -1) - (a.requests ?? -1))
+    .sort((a, b) => (b[sortMetric] ?? -1) - (a[sortMetric] ?? -1))
     .slice(0, 12)
   return (
     <Card className={PANEL_CARD_CLASS}>
@@ -1630,7 +1655,9 @@ function PerformanceTable({
               <TableRow>
                 <TableHead className='ps-6'>{t('Instance')}</TableHead>
                 <TableHead>{t('Status')}</TableHead>
-                <TableHead className='text-right'>{t('Requests')}</TableHead>
+                {family !== 'conductor' && (
+                  <TableHead className='text-right'>{t('Requests')}</TableHead>
+                )}
                 <TableHead className='text-right'>RPM</TableHead>
                 {family === 'conductor' && (
                   <TableHead className='text-right'>
@@ -1642,7 +1669,9 @@ function PerformanceTable({
                     {t('Total accounts')}
                   </TableHead>
                 )}
-                <TableHead className='text-right'>{t('Tokens')}</TableHead>
+                {family !== 'conductor' && (
+                  <TableHead className='text-right'>{t('Tokens')}</TableHead>
+                )}
                 <TableHead className='text-right'>
                   {t(metricLabel('quota', family))}
                 </TableHead>
@@ -1672,9 +1701,11 @@ function PerformanceTable({
                   <TableCell>
                     <StatusBadge status={row.instance.status} />
                   </TableCell>
-                  <TableCell className='text-right font-mono text-xs tabular-nums'>
-                    {formatMetric(row.requests, false)}
-                  </TableCell>
+                  {family !== 'conductor' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.requests, false)}
+                    </TableCell>
+                  )}
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatMetric(row.rpm, false)}
                   </TableCell>
@@ -1688,9 +1719,11 @@ function PerformanceTable({
                       {formatMetric(row.accountsTotal, false)}
                     </TableCell>
                   )}
-                  <TableCell className='text-right font-mono text-xs tabular-nums'>
-                    {formatMetric(row.tokens, false)}
-                  </TableCell>
+                  {family !== 'conductor' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.tokens, false)}
+                    </TableCell>
+                  )}
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatUsageMetric('quota', row.quota, family, false)}
                   </TableCell>
