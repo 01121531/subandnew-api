@@ -55,6 +55,7 @@ type InventoryItem struct {
 	Balance              *float64 `json:"balance,omitempty"`
 	ResponseTimeMS       *int64   `json:"response_time_ms,omitempty"`
 	ErrorMessage         string   `json:"error_message,omitempty"`
+	RateLimited          bool     `json:"rate_limited,omitempty"`
 	ActiveSessions       *int     `json:"active_sessions,omitempty"`
 	RPM                  *int     `json:"rpm,omitempty"`
 	AccountCount         *int     `json:"account_count,omitempty"`
@@ -116,14 +117,15 @@ type SummaryResult struct {
 }
 
 type RealtimeMetricsResult struct {
-	RPM               MetricSample `json:"rpm"`
-	RPMCapacity       MetricSample `json:"rpm_capacity"`
-	AccountsTotal     int          `json:"accounts_total,omitempty"`
-	AccountsAvailable int          `json:"accounts_available,omitempty"`
-	AccountsReporting int          `json:"accounts_reporting,omitempty"`
-	ActiveSessions    int          `json:"active_sessions,omitempty"`
-	StreamStatus      string       `json:"stream_status,omitempty"`
-	Stale             bool         `json:"stale,omitempty"`
+	RPM                 MetricSample `json:"rpm"`
+	RPMCapacity         MetricSample `json:"rpm_capacity"`
+	AccountsTotal       int          `json:"accounts_total,omitempty"`
+	AccountsAvailable   int          `json:"accounts_available,omitempty"`
+	AccountsRateLimited int          `json:"accounts_rate_limited,omitempty"`
+	AccountsReporting   int          `json:"accounts_reporting,omitempty"`
+	ActiveSessions      int          `json:"active_sessions,omitempty"`
+	StreamStatus        string       `json:"stream_status,omitempty"`
+	Stale               bool         `json:"stale,omitempty"`
 }
 
 type ObservationView struct {

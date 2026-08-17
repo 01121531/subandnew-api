@@ -49,7 +49,6 @@ import {
 } from 'recharts'
 
 import { SectionPageLayout } from '@/components/layout'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -80,7 +79,6 @@ import {
 import { cn } from '@/lib/utils'
 
 import {
-  getManagedAlerts,
   getManagedInstanceMetrics,
   getManagedInstanceRPMHistory,
   getManagedInstanceRealtimeMetrics,
@@ -91,7 +89,6 @@ import { StatusBadge } from '../managed-instances/components/status-badge'
 import { isInstanceConnectionError } from '../managed-instances/errors'
 import type {
   ManagedInstance,
-  ManagedInstanceAlert,
   ManagedInstanceSummary,
   ManagedInstanceRPMHistoryBucket,
 } from '../managed-instances/types'
@@ -118,6 +115,7 @@ type InstanceMetricRow = {
   rpm: number | null
   rpmCapacity: number | null
   accountsAvailable: number | null
+  accountsRateLimited: number | null
   accountsTotal: number | null
   tokens: number | null
   quota: number | null
@@ -156,14 +154,12 @@ const PANEL_CARD_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
 const PANEL_HEADER_CLASS = 'border-border/70 border-b py-3.5'
 
 const EMPTY_INSTANCES: ManagedInstance[] = []
-const EMPTY_ALERTS: ManagedInstanceAlert[] = []
 const KPI_SKELETON_KEYS = [
   'availability',
   'requests',
   'rpm',
   'tokens',
   'quota',
-  'alerts',
   'coverage',
 ]
 
@@ -432,11 +428,6 @@ export function FleetDashboard() {
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
     refetchInterval: DASHBOARD_REFRESH_MS,
   })
-  const alertsQuery = useQuery({
-    queryKey: ['fleet-dashboard-alerts'],
-    queryFn: getManagedAlerts,
-    refetchInterval: DASHBOARD_REFRESH_MS,
-  })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
     () => allInstances.filter((instance) => belongsToFamily(instance, family)),
@@ -466,7 +457,7 @@ export function FleetDashboard() {
   )
   const conductorRealtime = useManagedInstanceRealtimeEvents(
     conductorInstanceIDs,
-    ['rpm', 'status']
+    ['rpm', 'accounts', 'status']
   )
   const rpmHistoryQuery = useQuery({
     queryKey: [
@@ -487,7 +478,6 @@ export function FleetDashboard() {
     refetchInterval: RPM_HISTORY_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
-  const alerts = alertsQuery.data?.data.items ?? EMPTY_ALERTS
   const metricQueries = useQueries({
     queries: instances.map((instance) => ({
       queryKey: [
@@ -580,6 +570,10 @@ export function FleetDashboard() {
             instance.kind === 'conductor' && streamed?.observed_at
               ? streamed.accounts_available
               : null,
+          accountsRateLimited:
+            instance.kind === 'conductor' && streamed?.observed_at
+              ? streamed.accounts_rate_limited
+              : null,
           accountsTotal:
             instance.kind === 'conductor' && streamed?.observed_at
               ? streamed.accounts_total
@@ -600,6 +594,10 @@ export function FleetDashboard() {
         (sum, row) => sum + (row.accountsAvailable ?? 0),
         0
       ),
+      accountsRateLimited: rows.reduce(
+        (sum, row) => sum + (row.accountsRateLimited ?? 0),
+        0
+      ),
       accountsTotal: rows.reduce(
         (sum, row) => sum + (row.accountsTotal ?? 0),
         0
@@ -614,18 +612,14 @@ export function FleetDashboard() {
       rpmReady: rows.filter((row) => row.rpm != null).length,
       rpmCapacityReady: rows.filter((row) => row.rpmCapacity != null).length,
       accountsReady: rows.filter((row) => row.accountsTotal != null).length,
+      accountsRateLimitedReady: rows.filter(
+        (row) => row.accountsRateLimited != null
+      ).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
-      abnormal: instances.filter((item) =>
-        ['degraded', 'offline', 'auth_failed'].includes(item.status)
-      ).length,
     }),
     [instances, rows]
-  )
-  const instanceIDs = new Set(instances.map((instance) => instance.id))
-  const openAlerts = alerts.filter(
-    (alert) => alert.status === 'open' && instanceIDs.has(alert.instance_id)
   )
   const healthData = useMemo<HealthData[]>(() => {
     const statuses = [
@@ -696,9 +690,7 @@ export function FleetDashboard() {
     isInstanceConnectionError(query.error)
   )
   const isRefreshing =
-    instancesQuery.isFetching ||
-    alertsQuery.isFetching ||
-    metricQueries.some((query) => query.isFetching)
+    instancesQuery.isFetching || metricQueries.some((query) => query.isFetching)
   const coverage = instances.length
     ? Math.round((totals.collected / instances.length) * 100)
     : 0
@@ -770,7 +762,6 @@ export function FleetDashboard() {
 
   const refresh = () => {
     void instancesQuery.refetch()
-    void alertsQuery.refetch()
     for (const query of metricQueries) void query.refetch()
     for (const query of rpmQueries) void query.refetch()
     if (family === 'conductor' && effectiveTrendMetric === 'rpm') {
@@ -811,8 +802,6 @@ export function FleetDashboard() {
           family={family}
           rows={rows}
           totals={totals}
-          openAlerts={openAlerts}
-          alertsError={alertsQuery.isError}
           healthData={healthData}
           chartData={chartData}
           dailyUsageData={dailyUsageData}
@@ -964,6 +953,7 @@ type DashboardContentProps = {
     rpm: number
     rpmCapacity: number
     accountsAvailable: number
+    accountsRateLimited: number
     accountsTotal: number
     tokens: number
     quota: number
@@ -973,13 +963,11 @@ type DashboardContentProps = {
     rpmReady: number
     rpmCapacityReady: number
     accountsReady: number
+    accountsRateLimitedReady: number
     tokensReady: number
     quotaReady: number
     healthy: number
-    abnormal: number
   }
-  openAlerts: ManagedInstanceAlert[]
-  alertsError: boolean
   healthData: HealthData[]
   chartData: { name: string; value: number }[]
   dailyUsageData: DailyUsageData[]
@@ -1027,11 +1015,6 @@ function DashboardContent(props: DashboardContentProps) {
         />
         <HealthPanel data={props.healthData} total={props.instances.length} />
       </section>
-      <AlertsPanel
-        alerts={props.openAlerts}
-        instances={props.instances}
-        error={props.alertsError}
-      />
       <PerformanceTable family={props.family} rows={props.rows} />
     </div>
   )
@@ -1325,7 +1308,7 @@ function SummaryGrid(props: DashboardContentProps) {
       aria-label={t('Fleet summary')}
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
-        props.family === 'conductor' ? 'xl:grid-cols-9' : 'xl:grid-cols-7'
+        props.family === 'conductor' ? 'xl:grid-cols-9' : 'xl:grid-cols-6'
       )}
     >
       <MetricCard
@@ -1425,15 +1408,22 @@ function SummaryGrid(props: DashboardContentProps) {
         }
         tone='amber'
       />
-      <MetricCard
-        icon={AlertTriangle}
-        label={t('Open alerts')}
-        value={props.openAlerts.length}
-        detail={t('{{count}} abnormal instances', {
-          count: props.totals.abnormal,
-        })}
-        tone={props.totals.abnormal ? 'danger' : 'success'}
-      />
+      {props.family === 'conductor' && (
+        <MetricCard
+          icon={AlertTriangle}
+          label={t('Rate-limited accounts')}
+          value={formatMetric(
+            props.totals.accountsRateLimitedReady
+              ? props.totals.accountsRateLimited
+              : null,
+            false
+          )}
+          detail={t('Real-time across {{count}} instances', {
+            count: props.totals.accountsRateLimitedReady,
+          })}
+          tone={props.totals.accountsRateLimited ? 'amber' : 'success'}
+        />
+      )}
       <MetricCard
         icon={Gauge}
         label={t('Metric coverage')}
@@ -1600,121 +1590,6 @@ function HealthPanel({ data, total }: { data: HealthData[]; total: number }) {
         </div>
       </CardContent>
     </Card>
-  )
-}
-
-function AlertsPanel(props: {
-  alerts: ManagedInstanceAlert[]
-  instances: ManagedInstance[]
-  error: boolean
-}) {
-  const { t } = useTranslation()
-  let content: ReactNode
-  if (props.error) {
-    content = <PanelEmpty text={t('Failed to load alerts')} compact />
-  } else if (props.alerts.length === 0) {
-    content = (
-      <div className='flex min-h-40 flex-col items-center justify-center text-center'>
-        <CheckCircle2 className='text-success mb-2 size-8' />
-        <p className='text-sm font-medium'>{t('All clear')}</p>
-        <p className='text-muted-foreground text-xs'>{t('No active alerts')}</p>
-      </div>
-    )
-  } else {
-    content = (
-      <div className='divide-border divide-y'>
-        {props.alerts.slice(0, 5).map((alert) => {
-          const instance = props.instances.find(
-            (item) => item.id === alert.instance_id
-          )
-          return (
-            <div
-              key={alert.id}
-              className='flex items-start gap-3 py-2.5 first:pt-0 last:pb-0'
-            >
-              <span className='bg-destructive/10 text-destructive mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md'>
-                <ServerOff className='size-3.5' />
-              </span>
-              <div className='min-w-0 flex-1'>
-                <p className='truncate text-sm font-medium'>
-                  {instance?.name ?? `#${alert.instance_id}`}
-                </p>
-                <p className='text-muted-foreground truncate text-xs'>
-                  {t(alert.error_code || alert.alert_type)} ·{' '}
-                  {t('{{count}} occurrences', { count: alert.occurrences })}
-                </p>
-                <AlertEmailStatus alert={alert} />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-
-  return (
-    <Card className={PANEL_CARD_CLASS}>
-      <CardHeader
-        className={cn(
-          PANEL_HEADER_CLASS,
-          'flex-row items-center justify-between space-y-0'
-        )}
-      >
-        <CardTitle className='flex items-center gap-2'>
-          <AlertTriangle className='text-muted-foreground size-4' />
-          {t('Active alerts')}
-        </CardTitle>
-        <Badge variant={props.alerts.length ? 'destructive' : 'secondary'}>
-          {props.alerts.length}
-        </Badge>
-      </CardHeader>
-      <CardContent className='py-4'>{content}</CardContent>
-    </Card>
-  )
-}
-
-function AlertEmailStatus({ alert }: { alert: ManagedInstanceAlert }) {
-  const { t } = useTranslation()
-  const labels = {
-    pending: t('Pending'),
-    retrying: t('Retrying'),
-    sent: t('Sent'),
-    cancelled: t('Cancelled'),
-  }
-  const detail =
-    alert.email_error ||
-    (alert.email_status === 'sent'
-      ? t('Sent at {{time}}', {
-          time: new Date(alert.email_sent_at * 1000).toLocaleString(),
-        })
-      : alert.email_recipients || t('Waiting for email delivery'))
-  return (
-    <div className='mt-1.5 flex min-w-0 items-center gap-1.5'>
-      <span className='text-muted-foreground text-[11px]'>
-        {t('Failure email')}
-      </span>
-      <Badge
-        variant='outline'
-        className={cn(
-          'h-5 px-1.5 text-[11px]',
-          alert.email_status === 'pending' &&
-            'border-amber-600/20 bg-amber-600/10 text-amber-700 dark:text-amber-400',
-          alert.email_status === 'retrying' &&
-            'border-blue-600/20 bg-blue-600/10 text-blue-700 dark:text-blue-400',
-          alert.email_status === 'sent' &&
-            'border-emerald-600/20 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400',
-          alert.email_status === 'cancelled' && 'text-muted-foreground'
-        )}
-        title={detail}
-      >
-        {labels[alert.email_status]}
-      </Badge>
-      {alert.email_attempts > 0 && (
-        <span className='text-muted-foreground text-[11px] tabular-nums'>
-          {t('{{count}} attempts', { count: alert.email_attempts })}
-        </span>
-      )}
-    </div>
   )
 }
 

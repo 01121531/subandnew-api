@@ -126,7 +126,7 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 	stream.applyEvent([]byte(`{
 		"type":"account",
 		"data":{"kind":"snapshot","accounts":[
-			{"account_id":"1","source":"1","label":"one","available":false,"rpm_current":10,"active_session_count":3},
+			{"account_id":"1","source":"1","label":"one","available":false,"unavailable_kind":"upstream_rate_limited","rpm_current":10,"active_session_count":3},
 			{"account_id":"2","source":"1","label":"two","available":true,"rpm_current":0,"active_session_count":2},
 			{"account_id":"3","source":"1","label":"three","available":true,"rpm_current":-2},
 			{"account_id":"4","source":"1","label":"four","available":true}
@@ -135,6 +135,9 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 	state := conductorRealtimeTestState(stream)
 	if state.AccountsTotal != 4 || state.AccountsAvailable != 3 || state.AccountsReporting != 2 {
 		t.Fatalf("snapshot counts = total %d, available %d, reporting %d; want 4, 3, 2", state.AccountsTotal, state.AccountsAvailable, state.AccountsReporting)
+	}
+	if state.AccountsRateLimited != 1 || !state.Accounts[0].RateLimited {
+		t.Fatalf("rate-limited accounts = %d, first item = %v; want 1, true", state.AccountsRateLimited, state.Accounts[0].RateLimited)
 	}
 	if state.RPM.Value == nil || *state.RPM.Value != 10 {
 		t.Fatalf("snapshot RPM = %v, want 10", state.RPM.Value)
@@ -149,7 +152,7 @@ func TestConductorRealtimeAppliesSnapshotDeltaAndRemoval(t *testing.T) {
 		t.Fatalf("source mapping = %q, want worker-a", state.Accounts[0].Platform)
 	}
 
-	stream.applyEvent([]byte(`{"type":"account","data":{"account_id":"1","source":"1","label":"one","available":false,"rpm_current":14,"active_session_count":4}}`))
+	stream.applyEvent([]byte(`{"type":"account","data":{"account_id":"1","source":"1","label":"one","available":false,"unavailable_kind":"upstream_rate_limited","rpm_current":14,"active_session_count":4}}`))
 	state = conductorRealtimeTestState(stream)
 	if state.RPM.Value == nil || *state.RPM.Value != 14 {
 		t.Fatalf("delta RPM = %v, want 14", state.RPM.Value)

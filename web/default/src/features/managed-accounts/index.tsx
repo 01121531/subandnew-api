@@ -250,6 +250,15 @@ function availabilityRank(enabled?: boolean) {
   return enabled ? 2 : 0
 }
 
+function isRateLimitedAccount(item: ManagedInstanceInventoryItem) {
+  if (item.rate_limited) return true
+  return [item.error_message, item.status].some((value) =>
+    ['upstream_rate_limited', 'rate_limited', 'rate limited'].includes(
+      value?.trim().toLowerCase() ?? ''
+    )
+  )
+}
+
 function compareResourceRows(
   left: ResourceRow,
   right: ResourceRow,
@@ -1415,6 +1424,7 @@ function AccountTable(props: {
             const survivalSeconds = showsSurvival
               ? getSurvivalSeconds(item)
               : null
+            const rateLimited = isRateLimitedAccount(item)
             return (
               <TableRow key={`${instance.id}:${item.id}`}>
                 <TableCell className='ps-6'>
@@ -1513,13 +1523,19 @@ function AccountTable(props: {
                   </TableCell>
                 )}
                 <TableCell className='pe-6 text-right'>
-                  <AvailabilityBadge enabled={item.enabled} />
+                  <AvailabilityBadge
+                    enabled={item.enabled}
+                    rateLimited={rateLimited}
+                  />
                   {item.error_message && (
                     <p
-                      className='text-destructive ms-auto mt-1 max-w-40 truncate text-xs'
+                      className={cn(
+                        'ms-auto mt-1 max-w-40 truncate text-xs',
+                        rateLimited ? 'text-warning' : 'text-destructive'
+                      )}
                       title={item.error_message}
                     >
-                      {item.error_message}
+                      {t(item.error_message)}
                     </p>
                   )}
                 </TableCell>
@@ -1716,8 +1732,25 @@ function formatOptionalNumber(value?: number) {
   return value == null ? '--' : compactNumber.format(value)
 }
 
-function AvailabilityBadge({ enabled }: { enabled?: boolean }) {
+function AvailabilityBadge({
+  enabled,
+  rateLimited,
+}: {
+  enabled?: boolean
+  rateLimited?: boolean
+}) {
   const { t } = useTranslation()
+  if (rateLimited) {
+    return (
+      <Badge
+        variant='outline'
+        className='border-warning/25 bg-warning/10 text-warning'
+      >
+        <AlertTriangle />
+        {t('Rate limited')}
+      </Badge>
+    )
+  }
   if (enabled == null) return <Badge variant='secondary'>{t('Unknown')}</Badge>
   if (!enabled) return <Badge variant='destructive'>{t('Unavailable')}</Badge>
   return (

@@ -257,8 +257,18 @@ func conductorAccountItem(account conductorAccount) (InventoryItem, bool) {
 		ID: id, Name: name, Type: account.AuthType, Platform: account.Source, SourceID: strings.TrimSpace(account.Source), Group: account.SubscriptionType,
 		Status: status, Enabled: &enabled, CreatedAt: normalizeConductorUnixTime(account.CreatedAt), LastActivityAt: normalizeConductorUnixTime(account.DispatchStateChangedAt),
 		ActiveSessions: &activeSessions, RPM: account.RPMCurrent, Utilization5H: &u5, Utilization7D: &u7, Utilization7DOI: &u7oi,
-		ErrorMessage: errorMessage,
+		ErrorMessage: errorMessage, RateLimited: conductorAccountRateLimited(account),
 	}, true
+}
+
+func conductorAccountRateLimited(account conductorAccount) bool {
+	for _, value := range []string{account.UnavailableKind, account.BlockedReason, account.Status, account.Health, account.DispatchState} {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "upstream_rate_limited", "rate_limited", "rate limited":
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeConductorUnixTime(value int64) int64 {

@@ -165,6 +165,7 @@ export interface ManagedInstanceInventoryItem {
   balance?: number
   response_time_ms?: number
   error_message?: string
+  rate_limited?: boolean
   active_sessions?: number
   rpm?: number
   account_count?: number
@@ -230,6 +231,7 @@ export interface ManagedInstanceRealtimeMetrics {
   rpm_capacity: ManagedInstanceMetricSample
   accounts_total?: number
   accounts_available?: number
+  accounts_rate_limited?: number
   accounts_reporting?: number
   active_sessions?: number
   stream_status?: string
@@ -246,6 +248,7 @@ export interface ManagedInstanceRealtimeState {
   rpm_capacity: ManagedInstanceMetricSample
   accounts_total: number
   accounts_available: number
+  accounts_rate_limited: number
   accounts_reporting: number
   active_sessions: number
   accounts?: ManagedInstanceInventoryItem[]
