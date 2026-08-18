@@ -2,7 +2,10 @@ package managedinstance
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -113,24 +116,17 @@ func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, crede
 	requests.Add(2)
 	go func() {
 		defer requests.Done()
-		adapter := sub2APIAdapter{}
-		first, err := adapter.inventory(ctx, connector, credential, "account", "", false)
-		if err == nil {
-			first, err = collectCompleteInventory(ctx, sub2InventoryWithoutUsageAdapter{adapter}, connector, credential, "account", first)
+		total, available, rateLimited, err := fetchSub2GroupAccountCounts(ctx, connector, credential)
+		if err != nil {
+			total, available, rateLimited, err = collectSub2InventoryAccountCounts(ctx, connector, credential)
 		}
 		if err != nil {
 			result.AccountsErr = err
 			return
 		}
-		result.AccountsTotal = len(first.Items)
-		for _, item := range first.Items {
-			if item.Enabled != nil && *item.Enabled && !item.RateLimited {
-				result.AccountsAvailable++
-			}
-			if item.RateLimited {
-				result.AccountsRateLimited++
-			}
-		}
+		result.AccountsTotal = total
+		result.AccountsAvailable = available
+		result.AccountsRateLimited = rateLimited
 	}()
 	go func() {
 		defer requests.Done()
@@ -149,6 +145,86 @@ func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, crede
 	}()
 	requests.Wait()
 	return result
+}
+
+func fetchSub2GroupAccountCounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) (int, int, int, error) {
+	const pageSize = 100
+	totalAccounts := 0
+	availableAccounts := 0
+	rateLimitedAccounts := 0
+	seen := map[int64]struct{}{}
+	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
+		query := url.Values{
+			"page":       {strconv.Itoa(pageNumber)},
+			"page_size":  {strconv.Itoa(pageSize)},
+			"status":     {""},
+			"sort_by":    {"sort_order"},
+			"sort_order": {"asc"},
+			"timezone":   {"Asia/Shanghai"},
+		}
+		response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/admin/groups?"+query.Encode(), nil)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		if err := requireHTTPStatus(response); err != nil {
+			return 0, 0, 0, err
+		}
+		data, err := sub2EnvelopeData(response)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		var page struct {
+			Items []struct {
+				ID                      int64 `json:"id"`
+				AccountCount            int   `json:"account_count"`
+				ActiveAccountCount      int   `json:"active_account_count"`
+				RateLimitedAccountCount int   `json:"rate_limited_account_count"`
+			} `json:"items"`
+			Total int `json:"total"`
+			Pages int `json:"pages"`
+		}
+		if json.Unmarshal(data, &page) != nil || page.Items == nil || page.Total < 0 {
+			return 0, 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		for _, group := range page.Items {
+			if group.ID <= 0 || group.AccountCount < 0 || group.ActiveAccountCount < 0 || group.RateLimitedAccountCount < 0 {
+				return 0, 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+			}
+			if _, duplicate := seen[group.ID]; duplicate {
+				continue
+			}
+			seen[group.ID] = struct{}{}
+			totalAccounts += group.AccountCount
+			availableAccounts += group.ActiveAccountCount
+			rateLimitedAccounts += group.RateLimitedAccountCount
+		}
+		if len(page.Items) == 0 || (page.Pages > 0 && pageNumber >= page.Pages) || len(seen) >= page.Total {
+			return totalAccounts, availableAccounts, rateLimitedAccounts, nil
+		}
+	}
+	return 0, 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse}
+}
+
+func collectSub2InventoryAccountCounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) (int, int, int, error) {
+	adapter := sub2APIAdapter{}
+	page, err := adapter.inventory(ctx, connector, credential, "account", "", false)
+	if err == nil {
+		page, err = collectCompleteInventory(ctx, sub2InventoryWithoutUsageAdapter{adapter}, connector, credential, "account", page)
+	}
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	available := 0
+	rateLimited := 0
+	for _, item := range page.Items {
+		if item.Enabled != nil && *item.Enabled && !item.RateLimited {
+			available++
+		}
+		if item.RateLimited {
+			rateLimited++
+		}
+	}
+	return len(page.Items), available, rateLimited, nil
 }
 
 func CurrentSub2Realtime(instanceID int64) (Sub2RealtimeState, bool) {

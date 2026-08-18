@@ -429,8 +429,12 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 			require.Equal(t, "true", request.URL.Query().Get("include_stats"))
 			require.Equal(t, "false", request.URL.Query().Get("include_trend"))
 			writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":17}}}`)
+		case "/api/v1/admin/groups":
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":49,"account_count":389,"active_account_count":10,"rate_limited_account_count":148}],"total":1,"page":1,"page_size":100,"pages":1}}`)
 		case "/api/v1/admin/accounts":
-			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true},{"id":2,"status":"active","unavailable_kind":"upstream_rate_limited"},{"id":3,"status":"expired"}],"total":3,"page":1,"page_size":100,"pages":1}}`)
+			t.Fatal("group account counts should avoid scanning the account inventory")
 		case "/api/v1/admin/usage/stats":
 			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
 			require.Equal(t, request.URL.Query().Get("start_date"), request.URL.Query().Get("end_date"))
@@ -446,9 +450,9 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)
 	require.Equal(t, 17.0, *realtime.RPM.Value)
-	require.Equal(t, 3, realtime.AccountsTotal)
-	require.Equal(t, 1, realtime.AccountsAvailable)
-	require.Equal(t, 1, realtime.AccountsRateLimited)
+	require.Equal(t, 389, realtime.AccountsTotal)
+	require.Equal(t, 10, realtime.AccountsAvailable)
+	require.Equal(t, 148, realtime.AccountsRateLimited)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.AccountsCollectionStatus)
 	require.Equal(t, 12.34, *realtime.TodayCost.Value)
 }
