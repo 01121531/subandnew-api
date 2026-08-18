@@ -33,6 +33,8 @@ type Sub2RealtimeState struct {
 }
 
 const sub2RealtimeDetailsInterval = 60 * time.Second
+const sub2RealtimeDetailsRetryInterval = 15 * time.Second
+const sub2RealtimeRequestRefreshInterval = 8 * time.Second
 const sub2DefaultCapacityGroupID int64 = 49
 
 type sub2RealtimeDetails struct {
@@ -52,7 +54,19 @@ var sub2RealtimeCache = struct {
 	states map[int64]Sub2RealtimeState
 }{states: map[int64]Sub2RealtimeState{}}
 
+var sub2RealtimeRefreshLocks sync.Map
+
 func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeState, error) {
+	lockValue, _ := sub2RealtimeRefreshLocks.LoadOrStore(instanceID, &sync.Mutex{})
+	refreshLock := lockValue.(*sync.Mutex)
+	if !refreshLock.TryLock() {
+		if state, ok := CurrentSub2Realtime(instanceID); ok {
+			return state, nil
+		}
+		return Sub2RealtimeState{}, ErrUnsupportedCapability
+	}
+	defer refreshLock.Unlock()
+
 	instance, _, connector, credential, err := observationClient(instanceID)
 	if err != nil {
 		return Sub2RealtimeState{}, err
@@ -61,24 +75,28 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 		return Sub2RealtimeState{}, ErrUnsupportedCapability
 	}
 
-	now := common.GetTimestamp()
+	attemptStartedAt := common.GetTimestamp()
 	sample := sub2CurrentRPM(ctx, connector, credential)
 	sub2RealtimeCache.RLock()
 	previous := sub2RealtimeCache.states[instanceID]
-	refreshDetails := previous.LastDetailsAttemptAt == 0 || now-previous.LastDetailsAttemptAt >= int64(sub2RealtimeDetailsInterval/time.Second)
+	refreshDetails := previous.LastDetailsAttemptAt == 0 || attemptStartedAt-previous.LastDetailsAttemptAt >= int64(sub2RealtimeDetailsInterval/time.Second)
 	sub2RealtimeCache.RUnlock()
 	var details sub2RealtimeDetails
 	if refreshDetails {
 		details = collectSub2RealtimeDetails(ctx, connector, credential)
 	}
+	observedAt := common.GetTimestamp()
 	sub2RealtimeCache.Lock()
 	defer sub2RealtimeCache.Unlock()
 
 	state := sub2RealtimeCache.states[instanceID]
 	state.InstanceID = instanceID
-	state.LastAttemptAt = now
+	state.LastAttemptAt = observedAt
 	if refreshDetails {
-		state.LastDetailsAttemptAt = now
+		state.LastDetailsAttemptAt = observedAt
+		if details.TodayCostErr != nil {
+			state.LastDetailsAttemptAt = observedAt - int64((sub2RealtimeDetailsInterval-sub2RealtimeDetailsRetryInterval)/time.Second)
+		}
 		detailsSucceeded := false
 		if details.AccountsErr == nil {
 			state.AccountsTotal = details.AccountsTotal
@@ -104,12 +122,12 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 			state.TodayCost = MetricSample{Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionFailed}
 		}
 		if detailsSucceeded {
-			state.DetailsObservedAt = now
+			state.DetailsObservedAt = observedAt
 		}
 	}
 	if sample.Value != nil && sample.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
 		state.RPM = sample
-		state.ObservedAt = now
+		state.ObservedAt = observedAt
 		state.Stale = false
 		state.ErrorCode = ""
 		sub2RealtimeCache.states[instanceID] = state
@@ -320,4 +338,5 @@ func resetSub2RealtimeCacheForTest() {
 	sub2RealtimeCache.Lock()
 	sub2RealtimeCache.states = map[int64]Sub2RealtimeState{}
 	sub2RealtimeCache.Unlock()
+	sub2RealtimeRefreshLocks = sync.Map{}
 }

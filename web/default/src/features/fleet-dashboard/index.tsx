@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useQueries,
+  useQuery,
+  type Query,
+} from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
@@ -562,7 +567,8 @@ export function FleetDashboard() {
       retry: DASHBOARD_RETRY_COUNT,
       retryDelay,
       staleTime: DASHBOARD_REFRESH_MS / 2,
-      refetchInterval: DASHBOARD_REFRESH_MS,
+      refetchInterval: (query: Query) =>
+        query.state.error ? DASHBOARD_ERROR_RETRY_MS : DASHBOARD_REFRESH_MS,
       refetchIntervalInBackground: true,
     })),
   })

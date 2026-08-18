@@ -489,6 +489,8 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	var failing atomic.Bool
+	var rpm atomic.Int64
+	rpm.Store(9)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if failing.Load() {
 			http.Error(response, "temporary failure", http.StatusBadGateway)
@@ -496,7 +498,7 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 		}
 		switch request.URL.Path {
 		case "/api/v1/admin/dashboard/snapshot-v2":
-			writeProbeJSON(response, `{"code":0,"data":{"stats":{"current_rpm":9}}}`)
+			writeProbeJSON(response, fmt.Sprintf(`{"code":0,"data":{"stats":{"current_rpm":%d}}}`, rpm.Load()))
 		case "/api/v1/admin/accounts":
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true}],"total":1,"page":1,"page_size":100,"pages":1}}`)
 		case "/api/v1/admin/usage/stats":
@@ -517,8 +519,19 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	require.Equal(t, 3.5, *state.TodayCost.Value)
 	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
+	rpm.Store(11)
 	sub2RealtimeCache.Lock()
 	cached := sub2RealtimeCache.states[instance.Id]
+	cached.LastAttemptAt = 0
+	sub2RealtimeCache.states[instance.Id] = cached
+	sub2RealtimeCache.Unlock()
+	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	require.NoError(t, err)
+	realtime := view.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 11.0, *realtime.RPM.Value)
+
+	sub2RealtimeCache.Lock()
+	cached = sub2RealtimeCache.states[instance.Id]
 	cached.LastDetailsAttemptAt = 0
 	sub2RealtimeCache.states[instance.Id] = cached
 	sub2RealtimeCache.Unlock()
@@ -526,16 +539,17 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	state, err = RefreshSub2Realtime(context.Background(), instance.Id)
 	require.Error(t, err)
 	require.True(t, state.Stale)
-	require.Equal(t, 9.0, *state.RPM.Value)
+	require.Equal(t, 11.0, *state.RPM.Value)
 	require.Equal(t, 1, state.AccountsAvailable)
 	require.Equal(t, 3.5, *state.TodayCost.Value)
 	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
+	require.LessOrEqual(t, state.LastDetailsAttemptAt, time.Now().Unix()-int64(sub2RealtimeDetailsRetryInterval/time.Second))
 
-	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
+	view, err = CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
-	realtime := view.Data.(*RealtimeMetricsResult)
-	require.Equal(t, 9.0, *realtime.RPM.Value)
+	realtime = view.Data.(*RealtimeMetricsResult)
+	require.Equal(t, 11.0, *realtime.RPM.Value)
 	require.Equal(t, 48.0, *realtime.ConcurrencyUsed.Value)
 	require.Equal(t, 320.0, *realtime.ConcurrencyMax.Value)
 	require.True(t, realtime.Stale)

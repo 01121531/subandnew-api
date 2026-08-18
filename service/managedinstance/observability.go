@@ -1058,11 +1058,12 @@ func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*Observation
 	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
 		result.RPM = newAPICurrentRPM(ctx, connector, instance.Kind, credential)
 	case model.ManagedInstanceKindSub2API:
-		cached, cachedAt, ok := sub2RealtimeMetrics(instance.Id)
-		if !ok {
+		state, stateOK := CurrentSub2Realtime(instance.Id)
+		now := common.GetTimestamp()
+		if !stateOK || state.LastAttemptAt <= 0 || now < state.LastAttemptAt || now-state.LastAttemptAt >= int64(sub2RealtimeRequestRefreshInterval/time.Second) {
 			_, _ = RefreshSub2Realtime(ctx, instance.Id)
-			cached, cachedAt, ok = sub2RealtimeMetrics(instance.Id)
 		}
+		cached, cachedAt, ok := sub2RealtimeMetrics(instance.Id)
 		if ok {
 			result = cached
 			observedAt = cachedAt
