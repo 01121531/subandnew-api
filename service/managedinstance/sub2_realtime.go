@@ -94,7 +94,7 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 	state.LastAttemptAt = observedAt
 	if refreshDetails {
 		state.LastDetailsAttemptAt = observedAt
-		if details.TodayCostErr != nil {
+		if details.AccountsErr != nil || details.ConcurrencyErr != nil {
 			state.LastDetailsAttemptAt = observedAt - int64((sub2RealtimeDetailsInterval-sub2RealtimeDetailsRetryInterval)/time.Second)
 		}
 		detailsSucceeded := false
@@ -114,12 +114,6 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 			detailsSucceeded = true
 		} else if state.ConcurrencyStatus == "" {
 			state.ConcurrencyStatus = model.ManagedInstanceCollectionFailed
-		}
-		if details.TodayCostErr == nil {
-			state.TodayCost = details.TodayCost
-			detailsSucceeded = true
-		} else if state.TodayCost.Value == nil {
-			state.TodayCost = MetricSample{Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionFailed}
 		}
 		if detailsSucceeded {
 			state.DetailsObservedAt = observedAt
@@ -146,7 +140,7 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, credential *CredentialMaterial) sub2RealtimeDetails {
 	var result sub2RealtimeDetails
 	var requests sync.WaitGroup
-	requests.Add(3)
+	requests.Add(2)
 	go func() {
 		defer requests.Done()
 		total, available, rateLimited, err := fetchSub2GroupAccountCounts(ctx, connector, credential)
@@ -170,21 +164,6 @@ func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, crede
 		}
 		result.ConcurrencyUsed = supportedMetric(used, "concurrency")
 		result.ConcurrencyMax = supportedMetric(maximum, "concurrency")
-	}()
-	go func() {
-		defer requests.Done()
-		location, timezone := summaryLocation("Asia/Shanghai")
-		today := time.Now().In(location).Format("2006-01-02")
-		stats, err := fetchSub2UsageStats(ctx, connector, credential, url.Values{
-			"start_date": {today},
-			"end_date":   {today},
-			"timezone":   {timezone},
-		})
-		if err != nil {
-			result.TodayCostErr = err
-			return
-		}
-		result.TodayCost = supportedMetric(stats.TotalActualCost, "usd")
 	}()
 	requests.Wait()
 	return result
@@ -307,7 +286,7 @@ func CurrentSub2Realtime(instanceID int64) (Sub2RealtimeState, bool) {
 	sub2RealtimeCache.RLock()
 	defer sub2RealtimeCache.RUnlock()
 	state, ok := sub2RealtimeCache.states[instanceID]
-	return state, ok && (state.RPM.Value != nil || state.TodayCost.Value != nil || state.ConcurrencyStatus == model.ManagedInstanceCollectionSucceeded || state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded)
+	return state, ok && (state.RPM.Value != nil || state.ConcurrencyStatus == model.ManagedInstanceCollectionSucceeded || state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded)
 }
 
 func sub2RealtimeMetrics(instanceID int64) (*RealtimeMetricsResult, int64, bool) {

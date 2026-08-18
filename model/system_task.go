@@ -22,6 +22,7 @@ const (
 
 	SystemTaskTypeManagedInstanceProbe      = "managed_instance_probe"
 	SystemTaskTypeManagedInstanceSync       = "managed_instance_sync"
+	SystemTaskTypeManagedDashboardRefresh   = "managed_dashboard_refresh"
 	SystemTaskTypeManagedAccountSync        = "managed_account_sync"
 	SystemTaskTypeManagedInstanceAlertEmail = "managed_instance_alert_email"
 	SystemTaskTypeManagedUsageExport        = "managed_usage_export"

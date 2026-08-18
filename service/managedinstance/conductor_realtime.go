@@ -666,8 +666,7 @@ func (stream *conductorRealtimeStream) refreshSources(ctx context.Context) {
 	}
 	sources, sourcesErr := conductorInventorySources(ctx, connector, credential)
 	rpmPerAccount, capacityErr := conductorRPMCapacityPerAccount(ctx, connector, credential)
-	todayCost, todayCostErr := conductorTodayCost(ctx, connector, credential)
-	if sourcesErr != nil && capacityErr != nil && todayCostErr != nil {
+	if sourcesErr != nil && capacityErr != nil {
 		return
 	}
 	stream.mu.Lock()
@@ -677,18 +676,12 @@ func (stream *conductorRealtimeStream) refreshSources(ctx context.Context) {
 	if capacityErr == nil {
 		stream.rpmPerAccount = &rpmPerAccount
 	}
-	if todayCostErr == nil {
-		stream.todayCost = &todayCost
-	}
 	state := stream.snapshotLocked()
 	if sourcesErr == nil {
 		stream.broadcastLocked("sources", state)
 	}
 	if capacityErr == nil {
 		stream.broadcastLocked("rpm", state)
-	}
-	if todayCostErr == nil {
-		stream.broadcastLocked("status", state)
 	}
 	stream.mu.Unlock()
 }

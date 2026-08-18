@@ -97,6 +97,7 @@ func main() {
 
 	// Run only handlers registered by the control-plane task packages.
 	service.StartSystemTaskRunner()
+	service.StartManagedDashboardCollector()
 	service.StartManagedConductorRealtimeCollector()
 	service.StartManagedSub2RealtimeCollector()
 

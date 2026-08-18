@@ -226,6 +226,47 @@ export interface ManagedInstanceSummary {
   trend: ManagedInstanceUsageTrendPoint[]
 }
 
+export interface ManagedDashboardRange {
+  range_key: string
+  preset_days: number
+  start: number
+  end: number
+  timezone: string
+}
+
+export interface ManagedDashboardSnapshotSection {
+  range: ManagedDashboardRange
+  observation?: ManagedInstanceObservation<ManagedInstanceSummary>
+  last_attempt_at: number
+  last_attempt_status: ManagedInstanceCollectionStatus | 'running' | ''
+  last_error_code?: string
+  stale: boolean
+}
+
+export interface ManagedDashboardInstanceSnapshot {
+  instance_id: number
+  summary: ManagedDashboardSnapshotSection
+  today: ManagedDashboardSnapshotSection
+}
+
+export interface ManagedDashboardSnapshotList {
+  range: ManagedDashboardRange
+  items: ManagedDashboardInstanceSnapshot[]
+}
+
+export interface ManagedDashboardRefreshResult {
+  instance_id: number
+  enqueued: boolean
+  task?: ManagedInstanceTask
+}
+
+export interface ManagedDashboardEvent {
+  type: 'summary' | 'status' | 'topology'
+  instance_id?: number
+  snapshot?: ManagedDashboardSnapshotSection
+  instance_ids?: number[]
+}
+
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample

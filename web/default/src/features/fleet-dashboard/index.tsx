@@ -16,12 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  keepPreviousData,
-  useQueries,
-  useQuery,
-  type Query,
-} from '@tanstack/react-query'
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
@@ -81,22 +76,30 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import {
-  getManagedInstanceMetrics,
+  getManagedDashboardSnapshots,
   getManagedInstanceRPMHistory,
   getManagedInstanceRealtimeMetrics,
   getManagedInstances,
+  refreshManagedDashboard,
 } from '../managed-instances/api'
 import { InstanceConnectionAlert } from '../managed-instances/components/instance-connection-alert'
 import { StatusBadge } from '../managed-instances/components/status-badge'
 import { isInstanceConnectionError } from '../managed-instances/errors'
 import type {
+  ManagedDashboardSnapshotSection,
   ManagedInstance,
   ManagedInstanceSummary,
   ManagedInstanceRPMHistoryBucket,
 } from '../managed-instances/types'
+import { useManagedDashboardEvents } from '../managed-instances/use-dashboard-events'
 import { useManagedInstanceRealtimeEvents } from '../managed-instances/use-realtime-events'
 import {
   createFleetPresetRange,
@@ -115,6 +118,8 @@ type InstanceMetricRow = {
   instance: ManagedInstance
   summary?: ManagedInstanceSummary
   observedAt: number
+  summaryObservedAt: number
+  todayObservedAt: number
   collected: boolean
   requests: number | null
   rpm: number | null
@@ -126,6 +131,10 @@ type InstanceMetricRow = {
   todayCost: number | null
   tokens: number | null
   quota: number | null
+  lastAttemptAt: number
+  lastAttemptStatus: string
+  lastErrorCode: string
+  stale: boolean
 }
 
 type DailyUsageData = {
@@ -147,7 +156,6 @@ type HealthData = {
   value: number
 }
 
-const DASHBOARD_REFRESH_MS = 60_000
 const RPM_REFRESH_MS = 10_000
 const RPM_HISTORY_REFRESH_MS = 10_000
 const DASHBOARD_ERROR_RETRY_MS = 15_000
@@ -189,10 +197,9 @@ const compactCurrency = new Intl.NumberFormat(undefined, {
   notation: 'compact',
   maximumFractionDigits: 2,
 })
-const exactCurrency = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 4,
+const exactDecimal = new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 8,
+  maximumFractionDigits: 8,
 })
 const trendAxisDate = new Intl.DateTimeFormat(undefined, {
   month: '2-digit',
@@ -367,7 +374,9 @@ function formatUsageMetric(
 ) {
   if (value == null) return '--'
   if (metric === 'quota' && family !== 'new_api') {
-    return (compact ? compactCurrency : exactCurrency).format(value)
+    return compact
+      ? compactCurrency.format(value)
+      : `US$${exactDecimal.format(value)}`
   }
   return formatMetric(value, compact)
 }
@@ -378,6 +387,15 @@ function metricValue(
   return sample?.collection_status === 'succeeded' && sample.value != null
     ? sample.value
     : null
+}
+
+function latestDashboardSection(
+  cached: ManagedDashboardSnapshotSection | undefined,
+  streamed: ManagedDashboardSnapshotSection | undefined
+) {
+  if (!streamed) return cached
+  if (!cached) return streamed
+  return streamed.last_attempt_at >= cached.last_attempt_at ? streamed : cached
 }
 
 function trendMetricValue(
@@ -433,8 +451,7 @@ export function FleetDashboard() {
   )
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
-  const dashboardTimezone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+  const [refreshRequestedAt, setRefreshRequestedAt] = useState(0)
   let effectiveTrendMetric = trendMetric
   if (
     family === 'conductor' &&
@@ -453,11 +470,7 @@ export function FleetDashboard() {
     placeholderData: keepPreviousData,
     retry: DASHBOARD_RETRY_COUNT,
     retryDelay,
-    refetchInterval: (query) =>
-      query.state.status === 'error'
-        ? DASHBOARD_ERROR_RETRY_MS
-        : DASHBOARD_REFRESH_MS,
-    refetchIntervalInBackground: true,
+    staleTime: Number.POSITIVE_INFINITY,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -500,6 +513,36 @@ export function FleetDashboard() {
     conductorInstanceIDs,
     ['rpm', 'accounts', 'status']
   )
+  const instanceIDs = useMemo(
+    () => instances.map((instance) => instance.id),
+    [instances]
+  )
+  const dashboardRangeInput = useMemo(() => {
+    if (timeRange.presetDays) return { preset_days: timeRange.presetDays }
+    const resolved = resolveFleetTimeRange(timeRange)
+    return {
+      start: Math.floor(resolved.start.getTime() / 1000),
+      end: Math.floor(resolved.end.getTime() / 1000),
+    }
+  }, [timeRange])
+  const dashboardEvents = useManagedDashboardEvents(instanceIDs)
+  const dashboardQuery = useQuery({
+    queryKey: [
+      'fleet-dashboard-snapshots',
+      instanceIDs.join(','),
+      dashboardRangeInput.preset_days ?? 'custom',
+      dashboardRangeInput.start ?? 0,
+      dashboardRangeInput.end ?? 0,
+    ],
+    queryFn: () =>
+      getManagedDashboardSnapshots(instanceIDs, dashboardRangeInput, {
+        silent: true,
+      }),
+    enabled: instanceIDs.length > 0,
+    retry: DASHBOARD_RETRY_COUNT,
+    retryDelay,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
   const rpmHistoryQuery = useQuery({
     queryKey: [
       'fleet-dashboard-rpm-history',
@@ -524,54 +567,6 @@ export function FleetDashboard() {
         : RPM_HISTORY_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
-  const metricQueries = useQueries({
-    queries: instances.map((instance) => ({
-      queryKey: [
-        'fleet-dashboard-metric',
-        instance.id,
-        timeRange.presetDays ?? 'custom',
-        timeRange.presetDays ? null : timeRange.start.getTime(),
-        timeRange.presetDays ? null : timeRange.end.getTime(),
-      ],
-      queryFn: async () => {
-        const resolvedRange = resolveFleetTimeRange(timeRange)
-        const response = await getManagedInstanceMetrics(
-          instance.id,
-          {
-            start: Math.floor(resolvedRange.start.getTime() / 1000),
-            end: Math.floor(resolvedRange.end.getTime() / 1000),
-            timezone: dashboardTimezone,
-          },
-          { silent: true }
-        )
-        const observation = response.data
-        const summary = observation.data
-        const hasMetricData = [
-          summary?.requests,
-          summary?.tokens,
-          summary?.cost,
-        ].some(
-          (sample) =>
-            sample?.collection_status === 'succeeded' && sample.value != null
-        )
-        if (
-          observation.collection_status !== 'succeeded' ||
-          !summary ||
-          (!hasMetricData && summary.trend.length === 0)
-        ) {
-          throw new Error(observation.error_code || 'metrics_unavailable')
-        }
-        return response
-      },
-      placeholderData: keepPreviousData,
-      retry: DASHBOARD_RETRY_COUNT,
-      retryDelay,
-      staleTime: DASHBOARD_REFRESH_MS / 2,
-      refetchInterval: (query: Query) =>
-        query.state.error ? DASHBOARD_ERROR_RETRY_MS : DASHBOARD_REFRESH_MS,
-      refetchIntervalInBackground: true,
-    })),
-  })
   const rpmQueries = useQueries({
     queries: instances.map((instance) => ({
       queryKey: ['fleet-dashboard-rpm', instance.id],
@@ -584,8 +579,7 @@ export function FleetDashboard() {
         const hasRealtimeData =
           realtime?.rpm.collection_status === 'succeeded' ||
           realtime?.concurrency_collection_status === 'succeeded' ||
-          realtime?.accounts_collection_status === 'succeeded' ||
-          realtime?.today_cost?.collection_status === 'succeeded'
+          realtime?.accounts_collection_status === 'succeeded'
         if (
           observation.collection_status !== 'succeeded' ||
           !realtime ||
@@ -607,7 +601,19 @@ export function FleetDashboard() {
   const rows = useMemo<InstanceMetricRow[]>(
     () =>
       instances.map((instance, index) => {
-        const observation = metricQueries[index]?.data?.data
+        const cached = dashboardQuery.data?.data.items.find(
+          (item) => item.instance_id === instance.id
+        )
+        const rangeKey = dashboardQuery.data?.data.range.range_key ?? ''
+        const summarySection = latestDashboardSection(
+          cached?.summary,
+          dashboardEvents.snapshots[`${instance.id}:${rangeKey}`]
+        )
+        const todaySection = latestDashboardSection(
+          cached?.today,
+          dashboardEvents.snapshots[`${instance.id}:preset-1`]
+        )
+        const observation = summarySection?.observation
         const summary = observation?.data
         const streamed = conductorRealtime.states[instance.id]
         const polledRealtime = rpmQueries[index]?.data?.data?.data
@@ -618,19 +624,17 @@ export function FleetDashboard() {
             ? Boolean(streamed?.observed_at)
             : instance.kind === 'sub2api' &&
               polledRealtime?.accounts_collection_status === 'succeeded'
-        let todayCost: number | null = null
-        if (instance.kind === 'sub2api') {
-          todayCost = metricValue(polledRealtime?.today_cost)
-        } else if (instance.kind === 'conductor') {
-          todayCost = metricValue(streamed?.today_cost)
-        }
+        const todayCost = metricValue(todaySection?.observation?.data?.cost)
         return {
           instance,
           summary,
           observedAt: Math.max(
             observation?.observed_at ?? 0,
+            todaySection?.observation?.observed_at ?? 0,
             streamed?.observed_at ?? 0
           ),
+          summaryObservedAt: observation?.observed_at ?? 0,
+          todayObservedAt: todaySection?.observation?.observed_at ?? 0,
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
@@ -644,9 +648,29 @@ export function FleetDashboard() {
           todayCost,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
+          lastAttemptAt: Math.max(
+            summarySection?.last_attempt_at ?? 0,
+            todaySection?.last_attempt_at ?? 0
+          ),
+          lastAttemptStatus:
+            summarySection?.last_attempt_status === 'failed' ||
+            todaySection?.last_attempt_status === 'failed'
+              ? 'failed'
+              : (summarySection?.last_attempt_status ?? ''),
+          lastErrorCode:
+            summarySection?.last_error_code ??
+            todaySection?.last_error_code ??
+            '',
+          stale: Boolean(summarySection?.stale || todaySection?.stale),
         }
       }),
-    [conductorRealtime.states, instances, metricQueries, rpmQueries]
+    [
+      conductorRealtime.states,
+      dashboardEvents.snapshots,
+      dashboardQuery.data,
+      instances,
+      rpmQueries,
+    ]
   )
 
   const totals = useMemo(
@@ -751,18 +775,23 @@ export function FleetDashboard() {
       .map(([date, value]) => ({ date, value }))
   }, [effectiveTrendMetric, rows])
   const dailyUsageLoading =
-    metricQueries.some((query) => query.isPending) ||
-    (dailyUsageData.length === 0 &&
-      metricQueries.some((query) => query.isFetching))
+    dailyUsageData.length === 0 &&
+    (dashboardQuery.isPending ||
+      rows.some((row) => !row.collected && row.lastAttemptStatus !== 'failed'))
   const dailyUsageError =
     !dailyUsageLoading &&
     dailyUsageData.length === 0 &&
-    metricQueries.some((query) => query.isError)
-  const connectionFailed = [...metricQueries, ...rpmQueries].some((query) =>
-    isInstanceConnectionError(query.error)
-  )
+    (dashboardQuery.isError ||
+      rows.some((row) => row.lastAttemptStatus === 'failed'))
+  const connectionFailed =
+    dashboardQuery.isError ||
+    rows.some((row) => row.lastAttemptStatus === 'failed') ||
+    rpmQueries.some((query) => isInstanceConnectionError(query.error))
   const isRefreshing =
-    instancesQuery.isFetching || metricQueries.some((query) => query.isFetching)
+    dashboardQuery.isFetching ||
+    rows.some((row) => row.lastAttemptStatus === 'running') ||
+    (refreshRequestedAt > 0 &&
+      rows.some((row) => row.lastAttemptAt < refreshRequestedAt))
   const coverage = instances.length
     ? Math.round((totals.collected / instances.length) * 100)
     : 0
@@ -835,14 +864,40 @@ export function FleetDashboard() {
   }, [consumptionMetric, family, selectedInstances, timeRange, trendMetric])
 
   const lastObservedAt = Math.max(0, ...rows.map((row) => row.observedAt))
+  const refetchInstances = instancesQuery.refetch
 
-  const refresh = () => {
+  useEffect(() => {
+    if (dashboardEvents.topologyRevision > 0) void refetchInstances()
+  }, [dashboardEvents.topologyRevision, refetchInstances])
+
+  useEffect(() => {
+    if (
+      refreshRequestedAt > 0 &&
+      rows.length > 0 &&
+      rows.every(
+        (row) =>
+          row.lastAttemptAt >= refreshRequestedAt &&
+          row.lastAttemptStatus !== 'running'
+      )
+    ) {
+      setRefreshRequestedAt(0)
+    }
+  }, [refreshRequestedAt, rows])
+
+  const refresh = async () => {
+    const requestedAt = Math.floor(Date.now() / 1000)
+    setRefreshRequestedAt(requestedAt)
     void instancesQuery.refetch()
-    for (const query of metricQueries) void query.refetch()
+    try {
+      await refreshManagedDashboard(instanceIDs, dashboardRangeInput)
+    } catch {
+      setRefreshRequestedAt(0)
+    }
     for (const query of rpmQueries) void query.refetch()
     if (family !== 'new_api' && effectiveTrendMetric === 'rpm') {
       void rpmHistoryQuery.refetch()
     }
+    dashboardEvents.reconnect()
   }
 
   const refreshRPM = () => {
@@ -1001,7 +1056,7 @@ export function FleetDashboard() {
                   className={cn('size-3.5', isRefreshing && 'animate-pulse')}
                 />
                 {t('Auto-refreshing every {{seconds}}s', {
-                  seconds: DASHBOARD_REFRESH_MS / 1000,
+                  seconds: 60,
                 })}
               </span>
               {lastObservedAt > 0 && (
@@ -1069,6 +1124,10 @@ type DashboardContentProps = {
 }
 
 function DashboardContent(props: DashboardContentProps) {
+  const observedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.summaryObservedAt)
+  )
   return (
     <div className='grid gap-4 pb-6'>
       <SummaryGrid {...props} />
@@ -1084,6 +1143,7 @@ function DashboardContent(props: DashboardContentProps) {
         rpmHistoryData={props.rpmHistoryData}
         rpmHistoryLoading={props.rpmHistoryLoading}
         rpmHistoryError={props.rpmHistoryError}
+        observedAt={observedAt}
       />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
         <ConsumptionPanel
@@ -1091,6 +1151,7 @@ function DashboardContent(props: DashboardContentProps) {
           metric={props.consumptionMetric}
           data={props.chartData}
           onMetricChange={props.onConsumptionMetricChange}
+          observedAt={observedAt}
         />
         <HealthPanel data={props.healthData} total={props.instances.length} />
       </section>
@@ -1111,6 +1172,7 @@ function DailyUsagePanel(props: {
   rpmHistoryData: RPMHistoryData[]
   rpmHistoryLoading: boolean
   rpmHistoryError: boolean
+  observedAt: number
 }) {
   const { t } = useTranslation()
   const isRPM = props.family !== 'new_api' && props.metric === 'rpm'
@@ -1316,12 +1378,23 @@ function DailyUsagePanel(props: {
                       formatTrendDate(String(label), true)
                     }
                     formatter={(value) => (
-                      <span className='font-mono font-medium tabular-nums'>
-                        {formatUsageMetric(
-                          usageMetric,
-                          Number(value),
-                          props.family,
-                          false
+                      <span className='grid gap-0.5'>
+                        <span className='font-mono font-medium tabular-nums'>
+                          {formatUsageMetric(
+                            usageMetric,
+                            Number(value),
+                            props.family,
+                            false
+                          )}
+                        </span>
+                        {props.observedAt > 0 && (
+                          <span className='text-muted-foreground text-[11px]'>
+                            {t('Collected at {{time}}', {
+                              time: new Date(
+                                props.observedAt * 1000
+                              ).toLocaleString(),
+                            })}
+                          </span>
                         )}
                       </span>
                     )}
@@ -1384,6 +1457,29 @@ function SummaryGrid(props: DashboardContentProps) {
     : '最大容量数据加载中'
   const showsAccountMetrics =
     props.family === 'conductor' || props.family === 'sub2api'
+  const costObservedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.summaryObservedAt)
+  )
+  const todayObservedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.todayObservedAt)
+  )
+  const amountStale = props.rows.some((row) => row.stale)
+  const summaryPending = props.rows.some(
+    (row) => !row.collected && row.lastAttemptStatus !== 'failed'
+  )
+  let resolvedCostDetail = t('No metric data available')
+  if (props.totals.quotaReady) resolvedCostDetail = costDetail
+  else if (summaryPending) resolvedCostDetail = t('Data loading')
+  let todayCostDetail = t('No metric data available')
+  if (props.totals.todayCostReady) {
+    todayCostDetail = t('Across {{count}} instances', {
+      count: props.totals.todayCostReady,
+    })
+  } else if (summaryPending) {
+    todayCostDetail = t('Data loading')
+  }
 
   return (
     <section
@@ -1518,10 +1614,15 @@ function SummaryGrid(props: DashboardContentProps) {
           props.totals.quotaReady ? props.totals.quota : null,
           props.family
         )}
-        detail={
-          props.totals.quotaReady ? costDetail : t('No metric data available')
-        }
+        detail={resolvedCostDetail}
         tone='amber'
+        exactValue={
+          props.family !== 'new_api' && props.totals.quotaReady
+            ? `US$${exactDecimal.format(props.totals.quota)}`
+            : undefined
+        }
+        observedAt={costObservedAt}
+        stale={amountStale}
       />
       {props.family !== 'new_api' && (
         <MetricCard
@@ -1532,10 +1633,15 @@ function SummaryGrid(props: DashboardContentProps) {
             props.totals.todayCostReady ? props.totals.todayCost : null,
             props.family
           )}
-          detail={t('Real-time across {{count}} instances', {
-            count: props.totals.todayCostReady,
-          })}
+          detail={todayCostDetail}
           tone='violet'
+          exactValue={
+            props.totals.todayCostReady
+              ? `US$${exactDecimal.format(props.totals.todayCost)}`
+              : undefined
+          }
+          observedAt={todayObservedAt}
+          stale={amountStale}
         />
       )}
       <MetricCard
@@ -1559,6 +1665,7 @@ function ConsumptionPanel(props: {
   metric: MetricKey
   data: { name: string; value: number }[]
   onMetricChange: (metric: MetricKey) => void
+  observedAt: number
 }) {
   const { t } = useTranslation()
   return (
@@ -1619,12 +1726,23 @@ function ConsumptionPanel(props: {
                 content={
                   <ChartTooltipContent
                     formatter={(value) => (
-                      <span className='font-mono font-medium tabular-nums'>
-                        {formatUsageMetric(
-                          props.metric,
-                          Number(value),
-                          props.family,
-                          false
+                      <span className='grid gap-0.5'>
+                        <span className='font-mono font-medium tabular-nums'>
+                          {formatUsageMetric(
+                            props.metric,
+                            Number(value),
+                            props.family,
+                            false
+                          )}
+                        </span>
+                        {props.observedAt > 0 && (
+                          <span className='text-muted-foreground text-[11px]'>
+                            {t('Collected at {{time}}', {
+                              time: new Date(
+                                props.observedAt * 1000
+                              ).toLocaleString(),
+                            })}
+                          </span>
                         )}
                       </span>
                     )}
@@ -1884,7 +2002,11 @@ function MetricCard(props: {
   detail: string
   tone: MetricCardTone
   action?: ReactNode
+  exactValue?: string
+  observedAt?: number
+  stale?: boolean
 }) {
+  const { t } = useTranslation()
   const toneClass: Record<MetricCardTone, string> = {
     success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     blue: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
@@ -1911,9 +2033,38 @@ function MetricCard(props: {
           </span>
         </div>
       </div>
-      <p className='mt-2 font-mono text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
-        {props.value}
-      </p>
+      {props.exactValue ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type='button'
+                className='focus-visible:ring-ring mt-2 block max-w-full cursor-help truncate text-left font-mono text-xl font-semibold tracking-tight tabular-nums outline-none focus-visible:ring-2 sm:text-2xl'
+              />
+            }
+          >
+            {props.value}
+          </TooltipTrigger>
+          <TooltipContent className='grid gap-1'>
+            <span className='font-mono tabular-nums'>{props.exactValue}</span>
+            {props.observedAt ? (
+              <span className='text-xs opacity-80'>
+                {props.stale
+                  ? t('Last successful collection at {{time}}', {
+                      time: new Date(props.observedAt * 1000).toLocaleString(),
+                    })
+                  : t('Collected at {{time}}', {
+                      time: new Date(props.observedAt * 1000).toLocaleString(),
+                    })}
+              </span>
+            ) : null}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <p className='mt-2 font-mono text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
+          {props.value}
+        </p>
+      )}
       <p className='text-muted-foreground mt-1 truncate text-xs'>
         {props.detail}
       </p>

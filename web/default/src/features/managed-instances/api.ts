@@ -47,6 +47,8 @@ import type {
   ManagedInstanceRPMHistoryBucket,
   ManagedInstanceTask,
   ManagedInstanceSummary,
+  ManagedDashboardRefreshResult,
+  ManagedDashboardSnapshotList,
   ManagedConfigBinding,
   ManagedConfigMode,
   ManagedConfigPreview,
@@ -55,6 +57,53 @@ import type {
   ManagedConfigTemplateInput,
   ManagedConfigTemplateList,
 } from './types'
+
+export type ManagedDashboardRangeInput = {
+  preset_days?: number
+  start?: number
+  end?: number
+}
+
+function managedDashboardParams(
+  ids: number[],
+  input: ManagedDashboardRangeInput
+) {
+  const params = new URLSearchParams({ ids: ids.join(',') })
+  if (input.preset_days) params.set('preset_days', String(input.preset_days))
+  if (input.start) params.set('start', String(input.start))
+  if (input.end) params.set('end', String(input.end))
+  return params
+}
+
+export async function getManagedDashboardSnapshots(
+  ids: number[],
+  input: ManagedDashboardRangeInput,
+  options?: { silent?: boolean }
+): Promise<ApiResponse<ManagedDashboardSnapshotList>> {
+  const params = managedDashboardParams(ids, input)
+  const response = await api.get(
+    `/api/managed-instances/dashboard-snapshots?${params.toString()}`,
+    {
+      disableDuplicate: true,
+      skipBusinessError: options?.silent,
+      skipErrorHandler: options?.silent,
+    }
+  )
+  return response.data
+}
+
+export async function refreshManagedDashboard(
+  ids: number[],
+  input: ManagedDashboardRangeInput
+): Promise<ApiResponse<ManagedDashboardRefreshResult[]>> {
+  const response = await api.post('/api/managed-instances/dashboard-refresh', {
+    instance_ids: ids,
+    preset_days: input.preset_days ?? 0,
+    start: input.start ?? 0,
+    end: input.end ?? 0,
+  })
+  return response.data
+}
 
 export async function getManagedInstances(
   filters: ManagedInstanceFilters

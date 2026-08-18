@@ -1047,6 +1047,21 @@ func CollectSummary(ctx context.Context, instanceID int64, window TimeWindow) (*
 	return collectSummary(ctx, instanceID, window, nil)
 }
 
+// CollectSummaryData collects a dashboard summary without writing the legacy
+// observation snapshot. The fleet dashboard collector persists the result in
+// its range-aware cache after a complete upstream request succeeds.
+func CollectSummaryData(ctx context.Context, instanceID int64, window TimeWindow) (*SummaryResult, error) {
+	_, adapter, connector, credential, err := observationClient(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	window, err = normalizeSummaryWindow(window)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.Summary(ctx, connector, credential, window)
+}
+
 func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*ObservationView, error) {
 	instance, _, connector, credential, err := observationClient(instanceID)
 	if err != nil {
@@ -1084,6 +1099,16 @@ func collectSummary(ctx context.Context, instanceID int64, window TimeWindow, gu
 	if err != nil {
 		return nil, err
 	}
+	window, err = normalizeSummaryWindow(window)
+	if err != nil {
+		return nil, err
+	}
+	observedAt := common.GetTimestamp()
+	summary, collectionErr := adapter.Summary(ctx, connector, credential, window)
+	return persistObservationWithGuard(instance.Id, model.ManagedInstanceSnapshotTypeSummary, "", observedAt, summary, collectionErr, guard)
+}
+
+func normalizeSummaryWindow(window TimeWindow) (TimeWindow, error) {
 	if window.End == 0 {
 		window.End = common.GetTimestamp()
 	}
@@ -1091,11 +1116,9 @@ func collectSummary(ctx context.Context, instanceID int64, window TimeWindow, gu
 		window.Start = window.End - 86400
 	}
 	if window.Start < 0 || window.Start >= window.End {
-		return nil, ErrInvalidInstance
+		return TimeWindow{}, ErrInvalidInstance
 	}
-	observedAt := common.GetTimestamp()
-	summary, collectionErr := adapter.Summary(ctx, connector, credential, window)
-	return persistObservationWithGuard(instance.Id, model.ManagedInstanceSnapshotTypeSummary, "", observedAt, summary, collectionErr, guard)
+	return window, nil
 }
 
 func observationClient(instanceID int64) (*model.ManagedInstance, InstanceAdapter, *Connector, *CredentialMaterial, error) {

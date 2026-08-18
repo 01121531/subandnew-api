@@ -31,6 +31,7 @@ var expectedControlPlaneTables = []string{
 	"exchange_rates",
 	"managed_account_snapshots",
 	"managed_config_templates",
+	"managed_dashboard_snapshots",
 	"managed_instance_alerts",
 	"managed_instance_audits",
 	"managed_instance_config_bindings",

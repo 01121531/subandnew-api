@@ -49,6 +49,13 @@ type managedAccountRefreshRequest struct {
 	Force      bool   `json:"force"`
 }
 
+type managedDashboardRefreshRequest struct {
+	InstanceIDs []int64 `json:"instance_ids"`
+	PresetDays  int     `json:"preset_days"`
+	Start       int64   `json:"start"`
+	End         int64   `json:"end"`
+}
+
 func ListManagedInstances(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -114,17 +121,139 @@ func GetManagedInstanceInventory(c *gin.Context) {
 
 func GetManagedInstanceMetrics(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok || !managedInstanceDataReady(c, id) {
-		return
-	}
-	window := managedInstanceTimeWindow(c)
-	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
-		return managedinstance.CollectSummary(c.Request.Context(), id, window)
-	})
 	if !ok {
 		return
 	}
+	window := managedInstanceTimeWindow(c)
+	presetDays, _ := strconv.Atoi(c.Query("preset_days"))
+	dashboardRange, err := service.NormalizeManagedDashboardRange(presetDays, window.Start, window.End)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	result, err := service.GetManagedDashboardSnapshots([]int64{id}, dashboardRange)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	section := result.Items[0].Summary
+	if section.Observation == nil {
+		_, _ = service.EnqueueManagedDashboardRefresh(id, c.GetInt("id"), dashboardRange)
+		c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "collection_pending", "data": managedinstance.ObservationView{
+			SourceInstanceID: id, CollectionStatus: "pending",
+		}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": section.Observation})
+}
+
+func GetManagedDashboardSnapshots(c *gin.Context) {
+	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	presetDays, _ := strconv.Atoi(c.Query("preset_days"))
+	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
+	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
+	dashboardRange, err := service.NormalizeManagedDashboardRange(presetDays, start, end)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	result, err := service.GetManagedDashboardSnapshots(instanceIDs, dashboardRange)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	for _, item := range result.Items {
+		if item.Summary.Observation == nil || item.Today.Observation == nil {
+			_, _ = service.EnqueueManagedDashboardRefresh(item.InstanceID, c.GetInt("id"), dashboardRange)
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func RefreshManagedDashboard(c *gin.Context) {
+	request := managedDashboardRefreshRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil || len(request.InstanceIDs) == 0 || len(request.InstanceIDs) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	dashboardRange, err := service.NormalizeManagedDashboardRange(request.PresetDays, request.Start, request.End)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	seen := map[int64]struct{}{}
+	results := make([]*service.ManagedDashboardRefreshView, 0, len(request.InstanceIDs))
+	for _, instanceID := range request.InstanceIDs {
+		if instanceID <= 0 {
+			managedInstanceError(c, managedinstance.ErrInvalidInstance)
+			return
+		}
+		if _, duplicate := seen[instanceID]; duplicate {
+			continue
+		}
+		seen[instanceID] = struct{}{}
+		result, enqueueErr := service.EnqueueManagedDashboardRefresh(instanceID, c.GetInt("id"), dashboardRange)
+		if enqueueErr != nil {
+			managedInstanceError(c, enqueueErr)
+			return
+		}
+		results = append(results, result)
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": results})
+}
+
+func StreamManagedDashboardEvents(c *gin.Context) {
+	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	events, unsubscribe := service.SubscribeManagedDashboard(instanceIDs)
+	defer unsubscribe()
+	allowed := make(map[int64]struct{}, len(instanceIDs))
+	for _, instanceID := range instanceIDs {
+		allowed[instanceID] = struct{}{}
+	}
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	c.Writer.Flush()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = c.Writer.WriteString(": heartbeat\n\n")
+			c.Writer.Flush()
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if event.Type == "topology" {
+				filtered := make([]int64, 0, len(event.InstanceIDs))
+				for _, instanceID := range event.InstanceIDs {
+					if _, ok := allowed[instanceID]; ok {
+						filtered = append(filtered, instanceID)
+					}
+				}
+				event.InstanceIDs = filtered
+			}
+			payload, marshalErr := json.Marshal(event)
+			if marshalErr != nil {
+				continue
+			}
+			_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, payload)
+			c.Writer.Flush()
+		}
+	}
 }
 
 func GetManagedInstanceRealtimeMetrics(c *gin.Context) {

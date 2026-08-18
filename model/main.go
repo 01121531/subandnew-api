@@ -193,6 +193,7 @@ func controlPlaneModels() []interface{} {
 		&ManagedInstance{},
 		&ManagedInstanceCredential{},
 		&ManagedInstanceSnapshot{},
+		&ManagedDashboardSnapshot{},
 		&ManagedAccountSnapshot{},
 		&ManagedRPMHistory{},
 		&ManagedInstanceAlert{},

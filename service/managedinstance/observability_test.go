@@ -439,9 +439,7 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 		case "/api/v1/admin/accounts":
 			t.Fatal("group account counts should avoid scanning the account inventory")
 		case "/api/v1/admin/usage/stats":
-			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
-			require.Equal(t, request.URL.Query().Get("start_date"), request.URL.Query().Get("end_date"))
-			writeProbeJSON(response, `{"code":0,"data":{"total_actual_cost":12.34}}`)
+			t.Fatal("realtime metrics must not duplicate the dashboard today-cost request")
 		default:
 			http.NotFound(response, request)
 		}
@@ -460,7 +458,7 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	require.Equal(t, 320.0, *realtime.ConcurrencyMax.Value)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.ConcurrencyStatus)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.AccountsCollectionStatus)
-	require.Equal(t, 12.34, *realtime.TodayCost.Value)
+	require.Nil(t, realtime.TodayCost.Value)
 }
 
 func TestCollectRealtimeMetricsVerifiesSub2ZeroRPMWithRecentUsage(t *testing.T) {
@@ -502,7 +500,7 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 		case "/api/v1/admin/accounts":
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true}],"total":1,"page":1,"page_size":100,"pages":1}}`)
 		case "/api/v1/admin/usage/stats":
-			writeProbeJSON(response, `{"code":0,"data":{"total_actual_cost":3.5}}`)
+			t.Fatal("realtime refresh must not duplicate the dashboard today-cost request")
 		case "/api/v1/admin/groups/capacity-summary":
 			writeProbeJSON(response, `{"code":0,"data":[{"group_id":49,"concurrency_used":48,"concurrency_max":320}]}`)
 		default:
@@ -516,7 +514,7 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 9.0, *state.RPM.Value)
 	require.Equal(t, 1, state.AccountsAvailable)
-	require.Equal(t, 3.5, *state.TodayCost.Value)
+	require.Nil(t, state.TodayCost.Value)
 	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
 	rpm.Store(11)
@@ -541,7 +539,7 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	require.True(t, state.Stale)
 	require.Equal(t, 11.0, *state.RPM.Value)
 	require.Equal(t, 1, state.AccountsAvailable)
-	require.Equal(t, 3.5, *state.TodayCost.Value)
+	require.Nil(t, state.TodayCost.Value)
 	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
 	require.LessOrEqual(t, state.LastDetailsAttemptAt, time.Now().Unix()-int64(sub2RealtimeDetailsRetryInterval/time.Second))
@@ -602,7 +600,7 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 	require.Equal(t, 12.0, *realtime.RPM.Value)
 }
 
-func TestConductorRealtimeRefreshKeepsLastTodayCost(t *testing.T) {
+func TestConductorRealtimeRefreshDoesNotQueryTodayCost(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	var failing atomic.Bool
@@ -619,10 +617,7 @@ func TestConductorRealtimeRefreshKeepsLastTodayCost(t *testing.T) {
 		case "/api/v1/system/quota":
 			writeProbeJSON(response, `{"code":200,"data":{"per_account":{"min_interval_ms":400}}}`)
 		case "/api/v1/reports/usage":
-			require.Equal(t, "date", request.URL.Query().Get("group_by"))
-			require.Equal(t, request.URL.Query().Get("from"), request.URL.Query().Get("to"))
-			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("tz"))
-			writeProbeJSON(response, `{"code":200,"data":{"rows":[{"date":"2026-08-18","cost":27.5}],"summary":{"cost":27.5},"total":1}}`)
+			t.Fatal("realtime metadata refresh must not duplicate the dashboard today-cost request")
 		default:
 			http.NotFound(response, request)
 		}
@@ -636,14 +631,14 @@ func TestConductorRealtimeRefreshKeepsLastTodayCost(t *testing.T) {
 	stream.mu.Lock()
 	state := stream.snapshotLocked()
 	stream.mu.Unlock()
-	require.Equal(t, 27.5, *state.TodayCost.Value)
+	require.Nil(t, state.TodayCost.Value)
 
 	failing.Store(true)
 	stream.refreshSources(context.Background())
 	stream.mu.Lock()
 	state = stream.snapshotLocked()
 	stream.mu.Unlock()
-	require.Equal(t, 27.5, *state.TodayCost.Value)
+	require.Nil(t, state.TodayCost.Value)
 }
 
 func TestConductorSummaryUsesReportTotalsAndDailyRows(t *testing.T) {

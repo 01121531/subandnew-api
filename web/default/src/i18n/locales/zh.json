@@ -1326,6 +1326,7 @@
     "Account data collection failed": "账号数据采集失败",
     "Updating account data in the background": "正在后台更新账号数据",
     "Collected at {{time}}": "采集于 {{time}}",
+    "Last successful collection at {{time}}": "最后成功采集于 {{time}}",
     "Total resources": "资源总数",
     "{{count}} unknown status": "{{count}} 个状态未知",
     "Available resources": "可用资源",
