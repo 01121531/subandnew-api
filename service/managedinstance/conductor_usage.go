@@ -114,6 +114,22 @@ type ConductorKeyUsageResult struct {
 	Currency         string     `json:"currency"`
 }
 
+func conductorTodayCost(ctx context.Context, connector *Connector, credential *CredentialMaterial) (float64, error) {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.UTC
+	}
+	today := time.Now().In(location).Format("2006-01-02")
+	report, err := conductorUsageReport(ctx, connector, credential, "date", today, today, location.String(), "")
+	if err != nil {
+		return 0, err
+	}
+	if report.Summary.Cost < 0 {
+		return 0, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	return report.Summary.Cost, nil
+}
+
 func conductorUsageReport(ctx context.Context, connector *Connector, credential *CredentialMaterial, groupBy, from, to, timezone, search string) (*conductorReportPayload, error) {
 	query := url.Values{
 		"group_by": {groupBy},

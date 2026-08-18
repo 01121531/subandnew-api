@@ -612,6 +612,12 @@ export function FleetDashboard() {
             ? Boolean(streamed?.observed_at)
             : instance.kind === 'sub2api' &&
               polledRealtime?.accounts_collection_status === 'succeeded'
+        let todayCost: number | null = null
+        if (instance.kind === 'sub2api') {
+          todayCost = metricValue(polledRealtime?.today_cost)
+        } else if (instance.kind === 'conductor') {
+          todayCost = metricValue(streamed?.today_cost)
+        }
         return {
           instance,
           summary,
@@ -629,10 +635,7 @@ export function FleetDashboard() {
             ? (realtime?.accounts_available ?? 0)
             : null,
           accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
-          todayCost:
-            instance.kind === 'sub2api'
-              ? metricValue(polledRealtime?.today_cost)
-              : null,
+          todayCost,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
         }
@@ -1381,7 +1384,7 @@ function SummaryGrid(props: DashboardContentProps) {
       aria-label={t('Fleet summary')}
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
-        props.family === 'conductor' && 'xl:grid-cols-6',
+        props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-7',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
@@ -1514,7 +1517,7 @@ function SummaryGrid(props: DashboardContentProps) {
         }
         tone='amber'
       />
-      {props.family === 'sub2api' && (
+      {props.family !== 'new_api' && (
         <MetricCard
           icon={CircleDollarSign}
           label={t('Today consumption')}
@@ -1766,14 +1769,14 @@ function PerformanceTable({
                 {family === 'new_api' && (
                   <TableHead className='text-right'>{t('Tokens')}</TableHead>
                 )}
-                {family === 'sub2api' && (
+                <TableHead className='text-right'>
+                  {t(metricLabel('quota', family))}
+                </TableHead>
+                {family !== 'new_api' && (
                   <TableHead className='text-right'>
                     {t('Today consumption')}
                   </TableHead>
                 )}
-                <TableHead className='text-right'>
-                  {t(metricLabel('quota', family))}
-                </TableHead>
                 <TableHead>{t('Version')}</TableHead>
                 <TableHead className='pe-6 text-right'>
                   {t('Last seen')}
@@ -1832,14 +1835,14 @@ function PerformanceTable({
                       {formatMetric(row.tokens, false)}
                     </TableCell>
                   )}
-                  {family === 'sub2api' && (
+                  <TableCell className='text-right font-mono text-xs tabular-nums'>
+                    {formatUsageMetric('quota', row.quota, family, false)}
+                  </TableCell>
+                  {family !== 'new_api' && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatUsageMetric('quota', row.todayCost, family, false)}
                     </TableCell>
                   )}
-                  <TableCell className='text-right font-mono text-xs tabular-nums'>
-                    {formatUsageMetric('quota', row.quota, family, false)}
-                  </TableCell>
                   <TableCell className='font-mono text-xs'>
                     {row.instance.version || '--'}
                   </TableCell>

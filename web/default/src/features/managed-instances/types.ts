@@ -251,6 +251,7 @@ export interface ManagedInstanceRealtimeState {
   error_code?: string
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  today_cost?: ManagedInstanceMetricSample
   concurrency_used?: ManagedInstanceMetricSample
   concurrency_max?: ManagedInstanceMetricSample
   accounts_total: number

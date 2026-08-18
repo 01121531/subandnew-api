@@ -588,6 +588,50 @@ func TestConductorInventoryAndSummary(t *testing.T) {
 	require.Equal(t, 12.0, *realtime.RPM.Value)
 }
 
+func TestConductorRealtimeRefreshKeepsLastTodayCost(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var failing atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if failing.Load() {
+			http.Error(response, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		switch request.URL.Path {
+		case "/api/v1/auth/login":
+			writeProbeJSON(response, `{"code":200,"data":{"token":"conductor-token"}}`)
+		case "/api/v1/ws-clients":
+			writeProbeJSON(response, `{"code":200,"data":[]}`)
+		case "/api/v1/system/quota":
+			writeProbeJSON(response, `{"code":200,"data":{"per_account":{"min_interval_ms":400}}}`)
+		case "/api/v1/reports/usage":
+			require.Equal(t, "date", request.URL.Query().Get("group_by"))
+			require.Equal(t, request.URL.Query().Get("from"), request.URL.Query().Get("to"))
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("tz"))
+			writeProbeJSON(response, `{"code":200,"data":{"rows":[{"date":"2026-08-18","cost":27.5}],"summary":{"cost":27.5},"total":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindConductor, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "Cli@mini",
+	})
+	stream := defaultConductorRealtimeHub.stream(instance.Id, true)
+	stream.refreshSources(context.Background())
+	stream.mu.Lock()
+	state := stream.snapshotLocked()
+	stream.mu.Unlock()
+	require.Equal(t, 27.5, *state.TodayCost.Value)
+
+	failing.Store(true)
+	stream.refreshSources(context.Background())
+	stream.mu.Lock()
+	state = stream.snapshotLocked()
+	stream.mu.Unlock()
+	require.Equal(t, 27.5, *state.TodayCost.Value)
+}
+
 func TestConductorSummaryUsesReportTotalsAndDailyRows(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
