@@ -1373,6 +1373,8 @@
     "No active alerts": "No active alerts",
     "Instance performance": "Instance performance",
     "Consumption and collection status by instance": "Consumption and collection status by instance",
+    "Concurrency": "Concurrency",
+    "Sub2API group {{id}}": "Used / maximum concurrency for Sub2API group {{id}}",
     "Manage instances": "Manage instances",
     "Last seen": "Last seen",
     "No instances yet": "No instances yet",

@@ -433,6 +433,9 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 			require.Equal(t, "100", request.URL.Query().Get("page_size"))
 			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":49,"account_count":389,"active_account_count":10,"rate_limited_account_count":148}],"total":1,"page":1,"page_size":100,"pages":1}}`)
+		case "/api/v1/admin/groups/capacity-summary":
+			require.Equal(t, "Asia/Shanghai", request.URL.Query().Get("timezone"))
+			writeProbeJSON(response, `{"code":0,"data":[{"group_id":12,"concurrency_used":45,"concurrency_max":120},{"group_id":49,"concurrency_used":48,"concurrency_max":320}]}`)
 		case "/api/v1/admin/accounts":
 			t.Fatal("group account counts should avoid scanning the account inventory")
 		case "/api/v1/admin/usage/stats":
@@ -453,6 +456,9 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	require.Equal(t, 389, realtime.AccountsTotal)
 	require.Equal(t, 10, realtime.AccountsAvailable)
 	require.Equal(t, 148, realtime.AccountsRateLimited)
+	require.Equal(t, 48.0, *realtime.ConcurrencyUsed.Value)
+	require.Equal(t, 320.0, *realtime.ConcurrencyMax.Value)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.ConcurrencyStatus)
 	require.Equal(t, model.ManagedInstanceCollectionSucceeded, realtime.AccountsCollectionStatus)
 	require.Equal(t, 12.34, *realtime.TodayCost.Value)
 }
@@ -495,6 +501,8 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 			writeProbeJSON(response, `{"code":0,"data":{"items":[{"id":1,"status":"active","schedulable":true}],"total":1,"page":1,"page_size":100,"pages":1}}`)
 		case "/api/v1/admin/usage/stats":
 			writeProbeJSON(response, `{"code":0,"data":{"total_actual_cost":3.5}}`)
+		case "/api/v1/admin/groups/capacity-summary":
+			writeProbeJSON(response, `{"code":0,"data":[{"group_id":49,"concurrency_used":48,"concurrency_max":320}]}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -507,6 +515,8 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	require.Equal(t, 9.0, *state.RPM.Value)
 	require.Equal(t, 1, state.AccountsAvailable)
 	require.Equal(t, 3.5, *state.TodayCost.Value)
+	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
+	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
 	sub2RealtimeCache.Lock()
 	cached := sub2RealtimeCache.states[instance.Id]
 	cached.LastDetailsAttemptAt = 0
@@ -519,11 +529,15 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	require.Equal(t, 9.0, *state.RPM.Value)
 	require.Equal(t, 1, state.AccountsAvailable)
 	require.Equal(t, 3.5, *state.TodayCost.Value)
+	require.Equal(t, 48.0, *state.ConcurrencyUsed.Value)
+	require.Equal(t, 320.0, *state.ConcurrencyMax.Value)
 
 	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)
 	require.Equal(t, 9.0, *realtime.RPM.Value)
+	require.Equal(t, 48.0, *realtime.ConcurrencyUsed.Value)
+	require.Equal(t, 320.0, *realtime.ConcurrencyMax.Value)
 	require.True(t, realtime.Stale)
 	require.Equal(t, "reconnecting", realtime.StreamStatus)
 }

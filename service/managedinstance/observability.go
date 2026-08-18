@@ -120,6 +120,9 @@ type SummaryResult struct {
 type RealtimeMetricsResult struct {
 	RPM                      MetricSample `json:"rpm"`
 	RPMCapacity              MetricSample `json:"rpm_capacity"`
+	ConcurrencyUsed          MetricSample `json:"concurrency_used"`
+	ConcurrencyMax           MetricSample `json:"concurrency_max"`
+	ConcurrencyStatus        string       `json:"concurrency_collection_status,omitempty"`
 	TodayCost                MetricSample `json:"today_cost"`
 	AccountsTotal            int          `json:"accounts_total,omitempty"`
 	AccountsAvailable        int          `json:"accounts_available,omitempty"`

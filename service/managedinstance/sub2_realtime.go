@@ -20,6 +20,9 @@ type Sub2RealtimeState struct {
 	DetailsObservedAt        int64        `json:"details_observed_at"`
 	LastDetailsAttemptAt     int64        `json:"last_details_attempt_at"`
 	RPM                      MetricSample `json:"rpm"`
+	ConcurrencyUsed          MetricSample `json:"concurrency_used"`
+	ConcurrencyMax           MetricSample `json:"concurrency_max"`
+	ConcurrencyStatus        string       `json:"concurrency_collection_status,omitempty"`
 	TodayCost                MetricSample `json:"today_cost"`
 	AccountsTotal            int          `json:"accounts_total"`
 	AccountsAvailable        int          `json:"accounts_available"`
@@ -30,12 +33,16 @@ type Sub2RealtimeState struct {
 }
 
 const sub2RealtimeDetailsInterval = 60 * time.Second
+const sub2DefaultCapacityGroupID int64 = 49
 
 type sub2RealtimeDetails struct {
 	AccountsTotal       int
 	AccountsAvailable   int
 	AccountsRateLimited int
 	AccountsErr         error
+	ConcurrencyUsed     MetricSample
+	ConcurrencyMax      MetricSample
+	ConcurrencyErr      error
 	TodayCost           MetricSample
 	TodayCostErr        error
 }
@@ -82,6 +89,14 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 		} else if state.AccountsCollectionStatus == "" {
 			state.AccountsCollectionStatus = model.ManagedInstanceCollectionFailed
 		}
+		if details.ConcurrencyErr == nil {
+			state.ConcurrencyUsed = details.ConcurrencyUsed
+			state.ConcurrencyMax = details.ConcurrencyMax
+			state.ConcurrencyStatus = model.ManagedInstanceCollectionSucceeded
+			detailsSucceeded = true
+		} else if state.ConcurrencyStatus == "" {
+			state.ConcurrencyStatus = model.ManagedInstanceCollectionFailed
+		}
 		if details.TodayCostErr == nil {
 			state.TodayCost = details.TodayCost
 			detailsSucceeded = true
@@ -113,7 +128,7 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, credential *CredentialMaterial) sub2RealtimeDetails {
 	var result sub2RealtimeDetails
 	var requests sync.WaitGroup
-	requests.Add(2)
+	requests.Add(3)
 	go func() {
 		defer requests.Done()
 		total, available, rateLimited, err := fetchSub2GroupAccountCounts(ctx, connector, credential)
@@ -127,6 +142,16 @@ func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, crede
 		result.AccountsTotal = total
 		result.AccountsAvailable = available
 		result.AccountsRateLimited = rateLimited
+	}()
+	go func() {
+		defer requests.Done()
+		used, maximum, err := fetchSub2GroupConcurrency(ctx, connector, credential, sub2DefaultCapacityGroupID)
+		if err != nil {
+			result.ConcurrencyErr = err
+			return
+		}
+		result.ConcurrencyUsed = supportedMetric(used, "concurrency")
+		result.ConcurrencyMax = supportedMetric(maximum, "concurrency")
 	}()
 	go func() {
 		defer requests.Done()
@@ -145,6 +170,39 @@ func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, crede
 	}()
 	requests.Wait()
 	return result
+}
+
+func fetchSub2GroupConcurrency(ctx context.Context, connector *Connector, credential *CredentialMaterial, groupID int64) (float64, float64, error) {
+	query := url.Values{"timezone": {"Asia/Shanghai"}}
+	response, err := sub2APIDoJSON(ctx, connector, credential, http.MethodGet, "/api/v1/admin/groups/capacity-summary?"+query.Encode(), nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return 0, 0, err
+	}
+	data, err := sub2EnvelopeData(response)
+	if err != nil {
+		return 0, 0, err
+	}
+	var groups []struct {
+		GroupID         int64   `json:"group_id"`
+		ConcurrencyUsed float64 `json:"concurrency_used"`
+		ConcurrencyMax  float64 `json:"concurrency_max"`
+	}
+	if err := json.Unmarshal(data, &groups); err != nil || groups == nil {
+		return 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	for _, group := range groups {
+		if group.GroupID != groupID {
+			continue
+		}
+		if group.ConcurrencyUsed < 0 || group.ConcurrencyMax < 0 {
+			return 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		}
+		return group.ConcurrencyUsed, group.ConcurrencyMax, nil
+	}
+	return 0, 0, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 }
 
 func fetchSub2GroupAccountCounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) (int, int, int, error) {
@@ -231,7 +289,7 @@ func CurrentSub2Realtime(instanceID int64) (Sub2RealtimeState, bool) {
 	sub2RealtimeCache.RLock()
 	defer sub2RealtimeCache.RUnlock()
 	state, ok := sub2RealtimeCache.states[instanceID]
-	return state, ok && (state.RPM.Value != nil || state.TodayCost.Value != nil || state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded)
+	return state, ok && (state.RPM.Value != nil || state.TodayCost.Value != nil || state.ConcurrencyStatus == model.ManagedInstanceCollectionSucceeded || state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded)
 }
 
 func sub2RealtimeMetrics(instanceID int64) (*RealtimeMetricsResult, int64, bool) {
@@ -245,6 +303,9 @@ func sub2RealtimeMetrics(instanceID int64) (*RealtimeMetricsResult, int64, bool)
 	}
 	return &RealtimeMetricsResult{
 		RPM:                      state.RPM,
+		ConcurrencyUsed:          state.ConcurrencyUsed,
+		ConcurrencyMax:           state.ConcurrencyMax,
+		ConcurrencyStatus:        state.ConcurrencyStatus,
 		TodayCost:                state.TodayCost,
 		AccountsTotal:            state.AccountsTotal,
 		AccountsAvailable:        state.AccountsAvailable,

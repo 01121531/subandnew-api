@@ -23,6 +23,7 @@ import {
   Building2,
   CheckCircle2,
   CircleDollarSign,
+  Cpu,
   DatabaseZap,
   Gauge,
   Radio,
@@ -113,6 +114,8 @@ type InstanceMetricRow = {
   requests: number | null
   rpm: number | null
   rpmCapacity: number | null
+  concurrencyUsed: number | null
+  concurrencyMax: number | null
   accountsAvailable: number | null
   accountsTotal: number | null
   todayCost: number | null
@@ -574,6 +577,7 @@ export function FleetDashboard() {
         const realtime = observation.data
         const hasRealtimeData =
           realtime?.rpm.collection_status === 'succeeded' ||
+          realtime?.concurrency_collection_status === 'succeeded' ||
           realtime?.accounts_collection_status === 'succeeded' ||
           realtime?.today_cost?.collection_status === 'succeeded'
         if (
@@ -619,6 +623,8 @@ export function FleetDashboard() {
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
           rpmCapacity: metricValue(realtime?.rpm_capacity),
+          concurrencyUsed: metricValue(realtime?.concurrency_used),
+          concurrencyMax: metricValue(realtime?.concurrency_max),
           accountsAvailable: accountsReady
             ? (realtime?.accounts_available ?? 0)
             : null,
@@ -639,6 +645,14 @@ export function FleetDashboard() {
       requests: rows.reduce((sum, row) => sum + (row.requests ?? 0), 0),
       rpm: rows.reduce((sum, row) => sum + (row.rpm ?? 0), 0),
       rpmCapacity: rows.reduce((sum, row) => sum + (row.rpmCapacity ?? 0), 0),
+      concurrencyUsed: rows.reduce(
+        (sum, row) => sum + (row.concurrencyUsed ?? 0),
+        0
+      ),
+      concurrencyMax: rows.reduce(
+        (sum, row) => sum + (row.concurrencyMax ?? 0),
+        0
+      ),
       accountsAvailable: rows.reduce(
         (sum, row) => sum + (row.accountsAvailable ?? 0),
         0
@@ -657,6 +671,9 @@ export function FleetDashboard() {
       requestsReady: rows.filter((row) => row.requests != null).length,
       rpmReady: rows.filter((row) => row.rpm != null).length,
       rpmCapacityReady: rows.filter((row) => row.rpmCapacity != null).length,
+      concurrencyReady: rows.filter(
+        (row) => row.concurrencyUsed != null && row.concurrencyMax != null
+      ).length,
       accountsReady: rows.filter((row) => row.accountsTotal != null).length,
       todayCostReady: rows.filter((row) => row.todayCost != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
@@ -1002,6 +1019,8 @@ type DashboardContentProps = {
     requests: number
     rpm: number
     rpmCapacity: number
+    concurrencyUsed: number
+    concurrencyMax: number
     accountsAvailable: number
     accountsTotal: number
     todayCost: number
@@ -1012,6 +1031,7 @@ type DashboardContentProps = {
     requestsReady: number
     rpmReady: number
     rpmCapacityReady: number
+    concurrencyReady: number
     accountsReady: number
     todayCostReady: number
     tokensReady: number
@@ -1389,30 +1409,57 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='blue'
         />
       )}
-      <MetricCard
-        icon={Radio}
-        label='RPM'
-        value={
-          props.family === 'conductor'
-            ? rpmValue
-            : formatMetric(props.totals.rpmReady ? props.totals.rpm : null)
-        }
-        detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
-        tone='success'
-        action={
-          <Button
-            variant='ghost'
-            size='icon-xs'
-            aria-label={t('Refresh')}
-            title={t('Refresh')}
-            onClick={props.onRPMRefresh}
-          >
-            <RefreshCw
-              className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
-            />
-          </Button>
-        }
-      />
+      {props.family === 'sub2api' ? (
+        <MetricCard
+          icon={Cpu}
+          label={t('Concurrency')}
+          value={
+            props.totals.concurrencyReady === props.instances.length
+              ? `${formatMetric(props.totals.concurrencyUsed, false)} / ${formatMetric(props.totals.concurrencyMax, false)}`
+              : '-- / --'
+          }
+          detail={t('Sub2API group {{id}}', { id: 49 })}
+          tone='amber'
+          action={
+            <Button
+              variant='ghost'
+              size='icon-xs'
+              aria-label={t('Refresh')}
+              title={t('Refresh')}
+              onClick={props.onRPMRefresh}
+            >
+              <RefreshCw
+                className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
+              />
+            </Button>
+          }
+        />
+      ) : (
+        <MetricCard
+          icon={Radio}
+          label='RPM'
+          value={
+            props.family === 'conductor'
+              ? rpmValue
+              : formatMetric(props.totals.rpmReady ? props.totals.rpm : null)
+          }
+          detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
+          tone='success'
+          action={
+            <Button
+              variant='ghost'
+              size='icon-xs'
+              aria-label={t('Refresh')}
+              title={t('Refresh')}
+              onClick={props.onRPMRefresh}
+            >
+              <RefreshCw
+                className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
+              />
+            </Button>
+          }
+        />
+      )}
       {showsAccountMetrics && (
         <MetricCard
           icon={UserCheck}
@@ -1698,7 +1745,14 @@ function PerformanceTable({
                 {family === 'new_api' && (
                   <TableHead className='text-right'>{t('Requests')}</TableHead>
                 )}
-                <TableHead className='text-right'>RPM</TableHead>
+                {family !== 'sub2api' && (
+                  <TableHead className='text-right'>RPM</TableHead>
+                )}
+                {family === 'sub2api' && (
+                  <TableHead className='text-right'>
+                    {t('Concurrency')}
+                  </TableHead>
+                )}
                 {showsAccountMetrics && (
                   <TableHead className='text-right'>
                     {t('Available accounts')}
@@ -1751,9 +1805,18 @@ function PerformanceTable({
                       {formatMetric(row.requests, false)}
                     </TableCell>
                   )}
-                  <TableCell className='text-right font-mono text-xs tabular-nums'>
-                    {formatMetric(row.rpm, false)}
-                  </TableCell>
+                  {family !== 'sub2api' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {formatMetric(row.rpm, false)}
+                    </TableCell>
+                  )}
+                  {family === 'sub2api' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {row.concurrencyUsed != null && row.concurrencyMax != null
+                        ? `${formatMetric(row.concurrencyUsed, false)} / ${formatMetric(row.concurrencyMax, false)}`
+                        : '-- / --'}
+                    </TableCell>
+                  )}
                   {showsAccountMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.accountsAvailable, false)}

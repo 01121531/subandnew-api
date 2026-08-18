@@ -1373,6 +1373,8 @@
     "No active alerts": "当前没有活跃告警",
     "Instance performance": "实例性能明细",
     "Consumption and collection status by instance": "按实例查看用量与数据采集状态",
+    "Concurrency": "并发数",
+    "Sub2API group {{id}}": "Sub2API 分组 {{id}} 的已用 / 最大并发",
     "Manage instances": "管理实例",
     "Last seen": "最后在线",
     "No instances yet": "还没有实例",

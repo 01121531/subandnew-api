@@ -229,6 +229,9 @@ export interface ManagedInstanceSummary {
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  concurrency_used: ManagedInstanceMetricSample
+  concurrency_max: ManagedInstanceMetricSample
+  concurrency_collection_status?: string
   today_cost: ManagedInstanceMetricSample
   accounts_total?: number
   accounts_available?: number
@@ -248,6 +251,8 @@ export interface ManagedInstanceRealtimeState {
   error_code?: string
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  concurrency_used?: ManagedInstanceMetricSample
+  concurrency_max?: ManagedInstanceMetricSample
   accounts_total: number
   accounts_available: number
   accounts_rate_limited: number
