@@ -20,7 +20,6 @@ import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
-  AlertTriangle,
   Building2,
   CheckCircle2,
   CircleDollarSign,
@@ -115,7 +114,6 @@ type InstanceMetricRow = {
   rpm: number | null
   rpmCapacity: number | null
   accountsAvailable: number | null
-  accountsRateLimited: number | null
   accountsTotal: number | null
   todayCost: number | null
   tokens: number | null
@@ -624,9 +622,6 @@ export function FleetDashboard() {
           accountsAvailable: accountsReady
             ? (realtime?.accounts_available ?? 0)
             : null,
-          accountsRateLimited: accountsReady
-            ? (realtime?.accounts_rate_limited ?? 0)
-            : null,
           accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
           todayCost:
             instance.kind === 'sub2api'
@@ -648,10 +643,6 @@ export function FleetDashboard() {
         (sum, row) => sum + (row.accountsAvailable ?? 0),
         0
       ),
-      accountsRateLimited: rows.reduce(
-        (sum, row) => sum + (row.accountsRateLimited ?? 0),
-        0
-      ),
       accountsTotal: rows.reduce(
         (sum, row) => sum + (row.accountsTotal ?? 0),
         0
@@ -667,9 +658,6 @@ export function FleetDashboard() {
       rpmReady: rows.filter((row) => row.rpm != null).length,
       rpmCapacityReady: rows.filter((row) => row.rpmCapacity != null).length,
       accountsReady: rows.filter((row) => row.accountsTotal != null).length,
-      accountsRateLimitedReady: rows.filter(
-        (row) => row.accountsRateLimited != null
-      ).length,
       todayCostReady: rows.filter((row) => row.todayCost != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
@@ -1015,7 +1003,6 @@ type DashboardContentProps = {
     rpm: number
     rpmCapacity: number
     accountsAvailable: number
-    accountsRateLimited: number
     accountsTotal: number
     todayCost: number
     tokens: number
@@ -1026,7 +1013,6 @@ type DashboardContentProps = {
     rpmReady: number
     rpmCapacityReady: number
     accountsReady: number
-    accountsRateLimitedReady: number
     todayCostReady: number
     tokensReady: number
     quotaReady: number
@@ -1375,8 +1361,8 @@ function SummaryGrid(props: DashboardContentProps) {
       aria-label={t('Fleet summary')}
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
-        props.family === 'conductor' && 'xl:grid-cols-7',
-        props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
+        props.family === 'conductor' && 'xl:grid-cols-6',
+        props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-7',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
@@ -1439,22 +1425,6 @@ function SummaryGrid(props: DashboardContentProps) {
             count: props.totals.accountsReady,
           })}
           tone='success'
-        />
-      )}
-      {showsAccountMetrics && (
-        <MetricCard
-          icon={AlertTriangle}
-          label={t('Rate-limited accounts')}
-          value={formatMetric(
-            props.totals.accountsRateLimitedReady
-              ? props.totals.accountsRateLimited
-              : null,
-            false
-          )}
-          detail={t('Real-time across {{count}} instances', {
-            count: props.totals.accountsRateLimitedReady,
-          })}
-          tone={props.totals.accountsRateLimited ? 'amber' : 'success'}
         />
       )}
       {showsAccountMetrics && (
@@ -1739,11 +1709,6 @@ function PerformanceTable({
                     {t('Total accounts')}
                   </TableHead>
                 )}
-                {showsAccountMetrics && (
-                  <TableHead className='text-right'>
-                    {t('Rate-limited accounts')}
-                  </TableHead>
-                )}
                 {family === 'new_api' && (
                   <TableHead className='text-right'>{t('Tokens')}</TableHead>
                 )}
@@ -1797,11 +1762,6 @@ function PerformanceTable({
                   {showsAccountMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.accountsTotal, false)}
-                    </TableCell>
-                  )}
-                  {showsAccountMetrics && (
-                    <TableCell className='text-right font-mono text-xs tabular-nums'>
-                      {formatMetric(row.accountsRateLimited, false)}
                     </TableCell>
                   )}
                   {family === 'new_api' && (
