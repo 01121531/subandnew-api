@@ -1303,6 +1303,19 @@ func normalizedRateLimited(fields map[string]json.RawMessage, status string) boo
 			return true
 		}
 	}
+	now := time.Now().Unix()
+	for _, key := range []string{"rate_limit_reset_at", "overload_until", "temp_unschedulable_until"} {
+		until, ok := firstJSONUnixTime(fields, key)
+		if !ok {
+			continue
+		}
+		if until > 1_000_000_000_000 {
+			until /= 1000
+		}
+		if until > now {
+			return true
+		}
+	}
 	return false
 }
 

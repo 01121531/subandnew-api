@@ -150,6 +150,26 @@ func TestCollectInventoryAggregatesSub2APIPages(t *testing.T) {
 	require.True(t, page.Items[1].RateLimited)
 }
 
+func TestNormalizeInventoryItemUsesActiveSub2RateLimitWindows(t *testing.T) {
+	future := time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+	past := time.Now().Add(-time.Hour).Format(time.RFC3339Nano)
+	for _, field := range []string{"rate_limit_reset_at", "overload_until", "temp_unschedulable_until"} {
+		t.Run(field, func(t *testing.T) {
+			raw := json.RawMessage(fmt.Sprintf(`{"id":1,"status":"active","schedulable":true,%q:%q}`, field, future))
+			item, ok := normalizeInventoryItem(raw)
+			require.True(t, ok)
+			require.NotNil(t, item.Enabled)
+			require.True(t, *item.Enabled)
+			require.True(t, item.RateLimited)
+		})
+	}
+
+	raw := json.RawMessage(fmt.Sprintf(`{"id":1,"status":"active","schedulable":true,"rate_limit_reset_at":%q}`, past))
+	item, ok := normalizeInventoryItem(raw)
+	require.True(t, ok)
+	require.False(t, item.RateLimited)
+}
+
 func TestCollectInventoryAggregatesConductorPagesConcurrentlyDespiteLowReportedTotal(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
