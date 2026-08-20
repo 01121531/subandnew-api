@@ -12,24 +12,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestManagedSub2RealtimeCollectorSelectsSub2InstancesAndLimitsConcurrency(t *testing.T) {
+func TestManagedPollingRealtimeCollectorSelectsSupportedInstancesAndLimitsConcurrency(t *testing.T) {
 	truncate(t)
+	managedPollingRealtimeInFlight.Clear()
 	instances := []model.ManagedInstance{
 		{Name: "sub2-one", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://one.example.com"},
 		{Name: "new-api", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://new.example.com"},
+		{Name: "huichuan", Kind: model.ManagedInstanceKindHuichuan, BaseURL: "https://huichuan.example.com"},
+		{Name: "conductor", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://conductor.example.com"},
 		{Name: "sub2-two", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://two.example.com"},
-		{Name: "sub2-three", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://three.example.com"},
 	}
 	require.NoError(t, model.DB.Create(&instances).Error)
 
-	instanceIDs := managedSub2RealtimeInstanceIDs(context.Background())
-	require.Equal(t, []int64{instances[0].Id, instances[2].Id, instances[3].Id}, instanceIDs)
+	targets := managedPollingRealtimeTargets(context.Background())
+	require.Len(t, targets, 4)
+	require.Equal(t, []int64{instances[0].Id, instances[1].Id, instances[2].Id, instances[4].Id}, []int64{
+		targets[0].InstanceID,
+		targets[1].InstanceID,
+		targets[2].InstanceID,
+		targets[3].InstanceID,
+	})
 
 	var active atomic.Int32
 	var maxActive atomic.Int32
 	var mu sync.Mutex
 	refreshed := map[int64]int{}
-	refreshManagedSub2RealtimeInstances(context.Background(), instanceIDs, func(_ context.Context, instanceID int64) (managedinstance.Sub2RealtimeState, error) {
+	refreshManagedRealtimeTargetsWith(context.Background(), targets, func(_ context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
 		current := active.Add(1)
 		defer active.Add(-1)
 		for {
@@ -40,25 +48,28 @@ func TestManagedSub2RealtimeCollectorSelectsSub2InstancesAndLimitsConcurrency(t 
 		}
 		time.Sleep(20 * time.Millisecond)
 		mu.Lock()
-		refreshed[instanceID]++
+		refreshed[target.InstanceID]++
 		mu.Unlock()
-		return managedinstance.Sub2RealtimeState{InstanceID: instanceID}, nil
+		return managedinstance.ManagedRealtimeState{InstanceID: target.InstanceID}, nil
 	})
 
-	require.LessOrEqual(t, maxActive.Load(), int32(managedSub2RealtimeWorkers))
-	require.Equal(t, map[int64]int{instances[0].Id: 1, instances[2].Id: 1, instances[3].Id: 1}, refreshed)
+	require.LessOrEqual(t, maxActive.Load(), int32(managedPollingRealtimeWorkers))
+	for _, target := range targets {
+		require.Equal(t, 1, refreshed[target.InstanceID])
+	}
 }
 
-func TestManagedSub2RealtimeCollectorRecordsSuccessfulRPM(t *testing.T) {
+func TestManagedPollingRealtimeCollectorRecordsSuccessfulRPM(t *testing.T) {
 	truncate(t)
+	managedPollingRealtimeInFlight.Clear()
 	instance := model.ManagedInstance{Name: "sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"}
 	require.NoError(t, model.DB.Create(&instance).Error)
 	rpm := 37.0
 	observedAt := time.Now().Unix()
 
-	refreshManagedSub2RealtimeInstances(context.Background(), []int64{instance.Id}, func(_ context.Context, instanceID int64) (managedinstance.Sub2RealtimeState, error) {
-		return managedinstance.Sub2RealtimeState{
-			InstanceID: instanceID,
+	refreshManagedRealtimeTargetsWith(context.Background(), []managedRealtimeTarget{{InstanceID: instance.Id, Kind: instance.Kind, BaseURL: instance.BaseURL}}, func(_ context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
+		return managedinstance.ManagedRealtimeState{
+			InstanceID: target.InstanceID,
 			ObservedAt: observedAt,
 			RPM: managedinstance.MetricSample{
 				Value:            &rpm,

@@ -116,6 +116,21 @@ func CurrentConductorRealtime(instanceID int64) (ConductorRealtimeState, bool) {
 	return state, state.RPM.Value != nil
 }
 
+func RefreshConductorRealtime(ctx context.Context, instanceID int64) (ConductorRealtimeState, error) {
+	instance, err := Get(instanceID)
+	if err != nil {
+		return ConductorRealtimeState{}, err
+	}
+	if instance.Kind != model.ManagedInstanceKindConductor {
+		return ConductorRealtimeState{}, ErrUnsupportedCapability
+	}
+	stream := defaultConductorRealtimeHub.stream(instanceID, true)
+	stream.bootstrap()
+	stream.refreshSources(ctx)
+	state, _ := CurrentConductorRealtime(instanceID)
+	return state, nil
+}
+
 func activeConductorRealtime(instanceID int64) (ConductorRealtimeState, bool) {
 	stream := defaultConductorRealtimeHub.stream(instanceID, false)
 	if stream == nil {

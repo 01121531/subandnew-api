@@ -64,9 +64,9 @@ func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
 	}
 }
 
-func TestConductorRPMHistoryRejectsNonConductorInstances(t *testing.T) {
+func TestManagedRPMHistoryRejectsGenericInstances(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
-	instance := model.ManagedInstance{Name: "new-api", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://new.example.com"}
+	instance := model.ManagedInstance{Name: "generic", Kind: model.ManagedInstanceKindGeneric, BaseURL: "https://generic.example.com"}
 	if err := db.Create(&instance).Error; err != nil {
 		t.Fatalf("create instance: %v", err)
 	}
@@ -76,23 +76,29 @@ func TestConductorRPMHistoryRejectsNonConductorInstances(t *testing.T) {
 	}
 }
 
-func TestManagedRPMHistorySupportsSub2WithoutCapacity(t *testing.T) {
+func TestManagedRPMHistorySupportsPollingPlatformsWithoutCapacity(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
-	instance := model.ManagedInstance{Name: "sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"}
-	if err := db.Create(&instance).Error; err != nil {
+	instances := []model.ManagedInstance{
+		{Name: "sub2", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://sub2.example.com"},
+		{Name: "new-api", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://new.example.com"},
+		{Name: "huichuan", Kind: model.ManagedInstanceKindHuichuan, BaseURL: "https://huichuan.example.com"},
+	}
+	if err := db.Create(&instances).Error; err != nil {
 		t.Fatalf("create instance: %v", err)
 	}
 	start := int64(1_786_593_600)
-	if err := RecordManagedRPMSample(context.Background(), instance.Id, start+10, 42); err != nil {
-		t.Fatalf("record sample: %v", err)
+	for index, instance := range instances {
+		if err := RecordManagedRPMSample(context.Background(), instance.Id, start+10, float64(40+index)); err != nil {
+			t.Fatalf("record sample: %v", err)
+		}
 	}
 
-	history, err := GetManagedRPMHistory(context.Background(), []int64{instance.Id}, ConductorRPMBucketMinute, start, start+60)
+	history, err := GetManagedRPMHistory(context.Background(), []int64{instances[0].Id, instances[1].Id, instances[2].Id}, ConductorRPMBucketMinute, start, start+60)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}
-	if len(history.Points) != 1 || history.Points[0].RPM != 42 {
-		t.Fatalf("points = %#v, want one 42 RPM point", history.Points)
+	if len(history.Points) != 1 || history.Points[0].RPM != 123 {
+		t.Fatalf("points = %#v, want one aggregated 123 RPM point", history.Points)
 	}
 	if history.Points[0].Capacity != nil {
 		t.Fatalf("capacity = %#v, want nil", history.Points[0].Capacity)

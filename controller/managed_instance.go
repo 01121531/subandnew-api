@@ -56,6 +56,10 @@ type managedDashboardRefreshRequest struct {
 	End         int64   `json:"end"`
 }
 
+type managedRealtimeRefreshRequest struct {
+	InstanceIDs []int64 `json:"instance_ids"`
+}
+
 func ListManagedInstances(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -258,16 +262,29 @@ func StreamManagedDashboardEvents(c *gin.Context) {
 
 func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 	id, ok := managedInstanceID(c)
-	if !ok || !managedInstanceDataReady(c, id) {
-		return
-	}
-	result, ok := managedInstanceDataCall(c, id, func() (*managedinstance.ObservationView, error) {
-		return managedinstance.CollectRealtimeMetrics(c.Request.Context(), id)
-	})
 	if !ok {
 		return
 	}
+	result, err := managedinstance.CollectRealtimeMetrics(c.Request.Context(), id)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
+func RefreshManagedInstanceRealtime(c *gin.Context) {
+	request := managedRealtimeRefreshRequest{}
+	if err := c.ShouldBindJSON(&request); err != nil || len(request.InstanceIDs) == 0 || len(request.InstanceIDs) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	result, err := service.RefreshManagedRealtime(request.InstanceIDs)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": result})
 }
 
 func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
@@ -282,12 +299,12 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 		return
 	}
 	type subscription struct {
-		events      <-chan managedinstance.ConductorRealtimeEvent
+		events      <-chan service.ManagedRealtimeEvent
 		unsubscribe func()
 	}
 	subscriptions := make([]subscription, 0, len(instanceIDs))
 	for _, instanceID := range instanceIDs {
-		events, unsubscribe, subscribeErr := managedinstance.SubscribeConductorRealtime(instanceID)
+		events, unsubscribe, subscribeErr := service.SubscribeManagedRealtime(instanceID)
 		if subscribeErr != nil {
 			for _, item := range subscriptions {
 				item.unsubscribe()
@@ -305,7 +322,7 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 
 	streamContext, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
-	merged := make(chan managedinstance.ConductorRealtimeEvent, 128)
+	merged := make(chan service.ManagedRealtimeEvent, 128)
 	for _, item := range subscriptions {
 		events := item.events
 		go func() {

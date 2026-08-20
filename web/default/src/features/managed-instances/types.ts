@@ -287,6 +287,7 @@ export interface ManagedInstanceRealtimeMetrics {
 export interface ManagedInstanceRealtimeState {
   instance_id: number
   observed_at: number
+  last_attempt_at?: number
   stream_status: string
   stale: boolean
   error_code?: string
@@ -295,11 +296,13 @@ export interface ManagedInstanceRealtimeState {
   today_cost?: ManagedInstanceMetricSample
   concurrency_used?: ManagedInstanceMetricSample
   concurrency_max?: ManagedInstanceMetricSample
-  accounts_total: number
-  accounts_available: number
-  accounts_rate_limited: number
-  accounts_reporting: number
-  active_sessions: number
+  concurrency_collection_status?: string
+  accounts_total?: number
+  accounts_available?: number
+  accounts_rate_limited?: number
+  accounts_collection_status?: string
+  accounts_reporting?: number
+  active_sessions?: number
   accounts?: ManagedInstanceInventoryItem[]
   sources?: ManagedInstanceInventorySource[]
 }

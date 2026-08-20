@@ -69,7 +69,7 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 
 	instance, _, connector, credential, err := observationClient(instanceID)
 	if err != nil {
-		return Sub2RealtimeState{}, err
+		return storeSub2RealtimeFailure(instanceID, err), err
 	}
 	if instance.Kind != model.ManagedInstanceKindSub2API {
 		return Sub2RealtimeState{}, ErrUnsupportedCapability
@@ -135,6 +135,24 @@ func RefreshSub2Realtime(ctx context.Context, instanceID int64) (Sub2RealtimeSta
 	state.ErrorCode = ProbeErrorInvalidResponse
 	sub2RealtimeCache.states[instanceID] = state
 	return state, ErrUnsupportedCapability
+}
+
+func storeSub2RealtimeFailure(instanceID int64, err error) Sub2RealtimeState {
+	now := common.GetTimestamp()
+	sub2RealtimeCache.Lock()
+	defer sub2RealtimeCache.Unlock()
+	state := sub2RealtimeCache.states[instanceID]
+	state.InstanceID = instanceID
+	state.LastAttemptAt = now
+	state.ErrorCode = managedInstanceObservationErrorCode(err)
+	if state.RPM.Value == nil {
+		state.RPM = unsupportedMetric("request/min")
+		state.Stale = false
+	} else {
+		state.Stale = true
+	}
+	sub2RealtimeCache.states[instanceID] = state
+	return state
 }
 
 func collectSub2RealtimeDetails(ctx context.Context, connector *Connector, credential *CredentialMaterial) sub2RealtimeDetails {
@@ -286,7 +304,7 @@ func CurrentSub2Realtime(instanceID int64) (Sub2RealtimeState, bool) {
 	sub2RealtimeCache.RLock()
 	defer sub2RealtimeCache.RUnlock()
 	state, ok := sub2RealtimeCache.states[instanceID]
-	return state, ok && (state.RPM.Value != nil || state.ConcurrencyStatus == model.ManagedInstanceCollectionSucceeded || state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded)
+	return state, ok
 }
 
 func sub2RealtimeMetrics(instanceID int64) (*RealtimeMetricsResult, int64, bool) {

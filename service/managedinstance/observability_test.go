@@ -380,6 +380,7 @@ func TestCollectSummaryUsesSub2APIRegularAccountData(t *testing.T) {
 func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var rpmRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "Bearer metrics-secret", request.Header.Get("Authorization"))
 		require.Equal(t, "1", request.Header.Get("New-Api-User"))
@@ -391,6 +392,7 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 			require.Equal(t, "200", request.URL.Query().Get("end_timestamp"))
 			writeProbeJSON(response, `{"success":true,"data":[{"created_at":120,"token_used":1200,"count":8,"quota":45.5},{"created_at":180,"token_used":800,"count":5,"quota":24.5}]}`)
 		case "/api/log/stat":
+			rpmRequests.Add(1)
 			writeProbeJSON(response, `{"success":true,"data":{"rpm":23,"tpm":4000}}`)
 		default:
 			http.NotFound(response, request)
@@ -413,11 +415,67 @@ func TestCollectSummaryAggregatesNewAPIUsageData(t *testing.T) {
 	require.Equal(t, 2000.0, summary.Trend[0].Tokens)
 	require.Equal(t, 70.0, summary.Trend[0].Cost)
 
+	state, err := RefreshNewAPIRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 23.0, *state.RPM.Value)
+	require.Equal(t, int32(1), rpmRequests.Load())
 	realtimeView, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
 	realtime := realtimeView.Data.(*RealtimeMetricsResult)
 	require.Equal(t, 23.0, *realtime.RPM.Value)
 	require.Equal(t, "request/min", realtime.RPM.Unit)
+	require.Equal(t, int32(1), rpmRequests.Load(), "cache reads must not request the managed instance")
+}
+
+func TestNewAPIRealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var failing atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/log/stat" {
+			http.NotFound(response, request)
+			return
+		}
+		if failing.Load() {
+			http.Error(response, "temporary failure", http.StatusBadGateway)
+			return
+		}
+		writeProbeJSON(response, `{"success":true,"data":{"rpm":19}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "metrics-secret", UserID: "1"})
+
+	state, err := RefreshNewAPIRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 19.0, *state.RPM.Value)
+
+	failing.Store(true)
+	state, err = RefreshNewAPIRealtime(context.Background(), instance.Id)
+	require.Error(t, err)
+	require.True(t, state.Stale)
+	require.Equal(t, "reconnecting", state.StreamStatus)
+	require.Equal(t, 19.0, *state.RPM.Value)
+}
+
+func TestNewAPIRealtimeCacheKeepsLastRPMWhenCredentialBecomesUnavailable(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		writeProbeJSON(response, `{"success":true,"data":{"rpm":27}}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "metrics-secret", UserID: "1"})
+
+	state, err := RefreshNewAPIRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 27.0, *state.RPM.Value)
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).Delete(&model.ManagedInstanceCredential{}).Error)
+
+	state, err = RefreshNewAPIRealtime(context.Background(), instance.Id)
+	require.Error(t, err)
+	require.True(t, state.Stale)
+	require.Equal(t, "reconnecting", state.StreamStatus)
+	require.Equal(t, 27.0, *state.RPM.Value)
 }
 
 func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
@@ -447,6 +505,8 @@ func TestCollectRealtimeMetricsUsesSub2SnapshotRPM(t *testing.T) {
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
 
+	_, err := RefreshSub2Realtime(context.Background(), instance.Id)
+	require.NoError(t, err)
 	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)
@@ -477,6 +537,8 @@ func TestCollectRealtimeMetricsVerifiesSub2ZeroRPMWithRecentUsage(t *testing.T) 
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindSub2API, CredentialInput{AuthType: "admin_token", Secret: "admin-secret"})
 
+	_, err := RefreshSub2Realtime(context.Background(), instance.Id)
+	require.NoError(t, err)
 	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)
@@ -523,6 +585,9 @@ func TestSub2RealtimeCacheKeepsLastRPMWhenRefreshFails(t *testing.T) {
 	cached.LastAttemptAt = 0
 	sub2RealtimeCache.states[instance.Id] = cached
 	sub2RealtimeCache.Unlock()
+	state, err = RefreshSub2Realtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 11.0, *state.RPM.Value)
 	view, err := CollectRealtimeMetrics(context.Background(), instance.Id)
 	require.NoError(t, err)
 	realtime := view.Data.(*RealtimeMetricsResult)

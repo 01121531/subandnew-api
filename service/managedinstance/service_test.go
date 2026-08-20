@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ var managedInstanceTestDBSequence atomic.Uint64
 func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	resetSub2RealtimeCacheForTest()
+	resetNewAPIRealtimeCacheForTest()
+	dataReadProbeStates = sync.Map{}
 	dsn := fmt.Sprintf("file:managed-instance-%d?mode=memory&cache=shared", managedInstanceTestDBSequence.Add(1))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)

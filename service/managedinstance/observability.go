@@ -260,7 +260,7 @@ func (adapter newAPIAdapter) Summary(ctx context.Context, connector *Connector, 
 	return summary, nil
 }
 
-func newAPICurrentRPM(ctx context.Context, connector *Connector, configuredKind string, credential *CredentialMaterial) MetricSample {
+func newAPICurrentRPM(ctx context.Context, connector *Connector, configuredKind string, credential *CredentialMaterial) (MetricSample, error) {
 	now := time.Now()
 	query := url.Values{
 		"type":            {"2"},
@@ -272,8 +272,11 @@ func newAPICurrentRPM(ctx context.Context, connector *Connector, configuredKind 
 		endpoint = "/api/log/self/stat"
 	}
 	response, err := newAPIDoJSON(ctx, connector, configuredKind, credential, http.MethodGet, endpoint+"?"+query.Encode(), nil)
-	if err != nil || response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return unsupportedMetric("request/min")
+	if err != nil {
+		return unsupportedMetric("request/min"), err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return unsupportedMetric("request/min"), err
 	}
 	var payload struct {
 		Success bool `json:"success"`
@@ -282,9 +285,9 @@ func newAPICurrentRPM(ctx context.Context, connector *Connector, configuredKind 
 		} `json:"data"`
 	}
 	if json.Unmarshal(response.Body, &payload) != nil || !payload.Success || payload.Data.RPM < 0 {
-		return unsupportedMetric("request/min")
+		return unsupportedMetric("request/min"), &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
-	return supportedMetric(payload.Data.RPM, "request/min")
+	return supportedMetric(payload.Data.RPM, "request/min"), nil
 }
 
 func supportedMetric(value float64, unit string) MetricSample {
@@ -1063,30 +1066,21 @@ func CollectSummaryData(ctx context.Context, instanceID int64, window TimeWindow
 }
 
 func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*ObservationView, error) {
-	instance, _, connector, credential, err := observationClient(instanceID)
+	state, ok, err := CurrentManagedRealtime(instanceID)
 	if err != nil {
 		return nil, err
 	}
-	result := &RealtimeMetricsResult{RPM: unsupportedMetric("request/min")}
-	observedAt := common.GetTimestamp()
-	switch instance.Kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
-		result.RPM = newAPICurrentRPM(ctx, connector, instance.Kind, credential)
-	case model.ManagedInstanceKindSub2API:
-		state, stateOK := CurrentSub2Realtime(instance.Id)
-		now := common.GetTimestamp()
-		if !stateOK || state.LastAttemptAt <= 0 || now < state.LastAttemptAt || now-state.LastAttemptAt >= int64(sub2RealtimeRequestRefreshInterval/time.Second) {
-			_, _ = RefreshSub2Realtime(ctx, instance.Id)
+	if !ok {
+		state = ManagedRealtimeState{
+			InstanceID: instanceID, StreamStatus: "connecting", Stale: true,
+			RPM: unsupportedMetric("request/min"),
 		}
-		cached, cachedAt, ok := sub2RealtimeMetrics(instance.Id)
-		if ok {
-			result = cached
-			observedAt = cachedAt
-		}
-	case model.ManagedInstanceKindConductor:
-		result = conductorRealtimeMetrics(instance.Id)
 	}
-	view, _, err := observationView(instance.Id, observedAt, result, nil)
+	observedAt := state.ObservedAt
+	if observedAt <= 0 {
+		observedAt = common.GetTimestamp()
+	}
+	view, _, err := observationView(instanceID, observedAt, state.Metrics(), nil)
 	return view, err
 }
 

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
@@ -86,13 +86,12 @@ import { cn } from '@/lib/utils'
 import {
   getManagedDashboardSnapshots,
   getManagedInstanceRPMHistory,
-  getManagedInstanceRealtimeMetrics,
   getManagedInstances,
   refreshManagedDashboard,
+  refreshManagedRealtime,
 } from '../managed-instances/api'
 import { InstanceConnectionAlert } from '../managed-instances/components/instance-connection-alert'
 import { StatusBadge } from '../managed-instances/components/status-badge'
-import { isInstanceConnectionError } from '../managed-instances/errors'
 import type {
   ManagedDashboardSnapshotSection,
   ManagedInstance,
@@ -156,7 +155,6 @@ type HealthData = {
   value: number
 }
 
-const RPM_REFRESH_MS = 10_000
 const RPM_HISTORY_REFRESH_MS = 10_000
 const DASHBOARD_ERROR_RETRY_MS = 15_000
 const DASHBOARD_RETRY_COUNT = 3
@@ -452,14 +450,13 @@ export function FleetDashboard() {
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
   const [refreshRequestedAt, setRefreshRequestedAt] = useState(0)
+  const [manualRPMRefreshing, setManualRPMRefreshing] = useState(false)
   let effectiveTrendMetric = trendMetric
   if (
     family === 'conductor' &&
     (trendMetric === 'requests' || trendMetric === 'tokens')
   ) {
     effectiveTrendMetric = 'quota'
-  } else if (family === 'new_api' && trendMetric === 'rpm') {
-    effectiveTrendMetric = 'requests'
   }
   const effectiveConsumptionMetric =
     family === 'conductor' ? 'quota' : consumptionMetric
@@ -492,31 +489,19 @@ export function FleetDashboard() {
     () => (selectedInstance ? [selectedInstance] : familyInstances),
     [familyInstances, selectedInstance]
   )
-  const conductorInstanceIDs = useMemo(
-    () =>
-      instances
-        .filter((instance) => instance.kind === 'conductor')
-        .map((instance) => instance.id),
-    [instances]
-  )
-  const rpmHistoryInstanceIDs = useMemo(
-    () =>
-      instances
-        .filter(
-          (instance) =>
-            instance.kind === 'conductor' || instance.kind === 'sub2api'
-        )
-        .map((instance) => instance.id),
-    [instances]
-  )
-  const conductorRealtime = useManagedInstanceRealtimeEvents(
-    conductorInstanceIDs,
-    ['rpm', 'accounts', 'status']
-  )
   const instanceIDs = useMemo(
     () => instances.map((instance) => instance.id),
     [instances]
   )
+  const rpmHistoryInstanceIDs = useMemo(
+    () => instances.map((instance) => instance.id),
+    [instances]
+  )
+  const realtimeEvents = useManagedInstanceRealtimeEvents(instanceIDs, [
+    'rpm',
+    'accounts',
+    'status',
+  ])
   const dashboardRangeInput = useMemo(() => {
     if (timeRange.presetDays) return { preset_days: timeRange.presetDays }
     const resolved = resolveFleetTimeRange(timeRange)
@@ -553,10 +538,7 @@ export function FleetDashboard() {
       getManagedInstanceRPMHistory(rpmHistoryInstanceIDs, rpmHistoryBucket, {
         silent: true,
       }),
-    enabled:
-      family !== 'new_api' &&
-      effectiveTrendMetric === 'rpm' &&
-      rpmHistoryInstanceIDs.length > 0,
+    enabled: effectiveTrendMetric === 'rpm' && rpmHistoryInstanceIDs.length > 0,
     placeholderData: keepPreviousData,
     retry: DASHBOARD_RETRY_COUNT,
     retryDelay,
@@ -567,40 +549,9 @@ export function FleetDashboard() {
         : RPM_HISTORY_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
-  const rpmQueries = useQueries({
-    queries: instances.map((instance) => ({
-      queryKey: ['fleet-dashboard-rpm', instance.id],
-      queryFn: async () => {
-        const response = await getManagedInstanceRealtimeMetrics(instance.id, {
-          silent: true,
-        })
-        const observation = response.data
-        const realtime = observation.data
-        const hasRealtimeData =
-          realtime?.rpm.collection_status === 'succeeded' ||
-          realtime?.concurrency_collection_status === 'succeeded' ||
-          realtime?.accounts_collection_status === 'succeeded'
-        if (
-          observation.collection_status !== 'succeeded' ||
-          !realtime ||
-          !hasRealtimeData
-        ) {
-          throw new Error(observation.error_code || 'rpm_unavailable')
-        }
-        return response
-      },
-      placeholderData: keepPreviousData,
-      retry: DASHBOARD_RETRY_COUNT,
-      retryDelay,
-      enabled: instance.kind !== 'conductor',
-      staleTime: RPM_REFRESH_MS / 2,
-      refetchInterval: RPM_REFRESH_MS,
-      refetchIntervalInBackground: true,
-    })),
-  })
   const rows = useMemo<InstanceMetricRow[]>(
     () =>
-      instances.map((instance, index) => {
+      instances.map((instance) => {
         const cached = dashboardQuery.data?.data.items.find(
           (item) => item.instance_id === instance.id
         )
@@ -615,15 +566,12 @@ export function FleetDashboard() {
         )
         const observation = summarySection?.observation
         const summary = observation?.data
-        const streamed = conductorRealtime.states[instance.id]
-        const polledRealtime = rpmQueries[index]?.data?.data?.data
-        const realtime =
-          instance.kind === 'conductor' ? streamed : polledRealtime
+        const realtime = realtimeEvents.states[instance.id]
         const accountsReady =
           instance.kind === 'conductor'
-            ? Boolean(streamed?.observed_at)
+            ? Boolean(realtime?.observed_at)
             : instance.kind === 'sub2api' &&
-              polledRealtime?.accounts_collection_status === 'succeeded'
+              realtime?.accounts_collection_status === 'succeeded'
         const todayCost = metricValue(todaySection?.observation?.data?.cost)
         return {
           instance,
@@ -631,7 +579,7 @@ export function FleetDashboard() {
           observedAt: Math.max(
             observation?.observed_at ?? 0,
             todaySection?.observation?.observed_at ?? 0,
-            streamed?.observed_at ?? 0
+            realtime?.observed_at ?? 0
           ),
           summaryObservedAt: observation?.observed_at ?? 0,
           todayObservedAt: todaySection?.observation?.observed_at ?? 0,
@@ -665,11 +613,10 @@ export function FleetDashboard() {
         }
       }),
     [
-      conductorRealtime.states,
       dashboardEvents.snapshots,
       dashboardQuery.data,
       instances,
-      rpmQueries,
+      realtimeEvents.states,
     ]
   )
 
@@ -785,8 +732,7 @@ export function FleetDashboard() {
       rows.some((row) => row.lastAttemptStatus === 'failed'))
   const connectionFailed =
     dashboardQuery.isError ||
-    rows.some((row) => row.lastAttemptStatus === 'failed') ||
-    rpmQueries.some((query) => isInstanceConnectionError(query.error))
+    rows.some((row) => row.lastAttemptStatus === 'failed')
   const isRefreshing =
     dashboardQuery.isFetching ||
     rows.some((row) => row.lastAttemptStatus === 'running') ||
@@ -889,24 +835,33 @@ export function FleetDashboard() {
     setRefreshRequestedAt(requestedAt)
     void instancesQuery.refetch()
     try {
-      await refreshManagedDashboard(instanceIDs, dashboardRangeInput)
+      await Promise.all([
+        refreshManagedDashboard(instanceIDs, dashboardRangeInput),
+        refreshManagedRealtime(instanceIDs),
+      ])
     } catch {
       setRefreshRequestedAt(0)
     }
-    for (const query of rpmQueries) void query.refetch()
-    if (family !== 'new_api' && effectiveTrendMetric === 'rpm') {
+    if (effectiveTrendMetric === 'rpm') {
       void rpmHistoryQuery.refetch()
     }
     dashboardEvents.reconnect()
+    realtimeEvents.reconnect()
   }
 
-  const refreshRPM = () => {
-    conductorRealtime.reconnect()
-    for (const query of rpmQueries) void query.refetch()
+  const refreshRPM = async () => {
+    setManualRPMRefreshing(true)
+    try {
+      await refreshManagedRealtime(instanceIDs)
+    } finally {
+      realtimeEvents.reconnect()
+      void rpmHistoryQuery.refetch()
+      setManualRPMRefreshing(false)
+    }
   }
   const rpmRefreshing =
-    rpmQueries.some((query) => query.isFetching) ||
-    ['connecting', 'reconnecting'].includes(conductorRealtime.status)
+    manualRPMRefreshing ||
+    ['connecting', 'reconnecting'].includes(realtimeEvents.status)
 
   const handleFamilyChange = (nextFamily: FleetFamily) => {
     setFamily(nextFamily)
@@ -1175,7 +1130,7 @@ function DailyUsagePanel(props: {
   observedAt: number
 }) {
   const { t } = useTranslation()
-  const isRPM = props.family !== 'new_api' && props.metric === 'rpm'
+  const isRPM = props.metric === 'rpm'
   const usageMetric = props.metric === 'rpm' ? null : props.metric
   let subtitle = t('Daily totals in the selected period')
   if (isRPM) {
@@ -1186,7 +1141,7 @@ function DailyUsagePanel(props: {
   }
   let metricOptions: TrendMetricKey[] = ['requests', 'tokens', 'quota']
   if (props.family === 'conductor') metricOptions = ['quota', 'rpm']
-  else if (props.family === 'sub2api') metricOptions.push('rpm')
+  else metricOptions.push('rpm')
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader
@@ -1443,7 +1398,7 @@ function SummaryGrid(props: DashboardContentProps) {
   const rpmDetail = `${t('Last 60 seconds across {{count}} instances', {
     count: props.totals.rpmReady,
   })} · ${t('Auto-refreshing every {{seconds}}s', {
-    seconds: RPM_REFRESH_MS / 1000,
+    seconds: 10,
   })}`
   const capacityReady =
     props.family === 'conductor' &&
@@ -1487,7 +1442,7 @@ function SummaryGrid(props: DashboardContentProps) {
       className={cn(
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
         props.family === 'conductor' && 'xl:grid-cols-7',
-        props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-7',
+        props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
@@ -1514,7 +1469,7 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='blue'
         />
       )}
-      {props.family === 'sub2api' ? (
+      {props.family === 'sub2api' && (
         <MetricCard
           icon={Cpu}
           label={t('Concurrency')}
@@ -1539,32 +1494,31 @@ function SummaryGrid(props: DashboardContentProps) {
             </Button>
           }
         />
-      ) : (
-        <MetricCard
-          icon={Radio}
-          label='RPM'
-          value={
-            props.family === 'conductor'
-              ? rpmValue
-              : formatMetric(props.totals.rpmReady ? props.totals.rpm : null)
-          }
-          detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
-          tone='success'
-          action={
-            <Button
-              variant='ghost'
-              size='icon-xs'
-              aria-label={t('Refresh')}
-              title={t('Refresh')}
-              onClick={props.onRPMRefresh}
-            >
-              <RefreshCw
-                className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
-              />
-            </Button>
-          }
-        />
       )}
+      <MetricCard
+        icon={Radio}
+        label='RPM'
+        value={
+          props.family === 'conductor'
+            ? rpmValue
+            : formatMetric(props.totals.rpmReady ? props.totals.rpm : null)
+        }
+        detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
+        tone='success'
+        action={
+          <Button
+            variant='ghost'
+            size='icon-xs'
+            aria-label={t('Refresh')}
+            title={t('Refresh')}
+            onClick={props.onRPMRefresh}
+          >
+            <RefreshCw
+              className={cn('size-3', props.rpmRefreshing && 'animate-spin')}
+            />
+          </Button>
+        }
+      />
       {showsAccountMetrics && (
         <MetricCard
           icon={UserCheck}

@@ -99,7 +99,7 @@ func main() {
 	service.StartSystemTaskRunner()
 	service.StartManagedDashboardCollector()
 	service.StartManagedConductorRealtimeCollector()
-	service.StartManagedSub2RealtimeCollector()
+	service.StartManagedPollingRealtimeCollector()
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {

@@ -135,6 +135,10 @@ func cleanupConductorRPMHistory(ctx context.Context, now int64) {
 	_ = model.DB.WithContext(ctx).Where("bucket_start < ?", cutoff).Delete(&model.ManagedRPMHistory{}).Error
 }
 
+func CleanupManagedRPMHistory(ctx context.Context, now int64) {
+	cleanupConductorRPMHistory(ctx, now)
+}
+
 func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket string, start int64, end int64) (*ConductorRPMHistoryResult, error) {
 	return GetManagedRPMHistory(ctx, instanceIDs, bucket, start, end)
 }
@@ -153,6 +157,8 @@ func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket strin
 		Where("id IN ? AND kind IN ?", instanceIDs, []string{
 			model.ManagedInstanceKindConductor,
 			model.ManagedInstanceKindSub2API,
+			model.ManagedInstanceKindNewAPI,
+			model.ManagedInstanceKindHuichuan,
 		}).Count(&supportedCount).Error; err != nil {
 		return nil, err
 	}

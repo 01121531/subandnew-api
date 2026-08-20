@@ -145,9 +145,13 @@ func drainManagedConductorRealtimeEvents(ctx context.Context, events <-chan mana
 		select {
 		case <-ctx.Done():
 			return
-		case _, ok := <-events:
+		case event, ok := <-events:
 			if !ok {
 				return
+			}
+			state, _, err := managedinstance.CurrentManagedRealtime(event.State.InstanceID)
+			if err == nil {
+				publishManagedRealtimeState(event.Type, state)
 			}
 		}
 	}

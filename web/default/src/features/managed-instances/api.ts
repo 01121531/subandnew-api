@@ -268,6 +268,15 @@ export async function getManagedInstanceRealtimeMetrics(
   return response.data
 }
 
+export async function refreshManagedRealtime(
+  ids: number[]
+): Promise<ApiResponse<Array<{ instance_id: number; enqueued: boolean }>>> {
+  const response = await api.post('/api/managed-instances/realtime-refresh', {
+    instance_ids: ids,
+  })
+  return response.data
+}
+
 export async function getManagedInstanceRPMHistory(
   ids: number[],
   bucket: ManagedInstanceRPMHistoryBucket,

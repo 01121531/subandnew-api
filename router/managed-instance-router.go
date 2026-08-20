@@ -53,6 +53,7 @@ var managedInstancePermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/dashboard-refresh", permission: authz.ManagedInstanceView, handler: controller.RefreshManagedDashboard},
 	{method: http.MethodGet, path: "/dashboard-events", permission: authz.ManagedInstanceView, handler: controller.StreamManagedDashboardEvents},
 	{method: http.MethodGet, path: "/realtime-events", permission: authz.ManagedInstanceUsageView, handler: controller.StreamManagedInstanceRealtimeEvents},
+	{method: http.MethodPost, path: "/realtime-refresh", permission: authz.ManagedInstanceUsageView, handler: controller.RefreshManagedInstanceRealtime},
 	{method: http.MethodGet, path: "/realtime-history", permission: authz.ManagedInstanceUsageView, handler: controller.GetManagedInstanceRPMHistory},
 	{method: http.MethodGet, path: "/:id", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstance},
 	{method: http.MethodGet, path: "/:id/inventory", permission: authz.ManagedInstanceView, handler: controller.GetManagedInstanceInventory},
