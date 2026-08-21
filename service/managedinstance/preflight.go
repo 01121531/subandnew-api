@@ -61,11 +61,11 @@ func ProbeConnection(ctx context.Context, input CreateInput) (*PreflightResult, 
 	}
 	connector, err := NewConnector(instance, policy)
 	if err != nil {
-		return nil, err
+		return failedPreflightResult(err), nil
 	}
 	adapter, err := adapterForKind(instance.Kind)
 	if err != nil {
-		return nil, err
+		return failedPreflightResult(err), nil
 	}
 	startedAt := time.Now()
 	probe, probeErr := adapter.Probe(ctx, connector, credential)
@@ -79,6 +79,14 @@ func ProbeConnection(ctx context.Context, input CreateInput) (*PreflightResult, 
 	probe.LatencyMS = time.Since(startedAt).Milliseconds()
 	probe.CheckedAt = common.GetTimestamp()
 	return &PreflightResult{Success: true, Probe: probe, Stages: succeededConnectionStages()}, nil
+}
+
+func failedPreflightResult(err error) *PreflightResult {
+	code := managedInstanceObservationErrorCode(err)
+	return &PreflightResult{
+		Success: false, Stages: failedConnectionStages(err), ErrorCode: code,
+		Advice: preflightAdvice(code),
+	}
 }
 
 func pendingConnectionStages() []ConnectionStage {

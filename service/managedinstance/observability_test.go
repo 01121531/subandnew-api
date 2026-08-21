@@ -841,6 +841,22 @@ func TestProbeConnectionDoesNotPersistInstanceOrCredential(t *testing.T) {
 	require.Zero(t, credentialCount)
 }
 
+func TestProbeConnectionReturnsTargetBlockedForDisallowedPort(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedPortsEnv, "443")
+
+	result, err := ProbeConnection(context.Background(), CreateInput{
+		Name: "blocked-port", Kind: model.ManagedInstanceKindGeneric,
+		BaseURL: "http://example.com:4603", Environment: "development", TLSVerify: true,
+		Credential: &CredentialInput{AuthType: "account_password", Secret: "secret", UserID: "admin"},
+	})
+
+	require.NoError(t, err)
+	require.False(t, result.Success)
+	require.Equal(t, "target_blocked", result.ErrorCode)
+	require.Equal(t, "failed", result.Stages[3].Status)
+}
+
 func TestPreflightStagesIncludeAuthenticationCapabilityAndTLSClassification(t *testing.T) {
 	authStages := failedConnectionStages(&ProbeError{Code: ProbeErrorAuthentication})
 	require.Equal(t, "authentication", authStages[4].Name)

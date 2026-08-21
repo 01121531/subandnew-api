@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/managedinstance"
@@ -1073,12 +1074,20 @@ func managedInstanceError(c *gin.Context, err error) {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrCredentialKeyNotConfigured):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "managed instance credential encryption is not configured"})
+	case errors.Is(err, managedinstance.ErrConnectorTargetBlocked):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "target_blocked"})
+	case errors.Is(err, managedinstance.ErrUnsupportedCapability):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "unsupported_capability"})
 	default:
 		var probeError *managedinstance.ProbeError
 		if errors.As(err, &probeError) {
 			c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": probeError.Code})
 			return
 		}
+		logger.LogError(c.Request.Context(), fmt.Sprintf(
+			"managed instance operation failed: method=%s path=%s actor_id=%d error=%v",
+			c.Request.Method, c.Request.URL.Path, c.GetInt("id"), err,
+		))
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "managed instance operation failed"})
 	}
 }
