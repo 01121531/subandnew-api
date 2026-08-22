@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,6 +95,20 @@ type claudeGatewayTodaySummary struct {
 	TotalCost    claudeGatewayNumber `json:"total_cost"`
 	TotalCost7D  claudeGatewayNumber `json:"total_cost_7d"`
 	RequestCount claudeGatewayNumber `json:"request_count"`
+}
+
+type claudeGatewayOverview struct {
+	KPIs struct {
+		Total       claudeGatewayNumber `json:"total"`
+		SuccessRate claudeGatewayNumber `json:"successRate"`
+	} `json:"kpis"`
+}
+
+type claudeGatewayUsageSummary struct {
+	TotalKeys     claudeGatewayNumber `json:"total_keys"`
+	TotalRequests claudeGatewayNumber `json:"total_requests"`
+	TotalTokens   claudeGatewayNumber `json:"total_tokens"`
+	TotalCost     claudeGatewayNumber `json:"total_cost"`
 }
 
 func (claudeGatewayAdapter) Kind() string { return model.ManagedInstanceKindClaudeGateway }
@@ -308,6 +323,55 @@ func fetchClaudeGatewayTodaySummary(ctx context.Context, connector *Connector, c
 	return summary, nil
 }
 
+func fetchClaudeGatewayOverview(ctx context.Context, connector *Connector, credential *CredentialMaterial) (claudeGatewayOverview, error) {
+	response, err := claudeGatewayDoJSON(ctx, connector, credential, http.MethodGet, "/api/admin/overview?slice=time&granularity=day", nil)
+	if err != nil {
+		return claudeGatewayOverview{}, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return claudeGatewayOverview{}, err
+	}
+	var overview claudeGatewayOverview
+	if json.Unmarshal(response.Body, &overview) != nil {
+		return claudeGatewayOverview{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	total, successRate := float64(overview.KPIs.Total), float64(overview.KPIs.SuccessRate)
+	if total < 0 || successRate < 0 || successRate > 1 {
+		return claudeGatewayOverview{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return overview, nil
+}
+
+func fetchClaudeGatewayUsageSummary(ctx context.Context, connector *Connector, credential *CredentialMaterial, window TimeWindow) (claudeGatewayUsageSummary, error) {
+	location, _ := summaryLocation(window.Timezone)
+	query := url.Values{}
+	query.Set("range", "custom")
+	query.Set("from", time.Unix(window.Start, 0).In(location).Format("2006-01-02"))
+	query.Set("to", time.Unix(window.End, 0).In(location).Format("2006-01-02"))
+	query.Set("page", "1")
+	query.Set("limit", "1")
+	query.Set("sort", "cost")
+	query.Set("direction", "desc")
+	response, err := claudeGatewayDoJSON(ctx, connector, credential, http.MethodGet, "/api/admin/usage/keys?"+query.Encode(), nil)
+	if err != nil {
+		return claudeGatewayUsageSummary{}, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return claudeGatewayUsageSummary{}, err
+	}
+	var envelope struct {
+		Summary claudeGatewayUsageSummary `json:"summary"`
+	}
+	if json.Unmarshal(response.Body, &envelope) != nil {
+		return claudeGatewayUsageSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	requests, tokens, cost := float64(envelope.Summary.TotalRequests), float64(envelope.Summary.TotalTokens), float64(envelope.Summary.TotalCost)
+	if requests < 0 || tokens < 0 || cost < 0 {
+		return claudeGatewayUsageSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return envelope.Summary, nil
+}
+
 func claudeGatewayInventoryPage(accounts []claudeGatewayAccount) *InventoryPage {
 	items := make([]InventoryItem, 0, len(accounts))
 	for _, account := range accounts {
@@ -373,50 +437,18 @@ func claudeGatewayRateLimited(account claudeGatewayAccount) bool {
 }
 
 func (adapter claudeGatewayAdapter) Summary(ctx context.Context, connector *Connector, credential *CredentialMaterial, window TimeWindow) (*SummaryResult, error) {
-	accounts, err := fetchClaudeGatewayAccounts(ctx, connector, credential)
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
+		return nil, ErrUnsupportedCapability
+	}
+	usage, err := fetchClaudeGatewayUsageSummary(ctx, connector, credential, window)
 	if err != nil {
 		return nil, err
 	}
-	page := claudeGatewayInventoryPage(accounts)
-	result := summaryFromInventory(window, page)
-	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
-		return result, nil
-	}
-	today, err := fetchClaudeGatewayTodaySummary(ctx, connector, credential)
-	if err != nil {
-		return result, nil
-	}
-	now := time.Now()
-	location, locationErr := time.LoadLocation(firstNonEmpty(window.Timezone, "Asia/Shanghai"))
-	if locationErr != nil {
-		location = time.Local
-	}
-	localNow := now.In(location)
-	localStart := time.Unix(window.Start, 0).In(location)
-	duration := time.Duration(window.End-window.Start) * time.Second
-	if localStart.Format("2006-01-02") == localNow.Format("2006-01-02") && duration <= 36*time.Hour {
-		tokens := 0.0
-		for _, account := range accounts {
-			tokens += float64(account.Stats.DailyTokens)
-		}
-		requests, cost := float64(today.RequestCount), float64(today.TotalCost)
-		result.Requests = supportedMetric(requests, "request")
-		result.Tokens = supportedMetric(tokens, "token")
-		result.Cost = supportedMetric(cost, "usd")
-		result.Trend = []UsageTrendPoint{{Date: localNow.Format("2006-01-02"), Requests: requests, Tokens: tokens, Cost: cost}}
-		return result, nil
-	}
-	if duration <= 8*24*time.Hour && window.End >= now.Add(-time.Hour).Unix() {
-		requests, tokens := 0.0, 0.0
-		for _, account := range accounts {
-			requests += float64(account.UsageWindows.Requests7D)
-			tokens += float64(account.UsageWindows.Tokens7D)
-		}
-		result.Requests = supportedMetric(requests, "request")
-		result.Tokens = supportedMetric(tokens, "token")
-		result.Cost = supportedMetric(float64(today.TotalCost7D), "usd")
-	}
-	return result, nil
+	return &SummaryResult{
+		Window: window, Requests: supportedMetric(float64(usage.TotalRequests), "request"),
+		Tokens: supportedMetric(float64(usage.TotalTokens), "token"), Cost: supportedMetric(float64(usage.TotalCost), "usd"),
+		ErrorRate: unsupportedMetric("ratio"), Latency: unsupportedMetric("ms"),
+	}, nil
 }
 
 func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (ManagedRealtimeState, error) {
@@ -480,6 +512,15 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		state.TodayCost = previous.TodayCost
 	} else {
 		state.TodayCost = unsupportedMetric("usd")
+	}
+	if overview, overviewErr := fetchClaudeGatewayOverview(ctx, connector, credential); overviewErr == nil {
+		state.SuccessRate = supportedMetric(float64(overview.KPIs.SuccessRate), "ratio")
+		state.SuccessRateSampleCount = float64(overview.KPIs.Total)
+	} else if previous, ok := currentNewAPIRealtime(instanceID); ok {
+		state.SuccessRate = previous.SuccessRate
+		state.SuccessRateSampleCount = previous.SuccessRateSampleCount
+	} else {
+		state.SuccessRate = unsupportedMetric("ratio")
 	}
 	storeNewAPIRealtime(state)
 	return state, nil

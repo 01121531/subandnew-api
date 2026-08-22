@@ -271,6 +271,8 @@ export interface ManagedDashboardEvent {
 export interface ManagedInstanceRealtimeMetrics {
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  success_rate: ManagedInstanceMetricSample
+  success_rate_sample_count?: number
   concurrency_used: ManagedInstanceMetricSample
   concurrency_max: ManagedInstanceMetricSample
   concurrency_collection_status?: string
@@ -294,6 +296,8 @@ export interface ManagedInstanceRealtimeState {
   error_code?: string
   rpm: ManagedInstanceMetricSample
   rpm_capacity: ManagedInstanceMetricSample
+  success_rate: ManagedInstanceMetricSample
+  success_rate_sample_count?: number
   today_cost?: ManagedInstanceMetricSample
   concurrency_used?: ManagedInstanceMetricSample
   concurrency_max?: ManagedInstanceMetricSample

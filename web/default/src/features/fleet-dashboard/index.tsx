@@ -20,6 +20,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   Activity,
+  BadgeCheck,
   Building2,
   CheckCircle2,
   CircleDollarSign,
@@ -123,6 +124,8 @@ type InstanceMetricRow = {
   requests: number | null
   rpm: number | null
   rpmCapacity: number | null
+  successRate: number | null
+  successRateSampleCount: number
   concurrencyUsed: number | null
   concurrencyMax: number | null
   accountsAvailable: number | null
@@ -582,10 +585,7 @@ export function FleetDashboard() {
             ? Boolean(realtime?.observed_at)
             : instance.kind === 'sub2api' &&
               realtime?.accounts_collection_status === 'succeeded'
-        const todayCost =
-          instance.kind === 'claude_gateway'
-            ? metricValue(realtime?.today_cost)
-            : metricValue(todaySection?.observation?.data?.cost)
+        const todayCost = metricValue(todaySection?.observation?.data?.cost)
         return {
           instance,
           summary,
@@ -595,14 +595,13 @@ export function FleetDashboard() {
             realtime?.observed_at ?? 0
           ),
           summaryObservedAt: observation?.observed_at ?? 0,
-          todayObservedAt:
-            instance.kind === 'claude_gateway'
-              ? (realtime?.observed_at ?? 0)
-              : (todaySection?.observation?.observed_at ?? 0),
+          todayObservedAt: todaySection?.observation?.observed_at ?? 0,
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
           rpmCapacity: metricValue(realtime?.rpm_capacity),
+          successRate: metricValue(realtime?.success_rate),
+          successRateSampleCount: realtime?.success_rate_sample_count ?? 0,
           concurrencyUsed: metricValue(realtime?.concurrency_used),
           concurrencyMax: metricValue(realtime?.concurrency_max),
           accountsAvailable: accountsReady
@@ -640,11 +639,31 @@ export function FleetDashboard() {
     ]
   )
 
-  const totals = useMemo(
-    () => ({
+  const totals = useMemo(() => {
+    const successRows = rows.filter((row) => row.successRate != null)
+    const successRateSampleCount = successRows.reduce(
+      (sum, row) => sum + row.successRateSampleCount,
+      0
+    )
+    let successRate = 0
+    if (successRateSampleCount > 0) {
+      successRate =
+        successRows.reduce(
+          (sum, row) =>
+            sum + (row.successRate ?? 0) * row.successRateSampleCount,
+          0
+        ) / successRateSampleCount
+    } else if (successRows.length > 0) {
+      successRate =
+        successRows.reduce((sum, row) => sum + (row.successRate ?? 0), 0) /
+        successRows.length
+    }
+    return {
       requests: rows.reduce((sum, row) => sum + (row.requests ?? 0), 0),
       rpm: rows.reduce((sum, row) => sum + (row.rpm ?? 0), 0),
       rpmCapacity: rows.reduce((sum, row) => sum + (row.rpmCapacity ?? 0), 0),
+      successRate,
+      successRateSampleCount,
       concurrencyUsed: rows.reduce(
         (sum, row) => sum + (row.concurrencyUsed ?? 0),
         0
@@ -670,6 +689,7 @@ export function FleetDashboard() {
       ).length,
       requestsReady: rows.filter((row) => row.requests != null).length,
       rpmReady: rows.filter((row) => row.rpm != null).length,
+      successRateReady: successRows.length,
       rpmCapacityReady: rows.filter((row) => row.rpmCapacity != null).length,
       concurrencyReady: rows.filter(
         (row) => row.concurrencyUsed != null && row.concurrencyMax != null
@@ -679,9 +699,8 @@ export function FleetDashboard() {
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
-    }),
-    [instances, rows]
-  )
+    }
+  }, [instances, rows])
   const healthData = useMemo<HealthData[]>(() => {
     const statuses = [
       { key: 'healthy', label: t('Healthy'), color: 'var(--color-success)' },
@@ -1061,6 +1080,8 @@ type DashboardContentProps = {
     requests: number
     rpm: number
     rpmCapacity: number
+    successRate: number
+    successRateSampleCount: number
     concurrencyUsed: number
     concurrencyMax: number
     accountsAvailable: number
@@ -1072,6 +1093,7 @@ type DashboardContentProps = {
     metricReady: number
     requestsReady: number
     rpmReady: number
+    successRateReady: number
     rpmCapacityReady: number
     concurrencyReady: number
     accountsReady: number
@@ -1430,11 +1452,18 @@ function SummaryGrid(props: DashboardContentProps) {
     props.family === 'conductor' &&
     props.instances.length > 0 &&
     props.totals.rpmCapacityReady === props.instances.length
+  const capacityValue = capacityReady
+    ? formatMetric(props.totals.rpmCapacity)
+    : '--'
   const rpmValue = props.totals.rpmReady
-    ? `${formatMetric(props.totals.rpm)} / ${capacityReady ? formatMetric(props.totals.rpmCapacity) : '--'}`
-    : `-- / ${capacityReady ? formatMetric(props.totals.rpmCapacity) : '--'}`
+    ? `${formatMetric(props.totals.rpm)} / ${capacityValue}`
+    : `-- / ${capacityValue}`
+  const capacityUsage =
+    capacityReady && props.totals.rpmCapacity > 0
+      ? ((props.totals.rpm / props.totals.rpmCapacity) * 100).toFixed(1)
+      : '0.0'
   const rpmCapacityDetail = capacityReady
-    ? `${props.totals.rpmCapacity > 0 ? ((props.totals.rpm / props.totals.rpmCapacity) * 100).toFixed(1) : '0.0'}% · ${formatMetric(props.totals.accountsAvailable, false)} 个可用账号`
+    ? `${capacityUsage}% · ${formatMetric(props.totals.accountsAvailable, false)} 个可用账号`
     : '最大容量数据加载中'
   const showsAccountMetrics =
     props.family === 'conductor' ||
@@ -1449,6 +1478,13 @@ function SummaryGrid(props: DashboardContentProps) {
     ...props.rows.map((row) => row.todayObservedAt)
   )
   const amountStale = props.rows.some((row) => row.stale)
+  const successRateReady = props.totals.successRateReady > 0
+  let successRateTone: MetricCardTone = 'neutral'
+  if (successRateReady) {
+    if (props.totals.successRate >= 0.95) successRateTone = 'success'
+    else if (props.totals.successRate >= 0.8) successRateTone = 'amber'
+    else successRateTone = 'danger'
+  }
   const summaryPending = props.rows.some(
     (row) => !row.collected && row.lastAttemptStatus !== 'failed'
   )
@@ -1471,7 +1507,7 @@ function SummaryGrid(props: DashboardContentProps) {
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
         props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
-        props.family === 'claude_gateway' && 'xl:grid-cols-7',
+        props.family === 'claude_gateway' && 'xl:grid-cols-4 2xl:grid-cols-8',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
@@ -1548,6 +1584,30 @@ function SummaryGrid(props: DashboardContentProps) {
           </Button>
         }
       />
+      {props.family === 'claude_gateway' && (
+        <MetricCard
+          icon={BadgeCheck}
+          label={t('Success rate')}
+          value={
+            successRateReady
+              ? `${(props.totals.successRate * 100).toFixed(2)}%`
+              : '--'
+          }
+          detail={
+            successRateReady
+              ? t('{{count}} requests sampled', {
+                  count: formatMetric(
+                    props.totals.successRateSampleCount,
+                    false
+                  ),
+                })
+              : t('Real-time data is connecting')
+          }
+          tone={successRateTone}
+          observedAt={Math.max(0, ...props.rows.map((row) => row.observedAt))}
+          stale={props.rows.some((row) => row.successRate != null && row.stale)}
+        />
+      )}
       {showsAccountMetrics && (
         <MetricCard
           icon={UserCheck}
@@ -1861,6 +1921,11 @@ function PerformanceTable({
                 {family !== 'sub2api' && (
                   <TableHead className='text-right'>RPM</TableHead>
                 )}
+                {family === 'claude_gateway' && (
+                  <TableHead className='text-right'>
+                    {t('Success rate')}
+                  </TableHead>
+                )}
                 {family === 'sub2api' && (
                   <TableHead className='text-right'>
                     {t('Concurrency')}
@@ -1921,6 +1986,13 @@ function PerformanceTable({
                   {family !== 'sub2api' && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.rpm, false)}
+                    </TableCell>
+                  )}
+                  {family === 'claude_gateway' && (
+                    <TableCell className='text-right font-mono text-xs tabular-nums'>
+                      {row.successRate == null
+                        ? '--'
+                        : `${(row.successRate * 100).toFixed(2)}%`}
                     </TableCell>
                   )}
                   {family === 'sub2api' && (

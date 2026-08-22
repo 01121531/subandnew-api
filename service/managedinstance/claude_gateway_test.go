@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -101,6 +102,10 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"disabled","health_status":"failed","stats":{"rpm":5,"concurrent":1,"active_sessions":1}}]}`)
 		case "/api/admin/oauth-accounts/today-summary":
 			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"request_count":100}`)
+		case "/api/admin/overview":
+			require.Equal(t, "time", request.URL.Query().Get("slice"))
+			require.Equal(t, "day", request.URL.Query().Get("granularity"))
+			writeProbeJSON(response, `{"kpis":{"total":200,"successRate":0.975}}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -113,8 +118,33 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 17.0, *state.RPM.Value)
 	require.Equal(t, 3.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 12.34567891, *state.TodayCost.Value)
+	require.Equal(t, 0.975, *state.SuccessRate.Value)
+	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 2, state.AccountsTotal)
 	require.Equal(t, 1, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 2)
+}
+
+func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/admin/usage/keys", request.URL.Path)
+		require.Equal(t, "custom", request.URL.Query().Get("range"))
+		require.Equal(t, "2026-08-18", request.URL.Query().Get("from"))
+		require.Equal(t, "2026-08-18", request.URL.Query().Get("to"))
+		require.Equal(t, "1", request.URL.Query().Get("limit"))
+		writeProbeJSON(response, `{"items":[],"summary":{"total_keys":5,"total_requests":123,"total_tokens":456,"total_cost":78.90123456},"total":5}`)
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	start := time.Date(2026, 8, 18, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)).Unix()
+	end := start + 24*60*60 - 1
+	view, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: end, Timezone: "Asia/Shanghai"})
+	require.NoError(t, err)
+	summary := view.Data.(*SummaryResult)
+	require.Equal(t, 123.0, *summary.Requests.Value)
+	require.Equal(t, 456.0, *summary.Tokens.Value)
+	require.Equal(t, 78.90123456, *summary.Cost.Value)
 }

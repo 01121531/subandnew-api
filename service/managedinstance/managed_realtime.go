@@ -17,6 +17,8 @@ type ManagedRealtimeState struct {
 	ErrorCode                string            `json:"error_code,omitempty"`
 	RPM                      MetricSample      `json:"rpm"`
 	RPMCapacity              MetricSample      `json:"rpm_capacity"`
+	SuccessRate              MetricSample      `json:"success_rate"`
+	SuccessRateSampleCount   float64           `json:"success_rate_sample_count,omitempty"`
 	ConcurrencyUsed          MetricSample      `json:"concurrency_used"`
 	ConcurrencyMax           MetricSample      `json:"concurrency_max"`
 	ConcurrencyStatus        string            `json:"concurrency_collection_status,omitempty"`
@@ -167,8 +169,9 @@ func managedRealtimeFromConductor(state ConductorRealtimeState) ManagedRealtimeS
 
 func (state ManagedRealtimeState) Metrics() *RealtimeMetricsResult {
 	return &RealtimeMetricsResult{
-		RPM: state.RPM, RPMCapacity: state.RPMCapacity,
-		ConcurrencyUsed: state.ConcurrencyUsed, ConcurrencyMax: state.ConcurrencyMax, ConcurrencyStatus: state.ConcurrencyStatus,
+		RPM: state.RPM, RPMCapacity: state.RPMCapacity, SuccessRate: state.SuccessRate,
+		SuccessRateSampleCount: state.SuccessRateSampleCount,
+		ConcurrencyUsed:        state.ConcurrencyUsed, ConcurrencyMax: state.ConcurrencyMax, ConcurrencyStatus: state.ConcurrencyStatus,
 		TodayCost: state.TodayCost, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
 		AccountsRateLimited: state.AccountsRateLimited, AccountsCollectionStatus: state.AccountsCollectionStatus,
 		AccountsReporting: state.AccountsReporting, ActiveSessions: state.ActiveSessions,

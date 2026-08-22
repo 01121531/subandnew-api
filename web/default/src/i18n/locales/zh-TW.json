@@ -1074,6 +1074,8 @@
     "Submitting": "提交中",
     "succeeded": "已成功",
     "Success": "成功",
+    "Success rate": "成功率",
+    "{{count}} requests sampled": "統計樣本 {{count}} 個請求",
     "Suffix": "後綴",
     "Sunset Glow": "日落霞光",
     "Super Admin": "超級管理員",

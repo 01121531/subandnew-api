@@ -369,6 +369,14 @@ func refreshManagedDashboardPresets(ctx context.Context, instanceID int64, actor
 		markManagedDashboardPresetFailures(instanceID, err)
 		return err
 	}
+	instance, err := managedinstance.Get(instanceID)
+	if err != nil {
+		markManagedDashboardPresetFailures(instanceID, err)
+		return err
+	}
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		return refreshClaudeGatewayDashboardPresets(ctx, instanceID, actorID)
+	}
 	summary, err := managedinstance.CollectSummaryData(ctx, instanceID, managedinstance.TimeWindow{Start: thirty.Start, End: thirty.End, Timezone: managedDashboardTimezone})
 	if err != nil {
 		if managedinstance.RecoverDataConnection(ctx, instanceID, actorID) == nil {
@@ -389,6 +397,41 @@ func refreshManagedDashboardPresets(ctx context.Context, instanceID int64, actor
 		if err := saveManagedDashboardSuccess(instanceID, dashboardRange, observedAt, derived); err != nil {
 			return err
 		}
+	}
+	cancelManagedDashboardRetry(instanceID)
+	return nil
+}
+
+func refreshClaudeGatewayDashboardPresets(ctx context.Context, instanceID int64, actorID int) error {
+	observedAt := common.GetTimestamp()
+	var firstErr error
+	recovered := false
+	for _, days := range managedDashboardPresetDays {
+		dashboardRange, _ := NormalizeManagedDashboardRange(days, 0, 0)
+		window := managedinstance.TimeWindow{Start: dashboardRange.Start, End: dashboardRange.End, Timezone: managedDashboardTimezone}
+		summary, err := managedinstance.CollectSummaryData(ctx, instanceID, window)
+		if err != nil && !recovered {
+			recovered = true
+			if managedinstance.RecoverDataConnection(ctx, instanceID, actorID) == nil {
+				summary, err = managedinstance.CollectSummaryData(ctx, instanceID, window)
+			}
+		}
+		if err != nil || summary == nil {
+			if err == nil {
+				err = managedinstance.ErrRemoteDataUnavailable
+			}
+			_ = saveManagedDashboardFailure(instanceID, dashboardRange, err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := saveManagedDashboardSuccess(instanceID, dashboardRange, observedAt, summary); err != nil {
+			return err
+		}
+	}
+	if firstErr != nil {
+		return firstErr
 	}
 	cancelManagedDashboardRetry(instanceID)
 	return nil

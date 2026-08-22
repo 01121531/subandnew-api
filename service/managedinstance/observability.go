@@ -120,6 +120,8 @@ type SummaryResult struct {
 type RealtimeMetricsResult struct {
 	RPM                      MetricSample `json:"rpm"`
 	RPMCapacity              MetricSample `json:"rpm_capacity"`
+	SuccessRate              MetricSample `json:"success_rate"`
+	SuccessRateSampleCount   float64      `json:"success_rate_sample_count,omitempty"`
 	ConcurrencyUsed          MetricSample `json:"concurrency_used"`
 	ConcurrencyMax           MetricSample `json:"concurrency_max"`
 	ConcurrencyStatus        string       `json:"concurrency_collection_status,omitempty"`
