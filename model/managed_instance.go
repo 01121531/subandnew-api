@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	ManagedInstanceKindNewAPI    = "new_api"
-	ManagedInstanceKindHuichuan  = "huichuan"
-	ManagedInstanceKindSub2API   = "sub2api"
-	ManagedInstanceKindConductor = "conductor"
-	ManagedInstanceKindGeneric   = "generic"
+	ManagedInstanceKindNewAPI        = "new_api"
+	ManagedInstanceKindHuichuan      = "huichuan"
+	ManagedInstanceKindSub2API       = "sub2api"
+	ManagedInstanceKindConductor     = "conductor"
+	ManagedInstanceKindClaudeGateway = "claude_gateway"
+	ManagedInstanceKindGeneric       = "generic"
 
 	ManagedInstanceModeObserve = "observe"
 	ManagedInstanceModeOperate = "operate"

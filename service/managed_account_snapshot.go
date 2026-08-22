@@ -636,5 +636,5 @@ func cleanupManagedAccountCustomSnapshots(now int64) error {
 }
 
 func managedAccountKindSupported(kind string) bool {
-	return kind == model.ManagedInstanceKindNewAPI || kind == model.ManagedInstanceKindHuichuan || kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor
+	return kind == model.ManagedInstanceKindNewAPI || kind == model.ManagedInstanceKindHuichuan || kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
 }

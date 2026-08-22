@@ -159,6 +159,7 @@ func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket strin
 			model.ManagedInstanceKindSub2API,
 			model.ManagedInstanceKindNewAPI,
 			model.ManagedInstanceKindHuichuan,
+			model.ManagedInstanceKindClaudeGateway,
 		}).Count(&supportedCount).Error; err != nil {
 		return nil, err
 	}

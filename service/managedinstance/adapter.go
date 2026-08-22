@@ -70,6 +70,8 @@ func adapterForKind(kind string) (InstanceAdapter, error) {
 		return sub2APIAdapter{}, nil
 	case model.ManagedInstanceKindConductor:
 		return conductorAdapter{}, nil
+	case model.ManagedInstanceKindClaudeGateway:
+		return claudeGatewayAdapter{}, nil
 	case model.ManagedInstanceKindGeneric:
 		return genericAdapter{}, nil
 	default:
@@ -309,10 +311,13 @@ func invalidateAccountPasswordSession(connector *Connector, kind string, credent
 		invalidateSub2APISession(connector, credential, "")
 	case model.ManagedInstanceKindConductor:
 		invalidateConductorSession(connector, credential, "")
+	case model.ManagedInstanceKindClaudeGateway:
+		invalidateClaudeGatewaySession(connector, credential, "")
 	case model.ManagedInstanceKindGeneric:
 		invalidateNewAPISession(connector, credential)
 		invalidateSub2APISession(connector, credential, "")
 		invalidateConductorSession(connector, credential, "")
+		invalidateClaudeGatewaySession(connector, credential, "")
 	}
 }
 
@@ -632,7 +637,14 @@ func (genericAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	if !canTryNextGenericAdapter(sub2APIErr) {
 		return nil, sub2APIErr
 	}
-	return (conductorAdapter{}).Probe(ctx, connector, credential)
+	result, conductorErr := (conductorAdapter{}).Probe(ctx, connector, credential)
+	if conductorErr == nil {
+		return result, nil
+	}
+	if !canTryNextGenericAdapter(conductorErr) {
+		return nil, conductorErr
+	}
+	return (claudeGatewayAdapter{}).Probe(ctx, connector, credential)
 }
 
 func canTryNextGenericAdapter(err error) bool {

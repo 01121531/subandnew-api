@@ -1554,7 +1554,7 @@ func summaryFromInventory(window TimeWindow, page *InventoryPage) *SummaryResult
 }
 
 func defaultResourceKind(instanceKind string) string {
-	if instanceKind == model.ManagedInstanceKindSub2API || instanceKind == model.ManagedInstanceKindConductor {
+	if instanceKind == model.ManagedInstanceKindSub2API || instanceKind == model.ManagedInstanceKindConductor || instanceKind == model.ManagedInstanceKindClaudeGateway {
 		return "account"
 	}
 	return "channel"

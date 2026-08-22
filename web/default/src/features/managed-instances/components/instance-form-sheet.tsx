@@ -148,7 +148,7 @@ function createInstanceErrorMessage(error: unknown) {
     case 'two_factor_required':
       return 'This administrator account requires two-factor authentication.'
     case 'invalid_response':
-      return 'The target did not return a supported New API or Sub2API response.'
+      return 'The target did not return a supported New API, Sub2API, Conductor, or Claude Gateway response.'
     default:
       return message || 'Failed to add instance'
   }

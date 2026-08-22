@@ -127,6 +127,9 @@ func CurrentManagedRealtime(instanceID int64) (ManagedRealtimeState, bool, error
 	case model.ManagedInstanceKindConductor:
 		state, ok := CurrentConductorRealtime(instanceID)
 		return managedRealtimeFromConductor(state), ok, nil
+	case model.ManagedInstanceKindClaudeGateway:
+		state, ok := currentNewAPIRealtime(instanceID)
+		return state, ok, nil
 	default:
 		return ManagedRealtimeState{}, false, ErrUnsupportedCapability
 	}

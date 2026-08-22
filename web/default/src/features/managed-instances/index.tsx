@@ -263,6 +263,9 @@ export function ManagedInstances() {
                 <NativeSelectOption value='conductor'>
                   Conductor
                 </NativeSelectOption>
+                <NativeSelectOption value='claude_gateway'>
+                  Claude Gateway
+                </NativeSelectOption>
                 <NativeSelectOption value='generic'>
                   {t('Generic')}
                 </NativeSelectOption>

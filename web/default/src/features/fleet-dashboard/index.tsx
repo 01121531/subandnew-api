@@ -111,7 +111,7 @@ import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
 type TrendMetricKey = MetricKey | 'rpm'
-type FleetFamily = 'new_api' | 'sub2api' | 'conductor'
+type FleetFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
 
 type InstanceMetricRow = {
   instance: ManagedInstance
@@ -162,6 +162,7 @@ const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
   'sub2api',
   'conductor',
+  'claude_gateway',
 ]
 const ALL_SITES_VALUE = 'all'
 const DASHBOARD_PREFERENCES_KEY = 'fleet-dashboard-preferences-v1'
@@ -273,6 +274,7 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
       new_api: ALL_SITES_VALUE,
       sub2api: ALL_SITES_VALUE,
       conductor: ALL_SITES_VALUE,
+      claude_gateway: ALL_SITES_VALUE,
     },
     timeRange: createFleetPresetRange(7),
     trendMetric: 'requests',
@@ -344,6 +346,10 @@ function readDashboardPreferences(): FleetDashboardPreferences {
         conductor:
           typeof parsed.selectedInstances?.conductor === 'string'
             ? parsed.selectedInstances.conductor
+            : ALL_SITES_VALUE,
+        claude_gateway:
+          typeof parsed.selectedInstances?.claude_gateway === 'string'
+            ? parsed.selectedInstances.claude_gateway
             : ALL_SITES_VALUE,
       },
       timeRange,
@@ -424,12 +430,14 @@ function metricLabel(metric: MetricKey, family: FleetFamily) {
 function familyLabel(family: FleetFamily) {
   if (family === 'sub2api') return 'Sub2API'
   if (family === 'conductor') return 'Conductor'
+  if (family === 'claude_gateway') return 'Claude Gateway'
   return 'New API'
 }
 
 function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
   if (family === 'sub2api') return instance.kind === 'sub2api'
   if (family === 'conductor') return instance.kind === 'conductor'
+  if (family === 'claude_gateway') return instance.kind === 'claude_gateway'
   return instance.kind === 'new_api' || instance.kind === 'huichuan'
 }
 
@@ -452,7 +460,9 @@ export function FleetDashboard() {
   const [refreshRequestedAt, setRefreshRequestedAt] = useState(0)
   const [manualRPMRefreshing, setManualRPMRefreshing] = useState(false)
   let effectiveTrendMetric = trendMetric
-  if (
+  if (family === 'claude_gateway' && trendMetric !== 'rpm') {
+    effectiveTrendMetric = 'rpm'
+  } else if (
     family === 'conductor' &&
     (trendMetric === 'requests' || trendMetric === 'tokens')
   ) {
@@ -568,11 +578,14 @@ export function FleetDashboard() {
         const summary = observation?.data
         const realtime = realtimeEvents.states[instance.id]
         const accountsReady =
-          instance.kind === 'conductor'
+          instance.kind === 'conductor' || instance.kind === 'claude_gateway'
             ? Boolean(realtime?.observed_at)
             : instance.kind === 'sub2api' &&
               realtime?.accounts_collection_status === 'succeeded'
-        const todayCost = metricValue(todaySection?.observation?.data?.cost)
+        const todayCost =
+          instance.kind === 'claude_gateway'
+            ? metricValue(realtime?.today_cost)
+            : metricValue(todaySection?.observation?.data?.cost)
         return {
           instance,
           summary,
@@ -582,7 +595,10 @@ export function FleetDashboard() {
             realtime?.observed_at ?? 0
           ),
           summaryObservedAt: observation?.observed_at ?? 0,
-          todayObservedAt: todaySection?.observation?.observed_at ?? 0,
+          todayObservedAt:
+            instance.kind === 'claude_gateway'
+              ? (realtime?.observed_at ?? 0)
+              : (todaySection?.observation?.observed_at ?? 0),
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
@@ -609,7 +625,11 @@ export function FleetDashboard() {
             summarySection?.last_error_code ??
             todaySection?.last_error_code ??
             '',
-          stale: Boolean(summarySection?.stale || todaySection?.stale),
+          stale: Boolean(
+            summarySection?.stale ||
+            todaySection?.stale ||
+            (instance.kind === 'claude_gateway' && realtime?.stale)
+          ),
         }
       }),
     [
@@ -761,6 +781,9 @@ export function FleetDashboard() {
       ).length,
       conductor: allInstances.filter((instance) =>
         belongsToFamily(instance, 'conductor')
+      ).length,
+      claude_gateway: allInstances.filter((instance) =>
+        belongsToFamily(instance, 'claude_gateway')
       ).length,
     }),
     [allInstances]
@@ -1141,6 +1164,7 @@ function DailyUsagePanel(props: {
   }
   let metricOptions: TrendMetricKey[] = ['requests', 'tokens', 'quota']
   if (props.family === 'conductor') metricOptions = ['quota', 'rpm']
+  else if (props.family === 'claude_gateway') metricOptions = ['rpm']
   else metricOptions.push('rpm')
   return (
     <Card className={PANEL_CARD_CLASS}>
@@ -1394,6 +1418,8 @@ function SummaryGrid(props: DashboardContentProps) {
     costDetail = t('Actual cost reported by Sub2API')
   } else if (props.family === 'conductor') {
     costDetail = t('Actual cost calculated from Conductor prices')
+  } else if (props.family === 'claude_gateway') {
+    costDetail = t('Historical cost is not available from Claude Gateway')
   }
   const rpmDetail = `${t('Last 60 seconds across {{count}} instances', {
     count: props.totals.rpmReady,
@@ -1411,7 +1437,9 @@ function SummaryGrid(props: DashboardContentProps) {
     ? `${props.totals.rpmCapacity > 0 ? ((props.totals.rpm / props.totals.rpmCapacity) * 100).toFixed(1) : '0.0'}% · ${formatMetric(props.totals.accountsAvailable, false)} 个可用账号`
     : '最大容量数据加载中'
   const showsAccountMetrics =
-    props.family === 'conductor' || props.family === 'sub2api'
+    props.family === 'conductor' ||
+    props.family === 'sub2api' ||
+    props.family === 'claude_gateway'
   const costObservedAt = Math.max(
     0,
     ...props.rows.map((row) => row.summaryObservedAt)
@@ -1443,6 +1471,7 @@ function SummaryGrid(props: DashboardContentProps) {
         'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
         props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
+        props.family === 'claude_gateway' && 'xl:grid-cols-7',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
@@ -1793,7 +1822,10 @@ function PerformanceTable({
 }) {
   const { t } = useTranslation()
   const sortMetric = family === 'new_api' ? 'requests' : 'quota'
-  const showsAccountMetrics = family === 'conductor' || family === 'sub2api'
+  const showsAccountMetrics =
+    family === 'conductor' ||
+    family === 'sub2api' ||
+    family === 'claude_gateway'
   const sortedRows = [...rows]
     .sort((a, b) => (b[sortMetric] ?? -1) - (a[sortMetric] ?? -1))
     .slice(0, 12)

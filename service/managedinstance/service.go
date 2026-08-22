@@ -497,7 +497,7 @@ func NormalizeBaseURL(raw string) (string, error) {
 
 func validKind(kind string) bool {
 	switch kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindGeneric:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway, model.ManagedInstanceKindGeneric:
 		return true
 	default:
 		return false

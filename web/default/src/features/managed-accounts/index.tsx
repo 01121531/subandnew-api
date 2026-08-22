@@ -93,7 +93,7 @@ import type {
 import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
 import { cn } from '@/lib/utils'
 
-type AccountFamily = 'new_api' | 'sub2api' | 'conductor'
+type AccountFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
 type ResourceRow = {
   instance: ManagedInstance
   item: ManagedInstanceInventoryItem
@@ -125,6 +125,7 @@ const ACCOUNT_FAMILIES: readonly AccountFamily[] = [
   'new_api',
   'sub2api',
   'conductor',
+  'claude_gateway',
 ]
 const ALL_SITES_VALUE = 'all'
 const INVENTORY_REFRESH_MS = 120_000
@@ -157,6 +158,7 @@ function defaultPreferences(): AccountPreferences {
       new_api: ALL_SITES_VALUE,
       sub2api: ALL_SITES_VALUE,
       conductor: ALL_SITES_VALUE,
+      claude_gateway: ALL_SITES_VALUE,
     },
   }
 }
@@ -186,12 +188,14 @@ function readPreferences(): AccountPreferences {
 function belongsToFamily(instance: ManagedInstance, family: AccountFamily) {
   if (family === 'sub2api') return instance.kind === 'sub2api'
   if (family === 'conductor') return instance.kind === 'conductor'
+  if (family === 'claude_gateway') return instance.kind === 'claude_gateway'
   return instance.kind === 'new_api' || instance.kind === 'huichuan'
 }
 
 function familyLabel(family: AccountFamily) {
   if (family === 'sub2api') return 'Sub2API'
   if (family === 'conductor') return 'Conductor'
+  if (family === 'claude_gateway') return 'Claude Gateway'
   return 'New API'
 }
 
@@ -363,15 +367,18 @@ export function ManagedAccounts() {
     () => (selectedInstance ? [selectedInstance] : familyInstances),
     [familyInstances, selectedInstance]
   )
-  const conductorInstanceIDs = useMemo(
+  const realtimeAccountInstanceIDs = useMemo(
     () =>
       instances
-        .filter((instance) => instance.kind === 'conductor')
+        .filter(
+          (instance) =>
+            instance.kind === 'conductor' || instance.kind === 'claude_gateway'
+        )
         .map((instance) => instance.id),
     [instances]
   )
   const conductorRealtime = useManagedInstanceRealtimeEvents(
-    conductorInstanceIDs,
+    realtimeAccountInstanceIDs,
     ['rpm', 'accounts', 'sources', 'status']
   )
   const familyCounts = useMemo(
@@ -382,6 +389,9 @@ export function ManagedAccounts() {
         .length,
       conductor: allInstances.filter((item) =>
         belongsToFamily(item, 'conductor')
+      ).length,
+      claude_gateway: allInstances.filter((item) =>
+        belongsToFamily(item, 'claude_gateway')
       ).length,
     }),
     [allInstances]
@@ -433,7 +443,8 @@ export function ManagedAccounts() {
           snapshotQueries[index]?.data?.data.inventory.observation?.data
         const realtime = conductorRealtime.states[instance.id]
         const useRealtime =
-          instance.kind === 'conductor' &&
+          (instance.kind === 'conductor' ||
+            instance.kind === 'claude_gateway') &&
           realtime != null &&
           realtime.observed_at > 0 &&
           realtime.accounts != null

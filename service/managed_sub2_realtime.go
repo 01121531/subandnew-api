@@ -111,7 +111,7 @@ func managedPollingRealtimeTargets(ctx context.Context) []managedRealtimeTarget 
 	}
 	var instances []model.ManagedInstance
 	if err := model.DB.WithContext(ctx).
-		Where("kind IN ?", []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API}).
+		Where("kind IN ?", []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindClaudeGateway}).
 		Order("id asc").Find(&instances).Error; err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("managed polling realtime collector reconcile failed: %v", err))
 		return nil
@@ -222,7 +222,7 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 		eventType = "status"
 	}
 	publishManagedRealtimeState(eventType, state)
-	if target.Kind == model.ManagedInstanceKindSub2API {
+	if target.Kind == model.ManagedInstanceKindSub2API || target.Kind == model.ManagedInstanceKindClaudeGateway {
 		publishManagedRealtimeState("accounts", state)
 	}
 	if err == nil && !state.Stale && state.RPM.Value != nil && state.RPM.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
@@ -242,6 +242,9 @@ func refreshManagedRealtimeTarget(ctx context.Context, target managedRealtimeTar
 		return state, err
 	case model.ManagedInstanceKindSub2API:
 		_, refreshErr = managedinstance.RefreshSub2Realtime(ctx, target.InstanceID)
+	case model.ManagedInstanceKindClaudeGateway:
+		state, err := managedinstance.RefreshClaudeGatewayRealtime(ctx, target.InstanceID)
+		return state, err
 	case model.ManagedInstanceKindConductor:
 		_, refreshErr = managedinstance.RefreshConductorRealtime(ctx, target.InstanceID)
 	default:

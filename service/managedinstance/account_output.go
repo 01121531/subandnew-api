@@ -84,6 +84,11 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 		Items:            make([]AccountOutputItem, len(items)),
 		AddedAccounts:    len(items),
 	}
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		collectClaudeGatewayAccountOutput(result, items)
+		view, _, viewErr := observationView(instance.Id, common.GetTimestamp(), result, nil)
+		return view, viewErr
+	}
 	if instance.Kind == model.ManagedInstanceKindConductor {
 		if err := collectConductorAccountOutput(ctx, connector, credential, result, items, window); err != nil {
 			return nil, err

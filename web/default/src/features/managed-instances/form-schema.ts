@@ -27,7 +27,14 @@ function isManagedInstanceURL(value: string) {
 
 export const managedInstanceFormSchema = z.object({
   name: z.string().trim().min(1),
-  kind: z.enum(['new_api', 'huichuan', 'sub2api', 'conductor', 'generic']),
+  kind: z.enum([
+    'new_api',
+    'huichuan',
+    'sub2api',
+    'conductor',
+    'claude_gateway',
+    'generic',
+  ]),
   base_url: z.string().trim().min(1).refine(isManagedInstanceURL),
   environment: z.enum(['production', 'staging', 'development']),
   management_mode: z.enum(['observe', 'operate', 'enforce']),

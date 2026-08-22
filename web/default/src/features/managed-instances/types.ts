@@ -21,6 +21,7 @@ type ManagedInstanceKind =
   | 'huichuan'
   | 'sub2api'
   | 'conductor'
+  | 'claude_gateway'
   | 'generic'
 export type ManagedInstanceStatus =
   | 'unknown'
