@@ -324,7 +324,7 @@ func parseAllowedHosts(raw string) []string {
 
 func parseAllowedPorts(raw string) (map[string]struct{}, error) {
 	if strings.TrimSpace(raw) == "" {
-		raw = "80,443"
+		return nil, nil
 	}
 	if strings.TrimSpace(raw) == "*" {
 		return nil, nil

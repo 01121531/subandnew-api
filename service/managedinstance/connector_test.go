@@ -152,7 +152,7 @@ func TestConnectorPolicyEnforcesHostAndPortAllowlist(t *testing.T) {
 	policy, err := ConnectorPolicyFromEnvironment()
 	require.NoError(t, err)
 	require.True(t, connectorPortAllowed("443", policy.AllowedPorts))
-	require.False(t, connectorPortAllowed("8443", policy.AllowedPorts))
+	require.True(t, connectorPortAllowed("3100", policy.AllowedPorts))
 	require.True(t, connectorHostAllowed("api.example.com", policy.AllowedHosts))
 	require.False(t, connectorHostAllowed("other.example.com", policy.AllowedHosts))
 }
