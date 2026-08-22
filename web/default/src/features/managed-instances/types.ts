@@ -319,6 +319,8 @@ export interface ManagedInstanceRPMHistoryPoint {
   rpm: number
   capacity: number | null
   samples: number
+  success_rate: number | null
+  success_rate_samples: number
 }
 
 export interface ManagedInstanceRPMHistory {

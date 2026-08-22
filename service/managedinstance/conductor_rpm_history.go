@@ -22,10 +22,12 @@ const (
 )
 
 type ConductorRPMHistoryPoint struct {
-	Timestamp int64    `json:"timestamp"`
-	RPM       float64  `json:"rpm"`
-	Capacity  *float64 `json:"capacity"`
-	Samples   int      `json:"samples"`
+	Timestamp          int64    `json:"timestamp"`
+	RPM                float64  `json:"rpm"`
+	Capacity           *float64 `json:"capacity"`
+	Samples            int      `json:"samples"`
+	SuccessRate        *float64 `json:"success_rate"`
+	SuccessRateSamples int      `json:"success_rate_samples"`
 }
 
 type ConductorRPMHistoryResult struct {
@@ -68,13 +70,24 @@ func (stream *conductorRealtimeStream) sampleRPM(ctx context.Context) {
 }
 
 func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacities ...float64) error {
+	var capacity *float64
+	if len(capacities) > 0 {
+		capacity = &capacities[0]
+	}
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, capacity, nil, 0)
+}
+
+func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacity *float64, successRate *float64, successRateWeight float64) error {
 	if model.DB == nil || instanceID <= 0 || observedAt <= 0 || rpm < 0 {
 		return ErrInvalidInstance
 	}
-	capacity := 0.0
-	hasCapacity := len(capacities) > 0 && capacities[0] >= 0
-	if hasCapacity {
-		capacity = capacities[0]
+	hasCapacity := capacity != nil && *capacity >= 0
+	hasSuccessRate := successRate != nil && *successRate >= 0 && *successRate <= 1
+	if successRate != nil && !hasSuccessRate {
+		return ErrInvalidInstance
+	}
+	if hasSuccessRate && successRateWeight <= 0 {
+		successRateWeight = 1
 	}
 	bucketStart := observedAt - observedAt%60
 	now := common.GetTimestamp()
@@ -86,9 +99,15 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 			"updated_at":   now,
 		}
 		if hasCapacity {
-			updates["capacity_sum"] = gorm.Expr("capacity_sum + ?", capacity)
+			updates["capacity_sum"] = gorm.Expr("capacity_sum + ?", *capacity)
 			updates["capacity_sample_count"] = gorm.Expr("capacity_sample_count + 1")
-			updates["capacity_last"] = capacity
+			updates["capacity_last"] = *capacity
+		}
+		if hasSuccessRate {
+			updates["success_rate_weighted_sum"] = gorm.Expr("success_rate_weighted_sum + ?", *successRate*successRateWeight)
+			updates["success_rate_weight_sum"] = gorm.Expr("success_rate_weight_sum + ?", successRateWeight)
+			updates["success_rate_sample_count"] = gorm.Expr("success_rate_sample_count + 1")
+			updates["success_rate_last"] = *successRate
 		}
 		return model.DB.WithContext(ctx).Model(&model.ManagedRPMHistory{}).
 			Where("instance_id = ? AND bucket_start = ?", instanceID, bucketStart).
@@ -105,9 +124,15 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 		InstanceID: instanceID, BucketStart: bucketStart, RPMSum: rpm, SampleCount: 1, RPMLast: rpm,
 	}
 	if hasCapacity {
-		history.CapacitySum = capacity
+		history.CapacitySum = *capacity
 		history.CapacitySampleCount = 1
-		history.CapacityLast = capacity
+		history.CapacityLast = *capacity
+	}
+	if hasSuccessRate {
+		history.SuccessRateWeightedSum = *successRate * successRateWeight
+		history.SuccessRateWeightSum = successRateWeight
+		history.SuccessRateSampleCount = 1
+		history.SuccessRateLast = *successRate
 	}
 	createErr := model.DB.WithContext(ctx).Create(history).Error
 	if createErr == nil {
@@ -125,6 +150,10 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 
 func RecordManagedRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64) error {
 	return recordConductorRPMSample(ctx, instanceID, observedAt, rpm)
+}
+
+func RecordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, successRate *float64, successRateWeight float64) error {
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight)
 }
 
 func cleanupConductorRPMHistory(ctx context.Context, now int64) {
@@ -194,12 +223,15 @@ func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket strin
 
 func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string, start int64, end int64, expectedInstances ...int) []ConductorRPMHistoryPoint {
 	type aggregate struct {
-		sum              float64
-		count            int
-		samples          int
-		capacitySum      float64
-		capacityCount    int
-		capacityComplete bool
+		sum                    float64
+		count                  int
+		samples                int
+		capacitySum            float64
+		capacityCount          int
+		capacityComplete       bool
+		successRateWeightedSum float64
+		successRateWeightSum   float64
+		successRateSamples     int
 	}
 	expected := 0
 	if len(expectedInstances) > 0 {
@@ -220,6 +252,11 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		if row.CapacitySampleCount > 0 {
 			minute.capacitySum += row.CapacitySum / float64(row.CapacitySampleCount)
 			minute.capacityCount++
+		}
+		if row.SuccessRateSampleCount > 0 && row.SuccessRateWeightSum > 0 {
+			minute.successRateWeightedSum += row.SuccessRateWeightedSum
+			minute.successRateWeightSum += row.SuccessRateWeightSum
+			minute.successRateSamples += row.SuccessRateSampleCount
 		}
 	}
 	for _, minute := range minutes {
@@ -242,6 +279,9 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 				value.capacitySum += minute.capacitySum
 				value.capacityCount++
 			}
+			value.successRateWeightedSum += minute.successRateWeightedSum
+			value.successRateWeightSum += minute.successRateWeightSum
+			value.successRateSamples += minute.successRateSamples
 		}
 	}
 	points := make([]ConductorRPMHistoryPoint, 0, len(aggregates))
@@ -258,7 +298,15 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			capacityValue := value.capacitySum / float64(value.capacityCount)
 			capacity = &capacityValue
 		}
-		points = append(points, ConductorRPMHistoryPoint{Timestamp: timestamp, RPM: rpm, Capacity: capacity, Samples: value.samples})
+		var successRate *float64
+		if value.successRateSamples > 0 && value.successRateWeightSum > 0 {
+			rate := value.successRateWeightedSum / value.successRateWeightSum
+			successRate = &rate
+		}
+		points = append(points, ConductorRPMHistoryPoint{
+			Timestamp: timestamp, RPM: rpm, Capacity: capacity, Samples: value.samples,
+			SuccessRate: successRate, SuccessRateSamples: value.successRateSamples,
+		})
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
 	return points

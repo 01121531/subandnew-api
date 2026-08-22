@@ -230,7 +230,16 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 		if observedAt <= 0 {
 			observedAt = common.GetTimestamp()
 		}
-		_ = managedinstance.RecordManagedRPMSample(ctx, target.InstanceID, observedAt, *state.RPM.Value)
+		var successRate *float64
+		successRateWeight := 0.0
+		if target.Kind == model.ManagedInstanceKindClaudeGateway &&
+			state.SuccessRateObservedAt == observedAt &&
+			state.SuccessRate.Value != nil &&
+			state.SuccessRate.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
+			successRate = state.SuccessRate.Value
+			successRateWeight = state.SuccessRateSampleCount
+		}
+		_ = managedinstance.RecordManagedRealtimeSample(ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight)
 	}
 }
 

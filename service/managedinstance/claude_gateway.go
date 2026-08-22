@@ -516,9 +516,11 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	if overview, overviewErr := fetchClaudeGatewayOverview(ctx, connector, credential); overviewErr == nil {
 		state.SuccessRate = supportedMetric(float64(overview.KPIs.SuccessRate), "ratio")
 		state.SuccessRateSampleCount = float64(overview.KPIs.Total)
+		state.SuccessRateObservedAt = now
 	} else if previous, ok := currentNewAPIRealtime(instanceID); ok {
 		state.SuccessRate = previous.SuccessRate
 		state.SuccessRateSampleCount = previous.SuccessRateSampleCount
+		state.SuccessRateObservedAt = previous.SuccessRateObservedAt
 	} else {
 		state.SuccessRate = unsupportedMetric("ratio")
 	}

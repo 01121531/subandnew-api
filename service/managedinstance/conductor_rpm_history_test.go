@@ -2,6 +2,7 @@ package managedinstance
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/01121531/subandnew-api/model"
@@ -61,6 +62,56 @@ func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
 	}
 	if hour.Points[0].Capacity == nil || *hour.Points[0].Capacity != 1200 {
 		t.Fatalf("hour capacity = %#v, want 1200", hour.Points[0].Capacity)
+	}
+}
+
+func TestManagedRealtimeHistoryAggregatesClaudeGatewaySuccessRate(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instances := []model.ManagedInstance{
+		{Name: "gateway-one", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway-one.example.com"},
+		{Name: "gateway-two", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway-two.example.com"},
+	}
+	if err := db.Create(&instances).Error; err != nil {
+		t.Fatalf("create instances: %v", err)
+	}
+	start := int64(1_786_593_600)
+	ctx := context.Background()
+	samples := []struct {
+		instanceID int64
+		at         int64
+		rpm        float64
+		rate       float64
+		weight     float64
+	}{
+		{instances[0].Id, start + 10, 10, 0.8, 100},
+		{instances[0].Id, start + 20, 20, 0.6, 100},
+		{instances[1].Id, start + 30, 5, 0.5, 200},
+		{instances[0].Id, start + 70, 30, 0.9, 100},
+	}
+	for _, sample := range samples {
+		rate := sample.rate
+		if err := RecordManagedRealtimeSample(ctx, sample.instanceID, sample.at, sample.rpm, &rate, sample.weight); err != nil {
+			t.Fatalf("record sample: %v", err)
+		}
+	}
+
+	minute, err := GetManagedRPMHistory(ctx, []int64{instances[0].Id, instances[1].Id}, ConductorRPMBucketMinute, start, start+120)
+	if err != nil {
+		t.Fatalf("minute history: %v", err)
+	}
+	if len(minute.Points) != 2 || minute.Points[0].SuccessRate == nil || minute.Points[1].SuccessRate == nil {
+		t.Fatalf("minute points = %#v, want two success-rate points", minute.Points)
+	}
+	if math.Abs(*minute.Points[0].SuccessRate-0.6) > 1e-9 || math.Abs(*minute.Points[1].SuccessRate-0.9) > 1e-9 {
+		t.Fatalf("minute success rates = %#v, want 0.6 and 0.9", minute.Points)
+	}
+
+	hour, err := GetManagedRPMHistory(ctx, []int64{instances[0].Id, instances[1].Id}, ConductorRPMBucketHour, start, start+3600)
+	if err != nil {
+		t.Fatalf("hour history: %v", err)
+	}
+	if len(hour.Points) != 1 || hour.Points[0].SuccessRate == nil || math.Abs(*hour.Points[0].SuccessRate-0.66) > 1e-9 {
+		t.Fatalf("hour points = %#v, want weighted success rate 0.66", hour.Points)
 	}
 }
 

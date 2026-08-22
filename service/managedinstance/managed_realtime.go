@@ -19,6 +19,7 @@ type ManagedRealtimeState struct {
 	RPMCapacity              MetricSample      `json:"rpm_capacity"`
 	SuccessRate              MetricSample      `json:"success_rate"`
 	SuccessRateSampleCount   float64           `json:"success_rate_sample_count,omitempty"`
+	SuccessRateObservedAt    int64             `json:"success_rate_observed_at,omitempty"`
 	ConcurrencyUsed          MetricSample      `json:"concurrency_used"`
 	ConcurrencyMax           MetricSample      `json:"concurrency_max"`
 	ConcurrencyStatus        string            `json:"concurrency_collection_status,omitempty"`
@@ -203,10 +204,15 @@ func latestManagedRPMState(instanceID int64) (ManagedRealtimeState, bool) {
 		return ManagedRealtimeState{}, false
 	}
 	rpm := history.RPMLast
-	return ManagedRealtimeState{
+	state := ManagedRealtimeState{
 		InstanceID: instanceID, ObservedAt: history.UpdatedAt, LastAttemptAt: history.UpdatedAt,
 		StreamStatus: "cached", Stale: true, RPM: supportedMetric(rpm, "request/min"),
-	}, true
+	}
+	if history.SuccessRateSampleCount > 0 && history.SuccessRateLast >= 0 && history.SuccessRateLast <= 1 {
+		state.SuccessRate = supportedMetric(history.SuccessRateLast, "ratio")
+		state.SuccessRateObservedAt = history.UpdatedAt
+	}
+	return state, true
 }
 
 func storeNewAPIRealtime(state ManagedRealtimeState) {
