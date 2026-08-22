@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -79,18 +78,12 @@ type ConnectorStream struct {
 }
 
 func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
-	allowed, err := parseAllowedCIDRs(os.Getenv(managedInstanceAllowedCIDRsEnv))
-	if err != nil {
-		return ConnectorPolicy{}, err
-	}
-	allowed = append(allowed, connectorLocalProxyCIDRs()...)
-	ports, err := parseAllowedPorts(os.Getenv(managedInstanceAllowedPortsEnv))
+	allowed, err := parseAllowedCIDRs("0.0.0.0/0,::/0")
 	if err != nil {
 		return ConnectorPolicy{}, err
 	}
 	return ConnectorPolicy{
-		AllowedCIDRs: allowed, AllowedHosts: parseAllowedHosts(os.Getenv(managedInstanceAllowedHostsEnv)),
-		AllowedPorts: ports, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
+		AllowedCIDRs: allowed, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
 	}, nil
 }
 
@@ -124,9 +117,6 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 	baseURL, err := url.Parse(instance.BaseURL)
 	if err != nil || baseURL.Host == "" {
 		return nil, ErrInvalidInstance
-	}
-	if !connectorHostAllowed(baseURL.Hostname(), policy.AllowedHosts) || !connectorPortAllowed(effectivePort(baseURL), policy.AllowedPorts) {
-		return nil, ErrConnectorTargetBlocked
 	}
 	if policy.Resolver == nil {
 		policy.Resolver = net.DefaultResolver
@@ -175,7 +165,7 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 		Transport: transport,
 		Timeout:   timeout,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
-			if len(via) >= 5 || len(via) == 0 || !sameOrigin(via[0].URL, request.URL) {
+			if len(via) >= 5 {
 				return ErrConnectorRedirect
 			}
 			return nil

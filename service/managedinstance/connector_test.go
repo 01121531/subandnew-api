@@ -2,7 +2,6 @@ package managedinstance
 
 import (
 	"context"
-	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -82,7 +81,7 @@ func TestConnectorLimitsResponsesAndAllowsExplicitLoopback(t *testing.T) {
 	require.ErrorIs(t, err, ErrConnectorResponseLarge)
 }
 
-func TestConnectorBlocksCrossOriginRedirect(t *testing.T) {
+func TestConnectorAllowsCrossOriginRedirect(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusOK)
 	}))
@@ -97,7 +96,7 @@ func TestConnectorBlocksCrossOriginRedirect(t *testing.T) {
 	connector, err := NewConnector(&model.ManagedInstance{BaseURL: source.URL, RequestTimeoutSeconds: 2, TLSVerify: true}, ConnectorPolicy{AllowedCIDRs: allowed})
 	require.NoError(t, err)
 	_, err = connector.DoJSON(context.Background(), http.MethodGet, "/redirect", nil, nil)
-	require.True(t, errors.Is(err, ErrConnectorRedirect))
+	require.NoError(t, err)
 }
 
 func TestConnectorPreservesRelativeQueryAndRejectsAbsolutePath(t *testing.T) {
@@ -130,7 +129,7 @@ func TestParseAllowedCIDRsRejectsInvalidValue(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestConnectorPolicyEnforcesHostAndPortAllowlist(t *testing.T) {
+func TestConnectorAllowlistParsers(t *testing.T) {
 	ports, err := parseAllowedPorts("443,8443")
 	require.NoError(t, err)
 	require.True(t, connectorHostAllowed("api.example.com", []string{"*.example.com"}))
@@ -139,20 +138,23 @@ func TestConnectorPolicyEnforcesHostAndPortAllowlist(t *testing.T) {
 	require.True(t, connectorPortAllowed("8443", ports))
 	require.False(t, connectorPortAllowed("22", ports))
 
-	_, err = NewConnector(&model.ManagedInstance{
-		BaseURL: "https://api.example.com:22", RequestTimeoutSeconds: 2, TLSVerify: true,
-	}, ConnectorPolicy{AllowedHosts: []string{"*.example.com"}, AllowedPorts: ports})
-	require.ErrorIs(t, err, ErrConnectorTargetBlocked)
-
 	_, err = parseAllowedPorts("0,not-a-port")
 	require.Error(t, err)
+}
 
-	t.Setenv(managedInstanceAllowedPortsEnv, "")
+func TestConnectorPolicyAllowsAllTargetsByDefault(t *testing.T) {
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "not-a-cidr")
 	t.Setenv(managedInstanceAllowedHostsEnv, "api.example.com")
+	t.Setenv(managedInstanceAllowedPortsEnv, "443")
+
 	policy, err := ConnectorPolicyFromEnvironment()
 	require.NoError(t, err)
-	require.True(t, connectorPortAllowed("443", policy.AllowedPorts))
-	require.True(t, connectorPortAllowed("3100", policy.AllowedPorts))
-	require.True(t, connectorHostAllowed("api.example.com", policy.AllowedHosts))
-	require.False(t, connectorHostAllowed("other.example.com", policy.AllowedHosts))
+	require.Empty(t, policy.AllowedHosts)
+	require.Nil(t, policy.AllowedPorts)
+	require.True(t, connectorIPAllowed(net.ParseIP("127.0.0.1"), policy.AllowedCIDRs))
+
+	_, err = NewConnector(&model.ManagedInstance{
+		BaseURL: "http://127.0.0.1:3100", RequestTimeoutSeconds: 2, TLSVerify: true,
+	}, policy)
+	require.NoError(t, err)
 }

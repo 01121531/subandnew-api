@@ -132,15 +132,13 @@ go build ./...
 | `SESSION_SECRET` | 登录会话签名密钥 |
 | `MANAGED_INSTANCE_SECRET_KEY` | 32 字节标准 Base64 主密钥 |
 | `MANAGED_INSTANCE_SECRET_KEY_VERSION` | 当前凭据密钥版本 |
-| `MANAGED_INSTANCE_ALLOWED_CIDRS` | Connector 允许访问的私网 CIDR |
-| `MANAGED_INSTANCE_ALLOWED_PORTS` | 可选端口白名单；未设置时允许目标公网地址上的任意有效端口 |
 | `MANAGED_INSTANCE_PROBE_MAX_CONCURRENCY` | 巡检全局并发上限，默认 `8` |
 | `MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY` | 受控操作全局并发上限，默认 `4` |
 | `MANAGED_INSTANCE_OPERATION_MAX_PER_HOST` | 同一远端主机的操作并发上限，默认 `2` |
 | `MANAGED_INSTANCE_BATCH_MAX_CONCURRENCY` | 同一批次的操作并发上限，默认 `2` |
 | `MANAGED_USAGE_EXPORT_DIR` | 使用记录后台导出的持久化目录，默认 `./exports/usage-records`；Docker 建议设为 `/data/exports/usage-records` |
 
-默认拒绝访问私网和回环地址，但允许目标公网地址使用任意有效端口。如需限制端口，使用 `MANAGED_INSTANCE_ALLOWED_PORTS` 显式配置白名单；如需连接内网实例，必须通过 `MANAGED_INSTANCE_ALLOWED_CIDRS` 显式放行精确网段。
+实例连接不限制目标 IP、主机或端口，并允许最多 5 次跨源重定向。请仅将控制台部署在受信任的内部网络，并严格限制实例管理权限。
 
 ## 权限
 
