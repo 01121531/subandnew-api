@@ -21,7 +21,6 @@ import { Link } from '@tanstack/react-router'
 import {
   Activity,
   BadgeCheck,
-  Building2,
   CheckCircle2,
   CircleDollarSign,
   Cpu,
@@ -60,14 +59,6 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -450,6 +441,16 @@ function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
   return instance.kind === 'new_api' || instance.kind === 'huichuan'
 }
 
+function instanceFamily(instance: ManagedInstance): FleetFamily | null {
+  if (instance.kind === 'sub2api') return 'sub2api'
+  if (instance.kind === 'conductor') return 'conductor'
+  if (instance.kind === 'claude_gateway') return 'claude_gateway'
+  if (instance.kind === 'new_api' || instance.kind === 'huichuan') {
+    return 'new_api'
+  }
+  return null
+}
+
 export function FleetDashboard() {
   const { t } = useTranslation()
   const initialPreferences = useMemo(readDashboardPreferences, [])
@@ -477,9 +478,13 @@ export function FleetDashboard() {
     effectiveTrendMetric = 'rpm'
   } else if (
     family === 'conductor' &&
-    (trendMetric === 'requests' || trendMetric === 'tokens')
+    (trendMetric === 'requests' ||
+      trendMetric === 'tokens' ||
+      trendMetric === 'success_rate')
   ) {
     effectiveTrendMetric = 'quota'
+  } else if (family !== 'claude_gateway' && trendMetric === 'success_rate') {
+    effectiveTrendMetric = 'rpm'
   }
   const effectiveConsumptionMetric =
     family === 'conductor' ? 'quota' : consumptionMetric
@@ -493,9 +498,16 @@ export function FleetDashboard() {
     staleTime: Number.POSITIVE_INFINITY,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
+  const supportedInstances = useMemo(
+    () => allInstances.filter((instance) => instanceFamily(instance) != null),
+    [allInstances]
+  )
   const familyInstances = useMemo(
-    () => allInstances.filter((instance) => belongsToFamily(instance, family)),
-    [allInstances, family]
+    () =>
+      supportedInstances.filter((instance) =>
+        belongsToFamily(instance, family)
+      ),
+    [family, supportedInstances]
   )
   const selectedInstanceID = selectedInstances[family]
   const selectedInstance = useMemo(
@@ -505,12 +517,9 @@ export function FleetDashboard() {
       ),
     [familyInstances, selectedInstanceID]
   )
-  const effectiveInstanceID = selectedInstance
-    ? selectedInstanceID
-    : ALL_SITES_VALUE
   const instances = useMemo(
-    () => (selectedInstance ? [selectedInstance] : familyInstances),
-    [familyInstances, selectedInstance]
+    () => (selectedInstance ? [selectedInstance] : []),
+    [selectedInstance]
   )
   const instanceIDs = useMemo(
     () => instances.map((instance) => instance.id),
@@ -837,16 +846,17 @@ export function FleetDashboard() {
   useEffect(() => {
     if (
       !instancesQuery.isSuccess ||
-      selectedInstanceID === ALL_SITES_VALUE ||
       familyInstances.some(
         (instance) => String(instance.id) === selectedInstanceID
       )
     ) {
       return
     }
+    const fallback = familyInstances[0]
+    if (!fallback) return
     setSelectedInstances((current) => ({
       ...current,
-      [family]: ALL_SITES_VALUE,
+      [family]: String(fallback.id),
     }))
   }, [family, familyInstances, instancesQuery.isSuccess, selectedInstanceID])
 
@@ -926,8 +936,18 @@ export function FleetDashboard() {
     manualRPMRefreshing ||
     ['connecting', 'reconnecting'].includes(realtimeEvents.status)
 
-  const handleFamilyChange = (nextFamily: FleetFamily) => {
+  const handleInstanceChange = (instanceID: string) => {
+    const instance = supportedInstances.find(
+      (candidate) => String(candidate.id) === instanceID
+    )
+    if (!instance) return
+    const nextFamily = instanceFamily(instance)
+    if (!nextFamily) return
     setFamily(nextFamily)
+    setSelectedInstances((current) => ({
+      ...current,
+      [nextFamily]: instanceID,
+    }))
   }
 
   let content: ReactNode
@@ -935,8 +955,10 @@ export function FleetDashboard() {
     content = <DashboardSkeleton />
   } else if (instancesQuery.isError && !instancesQuery.data) {
     content = <DashboardError onRetry={refresh} />
-  } else if (instances.length === 0) {
+  } else if (supportedInstances.length === 0) {
     content = <EmptyFleet family={family} />
+  } else if (!selectedInstance) {
+    content = <DashboardSkeleton />
   } else {
     content = (
       <div className='grid gap-4'>
@@ -992,81 +1014,12 @@ export function FleetDashboard() {
       <SectionPageLayout.Content>
         <div className='grid gap-4'>
           <div className='bg-card border-border/80 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-2.5 py-2 shadow-xs sm:px-3'>
-            <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
-              <SegmentedControl
-                value={family}
-                options={FLEET_FAMILIES}
-                getLabel={(option) =>
-                  `${t(familyLabel(option))} · ${familyCounts[option]}`
-                }
-                onChange={handleFamilyChange}
+            <div className='min-w-0 flex-1'>
+              <InstanceTabs
+                instances={supportedInstances}
+                value={selectedInstance ? String(selectedInstance.id) : ''}
+                onChange={handleInstanceChange}
               />
-              <Select
-                items={[
-                  {
-                    value: ALL_SITES_VALUE,
-                    label: `${t('All sites')} · ${familyInstances.length}`,
-                  },
-                  ...familyInstances.map((instance) => ({
-                    value: String(instance.id),
-                    label: instance.name,
-                  })),
-                ]}
-                value={effectiveInstanceID}
-                onValueChange={(value) => {
-                  if (value) {
-                    setSelectedInstances((current) => ({
-                      ...current,
-                      [family]: value,
-                    }))
-                  }
-                }}
-              >
-                <SelectTrigger
-                  size='sm'
-                  className='w-full min-w-0 sm:w-64'
-                  aria-label={t('Select site')}
-                >
-                  <Building2 className='text-muted-foreground size-3.5' />
-                  <SelectValue placeholder={t('Select site')} />
-                </SelectTrigger>
-                <SelectContent
-                  align='start'
-                  alignItemWithTrigger={false}
-                  className='min-w-64'
-                >
-                  <SelectGroup>
-                    <SelectItem value={ALL_SITES_VALUE}>
-                      <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
-                        <span className='truncate'>{t('All sites')}</span>
-                        <span className='text-muted-foreground font-mono text-xs tabular-nums'>
-                          {familyInstances.length}
-                        </span>
-                      </span>
-                    </SelectItem>
-                    {familyInstances.map((instance) => (
-                      <SelectItem key={instance.id} value={String(instance.id)}>
-                        <span className='flex min-w-0 flex-1 items-center gap-2'>
-                          <span
-                            className={cn(
-                              'size-1.5 shrink-0 rounded-full',
-                              instance.status === 'healthy' && 'bg-emerald-500',
-                              instance.status === 'degraded' && 'bg-amber-500',
-                              instance.status === 'offline' && 'bg-red-500',
-                              instance.status === 'auth_failed' &&
-                                'bg-fuchsia-500',
-                              instance.status === 'unknown' &&
-                                'bg-muted-foreground/50'
-                            )}
-                            aria-hidden='true'
-                          />
-                          <span className='truncate'>{instance.name}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
             </div>
             <div className='flex min-w-0 items-center gap-2 text-xs'>
               <span className='border-success/20 bg-success/5 text-success flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium'>
@@ -2236,6 +2189,62 @@ function SegmentedControl<T extends string>(props: {
           {props.getLabel?.(option) ?? option}
         </button>
       ))}
+    </div>
+  )
+}
+
+function InstanceTabs(props: {
+  instances: ManagedInstance[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className='w-full [scrollbar-width:thin] overflow-x-auto'>
+      <div
+        role='tablist'
+        aria-label={t('Select site')}
+        className='bg-muted flex h-9 w-max min-w-full items-center gap-0.5 rounded-md p-0.5'
+      >
+        {props.instances.map((instance) => {
+          const family = instanceFamily(instance)
+          const selected = props.value === String(instance.id)
+          return (
+            <button
+              key={instance.id}
+              type='button'
+              role='tab'
+              aria-selected={selected}
+              title={`${instance.name} · ${family ? t(familyLabel(family)) : instance.kind}`}
+              className={cn(
+                'focus-visible:ring-ring flex h-8 max-w-56 shrink-0 items-center gap-2 rounded-sm px-3 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none',
+                selected
+                  ? 'bg-background text-foreground shadow-xs'
+                  : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
+              )}
+              onClick={() => props.onChange(String(instance.id))}
+            >
+              <span
+                className={cn(
+                  'size-1.5 shrink-0 rounded-full',
+                  instance.status === 'healthy' && 'bg-emerald-500',
+                  instance.status === 'degraded' && 'bg-amber-500',
+                  instance.status === 'offline' && 'bg-red-500',
+                  instance.status === 'auth_failed' && 'bg-fuchsia-500',
+                  instance.status === 'unknown' && 'bg-muted-foreground/50'
+                )}
+                aria-hidden='true'
+              />
+              <span className='truncate'>{instance.name}</span>
+              {family && (
+                <span className='text-muted-foreground/80 shrink-0 text-[10px] font-normal'>
+                  {t(familyLabel(family))}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
