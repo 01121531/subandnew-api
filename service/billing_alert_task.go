@@ -3,14 +3,18 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/billingalert"
+	"github.com/01121531/subandnew-api/service/metricalert"
 )
 
 type billingAlertScanHandler struct{}
@@ -18,10 +22,16 @@ type billingAlertEvaluateHandler struct{}
 type billingEmailDeliveryHandler struct{}
 type exchangeRateRefreshHandler struct{}
 type billingAlertExportHandler struct{}
+type metricAlertScanHandler struct{}
+type metricAlertEvaluateHandler struct{}
 
 type billingEvaluatePayload struct {
 	RuleID     int64 `json:"rule_id"`
 	InstanceID int64 `json:"instance_id"`
+}
+
+type metricEvaluatePayload struct {
+	RuleID int64 `json:"rule_id"`
 }
 
 type billingEmailPayload struct {
@@ -38,6 +48,56 @@ func init() {
 	RegisterSystemTaskHandler(billingEmailDeliveryHandler{})
 	RegisterSystemTaskHandler(exchangeRateRefreshHandler{})
 	RegisterSystemTaskHandler(billingAlertExportHandler{})
+	RegisterSystemTaskHandler(metricAlertScanHandler{})
+	RegisterSystemTaskHandler(metricAlertEvaluateHandler{})
+}
+
+func (metricAlertScanHandler) Type() string            { return model.SystemTaskTypeMetricAlertScan }
+func (metricAlertScanHandler) Enabled() bool           { return true }
+func (metricAlertScanHandler) Interval() time.Duration { return 10 * time.Second }
+func (metricAlertScanHandler) NewPayload() any         { return nil }
+
+func (metricAlertScanHandler) Run(_ context.Context, task *model.SystemTask, runnerID string) {
+	now := common.GetTimestamp()
+	rules, err := metricalert.DueRules(now, 500)
+	if err == nil {
+		for _, rule := range rules {
+			_, _, enqueueErr := EnqueueMetricAlertEvaluation(rule.ID)
+			if enqueueErr != nil && err == nil {
+				err = enqueueErr
+			}
+			_ = metricalert.TouchNextRun(rule.ID, now, rule.EvaluationIntervalSeconds)
+		}
+	}
+	status, message := model.SystemTaskStatusSucceeded, ""
+	if err != nil {
+		status, message = model.SystemTaskStatusFailed, err.Error()
+	}
+	_ = model.FinishSystemTask(task.TaskID, runnerID, status, map[string]any{"rules": len(rules)}, message)
+}
+
+func (metricAlertEvaluateHandler) Type() string { return model.SystemTaskTypeMetricAlertEvaluate }
+
+func (metricAlertEvaluateHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	payload := metricEvaluatePayload{}
+	err := task.DecodePayload(&payload)
+	var result any
+	if err == nil && payload.RuleID > 0 {
+		result, err = metricalert.EvaluateRule(ctx, payload.RuleID)
+	}
+	status, message := model.SystemTaskStatusSucceeded, ""
+	if err != nil && !errors.Is(err, metricalert.ErrDataUnavailable) {
+		status, message = model.SystemTaskStatusFailed, err.Error()
+	}
+	_ = model.FinishSystemTask(task.TaskID, runnerID, status, result, message)
+	_ = enqueueDueBillingDeliveries()
+}
+
+func EnqueueMetricAlertEvaluation(ruleID int64) (*model.SystemTask, bool, error) {
+	if ruleID <= 0 {
+		return nil, false, metricalert.ErrInvalidInput
+	}
+	return EnqueueScopedSystemTask(model.SystemTaskTypeMetricAlertEvaluate, strconv.FormatInt(ruleID, 10), metricEvaluatePayload{RuleID: ruleID}, nil)
 }
 
 func EnqueueBillingAlertExport(filter billingalert.AlertRecordFilter, actorID int) (*model.BillingAlertExport, error) {
@@ -293,6 +353,9 @@ func sendBillingDelivery(ctx context.Context, deliveryID int64) error {
 }
 
 func billingEmailContent(event *model.BillingAlertEvent, rule *model.BillingAlertRule, instance *model.ManagedInstance) (string, string, string) {
+	if event.SourceType == model.AlertSourceMetric {
+		return metricAlertEmailContent(event)
+	}
 	ruleName := event.RuleName
 	if ruleName == "" {
 		ruleName = rule.Name
@@ -335,6 +398,76 @@ func billingEmailContent(event *model.BillingAlertEvent, rule *model.BillingAler
 	}
 	htmlBody := "<div style=\"font-family:Arial,sans-serif;max-width:640px\"><h2>" + html.EscapeString(title) + "</h2><table style=\"border-collapse:collapse;width:100%\">" + rows.String() + "</table></div>"
 	return subject, textBody, htmlBody
+}
+
+func metricAlertEmailContent(event *model.BillingAlertEvent) (string, string, string) {
+	title := "指标预警"
+	switch event.EventType {
+	case model.MetricAlertEventRecovered:
+		title = "指标预警已恢复"
+	case model.MetricAlertEventMonitorFailure:
+		title = "指标监控异常"
+	case model.MetricAlertEventMonitorRecovery:
+		title = "指标监控已恢复"
+	}
+	instanceName := event.InstanceName
+	if instanceName == "" {
+		instanceName = "汇总范围"
+	}
+	subject := fmt.Sprintf("[%s] %s · %s", title, instanceName, event.RuleName)
+	lines := []string{
+		"范围：" + instanceName,
+		"规则：" + event.RuleName,
+		"计算模式：" + metricScopeDisplay(event.ScopeMode),
+	}
+	if event.ThresholdName != "" {
+		lines = append(lines, "指标："+event.ThresholdName)
+	}
+	if event.Threshold != "" {
+		lines = append(lines, "触发条件："+event.Threshold)
+	}
+	if event.ObservedValues != "" {
+		var values map[string]float64
+		if json.Unmarshal([]byte(event.ObservedValues), &values) == nil {
+			keys := make([]string, 0, len(values))
+			for key := range values {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				lines = append(lines, metricEmailLabel(key)+"："+strconv.FormatFloat(values[key], 'f', -1, 64))
+			}
+		}
+	}
+	if event.ErrorCode != "" {
+		lines = append(lines, "错误代码："+event.ErrorCode)
+	}
+	textBody := strings.Join(lines, "\n")
+	var rows strings.Builder
+	for _, line := range lines {
+		parts := strings.SplitN(line, "：", 2)
+		if len(parts) == 2 {
+			rows.WriteString("<tr><th style=\"text-align:left;padding:8px;color:#6b7280\">" + html.EscapeString(parts[0]) + "</th><td style=\"padding:8px\">" + html.EscapeString(parts[1]) + "</td></tr>")
+		}
+	}
+	htmlBody := "<div style=\"font-family:Arial,sans-serif;max-width:640px\"><h2>" + html.EscapeString(title) + "</h2><table style=\"border-collapse:collapse;width:100%\">" + rows.String() + "</table></div>"
+	return subject, textBody, htmlBody
+}
+
+func metricScopeDisplay(value string) string {
+	if value == metricalert.ScopeAggregate {
+		return "实例汇总"
+	}
+	return "每个实例独立"
+}
+
+func metricEmailLabel(key string) string {
+	for _, definition := range metricalert.MetricDefinitions() {
+		if definition.Key == key {
+			return definition.Label
+		}
+	}
+	return key
 }
 
 func billingDiscountDisplay(value string) string {

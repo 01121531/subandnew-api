@@ -8,6 +8,8 @@ License, or (at your option) any later version.
 */
 import { useQuery } from '@tanstack/react-query'
 import {
+  Activity,
+  BellDot,
   BellRing,
   CircleDollarSign,
   Mail,
@@ -82,6 +84,8 @@ import {
   discountMultiplierToPercent,
   discountPercentToMultiplier,
 } from './discount'
+import { MetricAlertRules } from './metric-rules'
+import { BillingAlertRecords } from './records'
 import { SMTPSettings } from './smtp-settings'
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -1339,7 +1343,7 @@ export function BillingAlerts() {
 
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>账单预警</SectionPageLayout.Title>
+      <SectionPageLayout.Title>预警任务</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='min-w-0'>
           <Tabs defaultValue='rules' className='gap-5'>
@@ -1349,7 +1353,15 @@ export function BillingAlerts() {
             >
               <TabsTrigger value='rules'>
                 <BellRing />
-                预警规则
+                账单预警
+              </TabsTrigger>
+              <TabsTrigger value='metrics'>
+                <Activity />
+                指标预警
+              </TabsTrigger>
+              <TabsTrigger value='records'>
+                <BellDot />
+                预警记录
               </TabsTrigger>
               <TabsTrigger value='templates'>
                 <SlidersHorizontal />
@@ -1364,7 +1376,7 @@ export function BillingAlerts() {
               {isRoot && (
                 <TabsTrigger value='smtp'>
                   <Mail />
-                  邮件设置
+                  通知设置
                 </TabsTrigger>
               )}
             </TabsList>
@@ -1498,6 +1510,12 @@ export function BillingAlerts() {
                   </TableBody>
                 </Table>
               </div>
+            </TabsContent>
+            <TabsContent value='metrics'>
+              <MetricAlertRules instances={instances} isRoot={isRoot} />
+            </TabsContent>
+            <TabsContent value='records'>
+              <BillingAlertRecords embedded />
             </TabsContent>
             <TabsContent value='templates'>
               <div className='mb-3 flex justify-end'>

@@ -186,7 +186,7 @@ func ListBillingAlertRecords(c *gin.Context) {
 	data, err := billingalert.ListAlertRecords(billingalert.AlertRecordFilter{
 		Page: queryInt(c, "page", 1), PageSize: queryInt(c, "page_size", 20),
 		InstanceID: queryInt64(c, "instance_id"), RuleID: queryInt64(c, "rule_id"),
-		EventType: c.Query("event_type"), Currency: c.Query("currency"), Recipient: c.Query("recipient"),
+		EventType: c.Query("event_type"), SourceType: c.Query("source_type"), MetricKey: c.Query("metric_key"), Currency: c.Query("currency"), Recipient: c.Query("recipient"),
 		StartTime: queryInt64(c, "start_time"), EndTime: queryInt64(c, "end_time"),
 	})
 	billingJSON(c, data, err)
@@ -241,7 +241,7 @@ func DownloadBillingAlertRecordExport(c *gin.Context) {
 func billingAlertRecordFilter(c *gin.Context) billingalert.AlertRecordFilter {
 	return billingalert.AlertRecordFilter{
 		InstanceID: queryInt64(c, "instance_id"), RuleID: queryInt64(c, "rule_id"),
-		EventType: c.Query("event_type"), Currency: c.Query("currency"), Recipient: c.Query("recipient"),
+		EventType: c.Query("event_type"), SourceType: c.Query("source_type"), MetricKey: c.Query("metric_key"), Currency: c.Query("currency"), Recipient: c.Query("recipient"),
 		StartTime: queryInt64(c, "start_time"), EndTime: queryInt64(c, "end_time"),
 	}
 }

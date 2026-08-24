@@ -81,7 +81,7 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 	}
 	defer os.Remove(temporaryPath)
 	writer := csv.NewWriter(file)
-	_ = writer.Write([]string{"事件类型", "实例", "系统类型", "规则", "档位", "币种", "阈值", "美元消耗", "人民币账单", "折扣", "汇率", "汇率来源", "汇率日期", "收件人", "错误代码", "创建时间"})
+	_ = writer.Write([]string{"来源", "事件类型", "实例", "系统类型", "规则", "监控范围", "指标", "条件", "观测值", "档位", "币种", "阈值", "美元消耗", "人民币账单", "折扣", "汇率", "汇率来源", "汇率日期", "收件人", "错误代码", "创建时间"})
 	query := applyAlertRecordFilter(model.DB.Model(&model.BillingAlertEvent{}), filter).Order("created_at ASC, id ASC")
 	var count int64
 	for offset := 0; ; offset += 1000 {
@@ -103,7 +103,8 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 				discountRate = event.DiscountRate
 			}
 			_ = writer.Write([]string{
-				event.EventType, event.InstanceName, event.InstanceKind, event.RuleName, event.ThresholdName,
+				event.SourceType, event.EventType, event.InstanceName, event.InstanceKind, event.RuleName,
+				event.ScopeMode, event.MetricKey, event.Conditions, event.ObservedValues, event.ThresholdName,
 				event.Currency, event.Threshold, event.USDTotal, event.CNYTotal, discountRate,
 				event.ExchangeRate, event.ExchangeSource, event.ExchangeObservedDate, event.Recipients,
 				event.ErrorCode, time.Unix(event.CreatedAt, 0).Format(time.RFC3339),

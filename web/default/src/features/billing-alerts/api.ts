@@ -140,6 +140,7 @@ export interface AlertDelivery {
 export interface AlertRecord {
   id: number
   event_type: string
+  source_type: 'billing' | 'metric'
   rule_id: number
   rule_name: string
   instance_id: number
@@ -154,8 +155,75 @@ export interface AlertRecord {
   exchange_rate: string
   recipients: string
   error_code: string
+  scope_mode: string
+  metric_key: string
+  conditions: string
+  observed_values: string
   created_at: number
   deliveries: AlertDelivery[]
+}
+
+export interface MetricAlertCondition {
+  id?: number
+  metric: string
+  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne'
+  threshold: string
+  recovery_threshold: string
+}
+
+export interface MetricAlertState {
+  id: number
+  scope_key: string
+  instance_id: number
+  active: boolean
+  consecutive_violations: number
+  consecutive_recoveries: number
+  consecutive_failures: number
+  failure_notified: boolean
+  last_values: string
+  last_error_code: string
+  last_observed_at: number
+}
+
+export interface MetricAlertRule {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  scope_mode: 'per_instance' | 'aggregate'
+  match_mode: 'all' | 'any'
+  evaluation_interval_seconds: 10 | 30 | 60 | 300
+  trigger_count: number
+  recovery_count: number
+  failure_threshold: number
+  reminder_mode: 'once' | 'repeat_interval'
+  repeat_interval_seconds: number
+  recipients: string[]
+  instance_ids: number[]
+  conditions: MetricAlertCondition[]
+  states: MetricAlertState[]
+  next_run_at: number
+  last_evaluated_at: number
+  created_at: number
+  updated_at: number
+}
+
+export type MetricAlertRuleInput = Omit<
+  MetricAlertRule,
+  | 'id'
+  | 'states'
+  | 'next_run_at'
+  | 'last_evaluated_at'
+  | 'created_at'
+  | 'updated_at'
+>
+
+export interface MetricAlertCapability {
+  key: string
+  label: string
+  unit: string
+  kinds: string[]
+  aggregatable: boolean
 }
 
 export interface AlertRecordPage {
@@ -274,6 +342,56 @@ export async function evaluateBillingRule(id: number, instanceId: number) {
     await api.post(`/api/billing/alert-rules/${id}/evaluate`, {
       instance_id: instanceId,
     })
+  ).data
+}
+
+export async function listMetricAlertRules() {
+  return (
+    await api.get<ApiResponse<MetricAlertRule[]>>('/api/metric-alert-rules')
+  ).data
+}
+
+export async function createMetricAlertRule(input: MetricAlertRuleInput) {
+  return (
+    await api.post<ApiResponse<MetricAlertRule>>(
+      '/api/metric-alert-rules',
+      input
+    )
+  ).data
+}
+
+export async function updateMetricAlertRule(
+  id: number,
+  input: MetricAlertRuleInput
+) {
+  return (
+    await api.put<ApiResponse<MetricAlertRule>>(
+      `/api/metric-alert-rules/${id}`,
+      input
+    )
+  ).data
+}
+
+export async function deleteMetricAlertRule(id: number) {
+  return (await api.delete(`/api/metric-alert-rules/${id}`)).data
+}
+
+export async function evaluateMetricAlertRule(id: number) {
+  return (await api.post(`/api/metric-alert-rules/${id}/evaluate`)).data
+}
+
+export async function listMetricAlertCapabilities(
+  instanceIds: number[],
+  scopeMode: 'per_instance' | 'aggregate'
+) {
+  const params = new URLSearchParams({
+    instance_ids: instanceIds.join(','),
+    scope_mode: scopeMode,
+  })
+  return (
+    await api.get<ApiResponse<MetricAlertCapability[]>>(
+      `/api/alert-metrics/capabilities?${params}`
+    )
   ).data
 }
 

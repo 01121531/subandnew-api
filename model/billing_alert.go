@@ -12,7 +12,84 @@ const (
 	BillingAlertEventThreshold = "threshold"
 	BillingAlertEventFailure   = "monitor_failure"
 	BillingAlertEventRecovery  = "monitor_recovery"
+
+	AlertSourceBilling = "billing"
+	AlertSourceMetric  = "metric"
+
+	MetricAlertEventTriggered       = "metric_triggered"
+	MetricAlertEventRecovered       = "metric_recovered"
+	MetricAlertEventMonitorFailure  = "metric_monitor_failure"
+	MetricAlertEventMonitorRecovery = "metric_monitor_recovery"
 )
+
+type MetricAlertRule struct {
+	ID                        int64  `json:"id" gorm:"primaryKey"`
+	Name                      string `json:"name" gorm:"type:varchar(128);not null;uniqueIndex"`
+	Description               string `json:"description" gorm:"type:varchar(512)"`
+	Enabled                   bool   `json:"enabled" gorm:"not null;default:true;index"`
+	ScopeMode                 string `json:"scope_mode" gorm:"type:varchar(24);not null;default:'per_instance';index"`
+	MatchMode                 string `json:"match_mode" gorm:"type:varchar(8);not null;default:'all'"`
+	EvaluationIntervalSeconds int64  `json:"evaluation_interval_seconds" gorm:"bigint;not null;default:60"`
+	TriggerCount              int    `json:"trigger_count" gorm:"not null;default:3"`
+	RecoveryCount             int    `json:"recovery_count" gorm:"not null;default:2"`
+	FailureThreshold          int    `json:"failure_threshold" gorm:"not null;default:3"`
+	ReminderMode              string `json:"reminder_mode" gorm:"type:varchar(24);not null;default:'once'"`
+	RepeatIntervalSeconds     int64  `json:"repeat_interval_seconds" gorm:"bigint;not null;default:0"`
+	Recipients                string `json:"recipients" gorm:"type:text;not null"`
+	NextRunAt                 int64  `json:"next_run_at" gorm:"bigint;not null;default:0;index"`
+	LastEvaluatedAt           int64  `json:"last_evaluated_at" gorm:"bigint;not null;default:0"`
+	CreatedBy                 int    `json:"created_by" gorm:"not null;index"`
+	UpdatedBy                 int    `json:"updated_by" gorm:"not null"`
+	CreatedAt                 int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt                 int64  `json:"updated_at" gorm:"bigint;not null;index"`
+}
+
+func (MetricAlertRule) TableName() string { return "metric_alert_rules" }
+
+type MetricAlertRuleInstance struct {
+	ID         int64 `json:"id" gorm:"primaryKey"`
+	RuleID     int64 `json:"rule_id" gorm:"not null;uniqueIndex:uidx_metric_rule_instance,priority:1;index"`
+	InstanceID int64 `json:"instance_id" gorm:"not null;uniqueIndex:uidx_metric_rule_instance,priority:2;index"`
+	CreatedAt  int64 `json:"created_at" gorm:"bigint;not null;index"`
+}
+
+func (MetricAlertRuleInstance) TableName() string { return "metric_alert_rule_instances" }
+
+type MetricAlertCondition struct {
+	ID                int64  `json:"id" gorm:"primaryKey"`
+	RuleID            int64  `json:"rule_id" gorm:"not null;index"`
+	Metric            string `json:"metric" gorm:"type:varchar(64);not null;index"`
+	Operator          string `json:"operator" gorm:"type:varchar(8);not null"`
+	Threshold         string `json:"threshold" gorm:"type:varchar(64);not null"`
+	RecoveryThreshold string `json:"recovery_threshold" gorm:"type:varchar(64)"`
+	SortOrder         int    `json:"sort_order" gorm:"not null;default:0"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt         int64  `json:"updated_at" gorm:"bigint;not null;index"`
+}
+
+func (MetricAlertCondition) TableName() string { return "metric_alert_conditions" }
+
+type MetricAlertState struct {
+	ID                    int64  `json:"id" gorm:"primaryKey"`
+	RuleID                int64  `json:"rule_id" gorm:"not null;uniqueIndex:uidx_metric_alert_state,priority:1;index"`
+	ScopeKey              string `json:"scope_key" gorm:"type:varchar(192);not null;uniqueIndex:uidx_metric_alert_state,priority:2"`
+	InstanceID            int64  `json:"instance_id" gorm:"not null;default:0;index"`
+	Active                bool   `json:"active" gorm:"not null;default:false;index"`
+	ConsecutiveViolations int    `json:"consecutive_violations" gorm:"not null;default:0"`
+	ConsecutiveRecoveries int    `json:"consecutive_recoveries" gorm:"not null;default:0"`
+	ConsecutiveFailures   int    `json:"consecutive_failures" gorm:"not null;default:0"`
+	FailureNotified       bool   `json:"failure_notified" gorm:"not null;default:false"`
+	OpenEventID           int64  `json:"open_event_id" gorm:"not null;default:0;index"`
+	FailureEventID        int64  `json:"failure_event_id" gorm:"not null;default:0;index"`
+	LastValues            string `json:"last_values" gorm:"type:text;not null"`
+	LastErrorCode         string `json:"last_error_code" gorm:"type:varchar(128)"`
+	LastObservedAt        int64  `json:"last_observed_at" gorm:"bigint;not null;default:0"`
+	LastNotifiedAt        int64  `json:"last_notified_at" gorm:"bigint;not null;default:0"`
+	CreatedAt             int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt             int64  `json:"updated_at" gorm:"bigint;not null;index"`
+}
+
+func (MetricAlertState) TableName() string { return "metric_alert_states" }
 
 type BillingFilterTemplate struct {
 	ID             int64  `json:"id" gorm:"primaryKey"`
@@ -144,6 +221,7 @@ type BillingAlertEvent struct {
 	ID                   int64  `json:"id" gorm:"primaryKey"`
 	EventKey             string `json:"event_key" gorm:"type:varchar(192);not null;uniqueIndex"`
 	EventType            string `json:"event_type" gorm:"type:varchar(32);not null;index"`
+	SourceType           string `json:"source_type" gorm:"type:varchar(16);not null;default:'billing';index"`
 	RuleID               int64  `json:"rule_id" gorm:"not null;index"`
 	InstanceID           int64  `json:"instance_id" gorm:"not null;index"`
 	CycleID              int64  `json:"cycle_id" gorm:"not null;default:0;index"`
@@ -168,6 +246,10 @@ type BillingAlertEvent struct {
 	ExchangeRate         string `json:"exchange_rate" gorm:"type:varchar(64)"`
 	Recipients           string `json:"recipients" gorm:"type:text;not null"`
 	ErrorCode            string `json:"error_code" gorm:"type:varchar(128)"`
+	ScopeMode            string `json:"scope_mode" gorm:"type:varchar(24)"`
+	MetricKey            string `json:"metric_key" gorm:"type:varchar(64);index"`
+	Conditions           string `json:"conditions" gorm:"type:text"`
+	ObservedValues       string `json:"observed_values" gorm:"type:text"`
 	CreatedAt            int64  `json:"created_at" gorm:"bigint;not null;index"`
 }
 
@@ -292,6 +374,22 @@ func (m *BillingFilterTemplate) BeforeCreate(_ *gorm.DB) error {
 }
 func (m *BillingFilterTemplateVersion) BeforeCreate(_ *gorm.DB) error {
 	billingModelBeforeCreate(&m.CreatedAt, nil)
+	return nil
+}
+func (m *MetricAlertRule) BeforeCreate(_ *gorm.DB) error {
+	billingModelBeforeCreate(&m.CreatedAt, &m.UpdatedAt)
+	return nil
+}
+func (m *MetricAlertRuleInstance) BeforeCreate(_ *gorm.DB) error {
+	billingModelBeforeCreate(&m.CreatedAt, nil)
+	return nil
+}
+func (m *MetricAlertCondition) BeforeCreate(_ *gorm.DB) error {
+	billingModelBeforeCreate(&m.CreatedAt, &m.UpdatedAt)
+	return nil
+}
+func (m *MetricAlertState) BeforeCreate(_ *gorm.DB) error {
+	billingModelBeforeCreate(&m.CreatedAt, &m.UpdatedAt)
 	return nil
 }
 func (m *BillingAlertRule) BeforeCreate(_ *gorm.DB) error {

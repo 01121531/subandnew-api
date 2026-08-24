@@ -8,6 +8,17 @@ import (
 )
 
 func registerBillingAlertRoutes(api *gin.RouterGroup) {
+	alerts := api.Group("")
+	alerts.Use(middleware.AdminAuth())
+	alerts.GET("/alert-tasks", middleware.RequirePermission(authz.BillingAlertView), controller.ListAlertTasks)
+	alerts.GET("/alert-metrics/capabilities", middleware.RequirePermission(authz.BillingAlertView), controller.ListMetricAlertCapabilities)
+	alerts.GET("/metric-alert-rules", middleware.RequirePermission(authz.BillingAlertView), controller.ListMetricAlertRules)
+	alerts.GET("/metric-alert-rules/:id", middleware.RequirePermission(authz.BillingAlertView), controller.GetMetricAlertRule)
+	alerts.POST("/metric-alert-rules", middleware.RootAuth(), controller.CreateMetricAlertRule)
+	alerts.PUT("/metric-alert-rules/:id", middleware.RootAuth(), controller.UpdateMetricAlertRule)
+	alerts.DELETE("/metric-alert-rules/:id", middleware.RootAuth(), controller.DeleteMetricAlertRule)
+	alerts.POST("/metric-alert-rules/:id/evaluate", middleware.RootAuth(), controller.EvaluateMetricAlertRule)
+
 	billing := api.Group("/billing")
 	billing.Use(middleware.AdminAuth())
 

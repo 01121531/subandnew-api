@@ -8,7 +8,6 @@ License, or (at your option) any later version.
 */
 import {
   BellRing,
-  BellDot,
   LayoutDashboard,
   FileClock,
   ScrollText,
@@ -89,14 +88,10 @@ export function useSidebarData(): SidebarData {
           ...(canViewBillingAlerts
             ? [
                 {
-                  title: '账单预警',
+                  title: '预警任务',
                   url: '/billing-alerts',
+                  activeUrls: ['/billing-alerts', '/billing-alert-records'],
                   icon: BellRing,
-                },
-                {
-                  title: '预警记录',
-                  url: '/billing-alert-records',
-                  icon: BellDot,
                 },
               ]
             : []),

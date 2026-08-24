@@ -14,6 +14,8 @@ type AlertRecordFilter struct {
 	InstanceID int64
 	RuleID     int64
 	EventType  string
+	SourceType string
+	MetricKey  string
 	Currency   string
 	Recipient  string
 	StartTime  int64
@@ -88,6 +90,12 @@ func applyAlertRecordFilter(query *gorm.DB, filter AlertRecordFilter) *gorm.DB {
 	if filter.EventType != "" {
 		query = query.Where("billing_alert_events.event_type = ?", filter.EventType)
 	}
+	if filter.SourceType != "" {
+		query = query.Where("billing_alert_events.source_type = ?", filter.SourceType)
+	}
+	if filter.MetricKey != "" {
+		query = query.Where("billing_alert_events.metric_key = ?", filter.MetricKey)
+	}
 	if filter.Currency != "" {
 		query = query.Where("billing_alert_events.currency = ?", strings.ToUpper(filter.Currency))
 	}
@@ -108,16 +116,23 @@ func alertRecordView(event *model.BillingAlertEvent) (*AlertRecordView, error) {
 		BillingAlertEvent: *event, RuleName: event.RuleName, InstanceName: event.InstanceName,
 		InstanceKind: event.InstanceKind, ThresholdName: event.ThresholdName,
 	}
-	var rule model.BillingAlertRule
-	if err := model.DB.Select("name").First(&rule, event.RuleID).Error; err == nil {
-		view.RuleName = rule.Name
+	if event.SourceType == model.AlertSourceMetric {
+		var rule model.MetricAlertRule
+		if err := model.DB.Select("name").First(&rule, event.RuleID).Error; err == nil {
+			view.RuleName = rule.Name
+		}
+	} else {
+		var rule model.BillingAlertRule
+		if err := model.DB.Select("name").First(&rule, event.RuleID).Error; err == nil {
+			view.RuleName = rule.Name
+		}
 	}
 	var instance model.ManagedInstance
 	if err := model.DB.Select("name", "kind").First(&instance, event.InstanceID).Error; err == nil {
 		view.InstanceName = instance.Name
 		view.InstanceKind = instance.Kind
 	}
-	if event.ThresholdID > 0 {
+	if event.SourceType != model.AlertSourceMetric && event.ThresholdID > 0 {
 		var threshold model.BillingAlertThreshold
 		if err := model.DB.Select("name").First(&threshold, event.ThresholdID).Error; err == nil {
 			view.ThresholdName = threshold.Name
