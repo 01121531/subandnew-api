@@ -102,6 +102,8 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"disabled","health_status":"failed","stats":{"rpm":5,"concurrent":1,"active_sessions":1}}]}`)
 		case "/api/admin/oauth-accounts/today-summary":
 			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"request_count":100}`)
+		case "/api/admin/groups":
+			writeProbeJSON(response, `{"items":[{"id":"default","name":"default","is_default":true,"account_count":82,"client_count":3},{"id":"other","name":"other","is_default":false,"account_count":4,"client_count":1}]}`)
 		case "/api/admin/overview":
 			require.Equal(t, "time", request.URL.Query().Get("slice"))
 			require.Equal(t, "day", request.URL.Query().Get("granularity"))
@@ -120,8 +122,8 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 12.34567891, *state.TodayCost.Value)
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
-	require.Equal(t, 2, state.AccountsTotal)
-	require.Equal(t, 1, state.AccountsAvailable)
+	require.Equal(t, 82, state.AccountsTotal)
+	require.Equal(t, 3, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 2)
 }

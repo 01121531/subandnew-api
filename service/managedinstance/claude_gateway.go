@@ -104,6 +104,14 @@ type claudeGatewayOverview struct {
 	} `json:"kpis"`
 }
 
+type claudeGatewayGroupSummary struct {
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	IsDefault    bool                `json:"is_default"`
+	AccountCount claudeGatewayNumber `json:"account_count"`
+	ClientCount  claudeGatewayNumber `json:"client_count"`
+}
+
 type claudeGatewayUsageSummary struct {
 	TotalKeys     claudeGatewayNumber `json:"total_keys"`
 	TotalRequests claudeGatewayNumber `json:"total_requests"`
@@ -323,6 +331,34 @@ func fetchClaudeGatewayTodaySummary(ctx context.Context, connector *Connector, c
 	return summary, nil
 }
 
+func fetchClaudeGatewayDefaultGroup(ctx context.Context, connector *Connector, credential *CredentialMaterial) (claudeGatewayGroupSummary, error) {
+	response, err := claudeGatewayDoJSON(ctx, connector, credential, http.MethodGet, "/api/admin/groups", nil)
+	if err != nil {
+		return claudeGatewayGroupSummary{}, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return claudeGatewayGroupSummary{}, err
+	}
+	var envelope struct {
+		Items []claudeGatewayGroupSummary `json:"items"`
+	}
+	if json.Unmarshal(response.Body, &envelope) != nil || len(envelope.Items) == 0 || len(envelope.Items) > managedInstanceInventoryMaxItems {
+		return claudeGatewayGroupSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	selected := envelope.Items[0]
+	for _, group := range envelope.Items {
+		if group.IsDefault || strings.EqualFold(strings.TrimSpace(group.Name), "default") {
+			selected = group
+			break
+		}
+	}
+	total, available := float64(selected.AccountCount), float64(selected.ClientCount)
+	if total < 0 || available < 0 || available > total || total > float64(managedInstanceInventoryMaxItems) {
+		return claudeGatewayGroupSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return selected, nil
+}
+
 func fetchClaudeGatewayOverview(ctx context.Context, connector *Connector, credential *CredentialMaterial) (claudeGatewayOverview, error) {
 	response, err := claudeGatewayDoJSON(ctx, connector, credential, http.MethodGet, "/api/admin/overview?slice=time&granularity=day", nil)
 	if err != nil {
@@ -505,6 +541,10 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		ConcurrencyMax: unsupportedMetric("concurrency"), ConcurrencyStatus: model.ManagedInstanceCollectionSucceeded,
 		AccountsTotal: len(accounts), AccountsAvailable: available, AccountsReporting: reporting,
 		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, ActiveSessions: sessions, Accounts: page.Items,
+	}
+	if group, groupErr := fetchClaudeGatewayDefaultGroup(ctx, connector, credential); groupErr == nil {
+		state.AccountsTotal = int(group.AccountCount)
+		state.AccountsAvailable = int(group.ClientCount)
 	}
 	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
 		state.TodayCost = supportedMetric(float64(summary.TotalCost), "usd")
