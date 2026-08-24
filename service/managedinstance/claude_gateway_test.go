@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -126,6 +127,60 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 3, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 2)
+}
+
+func TestDecodeClaudeGatewayGroupsAcceptsKnownResponseShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "items", body: `{"items":[{"name":"default","account_count":82,"client_count":3}]}`},
+		{name: "groups", body: `{"groups":[{"name":"default","account_count":"83","client_count":"4"}]}`},
+		{name: "nested data", body: `{"data":{"groups":[{"name":"default","account_count":84,"client_count":5}]}}`},
+		{name: "data array", body: `{"data":[{"name":"default","account_count":85,"client_count":6}]}`},
+		{name: "top level array", body: `[{"name":"default","account_count":86,"client_count":7}]`},
+		{name: "single group", body: `{"name":"default","account_count":87,"client_count":8}`},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			groups, err := decodeClaudeGatewayGroups([]byte(test.body))
+			require.NoError(t, err)
+			require.Len(t, groups, 1)
+			require.Equal(t, 82+index, int(groups[0].AccountCount))
+			require.Equal(t, 3+index, int(groups[0].ClientCount))
+		})
+	}
+}
+
+func TestRefreshClaudeGatewayRealtimeUsesLatestGroupCounts(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	resetNewAPIRealtimeCacheForTest()
+	groupRequest := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			writeProbeJSON(response, `{"accounts":[{"id":"one","status":"active","health_status":"healthy","stats":{"rpm":1}}]}`)
+		case "/api/admin/groups":
+			groupRequest++
+			writeProbeJSON(response, `{"data":{"groups":[{"name":"default","is_default":1,"account_count":82,"client_count":`+strconv.Itoa(groupRequest+2)+`}]}}`)
+		case "/api/admin/oauth-accounts/today-summary":
+			writeProbeJSON(response, `{"total_cost":1}`)
+		case "/api/admin/overview":
+			writeProbeJSON(response, `{"kpis":{"total":1,"successRate":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	first, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 3, first.AccountsAvailable)
+	second, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 4, second.AccountsAvailable)
+	require.Equal(t, 82, second.AccountsTotal)
 }
 
 func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {

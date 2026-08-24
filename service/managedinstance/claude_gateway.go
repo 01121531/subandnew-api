@@ -105,11 +105,42 @@ type claudeGatewayOverview struct {
 }
 
 type claudeGatewayGroupSummary struct {
-	ID           string              `json:"id"`
 	Name         string              `json:"name"`
-	IsDefault    bool                `json:"is_default"`
+	IsDefault    claudeGatewayBool   `json:"is_default"`
+	Default      claudeGatewayBool   `json:"default"`
 	AccountCount claudeGatewayNumber `json:"account_count"`
 	ClientCount  claudeGatewayNumber `json:"client_count"`
+}
+
+type claudeGatewayBool bool
+
+func (value *claudeGatewayBool) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		*value = false
+		return nil
+	}
+	var parsed bool
+	if err := json.Unmarshal(data, &parsed); err == nil {
+		*value = claudeGatewayBool(parsed)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		normalized := strings.ToLower(strings.TrimSpace(text))
+		*value = normalized == "true" || normalized == "1" || normalized == "yes"
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return err
+	}
+	parsedNumber, err := number.Int64()
+	if err != nil {
+		return err
+	}
+	*value = parsedNumber != 0
+	return nil
 }
 
 type claudeGatewayUsageSummary struct {
@@ -339,17 +370,18 @@ func fetchClaudeGatewayDefaultGroup(ctx context.Context, connector *Connector, c
 	if err := requireHTTPStatus(response); err != nil {
 		return claudeGatewayGroupSummary{}, err
 	}
-	var envelope struct {
-		Items []claudeGatewayGroupSummary `json:"items"`
-	}
-	if json.Unmarshal(response.Body, &envelope) != nil || len(envelope.Items) == 0 || len(envelope.Items) > managedInstanceInventoryMaxItems {
+	groups, err := decodeClaudeGatewayGroups(response.Body)
+	if err != nil || len(groups) == 0 || len(groups) > managedInstanceInventoryMaxItems {
 		return claudeGatewayGroupSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
-	selected := envelope.Items[0]
-	for _, group := range envelope.Items {
-		if group.IsDefault || strings.EqualFold(strings.TrimSpace(group.Name), "default") {
+	selected := groups[0]
+	for _, group := range groups {
+		if bool(group.IsDefault) || bool(group.Default) || strings.EqualFold(strings.TrimSpace(group.Name), "default") || strings.TrimSpace(group.Name) == "默认" {
 			selected = group
 			break
+		}
+		if group.AccountCount > selected.AccountCount {
+			selected = group
 		}
 	}
 	total, available := float64(selected.AccountCount), float64(selected.ClientCount)
@@ -357,6 +389,47 @@ func fetchClaudeGatewayDefaultGroup(ctx context.Context, connector *Connector, c
 		return claudeGatewayGroupSummary{}, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	return selected, nil
+}
+
+func decodeClaudeGatewayGroups(body []byte) ([]claudeGatewayGroupSummary, error) {
+	return decodeClaudeGatewayGroupsAtDepth(bytes.TrimSpace(body), 0)
+}
+
+func decodeClaudeGatewayGroupsAtDepth(body []byte, depth int) ([]claudeGatewayGroupSummary, error) {
+	if len(body) == 0 || depth > 3 {
+		return nil, ErrRemoteDataUnavailable
+	}
+	var groups []claudeGatewayGroupSummary
+	if body[0] == '[' {
+		if err := json.Unmarshal(body, &groups); err != nil {
+			return nil, err
+		}
+		return groups, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(body, &object); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"items", "groups", "data", "result"} {
+		raw, ok := object[key]
+		if !ok || len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			continue
+		}
+		decoded, err := decodeClaudeGatewayGroupsAtDepth(raw, depth+1)
+		if err == nil && len(decoded) > 0 {
+			return decoded, nil
+		}
+	}
+	if _, hasTotal := object["account_count"]; hasTotal {
+		if _, hasAvailable := object["client_count"]; hasAvailable {
+			var group claudeGatewayGroupSummary
+			if err := json.Unmarshal(body, &group); err != nil {
+				return nil, err
+			}
+			return []claudeGatewayGroupSummary{group}, nil
+		}
+	}
+	return nil, ErrRemoteDataUnavailable
 }
 
 func fetchClaudeGatewayOverview(ctx context.Context, connector *Connector, credential *CredentialMaterial) (claudeGatewayOverview, error) {
@@ -545,6 +618,9 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	if group, groupErr := fetchClaudeGatewayDefaultGroup(ctx, connector, credential); groupErr == nil {
 		state.AccountsTotal = int(group.AccountCount)
 		state.AccountsAvailable = int(group.ClientCount)
+	} else if previous, ok := currentNewAPIRealtime(instanceID); ok && previous.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded {
+		state.AccountsTotal = previous.AccountsTotal
+		state.AccountsAvailable = previous.AccountsAvailable
 	}
 	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
 		state.TodayCost = supportedMetric(float64(summary.TotalCost), "usd")
