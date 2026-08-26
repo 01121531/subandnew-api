@@ -35,6 +35,7 @@ import {
   RadioTower,
   RefreshCw,
   Search,
+  SearchX,
   Server,
   UserPlus,
   Users,
@@ -342,6 +343,32 @@ function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
   return `${Math.min(100, (successful / item.requests_24h) * 100).toFixed(2)}%`
 }
 
+function searchableText(values: Array<unknown>) {
+  return values
+    .filter((value) => value != null)
+    .join(' ')
+    .toLowerCase()
+}
+
+function exclusionTerms(value: string) {
+  return value
+    .split(/[,，\n]+/)
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function matchesAccountFilter(
+  values: Array<unknown>,
+  required: string,
+  excluded: string[]
+) {
+  const text = searchableText(values)
+  return (
+    (!required || text.includes(required)) &&
+    !excluded.some((term) => text.includes(term))
+  )
+}
+
 export function ManagedAccounts() {
   const { t } = useTranslation()
   const initialPreferences = useMemo(readPreferences, [])
@@ -350,6 +377,7 @@ export function ManagedAccounts() {
     initialPreferences.selectedInstances
   )
   const [search, setSearch] = useState('')
+  const [excludeSearch, setExcludeSearch] = useState('')
   const [sortKey, setSortKey] = useState<AccountSortKey>('available')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
@@ -519,6 +547,11 @@ export function ManagedAccounts() {
     }
   }, [conductorSources, rows])
   const normalizedSearch = search.trim().toLowerCase()
+  const excludedTerms = useMemo(
+    () => exclusionTerms(excludeSearch),
+    [excludeSearch]
+  )
+  const filtering = normalizedSearch !== '' || excludedTerms.length > 0
   const outputRows = useMemo<OutputRow[]>(
     () =>
       instances.flatMap((instance, index) =>
@@ -531,28 +564,28 @@ export function ManagedAccounts() {
   )
   const filteredOutputRows = useMemo(
     () =>
-      normalizedSearch
+      filtering
         ? outputRows.filter(({ instance, output }) =>
-            [
-              output.account.id,
-              output.account.name,
-              output.account.platform,
-              output.account.type,
-              output.account.group,
-              output.account.status,
-              instance.name,
-              output.total_requests,
-              output.total_tokens,
-              output.amount,
-              output.currency,
-            ]
-              .filter((value) => value != null)
-              .join(' ')
-              .toLowerCase()
-              .includes(normalizedSearch)
+            matchesAccountFilter(
+              [
+                output.account.id,
+                output.account.name,
+                output.account.platform,
+                output.account.type,
+                output.account.group,
+                output.account.status,
+                instance.name,
+                output.total_requests,
+                output.total_tokens,
+                output.amount,
+                output.currency,
+              ],
+              normalizedSearch,
+              excludedTerms
+            )
           )
         : outputRows,
-    [normalizedSearch, outputRows]
+    [excludedTerms, filtering, normalizedSearch, outputRows]
   )
   const outputTotals = useMemo(() => {
     const collected = filteredOutputRows.filter(
@@ -586,29 +619,29 @@ export function ManagedAccounts() {
     }
   }, [filteredOutputRows])
   const filteredRows = useMemo(() => {
-    const filtered = normalizedSearch
+    const filtered = filtering
       ? rows.filter(({ instance, item, source }) =>
-          [
-            item.id,
-            item.name,
-            item.platform,
-            item.type,
-            item.group,
-            item.status,
-            source?.name,
-            source?.status,
-            instance.name,
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-            .includes(normalizedSearch)
+          matchesAccountFilter(
+            [
+              item.id,
+              item.name,
+              item.platform,
+              item.type,
+              item.group,
+              item.status,
+              source?.name,
+              source?.status,
+              instance.name,
+            ],
+            normalizedSearch,
+            excludedTerms
+          )
         )
       : rows
     return [...filtered].sort((left, right) =>
       compareResourceRows(left, right, sortKey, sortDirection)
     )
-  }, [normalizedSearch, rows, sortDirection, sortKey])
+  }, [excludedTerms, filtering, normalizedSearch, rows, sortDirection, sortKey])
   const hasActiveTask = snapshotQueries.some((query) => {
     const task = query.data?.data.task
     return task && ['pending', 'running'].includes(task.status)
@@ -640,10 +673,14 @@ export function ManagedAccounts() {
   const collectedInstances = snapshotQueries.filter(
     (query) => query.data?.data.inventory.observation?.data
   ).length
-  const available = rows.filter((row) => row.item.enabled === true).length
-  const unavailable = rows.filter((row) => row.item.enabled === false).length
-  const unknown = rows.length - available - unavailable
-  const unavailableSurvival = rows.flatMap(({ item }) => {
+  const available = filteredRows.filter(
+    (row) => row.item.enabled === true
+  ).length
+  const unavailable = filteredRows.filter(
+    (row) => row.item.enabled === false
+  ).length
+  const unknown = filteredRows.length - available - unavailable
+  const unavailableSurvival = filteredRows.flatMap(({ item }) => {
     if (item.enabled !== false) return []
     const seconds = getSurvivalSeconds(item)
     return seconds == null ? [] : [seconds]
@@ -812,7 +849,7 @@ export function ManagedAccounts() {
           />
         )}
         <AccountSummary
-          total={rows.length}
+          total={filteredRows.length}
           available={available}
           unavailable={unavailable}
           unknown={unknown}
@@ -827,7 +864,7 @@ export function ManagedAccounts() {
           totals={outputTotals}
           loading={outputLoading}
           error={outputError}
-          searching={normalizedSearch !== ''}
+          searching={filtering}
         />
         <AccountTable
           family={family}
@@ -835,7 +872,7 @@ export function ManagedAccounts() {
           total={rows.length}
           loading={loading}
           error={error}
-          searching={normalizedSearch !== ''}
+          searching={filtering}
           sortKey={sortKey}
           sortDirection={sortDirection}
           onSortKeyChange={setSortKey}
@@ -937,6 +974,17 @@ export function ManagedAccounts() {
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t('Search accounts or channels')}
                 aria-label={t('Search accounts or channels')}
+                className='h-8 ps-8'
+              />
+            </div>
+            <div className='relative min-w-48 flex-1 sm:max-w-xs'>
+              <SearchX className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
+              <Input
+                value={excludeSearch}
+                onChange={(event) => setExcludeSearch(event.target.value)}
+                placeholder={t('Exclude accounts or channels')}
+                aria-label={t('Exclude accounts or channels')}
+                title={t('Separate multiple keywords with commas')}
                 className='h-8 ps-8'
               />
             </div>

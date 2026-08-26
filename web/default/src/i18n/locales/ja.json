@@ -1340,6 +1340,8 @@
     "Disabled or unschedulable": "Disabled or unschedulable",
     "Selected site coverage": "Selected site coverage",
     "Search accounts or channels": "Search accounts or channels",
+    "Exclude accounts or channels": "Exclude accounts or channels",
+    "Separate multiple keywords with commas": "Separate multiple keywords with commas",
     "No matching accounts or channels": "No matching accounts or channels",
     "Account details": "Account details",
     "Channel details": "Channel details",

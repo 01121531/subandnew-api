@@ -1346,6 +1346,8 @@
     "Disabled or unschedulable": "已停用或暫不可調度",
     "Selected site coverage": "所選站點採集覆蓋率",
     "Search accounts or channels": "搜尋帳號或渠道",
+    "Exclude accounts or channels": "排除帳號或渠道",
+    "Separate multiple keywords with commas": "多個排除關鍵詞請使用逗號分隔",
     "No matching accounts or channels": "沒有符合的帳號或渠道",
     "Account details": "帳號明細",
     "Channel details": "渠道明細",

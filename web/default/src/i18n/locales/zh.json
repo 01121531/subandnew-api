@@ -1351,6 +1351,8 @@
     "Disabled or unschedulable": "已停用或暂不可调度",
     "Selected site coverage": "所选站点采集覆盖率",
     "Search accounts or channels": "搜索账号或渠道",
+    "Exclude accounts or channels": "排除账号或渠道",
+    "Separate multiple keywords with commas": "多个排除关键词请使用逗号分隔",
     "No matching accounts or channels": "没有匹配的账号或渠道",
     "Account details": "账号明细",
     "Channel details": "渠道明细",
