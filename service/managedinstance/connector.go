@@ -180,8 +180,19 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 }
 
 func (c *Connector) DoJSON(ctx context.Context, method string, path string, headers http.Header, requestBody any) (*ConnectorResponse, error) {
+	maxBodyBytes := int64(0)
+	if c != nil {
+		maxBodyBytes = c.maxBodyBytes
+	}
+	return c.doJSONWithMaxBody(ctx, method, path, headers, requestBody, maxBodyBytes)
+}
+
+func (c *Connector) doJSONWithMaxBody(ctx context.Context, method string, path string, headers http.Header, requestBody any, maxBodyBytes int64) (*ConnectorResponse, error) {
 	if c == nil || c.client == nil || c.baseURL == nil {
 		return nil, errors.New("managed instance connector is nil")
+	}
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = c.maxBodyBytes
 	}
 	relativeURL, err := url.Parse(path)
 	if err != nil || relativeURL.IsAbs() || relativeURL.Host != "" {
@@ -216,12 +227,12 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 		return nil, err
 	}
 	defer response.Body.Close()
-	limited := io.LimitReader(response.Body, c.maxBodyBytes+1)
+	limited := io.LimitReader(response.Body, maxBodyBytes+1)
 	responseBody, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(responseBody)) > c.maxBodyBytes {
+	if int64(len(responseBody)) > maxBodyBytes {
 		return nil, ErrConnectorResponseLarge
 	}
 	return &ConnectorResponse{StatusCode: response.StatusCode, Header: response.Header.Clone(), Body: responseBody}, nil

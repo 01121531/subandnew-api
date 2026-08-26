@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,33 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 	require.Equal(t, 120.0, *item.Requests24H)
 	require.Equal(t, 100.0, *item.SuccessfulRequests24H)
 	require.Equal(t, 15.0, *item.LimitedRequests24H)
+}
+
+func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/api/admin/oauth-accounts", request.URL.Path)
+		response.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
+			"accounts": []map[string]any{{
+				"id": "large-account", "name": "large-account", "status": "active", "health_status": "healthy",
+				"created_at":    "1970-01-01T00:02:30Z",
+				"usage_windows": map[string]any{"req_30d": 123, "tokens_30d": 456, "cost_30d": 7.89},
+			}},
+			"padding": strings.Repeat("x", int(defaultConnectorMaxBodyBytes)),
+		}))
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectAccountOutput(context.Background(), instance.Id, TimeWindow{Start: 100, End: 200})
+	require.NoError(t, err)
+	result := view.Data.(*AccountOutputResult)
+	require.Equal(t, 1, result.AddedAccounts)
+	require.Equal(t, 1, result.CollectedAccounts)
+	require.Equal(t, 123.0, result.TotalRequests)
+	require.Equal(t, 456.0, result.TotalTokens)
+	require.Equal(t, 7.89, result.TotalAmount)
 }
 
 func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {

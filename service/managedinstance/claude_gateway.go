@@ -25,7 +25,10 @@ type claudeGatewaySession struct {
 	expiresAt   time.Time
 }
 
-const claudeGatewaySessionTTL = 10 * time.Minute
+const (
+	claudeGatewaySessionTTL           = 10 * time.Minute
+	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
+)
 
 var claudeGatewaySessions sync.Map
 
@@ -272,11 +275,15 @@ func invalidateClaudeGatewaySession(connector *Connector, credential *Credential
 }
 
 func claudeGatewayDoJSON(ctx context.Context, connector *Connector, credential *CredentialMaterial, method, path string, body any) (*ConnectorResponse, error) {
+	return claudeGatewayDoJSONWithMaxBody(ctx, connector, credential, method, path, body, 0)
+}
+
+func claudeGatewayDoJSONWithMaxBody(ctx context.Context, connector *Connector, credential *CredentialMaterial, method, path string, body any, maxBodyBytes int64) (*ConnectorResponse, error) {
 	headers, err := claudeGatewayAuthHeaders(ctx, connector, credential)
 	if err != nil {
 		return nil, err
 	}
-	response, err := connector.DoJSON(ctx, method, path, headers, body)
+	response, err := connector.doJSONWithMaxBody(ctx, method, path, headers, body, maxBodyBytes)
 	if err != nil || credential.AuthType != "account_password" || !authenticationRejected(response) {
 		return response, err
 	}
@@ -285,7 +292,7 @@ func claudeGatewayDoJSON(ctx context.Context, connector *Connector, credential *
 	if err != nil {
 		return nil, err
 	}
-	return connector.DoJSON(ctx, method, path, headers, body)
+	return connector.doJSONWithMaxBody(ctx, method, path, headers, body, maxBodyBytes)
 }
 
 func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind, cursor string) (*InventoryPage, error) {
@@ -304,7 +311,15 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 }
 
 func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
-	response, err := claudeGatewayDoJSON(ctx, connector, credential, http.MethodGet, "/api/admin/oauth-accounts", nil)
+	response, err := claudeGatewayDoJSONWithMaxBody(
+		ctx,
+		connector,
+		credential,
+		http.MethodGet,
+		"/api/admin/oauth-accounts",
+		nil,
+		claudeGatewayAccountsMaxBodyBytes,
+	)
 	if err != nil {
 		return nil, err
 	}
