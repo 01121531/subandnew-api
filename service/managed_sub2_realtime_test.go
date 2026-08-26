@@ -84,3 +84,54 @@ func TestManagedPollingRealtimeCollectorRecordsSuccessfulRPM(t *testing.T) {
 	require.Equal(t, rpm, history.RPMSum)
 	require.Equal(t, 1, history.SampleCount)
 }
+
+func TestManagedPollingRealtimeCollectorRecordsGatewayAccountsOnlyOnSuccess(t *testing.T) {
+	truncate(t)
+	managedPollingRealtimeInFlight.Clear()
+	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, model.DB.Create(&instance).Error)
+	rpm := 37.0
+	observedAt := time.Now().Unix()
+	target := managedRealtimeTarget{InstanceID: instance.Id, Kind: instance.Kind, BaseURL: instance.BaseURL}
+
+	refreshManagedRealtimeTargetsWith(context.Background(), []managedRealtimeTarget{target}, func(_ context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
+		return managedinstance.ManagedRealtimeState{
+			InstanceID: target.InstanceID,
+			ObservedAt: observedAt,
+			RPM: managedinstance.MetricSample{
+				Value:            &rpm,
+				Unit:             "request/min",
+				CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+			AccountsAvailable:        0,
+			AccountsTotal:            0,
+			AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		}, nil
+	})
+
+	var history model.ManagedRPMHistory
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
+	require.Equal(t, 1, history.AccountSampleCount)
+	require.Zero(t, history.AccountsAvailableLast)
+	require.Zero(t, history.AccountsTotalLast)
+
+	refreshManagedRealtimeTargetsWith(context.Background(), []managedRealtimeTarget{target}, func(_ context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
+		return managedinstance.ManagedRealtimeState{
+			InstanceID: target.InstanceID,
+			ObservedAt: observedAt + 10,
+			RPM: managedinstance.MetricSample{
+				Value:            &rpm,
+				Unit:             "request/min",
+				CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+			AccountsAvailable:        9,
+			AccountsTotal:            10,
+			AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		}, managedinstance.ErrRemoteDataUnavailable
+	})
+
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
+	require.Equal(t, 1, history.AccountSampleCount)
+	require.Zero(t, history.AccountsAvailableLast)
+	require.Zero(t, history.AccountsTotalLast)
+}

@@ -239,7 +239,14 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 			successRate = state.SuccessRate.Value
 			successRateWeight = state.SuccessRateSampleCount
 		}
-		_ = managedinstance.RecordManagedRealtimeSample(ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight)
+		if target.Kind == model.ManagedInstanceKindClaudeGateway && state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded {
+			_ = managedinstance.RecordManagedRealtimeSampleWithAccounts(
+				ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight,
+				state.AccountsAvailable, state.AccountsTotal,
+			)
+		} else {
+			_ = managedinstance.RecordManagedRealtimeSample(ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight)
+		}
 	}
 }
 

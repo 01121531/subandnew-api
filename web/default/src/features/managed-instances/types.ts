@@ -327,6 +327,9 @@ export interface ManagedInstanceRPMHistoryPoint {
   samples: number
   success_rate: number | null
   success_rate_samples: number
+  accounts_available: number | null
+  accounts_total: number | null
+  account_samples: number
 }
 
 export interface ManagedInstanceRPMHistory {

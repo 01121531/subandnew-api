@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConductorRPMHistoryAggregatesInstancesByMinuteAndHour(t *testing.T) {
@@ -113,6 +114,62 @@ func TestManagedRealtimeHistoryAggregatesClaudeGatewaySuccessRate(t *testing.T) 
 	if len(hour.Points) != 1 || hour.Points[0].SuccessRate == nil || math.Abs(*hour.Points[0].SuccessRate-0.66) > 1e-9 {
 		t.Fatalf("hour points = %#v, want weighted success rate 0.66", hour.Points)
 	}
+}
+
+func TestManagedRealtimeHistoryUsesLastCompleteGatewayAccountValues(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instances := []model.ManagedInstance{
+		{Name: "gateway-one", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway-one.example.com"},
+		{Name: "gateway-two", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway-two.example.com"},
+	}
+	require.NoError(t, db.Create(&instances).Error)
+	start := int64(1_786_593_600)
+	ctx := context.Background()
+
+	record := func(instanceID, at int64, rpm float64, available, total int) {
+		t.Helper()
+		require.NoError(t, RecordManagedRealtimeSampleWithAccounts(ctx, instanceID, at, rpm, nil, 0, available, total))
+	}
+	record(instances[0].Id, start+10, 10, 2, 10)
+	record(instances[0].Id, start+20, 20, 3, 11)
+	record(instances[1].Id, start+30, 5, 4, 12)
+	record(instances[0].Id, start+70, 30, 0, 0)
+	record(instances[1].Id, start+130, 40, 6, 14)
+	record(instances[0].Id, start+190, 50, 7, 15)
+	record(instances[1].Id, start+250, 60, 8, 16)
+
+	minute, err := GetManagedRPMHistory(ctx, []int64{instances[0].Id, instances[1].Id}, ConductorRPMBucketMinute, start, start+300)
+	require.NoError(t, err)
+	require.Len(t, minute.Points, 5)
+	require.NotNil(t, minute.Points[0].AccountsAvailable)
+	require.NotNil(t, minute.Points[0].AccountsTotal)
+	require.Equal(t, 7, *minute.Points[0].AccountsAvailable)
+	require.Equal(t, 23, *minute.Points[0].AccountsTotal)
+	require.Equal(t, 3, minute.Points[0].AccountSamples)
+	require.Nil(t, minute.Points[1].AccountsAvailable)
+	require.Nil(t, minute.Points[1].AccountsTotal)
+	require.Equal(t, 1, minute.Points[1].AccountSamples)
+
+	hour, err := GetManagedRPMHistory(ctx, []int64{instances[0].Id, instances[1].Id}, ConductorRPMBucketHour, start, start+3600)
+	require.NoError(t, err)
+	require.Len(t, hour.Points, 1)
+	require.NotNil(t, hour.Points[0].AccountsAvailable)
+	require.NotNil(t, hour.Points[0].AccountsTotal)
+	require.Equal(t, 15, *hour.Points[0].AccountsAvailable)
+	require.Equal(t, 31, *hour.Points[0].AccountsTotal)
+	require.Equal(t, 7, hour.Points[0].AccountSamples)
+}
+
+func TestManagedRealtimeHistoryRejectsInvalidGatewayAccountValues(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, db.Create(&instance).Error)
+
+	err := RecordManagedRealtimeSampleWithAccounts(context.Background(), instance.Id, 1_786_593_610, 10, nil, 0, 2, 1)
+	require.ErrorIs(t, err, ErrInvalidInstance)
+	var count int64
+	require.NoError(t, db.Model(&model.ManagedRPMHistory{}).Where("instance_id = ?", instance.Id).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func TestManagedRPMHistoryRejectsGenericInstances(t *testing.T) {

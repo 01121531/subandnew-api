@@ -28,6 +28,9 @@ type ConductorRPMHistoryPoint struct {
 	Samples            int      `json:"samples"`
 	SuccessRate        *float64 `json:"success_rate"`
 	SuccessRateSamples int      `json:"success_rate_samples"`
+	AccountsAvailable  *int     `json:"accounts_available"`
+	AccountsTotal      *int     `json:"accounts_total"`
+	AccountSamples     int      `json:"account_samples"`
 }
 
 type ConductorRPMHistoryResult struct {
@@ -74,17 +77,23 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 	if len(capacities) > 0 {
 		capacity = &capacities[0]
 	}
-	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, capacity, nil, 0)
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, capacity, nil, 0, nil, nil)
 }
 
-func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacity *float64, successRate *float64, successRateWeight float64) error {
+func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacity *float64, successRate *float64, successRateWeight float64, accountsAvailable *int, accountsTotal *int) error {
 	if model.DB == nil || instanceID <= 0 || observedAt <= 0 || rpm < 0 {
 		return ErrInvalidInstance
 	}
 	hasCapacity := capacity != nil && *capacity >= 0
 	hasSuccessRate := successRate != nil && *successRate >= 0 && *successRate <= 1
+	hasAccounts := accountsAvailable != nil && accountsTotal != nil && *accountsAvailable >= 0 && *accountsTotal >= 0 && *accountsAvailable <= *accountsTotal
 	if successRate != nil && !hasSuccessRate {
 		return ErrInvalidInstance
+	}
+	if accountsAvailable != nil || accountsTotal != nil {
+		if !hasAccounts {
+			return ErrInvalidInstance
+		}
 	}
 	if hasSuccessRate && successRateWeight <= 0 {
 		successRateWeight = 1
@@ -108,6 +117,11 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 			updates["success_rate_weight_sum"] = gorm.Expr("success_rate_weight_sum + ?", successRateWeight)
 			updates["success_rate_sample_count"] = gorm.Expr("success_rate_sample_count + 1")
 			updates["success_rate_last"] = *successRate
+		}
+		if hasAccounts {
+			updates["accounts_available_last"] = *accountsAvailable
+			updates["accounts_total_last"] = *accountsTotal
+			updates["account_sample_count"] = gorm.Expr("account_sample_count + 1")
 		}
 		return model.DB.WithContext(ctx).Model(&model.ManagedRPMHistory{}).
 			Where("instance_id = ? AND bucket_start = ?", instanceID, bucketStart).
@@ -134,6 +148,11 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 		history.SuccessRateSampleCount = 1
 		history.SuccessRateLast = *successRate
 	}
+	if hasAccounts {
+		history.AccountsAvailableLast = *accountsAvailable
+		history.AccountsTotalLast = *accountsTotal
+		history.AccountSampleCount = 1
+	}
 	createErr := model.DB.WithContext(ctx).Create(history).Error
 	if createErr == nil {
 		return nil
@@ -153,7 +172,11 @@ func RecordManagedRPMSample(ctx context.Context, instanceID int64, observedAt in
 }
 
 func RecordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, successRate *float64, successRateWeight float64) error {
-	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight)
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight, nil, nil)
+}
+
+func RecordManagedRealtimeSampleWithAccounts(ctx context.Context, instanceID int64, observedAt int64, rpm float64, successRate *float64, successRateWeight float64, accountsAvailable int, accountsTotal int) error {
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight, &accountsAvailable, &accountsTotal)
 }
 
 func cleanupConductorRPMHistory(ctx context.Context, now int64) {
@@ -285,6 +308,7 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		}
 	}
 	points := make([]ConductorRPMHistoryPoint, 0, len(aggregates))
+	accountPoints := aggregateManagedAccountHistory(rows, bucket, start, end, expected)
 	for timestamp, value := range aggregates {
 		rpm := value.sum
 		if bucket == ConductorRPMBucketHour && value.count > 0 {
@@ -303,13 +327,76 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			rate := value.successRateWeightedSum / value.successRateWeightSum
 			successRate = &rate
 		}
-		points = append(points, ConductorRPMHistoryPoint{
+		point := ConductorRPMHistoryPoint{
 			Timestamp: timestamp, RPM: rpm, Capacity: capacity, Samples: value.samples,
 			SuccessRate: successRate, SuccessRateSamples: value.successRateSamples,
-		})
+		}
+		if accounts, ok := accountPoints[timestamp]; ok {
+			point.AccountsAvailable = accounts.available
+			point.AccountsTotal = accounts.total
+			point.AccountSamples = accounts.samples
+		}
+		points = append(points, point)
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
 	return points
+}
+
+type managedAccountHistoryPoint struct {
+	available *int
+	total     *int
+	samples   int
+}
+
+func aggregateManagedAccountHistory(rows []model.ManagedRPMHistory, bucket string, start int64, end int64, expectedInstances int) map[int64]managedAccountHistoryPoint {
+	type accountValue struct {
+		available   int
+		total       int
+		bucketStart int64
+	}
+	type accountBucket struct {
+		lastByInstance map[int64]accountValue
+		samples        int
+	}
+	buckets := map[int64]*accountBucket{}
+	for _, row := range rows {
+		if row.AccountSampleCount <= 0 || row.BucketStart < start || row.BucketStart > end {
+			continue
+		}
+		timestamp := row.BucketStart
+		if bucket == ConductorRPMBucketHour {
+			timestamp -= timestamp % 3600
+		}
+		value := buckets[timestamp]
+		if value == nil {
+			value = &accountBucket{lastByInstance: map[int64]accountValue{}}
+			buckets[timestamp] = value
+		}
+		value.samples += row.AccountSampleCount
+		previous, exists := value.lastByInstance[row.InstanceID]
+		if !exists || row.BucketStart >= previous.bucketStart {
+			value.lastByInstance[row.InstanceID] = accountValue{
+				available:   row.AccountsAvailableLast,
+				total:       row.AccountsTotalLast,
+				bucketStart: row.BucketStart,
+			}
+		}
+	}
+	result := make(map[int64]managedAccountHistoryPoint, len(buckets))
+	for timestamp, bucketValue := range buckets {
+		point := managedAccountHistoryPoint{samples: bucketValue.samples}
+		if len(bucketValue.lastByInstance) > 0 && (expectedInstances == 0 || len(bucketValue.lastByInstance) == expectedInstances) {
+			available, total := 0, 0
+			for _, instanceValue := range bucketValue.lastByInstance {
+				available += instanceValue.available
+				total += instanceValue.total
+			}
+			point.available = &available
+			point.total = &total
+		}
+		result[timestamp] = point
+	}
+	return result
 }
 
 func uniquePositiveInt64s(values []int64) []int64 {

@@ -20,6 +20,9 @@ type ManagedRPMHistory struct {
 	SuccessRateWeightSum   float64 `json:"success_rate_weight_sum" gorm:"not null;default:0"`
 	SuccessRateSampleCount int     `json:"success_rate_sample_count" gorm:"not null;default:0"`
 	SuccessRateLast        float64 `json:"success_rate_last" gorm:"not null;default:0"`
+	AccountsAvailableLast  int     `json:"accounts_available_last" gorm:"not null;default:0"`
+	AccountsTotalLast      int     `json:"accounts_total_last" gorm:"not null;default:0"`
+	AccountSampleCount     int     `json:"account_sample_count" gorm:"not null;default:0"`
 	CreatedAt              int64   `json:"created_at" gorm:"bigint;not null"`
 	UpdatedAt              int64   `json:"updated_at" gorm:"bigint;not null;index"`
 }

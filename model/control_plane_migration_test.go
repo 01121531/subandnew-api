@@ -85,6 +85,9 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.Equal(t, expectedControlPlaneTables, sqliteUserTables(t, db))
 	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatch{}, "uidx_managed_instance_batch_idempotency"))
 	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatchItem{}, "uidx_managed_instance_batch_target"))
+	for _, column := range []string{"accounts_available_last", "accounts_total_last", "account_sample_count"} {
+		require.Truef(t, db.Migrator().HasColumn(&ManagedRPMHistory{}, column), "managed_rpm_history.%s must exist", column)
+	}
 	for _, table := range representativeLegacyTables {
 		require.Falsef(t, db.Migrator().HasTable(table), "legacy table %q must not be created", table)
 	}

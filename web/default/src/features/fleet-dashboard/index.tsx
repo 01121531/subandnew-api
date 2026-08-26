@@ -115,7 +115,7 @@ import {
 import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
-type TrendMetricKey = MetricKey | 'rpm' | 'success_rate'
+type TrendMetricKey = MetricKey | 'rpm' | 'success_rate' | 'accounts'
 type FleetFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
 
 type InstanceMetricRow = {
@@ -155,6 +155,9 @@ type RPMHistoryData = {
   samples: number
   success_rate: number | null
   success_rate_samples: number
+  accounts_available: number | null
+  accounts_total: number | null
+  account_samples: number
 }
 
 type HealthData = {
@@ -304,7 +307,12 @@ function isMetricKey(value: unknown): value is MetricKey {
 }
 
 function isTrendMetricKey(value: unknown): value is TrendMetricKey {
-  return isMetricKey(value) || value === 'rpm' || value === 'success_rate'
+  return (
+    isMetricKey(value) ||
+    value === 'rpm' ||
+    value === 'success_rate' ||
+    value === 'accounts'
+  )
 }
 
 function isFleetPresetDays(value: unknown): value is FleetPresetDays {
@@ -486,17 +494,22 @@ export function FleetDashboard() {
   if (
     family === 'claude_gateway' &&
     trendMetric !== 'rpm' &&
-    trendMetric !== 'success_rate'
+    trendMetric !== 'success_rate' &&
+    trendMetric !== 'accounts'
   ) {
     effectiveTrendMetric = 'rpm'
   } else if (
     family === 'conductor' &&
     (trendMetric === 'requests' ||
       trendMetric === 'tokens' ||
-      trendMetric === 'success_rate')
+      trendMetric === 'success_rate' ||
+      trendMetric === 'accounts')
   ) {
     effectiveTrendMetric = 'quota'
-  } else if (family !== 'claude_gateway' && trendMetric === 'success_rate') {
+  } else if (
+    family !== 'claude_gateway' &&
+    (trendMetric === 'success_rate' || trendMetric === 'accounts')
+  ) {
     effectiveTrendMetric = 'rpm'
   }
   const effectiveConsumptionMetric =
@@ -585,7 +598,8 @@ export function FleetDashboard() {
       }),
     enabled:
       (effectiveTrendMetric === 'rpm' ||
-        effectiveTrendMetric === 'success_rate') &&
+        effectiveTrendMetric === 'success_rate' ||
+        effectiveTrendMetric === 'accounts') &&
       rpmHistoryInstanceIDs.length > 0,
     placeholderData: keepPreviousData,
     retry: DASHBOARD_RETRY_COUNT,
@@ -782,7 +796,8 @@ export function FleetDashboard() {
   const dailyUsageData = useMemo<DailyUsageData[]>(() => {
     if (
       effectiveTrendMetric === 'rpm' ||
-      effectiveTrendMetric === 'success_rate'
+      effectiveTrendMetric === 'success_rate' ||
+      effectiveTrendMetric === 'accounts'
     ) {
       return []
     }
@@ -927,7 +942,8 @@ export function FleetDashboard() {
     }
     if (
       effectiveTrendMetric === 'rpm' ||
-      effectiveTrendMetric === 'success_rate'
+      effectiveTrendMetric === 'success_rate' ||
+      effectiveTrendMetric === 'accounts'
     ) {
       void rpmHistoryQuery.refetch()
     }
@@ -1178,13 +1194,44 @@ function DailyUsagePanel(props: {
   const { t } = useTranslation()
   const isRPM = props.metric === 'rpm'
   const isSuccessRate = props.metric === 'success_rate'
-  const isRealtimeHistory = isRPM || isSuccessRate
+  const isAccounts = props.metric === 'accounts'
+  const isRealtimeHistory = isRPM || isSuccessRate || isAccounts
   const usageMetric: MetricKey | null = isRealtimeHistory
     ? null
     : (props.metric as MetricKey)
-  const historyData = isSuccessRate
-    ? props.rpmHistoryData.filter((point) => point.success_rate != null)
-    : props.rpmHistoryData
+  let historyData = props.rpmHistoryData
+  if (isSuccessRate) {
+    historyData = props.rpmHistoryData.filter(
+      (point) => point.success_rate != null
+    )
+  } else if (isAccounts) {
+    historyData = props.rpmHistoryData.filter(
+      (point) =>
+        point.account_samples > 0 &&
+        point.accounts_available != null &&
+        point.accounts_total != null
+    )
+  }
+  const accountChartConfig = useMemo(
+    () =>
+      ({
+        accounts_available: {
+          label: t('Available accounts'),
+          color: 'var(--color-success)',
+        },
+        accounts_total: {
+          label: t('Total accounts'),
+          color: 'var(--chart-1)',
+        },
+      }) satisfies ChartConfig,
+    [t]
+  )
+  let realtimeChartConfig: ChartConfig = RPM_CHART_CONFIG
+  if (isSuccessRate) {
+    realtimeChartConfig = SUCCESS_RATE_CHART_CONFIG
+  } else if (isAccounts) {
+    realtimeChartConfig = accountChartConfig
+  }
   let subtitle = t('Daily totals in the selected period')
   if (isRPM) {
     subtitle =
@@ -1196,19 +1243,37 @@ function DailyUsagePanel(props: {
       props.rpmHistoryBucket === 'minute'
         ? t('Average success rate snapshot per minute over the last 60 minutes')
         : t('Average success rate snapshot per hour over the last 24 hours')
+  } else if (isAccounts) {
+    subtitle =
+      props.rpmHistoryBucket === 'minute'
+        ? t('Last account count per minute over the last 60 minutes')
+        : t('Last account count per hour over the last 24 hours')
   }
   let metricOptions: TrendMetricKey[] = ['requests', 'tokens', 'quota']
   if (props.family === 'conductor') {
     metricOptions = ['quota', 'rpm']
   } else if (props.family === 'claude_gateway') {
-    metricOptions = ['rpm', 'success_rate']
+    metricOptions = ['rpm', 'success_rate', 'accounts']
   } else {
     metricOptions.push('rpm')
   }
   const trendMetricLabel = (value: TrendMetricKey) => {
     if (value === 'rpm') return 'RPM'
     if (value === 'success_rate') return t('Success rate')
+    if (value === 'accounts') return t('Account count')
     return t(metricLabel(value, props.family))
+  }
+  let panelTitle = t('Daily usage trend')
+  if (isSuccessRate) {
+    panelTitle = t('Success rate trend')
+  } else if (isAccounts) {
+    panelTitle = t('Account count trend')
+  }
+  let historyEmptyMessage = 'RPM history is being collected'
+  if (isSuccessRate) {
+    historyEmptyMessage = 'Success rate history is being collected'
+  } else if (isAccounts) {
+    historyEmptyMessage = 'Account count history is being collected'
   }
   return (
     <Card className={PANEL_CARD_CLASS}>
@@ -1219,9 +1284,7 @@ function DailyUsagePanel(props: {
         )}
       >
         <div className='min-w-0'>
-          <CardTitle>
-            {isSuccessRate ? t('Success rate trend') : t('Daily usage trend')}
-          </CardTitle>
+          <CardTitle>{panelTitle}</CardTitle>
           <p className='text-muted-foreground mt-1 text-sm break-words'>
             {subtitle}
           </p>
@@ -1231,7 +1294,7 @@ function DailyUsagePanel(props: {
             className='w-full md:hidden [&_select]:h-11'
             name='dashboard-trend-metric'
             value={props.metric}
-            aria-label={t('Daily usage trend')}
+            aria-label={panelTitle}
             onChange={(event) =>
               props.onMetricChange(event.target.value as TrendMetricKey)
             }
@@ -1294,9 +1357,7 @@ function DailyUsagePanel(props: {
           )}
         {isRealtimeHistory && historyData.length > 0 && (
           <ChartContainer
-            config={
-              isSuccessRate ? SUCCESS_RATE_CHART_CONFIG : RPM_CHART_CONFIG
-            }
+            config={realtimeChartConfig}
             className='aspect-auto h-[240px] w-full min-[420px]:h-[260px] sm:h-[280px] md:h-[300px]'
           >
             <LineChart
@@ -1361,6 +1422,22 @@ function DailyUsagePanel(props: {
                           </div>
                         )
                       }
+                      if (isAccounts) {
+                        return (
+                          <div className='flex w-full min-w-0 items-center gap-2'>
+                            <span
+                              className='size-2 shrink-0 rounded-sm'
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className='text-muted-foreground flex-1'>
+                              {String(name)}
+                            </span>
+                            <span className='font-mono font-medium tabular-nums'>
+                              {exactNumber.format(Number(value))}
+                            </span>
+                          </div>
+                        )
+                      }
                       const utilization =
                         point.capacity != null && point.capacity > 0
                           ? (point.rpm / point.capacity) * 100
@@ -1386,7 +1463,7 @@ function DailyUsagePanel(props: {
                   />
                 }
               />
-              {isSuccessRate ? (
+              {isSuccessRate && (
                 <Line
                   type='monotone'
                   dataKey='success_rate'
@@ -1396,7 +1473,32 @@ function DailyUsagePanel(props: {
                   dot={historyData.length <= 24}
                   activeDot={{ r: 4 }}
                 />
-              ) : (
+              )}
+              {isAccounts && (
+                <>
+                  <Line
+                    type='stepAfter'
+                    dataKey='accounts_available'
+                    name={t('Available accounts')}
+                    stroke='var(--color-accounts_available)'
+                    strokeWidth={2.25}
+                    dot={historyData.length <= 24}
+                    activeDot={{ r: 4 }}
+                    connectNulls={false}
+                  />
+                  <Line
+                    type='stepAfter'
+                    dataKey='accounts_total'
+                    name={t('Total accounts')}
+                    stroke='var(--color-accounts_total)'
+                    strokeWidth={2.25}
+                    dot={historyData.length <= 24}
+                    activeDot={{ r: 4 }}
+                    connectNulls={false}
+                  />
+                </>
+              )}
+              {isRPM && (
                 <Line
                   type='monotone'
                   dataKey='rpm'
@@ -1432,13 +1534,7 @@ function DailyUsagePanel(props: {
           historyData.length === 0 &&
           !props.rpmHistoryLoading &&
           !props.rpmHistoryError && (
-            <PanelEmpty
-              text={t(
-                isSuccessRate
-                  ? 'Success rate history is being collected'
-                  : 'RPM history is being collected'
-              )}
-            />
+            <PanelEmpty text={t(historyEmptyMessage)} />
           )}
         {usageMetric && props.loading && (
           <div className='text-muted-foreground flex min-h-[280px] items-center justify-center gap-2 text-sm'>
