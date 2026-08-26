@@ -518,6 +518,7 @@ export function ManagedAccounts() {
       ),
     }
   }, [conductorSources, rows])
+  const normalizedSearch = search.trim().toLowerCase()
   const outputRows = useMemo<OutputRow[]>(
     () =>
       instances.flatMap((instance, index) =>
@@ -528,8 +529,33 @@ export function ManagedAccounts() {
       ),
     [instances, snapshotQueries]
   )
+  const filteredOutputRows = useMemo(
+    () =>
+      normalizedSearch
+        ? outputRows.filter(({ instance, output }) =>
+            [
+              output.account.id,
+              output.account.name,
+              output.account.platform,
+              output.account.type,
+              output.account.group,
+              output.account.status,
+              instance.name,
+              output.total_requests,
+              output.total_tokens,
+              output.amount,
+              output.currency,
+            ]
+              .filter((value) => value != null)
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedSearch)
+          )
+        : outputRows,
+    [normalizedSearch, outputRows]
+  )
   const outputTotals = useMemo(() => {
-    const collected = outputRows.filter(
+    const collected = filteredOutputRows.filter(
       ({ output }) => output.collection_status === 'succeeded'
     )
     const currencies = new Set(collected.map(({ output }) => output.currency))
@@ -539,7 +565,7 @@ export function ManagedAccounts() {
         ? null
         : collected.reduce((sum, { output }) => sum + output.amount, 0)
     return {
-      added: outputRows.length,
+      added: filteredOutputRows.length,
       collected: collected.length,
       requests: collected.reduce(
         (sum, { output }) => sum + output.total_requests,
@@ -552,14 +578,13 @@ export function ManagedAccounts() {
       amount,
       average:
         amount == null ||
-        collected.length !== outputRows.length ||
-        outputRows.length === 0
+        collected.length !== filteredOutputRows.length ||
+        filteredOutputRows.length === 0
           ? null
-          : amount / outputRows.length,
+          : amount / filteredOutputRows.length,
       currency,
     }
-  }, [outputRows])
-  const normalizedSearch = search.trim().toLowerCase()
+  }, [filteredOutputRows])
   const filteredRows = useMemo(() => {
     const filtered = normalizedSearch
       ? rows.filter(({ instance, item, source }) =>
@@ -798,10 +823,11 @@ export function ManagedAccounts() {
         />
         <AccountOutputPanel
           family={family}
-          rows={outputRows}
+          rows={filteredOutputRows}
           totals={outputTotals}
           loading={outputLoading}
           error={outputError}
+          searching={normalizedSearch !== ''}
         />
         <AccountTable
           family={family}
@@ -1206,6 +1232,7 @@ function AccountOutputPanel(props: {
   }
   loading: boolean
   error: boolean
+  searching: boolean
 }) {
   const { t } = useTranslation()
   const summary = [
@@ -1245,19 +1272,14 @@ function AccountOutputPanel(props: {
       tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
     },
   ]
+  let emptyText = t('No accounts were added in the selected period')
+  if (props.searching) emptyText = t('No matching accounts or channels')
+  if (props.error) emptyText = t('Account output data could not be loaded')
   let detailContent: ReactNode
   if (props.loading && props.rows.length === 0) {
     detailContent = <TableSkeleton wide={false} />
   } else if (props.rows.length === 0) {
-    detailContent = (
-      <PanelEmpty
-        text={
-          props.error
-            ? t('Account output data could not be loaded')
-            : t('No accounts were added in the selected period')
-        }
-      />
-    )
+    detailContent = <PanelEmpty text={emptyText} />
   } else {
     detailContent = (
       <div className='overflow-x-auto'>
