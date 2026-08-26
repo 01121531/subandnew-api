@@ -24,6 +24,7 @@ import (
 const (
 	managedAccountSyncInterval      = time.Hour
 	managedAccountRefreshCooldown   = 5 * time.Minute
+	managedAccountFailureCooldown   = time.Minute
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
@@ -270,7 +271,11 @@ func managedAccountSectionNeedsRefresh(snapshot *model.ManagedAccountSnapshot, n
 	if snapshot == nil || snapshot.LastAttemptAt == 0 {
 		return true
 	}
-	return now-snapshot.LastAttemptAt >= int64(managedAccountRefreshCooldown/time.Second)
+	cooldown := managedAccountRefreshCooldown
+	if snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed {
+		cooldown = managedAccountFailureCooldown
+	}
+	return now-snapshot.LastAttemptAt >= int64(cooldown/time.Second)
 }
 
 func managedAccountTaskScope(instanceID int64, mode string, rangeKey string) string {

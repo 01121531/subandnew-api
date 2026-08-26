@@ -593,7 +593,7 @@ export function ManagedAccounts() {
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
     createFleetPresetRange(7)
   )
-  const automaticRefreshes = useRef(new Set<string>())
+  const automaticRefreshes = useRef(new Map<string, number>())
   const [submittingRefreshes, setSubmittingRefreshes] = useState<Set<number>>(
     () => new Set()
   )
@@ -604,6 +604,7 @@ export function ManagedAccounts() {
     retry: 1,
     retryDelay: FAILED_REFRESH_RETRY_MS,
     refetchInterval: INVENTORY_REFRESH_MS,
+    refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
   const familyInstances = useMemo(
@@ -690,13 +691,22 @@ export function ManagedAccounts() {
       staleTime: INVENTORY_REFRESH_MS / 2,
       refetchInterval: (query: { state: { data?: unknown } }) => {
         const response = query.state.data as
-          | { data?: { task?: { status: string } } }
+          | {
+              data?: {
+                task?: { status: string }
+                inventory?: { last_attempt_status?: string }
+                account_output?: { last_attempt_status?: string }
+              }
+            }
           | undefined
         const task = response?.data?.task
-        return task && ['pending', 'running'].includes(task.status)
-          ? 3_000
-          : INVENTORY_REFRESH_MS
+        if (task && ['pending', 'running'].includes(task.status)) return 3_000
+        const failed =
+          response?.data?.inventory?.last_attempt_status === 'failed' ||
+          response?.data?.account_output?.last_attempt_status === 'failed'
+        return failed ? FAILED_REFRESH_RETRY_MS : INVENTORY_REFRESH_MS
       },
+      refetchIntervalInBackground: true,
     })),
   })
   const exportRangeKey =
@@ -993,14 +1003,18 @@ export function ManagedAccounts() {
     instances.forEach((instance, index) => {
       const snapshot = snapshotQueries[index]?.data?.data
       const key = `${instance.id}:${rangeQueryKey}`
+      const attemptMarker = Math.max(
+        snapshot?.inventory.last_attempt_at ?? 0,
+        snapshot?.account_output.last_attempt_at ?? 0
+      )
       if (
         !snapshot?.refresh_recommended ||
         snapshot.task ||
-        automaticRefreshes.current.has(key)
+        automaticRefreshes.current.get(key) === attemptMarker
       ) {
         return
       }
-      automaticRefreshes.current.add(key)
+      automaticRefreshes.current.set(key, attemptMarker)
       setSubmittingRefreshes((current) => new Set(current).add(instance.id))
       void refreshManagedAccountSnapshot(
         instance.id,

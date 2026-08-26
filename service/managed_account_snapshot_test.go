@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
@@ -52,6 +53,24 @@ func TestManagedAccountFailedRefreshKeepsLastSuccess(t *testing.T) {
 	require.JSONEq(t, `{"total":2}`, snapshot.Payload)
 	require.Equal(t, model.ManagedInstanceCollectionFailed, snapshot.LastAttemptStatus)
 	require.Equal(t, "collection_failed", snapshot.LastErrorCode)
+}
+
+func TestManagedAccountFailedRefreshRetriesAfterOneMinute(t *testing.T) {
+	now := int64(10_000)
+	failed := &model.ManagedAccountSnapshot{
+		LastAttemptAt:     now - int64(managedAccountFailureCooldown/time.Second),
+		LastAttemptStatus: model.ManagedInstanceCollectionFailed,
+	}
+	require.True(t, managedAccountSectionNeedsRefresh(failed, now))
+
+	failed.LastAttemptAt++
+	require.False(t, managedAccountSectionNeedsRefresh(failed, now))
+
+	succeeded := &model.ManagedAccountSnapshot{
+		LastAttemptAt:     now - int64(managedAccountFailureCooldown/time.Second),
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}
+	require.False(t, managedAccountSectionNeedsRefresh(succeeded, now))
 }
 
 func TestManagedAccountRefreshCooldownAndDeduplication(t *testing.T) {
