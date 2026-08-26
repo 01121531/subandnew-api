@@ -411,12 +411,7 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 	name := firstNonEmpty(account.Name, account.Email, account.ID)
 	status := firstNonEmpty(account.HealthStatus, account.Status)
 	rateLimited := claudeGatewayRateLimited(account)
-	healthStatus := strings.TrimSpace(account.HealthStatus)
-	healthy := strings.EqualFold(healthStatus, "healthy")
-	if healthStatus == "" {
-		healthy = strings.EqualFold(strings.TrimSpace(account.Status), "active")
-	}
-	enabled := strings.EqualFold(strings.TrimSpace(account.Status), "active") && healthy && !rateLimited
+	enabled := claudeGatewayAccountAvailable(account)
 	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
 	usageWindowDays := 0
 	windowRequests := float64(account.UsageWindows.Requests30D)
@@ -452,6 +447,10 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
 		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
 	}
+}
+
+func claudeGatewayAccountAvailable(account claudeGatewayAccount) bool {
+	return strings.EqualFold(strings.TrimSpace(account.Status), "active") && !account.Stats.Cooldown
 }
 
 func claudeGatewayStableID(value string) int64 {

@@ -119,7 +119,7 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 
 	item := claudeGatewayAccountItem(account)
 	require.NotNil(t, item.Enabled)
-	require.False(t, *item.Enabled)
+	require.True(t, *item.Enabled)
 	require.True(t, item.RateLimited)
 	require.Equal(t, int64(1787650200), item.DisabledAt)
 	require.Equal(t, int64(1787721160), item.ExpiresAt)
@@ -130,6 +130,36 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 	require.Equal(t, 120.0, *item.Requests24H)
 	require.Equal(t, 100.0, *item.SuccessfulRequests24H)
 	require.Equal(t, 15.0, *item.LimitedRequests24H)
+}
+
+func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        string
+		healthStatus  string
+		cooldown      bool
+		lastError     string
+		wantAvailable bool
+	}{
+		{name: "healthy active", status: "active", healthStatus: "healthy", wantAvailable: true},
+		{name: "unknown health active", status: "active", healthStatus: "unknown", wantAvailable: true},
+		{name: "failed health active", status: "active", healthStatus: "failed", wantAvailable: true},
+		{name: "historical rate limit active", status: "active", healthStatus: "healthy", lastError: "upstream rate_limit", wantAvailable: true},
+		{name: "cooldown active", status: "active", healthStatus: "cooldown", cooldown: true, wantAvailable: false},
+		{name: "disabled", status: "disabled", healthStatus: "healthy", wantAvailable: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := claudeGatewayAccount{
+				Status:       test.status,
+				HealthStatus: test.healthStatus,
+				LastError:    test.lastError,
+			}
+			account.Stats.Cooldown = test.cooldown
+			require.Equal(t, test.wantAvailable, claudeGatewayAccountAvailable(account))
+		})
+	}
 }
 
 func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
@@ -187,7 +217,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 4, state.AccountsTotal)
-	require.Equal(t, 1, state.AccountsAvailable)
+	require.Equal(t, 2, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 4)
 }
