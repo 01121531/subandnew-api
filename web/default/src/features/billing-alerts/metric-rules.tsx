@@ -16,10 +16,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -31,6 +38,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -45,6 +53,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import type { ManagedInstance } from '@/features/managed-instances/types'
+import { cn } from '@/lib/utils'
 
 import {
   type MetricAlertCondition,
@@ -281,7 +290,7 @@ function MetricRuleDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-h-[92vh] overflow-y-auto sm:max-w-4xl'>
+      <DialogContent className='max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto sm:max-h-[92vh] sm:max-w-4xl'>
         <DialogHeader>
           <DialogTitle>{rule ? '编辑指标预警' : '新建指标预警'}</DialogTitle>
           <DialogDescription>
@@ -664,7 +673,7 @@ function MetricRuleDialog({
           </section>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className='bg-background sticky bottom-0 -mx-6 -mb-6 border-t px-6 py-4'>
           <Button
             variant='outline'
             onClick={() => onOpenChange(false)}
@@ -733,7 +742,145 @@ export function MetricAlertRules({
           </Button>
         )}
       </div>
-      <div className='overflow-x-auto rounded-lg border'>
+      <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
+        {rules.map((rule) => {
+          const status = ruleStatus(rule)
+          const activeCount = rule.states.filter((state) => state.active).length
+          return (
+            <AccordionItem
+              key={rule.id}
+              value={String(rule.id)}
+              className={cn(
+                'border-l-2',
+                activeCount ? 'border-l-red-500' : 'border-l-border'
+              )}
+            >
+              <div className='flex min-w-0 items-stretch'>
+                <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      <span className='min-w-0 font-medium break-words'>
+                        {rule.name}
+                      </span>
+                      <Badge variant='outline' className={status.className}>
+                        {status.label}
+                      </Badge>
+                    </div>
+                    <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                      <span>#{rule.id}</span>
+                      <span>{rule.instance_ids.length} 个实例</span>
+                      <span>{rule.conditions.length} 个条件</span>
+                      {activeCount > 0 && (
+                        <span className='text-red-600 dark:text-red-400'>
+                          {activeCount} 个范围正在预警
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                {isRoot && (
+                  <div className='flex shrink-0 items-center gap-1 pe-2'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='size-11'
+                      aria-label='编辑规则'
+                      onClick={() => {
+                        setEditing(rule)
+                        setOpen(true)
+                      }}
+                    >
+                      <Pencil />
+                    </Button>
+                    <DataTableRowActionMenu
+                      ariaLabel='更多规则操作'
+                      triggerClassName='size-11'
+                    >
+                      <DropdownMenuItem
+                        onClick={async () => {
+                          try {
+                            await evaluateMetricAlertRule(rule.id)
+                            toast.success('已加入检查队列')
+                          } catch {
+                            toast.error('提交检查失败')
+                          }
+                        }}
+                      >
+                        <Play />
+                        立即检查
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant='destructive'
+                        onClick={() => setDeleting(rule)}
+                      >
+                        <Trash2 />
+                        删除规则
+                      </DropdownMenuItem>
+                    </DataTableRowActionMenu>
+                  </div>
+                )}
+              </div>
+              <AccordionContent className='px-3 pb-4'>
+                <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                  <MobileRuleDetail label='监控范围'>
+                    {rule.scope_mode === 'aggregate' ? '汇总监控' : '独立监控'}
+                    <div className='mt-1 flex flex-wrap gap-1'>
+                      {rule.instance_ids.map((id) => (
+                        <Badge
+                          key={id}
+                          variant='outline'
+                          className='font-normal'
+                        >
+                          {instanceMap.get(id)?.name ?? `#${id}`}
+                        </Badge>
+                      ))}
+                    </div>
+                  </MobileRuleDetail>
+                  <MobileRuleDetail label='触发条件'>
+                    <div className='grid gap-1'>
+                      {rule.conditions.map((condition, index) => (
+                        <div
+                          key={condition.id ?? index}
+                          className='break-words'
+                        >
+                          {METRIC_LABELS[condition.metric] ?? condition.metric}{' '}
+                          {OPERATOR_LABELS[condition.operator]}{' '}
+                          {condition.threshold}
+                        </div>
+                      ))}
+                    </div>
+                    <span className='text-muted-foreground mt-1 block text-xs'>
+                      {rule.match_mode === 'all' ? '全部满足' : '任一满足'}
+                    </span>
+                  </MobileRuleDetail>
+                  <MobileRuleDetail label='检查策略'>
+                    每 {rule.evaluation_interval_seconds} 秒
+                    <span className='text-muted-foreground mt-1 block text-xs'>
+                      触发 {rule.trigger_count} 次 · 恢复 {rule.recovery_count}{' '}
+                      次
+                    </span>
+                  </MobileRuleDetail>
+                  <MobileRuleDetail label='最近检查'>
+                    {formatTime(rule.last_evaluated_at)}
+                  </MobileRuleDetail>
+                  <MobileRuleDetail label='收件人'>
+                    <div className='break-words'>
+                      {rule.recipients.join(', ') || '—'}
+                    </div>
+                  </MobileRuleDetail>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+        {!rules.length && (
+          <div className='text-muted-foreground grid min-h-36 content-center justify-items-center gap-2 text-sm'>
+            <Activity className='size-6' />
+            暂无指标预警规则
+          </div>
+        )}
+      </Accordion>
+      <div className='hidden overflow-x-auto rounded-lg border md:block'>
         <Table>
           <TableHeader className='bg-muted/40'>
             <TableRow>
@@ -902,6 +1049,17 @@ export function MetricAlertRules({
         confirmText='删除'
         handleConfirm={() => void remove()}
       />
+    </div>
+  )
+}
+
+function MobileRuleDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 text-sm break-words tabular-nums'>
+        {props.children}
+      </div>
     </div>
   )
 }

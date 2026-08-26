@@ -20,8 +20,13 @@ import { useNavigate } from '@tanstack/react-router'
 import { KeyRound, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import {
   Empty,
   EmptyDescription,
@@ -114,7 +119,7 @@ export function InstancesTable(props: InstancesTableProps) {
               if (event.key === 'Enter') openInstance(instance.id)
             }}
           >
-            <div className='flex min-w-0 items-start justify-between gap-3'>
+            <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
               <div className='flex min-w-0 items-start gap-3'>
                 {props.selectable && (
                   <Checkbox
@@ -129,9 +134,9 @@ export function InstancesTable(props: InstancesTableProps) {
                   />
                 )}
                 <div className='min-w-0'>
-                  <div className='truncate font-medium'>{instance.name}</div>
+                  <div className='font-medium break-words'>{instance.name}</div>
                   {instance.base_url && (
-                    <div className='text-muted-foreground truncate text-xs'>
+                    <div className='text-muted-foreground text-xs break-all'>
                       {instance.base_url}
                     </div>
                   )}
@@ -151,7 +156,11 @@ export function InstancesTable(props: InstancesTableProps) {
                 <div>{formatTimestamp(instance.last_checked_at)}</div>
               </div>
             </div>
-            <div className='flex h-8 justify-end gap-1 border-t pt-2'>
+            <div
+              className='flex min-h-11 justify-end gap-1 border-t pt-2'
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
               {props.canCheck && (
                 <ActionButton
                   label={t('Check now')}
@@ -164,7 +173,7 @@ export function InstancesTable(props: InstancesTableProps) {
                   />
                 </ActionButton>
               )}
-              {props.canUpdate && (
+              {!props.canCheck && props.canUpdate && (
                 <ActionButton
                   label={t('Edit')}
                   onClick={() => props.onEdit(instance)}
@@ -172,22 +181,36 @@ export function InstancesTable(props: InstancesTableProps) {
                   <Pencil />
                 </ActionButton>
               )}
-              {props.canRotate && (
-                <ActionButton
-                  label={t('Rotate credential')}
-                  onClick={() => props.onRotate(instance)}
+              {(props.canUpdate || props.canRotate || props.canDelete) && (
+                <DataTableRowActionMenu
+                  ariaLabel={t('Actions')}
+                  triggerClassName='size-11'
                 >
-                  <KeyRound />
-                </ActionButton>
-              )}
-              {props.canDelete && (
-                <ActionButton
-                  label={t('Delete')}
-                  onClick={() => props.onDelete(instance)}
-                  destructive
-                >
-                  <Trash2 />
-                </ActionButton>
+                  {props.canCheck && props.canUpdate && (
+                    <DropdownMenuItem onClick={() => props.onEdit(instance)}>
+                      <Pencil />
+                      {t('Edit')}
+                    </DropdownMenuItem>
+                  )}
+                  {props.canRotate && (
+                    <DropdownMenuItem onClick={() => props.onRotate(instance)}>
+                      <KeyRound />
+                      {t('Rotate credential')}
+                    </DropdownMenuItem>
+                  )}
+                  {props.canDelete && (props.canUpdate || props.canRotate) && (
+                    <DropdownMenuSeparator />
+                  )}
+                  {props.canDelete && (
+                    <DropdownMenuItem
+                      variant='destructive'
+                      onClick={() => props.onDelete(instance)}
+                    >
+                      <Trash2 />
+                      {t('Delete')}
+                    </DropdownMenuItem>
+                  )}
+                </DataTableRowActionMenu>
               )}
             </div>
           </div>

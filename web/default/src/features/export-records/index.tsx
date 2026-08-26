@@ -17,14 +17,22 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import { SectionPageLayout } from '@/components/layout'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Progress } from '@/components/ui/progress'
@@ -105,7 +113,7 @@ function formatBytes(value: number) {
 function ExportProgress({ item }: { item: UsageRecordExportTask }) {
   if (item.status === 'running') {
     return (
-      <div className='w-44 space-y-1'>
+      <div className='w-full max-w-44 space-y-1'>
         <div className='flex justify-between text-xs tabular-nums'>
           <span>{item.progress}%</span>
           <span className='text-muted-foreground'>
@@ -268,8 +276,8 @@ export function ExportRecords() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='grid gap-3'>
-          <div className='border-border bg-card flex flex-wrap items-end gap-3 rounded-lg border p-3 shadow-xs'>
-            <label className='grid min-w-36 gap-1 text-xs font-medium'>
+          <div className='border-border bg-card grid min-w-0 gap-3 rounded-lg border p-3 shadow-xs sm:flex sm:flex-wrap sm:items-end'>
+            <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-36'>
               状态
               <NativeSelect
                 value={status}
@@ -285,7 +293,7 @@ export function ExportRecords() {
                 ))}
               </NativeSelect>
             </label>
-            <label className='grid min-w-48 gap-1 text-xs font-medium'>
+            <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-48'>
               实例
               <NativeSelect
                 value={instanceId}
@@ -306,7 +314,7 @@ export function ExportRecords() {
               </NativeSelect>
             </label>
             {isRoot && (
-              <label className='grid min-w-40 gap-1 text-xs font-medium'>
+              <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-40'>
                 创建人 ID
                 <div className='relative'>
                   <Search className='text-muted-foreground absolute top-1/2 left-2 size-4 -translate-y-1/2' />
@@ -336,7 +344,155 @@ export function ExportRecords() {
           )}
 
           <div className='border-border bg-card overflow-hidden rounded-lg border shadow-xs'>
-            <div className='overflow-x-auto'>
+            <div className='md:hidden'>
+              {exportsQuery.isLoading && (
+                <div className='grid gap-2 p-3'>
+                  {SKELETON_ROWS.map((key) => (
+                    <Skeleton key={key} className='h-20 w-full rounded-md' />
+                  ))}
+                </div>
+              )}
+              {!exportsQuery.isLoading &&
+                !exportsQuery.isError &&
+                items.length === 0 && (
+                  <div className='text-muted-foreground flex min-h-40 items-center justify-center px-4 text-sm'>
+                    暂无导出记录
+                  </div>
+                )}
+              <Accordion className='divide-border divide-y'>
+                {items.map((item) => {
+                  const meta = EXPORT_STATUS_META[item.status]
+                  const canDelete =
+                    item.status !== 'pending' && item.status !== 'running'
+                  return (
+                    <AccordionItem
+                      key={item.task_id}
+                      value={item.task_id}
+                      className={cn('border-l-2', meta.accentClassName)}
+                    >
+                      <div className='flex min-w-0 items-stretch'>
+                        <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                          <div className='min-w-0 flex-1'>
+                            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                              <span className='min-w-0 font-medium break-words'>
+                                {item.instance_name}
+                              </span>
+                              <ExportStatusBadge status={item.status} />
+                            </div>
+                            <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                              <span>{formatTime(item.created_at)}</span>
+                              {item.queue_position > 0 && (
+                                <span className='tabular-nums'>
+                                  队列第 {item.queue_position} 位
+                                </span>
+                              )}
+                            </div>
+                            <div className='mt-2'>
+                              <ExportProgress item={item} />
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <div className='flex shrink-0 items-center gap-1 pe-2'>
+                          {item.status === 'pending' && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-11'
+                              aria-label='取消导出'
+                              disabled={busyTask === item.task_id}
+                              onClick={() =>
+                                void runAction(item.task_id, 'cancel')
+                              }
+                            >
+                              <Ban />
+                            </Button>
+                          )}
+                          {item.status === 'succeeded' && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-11'
+                              aria-label='下载 CSV'
+                              disabled={busyTask === item.task_id}
+                              onClick={() => void download(item.task_id)}
+                            >
+                              <Download />
+                            </Button>
+                          )}
+                          {(item.status === 'failed' ||
+                            item.status === 'expired') && (
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-11'
+                              aria-label='重新导出'
+                              disabled={busyTask === item.task_id}
+                              onClick={() =>
+                                void runAction(item.task_id, 'retry')
+                              }
+                            >
+                              <RotateCcw />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <DataTableRowActionMenu
+                              ariaLabel='更多导出操作'
+                              triggerClassName='size-11'
+                            >
+                              <DropdownMenuItem
+                                variant='destructive'
+                                disabled={busyTask === item.task_id}
+                                onClick={() => setDeleteTarget(item)}
+                              >
+                                <Trash2 />
+                                删除导出记录
+                              </DropdownMenuItem>
+                            </DataTableRowActionMenu>
+                          )}
+                        </div>
+                      </div>
+                      <AccordionContent className='px-3 pb-4'>
+                        <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
+                          <MobileExportDetail label='系统类型'>
+                            <Badge
+                              variant='outline'
+                              className={cn(
+                                'h-5 rounded px-1.5 text-[10px] font-medium',
+                                exportInstanceKindClassName(item.instance_kind)
+                              )}
+                            >
+                              {exportInstanceKindLabel(item.instance_kind)}
+                            </Badge>
+                          </MobileExportDetail>
+                          <MobileExportDetail label='创建人'>
+                            {item.actor_name} · #{item.actor_id}
+                          </MobileExportDetail>
+                          <MobileExportDetail label='筛选条件'>
+                            <FilterDetailsDialog item={item} />
+                          </MobileExportDetail>
+                          <MobileExportDetail label='完成时间'>
+                            {formatTime(item.finished_at)}
+                          </MobileExportDetail>
+                          {item.expires_at > 0 && (
+                            <MobileExportDetail label='过期时间'>
+                              {formatTime(item.expires_at)}
+                            </MobileExportDetail>
+                          )}
+                          {item.error_code && (
+                            <MobileExportDetail label='错误'>
+                              <span className='text-destructive break-words'>
+                                {item.error_code}
+                              </span>
+                            </MobileExportDetail>
+                          )}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  )
+                })}
+              </Accordion>
+            </div>
+            <div className='hidden overflow-x-auto md:block'>
               <Table className='min-w-[1180px]'>
                 <TableHeader className='bg-muted/35'>
                   <TableRow>
@@ -483,14 +639,15 @@ export function ExportRecords() {
                 </TableBody>
               </Table>
             </div>
-            <div className='border-border flex items-center justify-between border-t px-3 py-2'>
+            <div className='border-border flex flex-col gap-2 border-t px-3 py-2 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
               <span className='text-muted-foreground text-xs tabular-nums'>
                 共 {(list?.total ?? 0).toLocaleString()} 个任务
               </span>
-              <div className='flex items-center gap-2'>
+              <div className='grid grid-cols-[1fr_auto_1fr] items-center gap-2'>
                 <Button
                   variant='outline'
                   size='sm'
+                  className='min-h-11 min-[420px]:min-h-0'
                   disabled={page <= 1}
                   onClick={() => setPage(page - 1)}
                 >
@@ -502,6 +659,7 @@ export function ExportRecords() {
                 <Button
                   variant='outline'
                   size='sm'
+                  className='min-h-11 min-[420px]:min-h-0'
                   disabled={page >= totalPages}
                   onClick={() => setPage(page + 1)}
                 >
@@ -527,5 +685,16 @@ export function ExportRecords() {
         handleConfirm={() => void remove()}
       />
     </SectionPageLayout>
+  )
+}
+
+function MobileExportDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 text-sm break-words tabular-nums'>
+        {props.children}
+      </div>
+    </div>
   )
 }

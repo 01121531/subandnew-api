@@ -12,6 +12,12 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -222,10 +228,11 @@ export function BillingAlertRecords({
 
   const content = (
     <div className='min-w-0'>
-      <div className='mb-3 flex justify-end gap-2'>
+      <div className='mb-3 grid grid-cols-[1fr_auto] gap-2 min-[420px]:flex min-[420px]:justify-end'>
         <Button
           variant='outline'
           size='sm'
+          className='min-h-11 min-[420px]:min-h-0'
           onClick={async () => {
             try {
               await createAlertRecordExport(params)
@@ -242,6 +249,7 @@ export function BillingAlertRecords({
         <Button
           variant='outline'
           size='icon-sm'
+          className='size-11 min-[420px]:size-8'
           aria-label='刷新预警记录'
           onClick={() => void query.refetch()}
         >
@@ -304,7 +312,111 @@ export function BillingAlertRecords({
           共 {data?.total ?? 0} 条
         </Badge>
       </div>
-      <div className='overflow-x-auto rounded-lg border'>
+      <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
+        {(data?.items ?? []).map((item) => (
+          <AccordionItem
+            key={item.id}
+            value={String(item.id)}
+            className={eventRowClass(item.event_type)}
+          >
+            <div className='flex min-w-0 items-stretch'>
+              <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                <div className='min-w-0 flex-1'>
+                  <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                    <span className='min-w-0 font-medium break-words'>
+                      {item.instance_name || `#${item.instance_id}`}
+                    </span>
+                    <EventBadge type={item.event_type} />
+                  </div>
+                  <div className='text-muted-foreground mt-2 text-xs break-words'>
+                    {item.rule_name || `规则 #${item.rule_id}`} ·{' '}
+                    {item.instance_kind}
+                  </div>
+                  <div className='text-muted-foreground mt-2 text-xs tabular-nums'>
+                    {dateTime.format(new Date(item.created_at * 1000))}
+                  </div>
+                </div>
+              </AccordionTrigger>
+              <div className='flex shrink-0 items-center pe-2'>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='size-11'
+                  aria-label='查看详情'
+                  onClick={() => setSelected(item)}
+                >
+                  <Eye />
+                </Button>
+              </div>
+            </div>
+            <AccordionContent className='px-3 pb-4'>
+              <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                <MobileAlertDetail label='触发条件'>
+                  {item.source_type === 'metric' ? (
+                    metricConditionSummary(item)
+                  ) : (
+                    <>
+                      {item.threshold_name || '—'} · {item.currency}{' '}
+                      {item.threshold}
+                    </>
+                  )}
+                </MobileAlertDetail>
+                <MobileAlertDetail label='观测结果'>
+                  {item.source_type === 'metric' ? (
+                    metricValueSummary(item) || item.error_code || '—'
+                  ) : (
+                    <>
+                      ${item.usd_total || '—'} · ¥{item.cny_total || '—'}
+                    </>
+                  )}
+                </MobileAlertDetail>
+                <MobileAlertDetail label='范围 / 换算'>
+                  {item.source_type === 'metric' ? (
+                    <>
+                      {item.scope_mode === 'aggregate'
+                        ? '汇总监控'
+                        : '实例独立监控'}
+                      <span className='text-muted-foreground mt-1 block text-xs'>
+                        {item.metric_key || '多指标'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      汇率 {item.exchange_rate || '—'} · 折扣{' '}
+                      {formatDiscountPercent(item.discount_rate)}
+                    </>
+                  )}
+                </MobileAlertDetail>
+                <MobileAlertDetail label='邮件'>
+                  <div className='flex flex-wrap gap-1'>
+                    {item.deliveries.map((delivery) => (
+                      <Badge
+                        key={delivery.id}
+                        variant={deliveryVariant(delivery.status)}
+                      >
+                        {delivery.status}
+                      </Badge>
+                    ))}
+                  </div>
+                </MobileAlertDetail>
+                {item.error_code && (
+                  <MobileAlertDetail label='错误'>
+                    <span className='text-destructive break-words'>
+                      {item.error_code}
+                    </span>
+                  </MobileAlertDetail>
+                )}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+        {!data?.items.length && (
+          <div className='text-muted-foreground flex min-h-40 items-center justify-center px-4 text-sm'>
+            {query.isLoading ? '数据加载中' : '暂无预警记录'}
+          </div>
+        )}
+      </Accordion>
+      <div className='hidden overflow-x-auto rounded-lg border md:block'>
         <Table>
           <TableHeader className='bg-muted/40'>
             <TableRow>
@@ -424,87 +536,126 @@ export function BillingAlertRecords({
             )}
           </TableBody>
         </Table>
-        <div className='flex items-center justify-between border-t px-4 py-3 text-sm'>
-          <span className='text-muted-foreground'>
-            第 {page} / {pages} 页
-          </span>
-          <div className='flex gap-2'>
-            <Button
-              size='sm'
-              variant='outline'
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              上一页
-            </Button>
-            <Button
-              size='sm'
-              variant='outline'
-              disabled={page >= pages}
-              onClick={() => setPage(page + 1)}
-            >
-              下一页
-            </Button>
-          </div>
+      </div>
+      <div className='flex flex-col gap-2 border-t px-4 py-3 text-sm min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
+        <span className='text-muted-foreground'>
+          第 {page} / {pages} 页
+        </span>
+        <div className='flex gap-2'>
+          <Button
+            size='sm'
+            variant='outline'
+            className='min-h-11 min-[420px]:min-h-0'
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+          >
+            上一页
+          </Button>
+          <Button
+            size='sm'
+            variant='outline'
+            className='min-h-11 min-[420px]:min-h-0'
+            disabled={page >= pages}
+            onClick={() => setPage(page + 1)}
+          >
+            下一页
+          </Button>
         </div>
       </div>
       {(exportsQuery.data?.data.length ?? 0) > 0 && (
-        <section className='mt-5 overflow-x-auto rounded-lg border'>
+        <section className='mt-5 overflow-hidden rounded-lg border'>
           <div className='bg-muted/30 flex items-center gap-2 border-b px-4 py-3 text-sm font-medium'>
             <FileClock className='size-4' />
             最近导出
           </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>状态</TableHead>
-                <TableHead>记录数</TableHead>
-                <TableHead>文件</TableHead>
-                <TableHead>创建时间</TableHead>
-                <TableHead className='text-right'>操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
+          <div className='divide-border divide-y md:hidden'>
+            {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
+              <div
+                key={item.id}
+                className='flex min-w-0 items-center justify-between gap-3 px-4 py-3'
+              >
+                <div className='min-w-0'>
+                  <div className='flex flex-wrap items-center gap-2'>
                     <Badge variant={exportVariant(item.status)}>
                       {exportStatusLabel(item.status)}
                     </Badge>
-                  </TableCell>
-                  <TableCell className='tabular-nums'>
-                    {item.record_count.toLocaleString()}
-                  </TableCell>
-                  <TableCell>
+                    <span className='text-sm tabular-nums'>
+                      {item.record_count.toLocaleString()} 条
+                    </span>
+                  </div>
+                  <div className='text-muted-foreground mt-1 text-xs break-words'>
                     {item.file_name || item.error_code || '准备中'}
-                  </TableCell>
-                  <TableCell>
+                  </div>
+                  <div className='text-muted-foreground mt-1 text-xs tabular-nums'>
                     {dateTime.format(new Date(item.created_at * 1000))}
-                  </TableCell>
-                  <TableCell className='text-right'>
-                    <Button
-                      variant='ghost'
-                      size='icon-sm'
-                      aria-label='下载导出文件'
-                      disabled={item.status !== 'succeeded'}
-                      onClick={() =>
-                        void downloadAlertRecordExport(item.task_id)
-                      }
-                    >
-                      <Download />
-                    </Button>
-                  </TableCell>
+                  </div>
+                </div>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='size-11 shrink-0'
+                  aria-label='下载导出文件'
+                  disabled={item.status !== 'succeeded'}
+                  onClick={() => void downloadAlertRecordExport(item.task_id)}
+                >
+                  <Download />
+                </Button>
+              </div>
+            ))}
+          </div>
+          <div className='hidden overflow-x-auto md:block'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>状态</TableHead>
+                  <TableHead>记录数</TableHead>
+                  <TableHead>文件</TableHead>
+                  <TableHead>创建时间</TableHead>
+                  <TableHead className='text-right'>操作</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <Badge variant={exportVariant(item.status)}>
+                        {exportStatusLabel(item.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className='tabular-nums'>
+                      {item.record_count.toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      {item.file_name || item.error_code || '准备中'}
+                    </TableCell>
+                    <TableCell>
+                      {dateTime.format(new Date(item.created_at * 1000))}
+                    </TableCell>
+                    <TableCell className='text-right'>
+                      <Button
+                        variant='ghost'
+                        size='icon-sm'
+                        aria-label='下载导出文件'
+                        disabled={item.status !== 'succeeded'}
+                        onClick={() =>
+                          void downloadAlertRecordExport(item.task_id)
+                        }
+                      >
+                        <Download />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </section>
       )}
       <Dialog
         open={Boolean(selected)}
         onOpenChange={(open) => !open && setSelected(null)}
       >
-        <DialogContent className='sm:max-w-2xl'>
+        <DialogContent className='max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-2xl'>
           <DialogHeader>
             <DialogTitle>预警记录详情</DialogTitle>
             <DialogDescription>
@@ -552,7 +703,7 @@ export function BillingAlertRecords({
                 {selected.deliveries.map((item) => (
                   <div
                     key={item.id}
-                    className='flex justify-between border-b py-2 last:border-0'
+                    className='flex flex-col gap-1 border-b py-2 last:border-0 min-[420px]:flex-row min-[420px]:justify-between'
                   >
                     <span>{item.recipient}</span>
                     <span className='text-muted-foreground'>
@@ -613,6 +764,17 @@ function Detail({
     <div className={className}>
       <div className='text-muted-foreground mb-1 text-xs'>{label}</div>
       <div className='text-sm break-words'>{children}</div>
+    </div>
+  )
+}
+
+function MobileAlertDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 text-sm break-words tabular-nums'>
+        {props.children}
+      </div>
     </div>
   )
 }

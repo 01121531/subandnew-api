@@ -18,9 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { ListChecks, RefreshCw } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ErrorState } from '@/components/error-state'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
@@ -101,67 +108,41 @@ function SystemTasksTable(props: SystemTasksTableProps) {
   const { t, i18n } = useTranslation()
 
   return (
-    <div className='overflow-x-auto rounded-md border'>
-      <Table className='min-w-[900px]'>
-        <TableHeader>
-          <TableRow className='bg-muted/40 hover:bg-muted/40'>
-            <TableHead className='h-9 w-[260px] px-4 text-xs'>
-              {t('Type')}
-            </TableHead>
-            <TableHead className='h-9 w-[130px] text-xs'>
-              {t('Status')}
-            </TableHead>
-            <TableHead className='h-9 w-[180px] text-xs'>
-              {t('Progress')}
-            </TableHead>
-            <TableHead className='h-9 min-w-[260px] text-xs'>
-              {t('Executor')}
-            </TableHead>
-            <TableHead className='h-9 w-[190px] text-xs'>
-              {t('Updated')}
-            </TableHead>
-            <TableHead className='h-9 w-[220px] pr-4 text-xs'>
-              {t('Detail')}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {props.tasks.map((task) => {
-            const progress = getProgress(task)
-            return (
-              <TableRow key={task.task_id} className='hover:bg-muted/30'>
-                <TableCell className='px-4 py-3 align-middle'>
-                  <div className='space-y-0.5'>
-                    <div className='font-medium'>
+    <>
+      <Accordion className='divide-border divide-y overflow-hidden rounded-md border md:hidden'>
+        {props.tasks.map((task) => {
+          const progress = getProgress(task)
+          return (
+            <AccordionItem
+              key={task.task_id}
+              value={task.task_id}
+              className='border-0'
+            >
+              <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
+                <div className='min-w-0 flex-1'>
+                  <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                    <span className='min-w-0 font-medium break-words'>
                       {t(TYPE_LABEL[task.type] ?? task.type)}
-                    </div>
-                    <div className='text-muted-foreground font-mono text-[11px]'>
-                      {task.type}
-                    </div>
+                    </span>
+                    <Badge
+                      variant={STATUS_VARIANT[task.status]}
+                      className={cn('gap-1.5', STATUS_CLASS_NAME[task.status])}
+                    >
+                      <span
+                        className={cn(
+                          'size-1.5 rounded-full',
+                          STATUS_DOT_CLASS_NAME[task.status]
+                        )}
+                        aria-hidden='true'
+                      />
+                      {t(task.status)}
+                    </Badge>
                   </div>
-                </TableCell>
-                <TableCell className='py-3 align-middle'>
-                  <Badge
-                    variant={STATUS_VARIANT[task.status]}
-                    className={cn('gap-1.5', STATUS_CLASS_NAME[task.status])}
-                  >
-                    <span
-                      className={cn(
-                        'size-1.5 rounded-full',
-                        STATUS_DOT_CLASS_NAME[task.status]
-                      )}
-                      aria-hidden='true'
-                    />
-                    {t(task.status)}
-                  </Badge>
-                </TableCell>
-                <TableCell className='py-3 align-middle'>
-                  <div className='flex items-center gap-2'>
+                  <div className='mt-3 flex items-center gap-2'>
                     <Progress
                       value={progress ?? 0}
-                      aria-label={`${t('Progress')}: ${t(TYPE_LABEL[task.type] ?? task.type)}`}
                       className={cn(
-                        'w-24',
+                        'h-1.5 flex-1',
                         PROGRESS_BAR_CLASS_NAME[task.status]
                       )}
                     />
@@ -169,31 +150,141 @@ function SystemTasksTable(props: SystemTasksTableProps) {
                       {progress === null ? '-' : `${progress}%`}
                     </span>
                   </div>
-                </TableCell>
-                <TableCell className='text-muted-foreground max-w-[280px] truncate py-3 align-middle font-mono text-xs'>
-                  {task.locked_by || '-'}
-                </TableCell>
-                <TableCell
-                  className='text-muted-foreground py-3 align-middle text-xs whitespace-nowrap'
-                  title={formatTimestampToDate(task.updated_at)}
-                >
-                  {formatTimestampRelative(
-                    task.updated_at,
-                    'seconds',
-                    toIntlLocale(i18n.language)
-                  )}
-                </TableCell>
-                <TableCell
-                  className='text-destructive max-w-[220px] truncate py-3 pr-4 align-middle text-xs'
-                  title={task.error || undefined}
-                >
-                  {task.error || '-'}
-                </TableCell>
-              </TableRow>
-            )
-          })}
-        </TableBody>
-      </Table>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className='px-4 pb-4'>
+                <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                  <MobileTaskDetail label={t('Type')}>
+                    <span className='font-mono text-xs break-all'>
+                      {task.type}
+                    </span>
+                  </MobileTaskDetail>
+                  <MobileTaskDetail label={t('Executor')}>
+                    <span className='font-mono text-xs break-all'>
+                      {task.locked_by || '-'}
+                    </span>
+                  </MobileTaskDetail>
+                  <MobileTaskDetail label={t('Updated')}>
+                    {formatTimestampToDate(task.updated_at)}
+                  </MobileTaskDetail>
+                  <MobileTaskDetail label={t('Detail')}>
+                    <span
+                      className={task.error ? 'text-destructive' : undefined}
+                    >
+                      {task.error || '-'}
+                    </span>
+                  </MobileTaskDetail>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+      </Accordion>
+      <div className='hidden overflow-x-auto rounded-md border md:block'>
+        <Table className='min-w-[900px]'>
+          <TableHeader>
+            <TableRow className='bg-muted/40 hover:bg-muted/40'>
+              <TableHead className='h-9 w-[260px] px-4 text-xs'>
+                {t('Type')}
+              </TableHead>
+              <TableHead className='h-9 w-[130px] text-xs'>
+                {t('Status')}
+              </TableHead>
+              <TableHead className='h-9 w-[180px] text-xs'>
+                {t('Progress')}
+              </TableHead>
+              <TableHead className='h-9 min-w-[260px] text-xs'>
+                {t('Executor')}
+              </TableHead>
+              <TableHead className='h-9 w-[190px] text-xs'>
+                {t('Updated')}
+              </TableHead>
+              <TableHead className='h-9 w-[220px] pr-4 text-xs'>
+                {t('Detail')}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {props.tasks.map((task) => {
+              const progress = getProgress(task)
+              return (
+                <TableRow key={task.task_id} className='hover:bg-muted/30'>
+                  <TableCell className='px-4 py-3 align-middle'>
+                    <div className='space-y-0.5'>
+                      <div className='font-medium'>
+                        {t(TYPE_LABEL[task.type] ?? task.type)}
+                      </div>
+                      <div className='text-muted-foreground font-mono text-[11px]'>
+                        {task.type}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className='py-3 align-middle'>
+                    <Badge
+                      variant={STATUS_VARIANT[task.status]}
+                      className={cn('gap-1.5', STATUS_CLASS_NAME[task.status])}
+                    >
+                      <span
+                        className={cn(
+                          'size-1.5 rounded-full',
+                          STATUS_DOT_CLASS_NAME[task.status]
+                        )}
+                        aria-hidden='true'
+                      />
+                      {t(task.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className='py-3 align-middle'>
+                    <div className='flex items-center gap-2'>
+                      <Progress
+                        value={progress ?? 0}
+                        aria-label={`${t('Progress')}: ${t(TYPE_LABEL[task.type] ?? task.type)}`}
+                        className={cn(
+                          'w-24',
+                          PROGRESS_BAR_CLASS_NAME[task.status]
+                        )}
+                      />
+                      <span className='text-muted-foreground w-10 text-right text-xs tabular-nums'>
+                        {progress === null ? '-' : `${progress}%`}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className='text-muted-foreground max-w-[280px] truncate py-3 align-middle font-mono text-xs'>
+                    {task.locked_by || '-'}
+                  </TableCell>
+                  <TableCell
+                    className='text-muted-foreground py-3 align-middle text-xs whitespace-nowrap'
+                    title={formatTimestampToDate(task.updated_at)}
+                  >
+                    {formatTimestampRelative(
+                      task.updated_at,
+                      'seconds',
+                      toIntlLocale(i18n.language)
+                    )}
+                  </TableCell>
+                  <TableCell
+                    className='text-destructive max-w-[220px] truncate py-3 pr-4 align-middle text-xs'
+                    title={task.error || undefined}
+                  >
+                    {task.error || '-'}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </>
+  )
+}
+
+function MobileTaskDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 text-sm break-words tabular-nums'>
+        {props.children}
+      </div>
     </div>
   )
 }

@@ -33,6 +33,7 @@ type DataTableRowActionMenuProps = {
   contentClassName?: string
   modal?: boolean
   onOpenChange?: (open: boolean) => void
+  triggerClassName?: string
 }
 
 export function DataTableRowActionMenu(props: DataTableRowActionMenuProps) {
@@ -43,7 +44,7 @@ export function DataTableRowActionMenu(props: DataTableRowActionMenuProps) {
           <Button
             variant='ghost'
             size='icon'
-            className='data-popup-open:bg-muted'
+            className={cn('data-popup-open:bg-muted', props.triggerClassName)}
             aria-label={props.ariaLabel}
           />
         }

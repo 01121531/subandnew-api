@@ -45,6 +45,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -900,7 +906,7 @@ export function ManagedAccounts() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='grid gap-4'>
-          <div className='bg-card border-border/80 flex flex-wrap items-center gap-2 rounded-lg border p-2.5 shadow-xs sm:p-3'>
+          <div className='bg-card border-border/80 grid min-w-0 gap-2 rounded-lg border p-2.5 shadow-xs sm:flex sm:flex-wrap sm:items-center sm:p-3'>
             <SegmentedControl
               value={family}
               options={ACCOUNT_FAMILIES}
@@ -935,7 +941,7 @@ export function ManagedAccounts() {
               }}
             >
               <SelectTrigger
-                className='h-8 max-w-full min-w-44 sm:w-64'
+                className='h-10 w-full min-w-0 sm:h-8 sm:w-64'
                 aria-label={t('Select site')}
               >
                 <SelectValue />
@@ -967,17 +973,17 @@ export function ManagedAccounts() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <div className='relative min-w-48 flex-1 sm:ms-auto sm:max-w-xs'>
+            <div className='relative min-w-0 flex-1 sm:ms-auto sm:max-w-xs'>
               <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t('Search accounts or channels')}
                 aria-label={t('Search accounts or channels')}
-                className='h-8 ps-8'
+                className='h-10 ps-8 sm:h-8'
               />
             </div>
-            <div className='relative min-w-48 flex-1 sm:max-w-xs'>
+            <div className='relative min-w-0 flex-1 sm:max-w-xs'>
               <SearchX className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
               <Input
                 value={excludeSearch}
@@ -985,7 +991,7 @@ export function ManagedAccounts() {
                 placeholder={t('Exclude accounts or channels')}
                 aria-label={t('Exclude accounts or channels')}
                 title={t('Separate multiple keywords with commas')}
-                className='h-8 ps-8'
+                className='h-10 ps-8 sm:h-8'
               />
             </div>
           </div>
@@ -1330,7 +1336,7 @@ function AccountOutputPanel(props: {
     detailContent = <PanelEmpty text={emptyText} />
   } else {
     detailContent = (
-      <div className='overflow-x-auto'>
+      <div className='min-w-0'>
         <AccountOutputTable family={props.family} rows={props.rows} />
       </div>
     )
@@ -1350,7 +1356,7 @@ function AccountOutputPanel(props: {
         </p>
       </CardHeader>
       <CardContent className='p-0'>
-        <div className='bg-border grid grid-cols-2 gap-px border-b lg:grid-cols-3 xl:grid-cols-5'>
+        <div className='bg-border grid grid-cols-1 gap-px border-b min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
           {summary.map((item) => (
             <div key={item.key} className='bg-card min-h-24 p-4'>
               <div className='flex items-start justify-between gap-2'>
@@ -1499,55 +1505,172 @@ function AccountOutputTable({
       </TableHead>
     )
   }
+  const sortOptions: { value: OutputSortKey; label: string }[] = [
+    { value: 'account', label: t(isChannel ? 'Channel' : 'Account') },
+    { value: 'instance', label: t('Instance') },
+    {
+      value: 'created_at',
+      label: t(isChannel ? 'Created At' : 'Uploaded at'),
+    },
+    { value: 'requests', label: t('Requests') },
+    { value: 'tokens', label: t('Tokens') },
+    { value: 'amount', label: t('Output amount') },
+  ]
   return (
-    <Table className='min-w-[860px]'>
-      <TableHeader className='bg-muted/35'>
-        <TableRow>
-          {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
-          {sortableHead('instance', t('Instance'))}
-          {sortableHead(
-            'created_at',
-            t(isChannel ? 'Created At' : 'Uploaded at')
-          )}
-          {sortableHead('requests', t('Requests'), 'right')}
-          {sortableHead('tokens', t('Tokens'), 'right')}
-          {sortableHead('amount', t('Output amount'), 'right')}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sortedRows.map(({ instance, output }) => (
-          <TableRow key={`${instance.id}:${output.account.id}`}>
-            <TableCell className='ps-6'>
-              <p className='max-w-52 truncate font-medium'>
-                {output.account.name || `#${output.account.id}`}
-              </p>
-              <p className='text-muted-foreground text-xs tabular-nums'>
-                #{output.account.id}
-              </p>
-            </TableCell>
-            <TableCell>{instance.name}</TableCell>
-            <TableCell className='whitespace-nowrap'>
-              {formatTimestamp(output.account.created_at)}
-            </TableCell>
-            <TableCell className='text-right tabular-nums'>
-              {output.collection_status === 'succeeded'
-                ? formatOptionalNumber(output.total_requests)
-                : '--'}
-            </TableCell>
-            <TableCell className='text-right tabular-nums'>
-              {output.collection_status === 'succeeded'
-                ? formatOptionalNumber(output.total_tokens)
-                : '--'}
-            </TableCell>
-            <TableCell className='pe-6 text-right font-medium tabular-nums'>
-              {output.collection_status === 'succeeded'
-                ? formatOutputAmount(output.amount, output.currency)
-                : t('Collection failed')}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <>
+      <div className='border-b p-3 md:hidden'>
+        <div className='grid grid-cols-[minmax(0,1fr)_7rem] gap-2'>
+          <Select
+            items={sortOptions}
+            value={sortKey}
+            onValueChange={(value) =>
+              value && setSortKey(value as OutputSortKey)
+            }
+          >
+            <SelectTrigger className='h-11 w-full' aria-label={t('Sort')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {sortOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            items={[
+              { value: 'desc', label: t('Desc') },
+              { value: 'asc', label: t('Asc') },
+            ]}
+            value={sortDirection}
+            onValueChange={(value) =>
+              value && setSortDirection(value as SortDirection)
+            }
+          >
+            <SelectTrigger className='h-11 w-full' aria-label={t('Sort')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='desc'>{t('Desc')}</SelectItem>
+              <SelectItem value='asc'>{t('Asc')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <Accordion className='divide-border divide-y md:hidden'>
+        {sortedRows.map(({ instance, output }) => {
+          const succeeded = output.collection_status === 'succeeded'
+          return (
+            <AccordionItem
+              key={`${instance.id}:${output.account.id}`}
+              value={`${instance.id}:${output.account.id}`}
+              className='border-0'
+            >
+              <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
+                <div className='min-w-0 flex-1'>
+                  <div className='flex min-w-0 items-center justify-between gap-3'>
+                    <span className='min-w-0 font-medium break-words'>
+                      {output.account.name || `#${output.account.id}`}
+                    </span>
+                    <span className='shrink-0 font-mono text-sm font-semibold tabular-nums'>
+                      {succeeded
+                        ? formatOutputAmount(output.amount, output.currency)
+                        : t('Collection failed')}
+                    </span>
+                  </div>
+                  <div className='text-muted-foreground mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs'>
+                    <span className='break-words'>{instance.name}</span>
+                    <span className='tabular-nums'>#{output.account.id}</span>
+                  </div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className='px-4 pb-4'>
+                <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
+                  <MobileDetail
+                    label={t(isChannel ? 'Created At' : 'Uploaded at')}
+                  >
+                    {formatTimestamp(output.account.created_at)}
+                  </MobileDetail>
+                  <MobileDetail label={t('Instance')}>
+                    {instance.name}
+                  </MobileDetail>
+                  <MobileDetail label={t('Requests')}>
+                    {succeeded
+                      ? formatOptionalNumber(output.total_requests)
+                      : '--'}
+                  </MobileDetail>
+                  <MobileDetail label={t('Tokens')}>
+                    {succeeded
+                      ? formatOptionalNumber(output.total_tokens)
+                      : '--'}
+                  </MobileDetail>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )
+        })}
+      </Accordion>
+      <div className='hidden overflow-x-auto md:block'>
+        <Table className='min-w-[860px]'>
+          <TableHeader className='bg-muted/35'>
+            <TableRow>
+              {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
+              {sortableHead('instance', t('Instance'))}
+              {sortableHead(
+                'created_at',
+                t(isChannel ? 'Created At' : 'Uploaded at')
+              )}
+              {sortableHead('requests', t('Requests'), 'right')}
+              {sortableHead('tokens', t('Tokens'), 'right')}
+              {sortableHead('amount', t('Output amount'), 'right')}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedRows.map(({ instance, output }) => (
+              <TableRow key={`${instance.id}:${output.account.id}`}>
+                <TableCell className='ps-6'>
+                  <p className='max-w-52 truncate font-medium'>
+                    {output.account.name || `#${output.account.id}`}
+                  </p>
+                  <p className='text-muted-foreground text-xs tabular-nums'>
+                    #{output.account.id}
+                  </p>
+                </TableCell>
+                <TableCell>{instance.name}</TableCell>
+                <TableCell className='whitespace-nowrap'>
+                  {formatTimestamp(output.account.created_at)}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  {output.collection_status === 'succeeded'
+                    ? formatOptionalNumber(output.total_requests)
+                    : '--'}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  {output.collection_status === 'succeeded'
+                    ? formatOptionalNumber(output.total_tokens)
+                    : '--'}
+                </TableCell>
+                <TableCell className='pe-6 text-right font-medium tabular-nums'>
+                  {output.collection_status === 'succeeded'
+                    ? formatOutputAmount(output.amount, output.currency)
+                    : t('Collection failed')}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
+  )
+}
+
+function MobileDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 break-words tabular-nums'>{props.children}</div>
+    </div>
   )
 }
 
@@ -1606,26 +1729,8 @@ function AccountTable(props: {
     content = <PanelEmpty text={emptyText} />
   } else {
     content = (
-      <Table className={tableMinWidth}>
-        <TableHeader className='bg-muted/35'>
-          <TableRow>
-            <TableHead className='ps-6'>
-              {t(isChannel ? 'Channel' : 'Account')}
-            </TableHead>
-            <TableHead>{t('Instance')}</TableHead>
-            <TableHead>
-              {isConductor ? '工作节点' : `${t('Platform')} / ${t('Type')}`}
-            </TableHead>
-            <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
-            <TableHead className='text-right'>
-              {isConductor ? '运行负载' : usageColumnLabel}
-            </TableHead>
-            <TableHead>{t('Last activity')}</TableHead>
-            {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
-            <TableHead className='pe-6 text-right'>{t('Available')}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody className='[&>tr]:h-16'>
+      <>
+        <Accordion className='divide-border divide-y md:hidden'>
           {props.rows.map(({ instance, item, source }) => {
             const descriptors = [item.platform, item.type, item.group].filter(
               (value, index, values): value is string =>
@@ -1636,153 +1741,321 @@ function AccountTable(props: {
               : null
             const rateLimited = isRateLimitedAccount(item)
             return (
-              <TableRow key={`${instance.id}:${item.id}`}>
-                <TableCell className='ps-6'>
-                  <div className='max-w-52 min-w-36'>
-                    <p className='truncate font-medium'>
-                      {item.name || `#${item.id}`}
-                    </p>
-                    <p className='text-muted-foreground text-xs tabular-nums'>
-                      #{item.id}
-                    </p>
+              <AccordionItem
+                key={`${instance.id}:${item.id}`}
+                value={`${instance.id}:${item.id}`}
+                className='border-0'
+              >
+                <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex min-w-0 items-start justify-between gap-3'>
+                      <div className='min-w-0'>
+                        <div className='font-medium break-words'>
+                          {item.name || `#${item.id}`}
+                        </div>
+                        <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs'>
+                          <span className='break-words'>{instance.name}</span>
+                          <span className='tabular-nums'>#{item.id}</span>
+                        </div>
+                      </div>
+                      <AvailabilityBadge
+                        enabled={item.enabled}
+                        rateLimited={rateLimited}
+                      />
+                    </div>
+                    <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                      <span>
+                        {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
+                        {formatTimestamp(item.created_at)}
+                      </span>
+                      {!isConductor && (
+                        <span className='text-foreground font-medium'>
+                          {usageColumnLabel}: {formatCost(item)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </TableCell>
-                <TableCell>
-                  <Link
-                    to='/instances/$id'
-                    params={{ id: String(instance.id) }}
-                    className='block max-w-40 truncate text-sm hover:underline'
-                  >
-                    {instance.name}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  {isConductor ? (
-                    <SourceCell
-                      source={source}
-                      sourceID={item.source_id}
-                      onOpen={(nextSource) =>
-                        setSelectedSource({ instance, source: nextSource })
+                </AccordionTrigger>
+                <AccordionContent className='px-4 pb-4'>
+                  <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
+                    <MobileDetail label={t('Instance')}>
+                      <Link
+                        to='/instances/$id'
+                        params={{ id: String(instance.id) }}
+                        className='break-words hover:underline'
+                      >
+                        {instance.name}
+                      </Link>
+                    </MobileDetail>
+                    <MobileDetail
+                      label={
+                        isConductor
+                          ? '工作节点'
+                          : `${t('Platform')} / ${t('Type')}`
                       }
-                    />
-                  ) : (
-                    <span className='block max-w-44 truncate text-sm'>
-                      {descriptors.join(' / ') || '--'}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell className='text-muted-foreground whitespace-nowrap'>
-                  {formatTimestamp(item.created_at)}
-                </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  {isConductor ? (
-                    <>
-                      <p className='font-medium'>
-                        {formatOptionalNumber(item.rpm)} RPM
-                      </p>
-                      <p className='text-muted-foreground text-xs'>
-                        {formatOptionalNumber(item.active_sessions)} 个会话 ·{' '}
-                        {item.utilization_5h == null
-                          ? '--'
-                          : `${(item.utilization_5h * 100).toFixed(1)}%`}{' '}
-                        / 5h
-                      </p>
-                    </>
-                  ) : (
-                    <p className='font-medium'>{formatCost(item)}</p>
-                  )}
-                  {isClaudeGateway && (
-                    <>
-                      <p className='text-muted-foreground text-xs'>
+                    >
+                      {isConductor ? (
+                        <SourceCell
+                          source={source}
+                          sourceID={item.source_id}
+                          onOpen={(nextSource) =>
+                            setSelectedSource({ instance, source: nextSource })
+                          }
+                        />
+                      ) : (
+                        descriptors.join(' / ') || '--'
+                      )}
+                    </MobileDetail>
+                    <MobileDetail
+                      label={isConductor ? '运行负载' : usageColumnLabel}
+                    >
+                      {isConductor ? (
+                        <>
+                          {formatOptionalNumber(item.rpm)} RPM ·{' '}
+                          {formatOptionalNumber(item.active_sessions)} 个会话
+                        </>
+                      ) : (
+                        formatCost(item)
+                      )}
+                    </MobileDetail>
+                    <MobileDetail label={t('Last activity')}>
+                      {formatTimestamp(item.last_activity_at)}
+                      {item.response_time_ms != null && (
+                        <span className='text-muted-foreground block text-xs'>
+                          {item.response_time_ms} ms
+                        </span>
+                      )}
+                    </MobileDetail>
+                    {showsSurvival && (
+                      <MobileDetail label={t('Survival time')}>
+                        {formatSurvivalDuration(survivalSeconds, t)}
+                        {survivalSeconds != null && (
+                          <span className='text-muted-foreground block text-xs'>
+                            {t(
+                              item.enabled === false
+                                ? 'Until last call'
+                                : 'Still active'
+                            )}
+                          </span>
+                        )}
+                      </MobileDetail>
+                    )}
+                    {isClaudeGateway && (
+                      <MobileDetail label={t('Success rate')}>
+                        {formatSuccessRate24H(item) || '--'} ·{' '}
                         {formatOptionalNumber(item.requests_24h)}{' '}
                         {t('Requests')} / 24h
-                      </p>
-                      {formatSuccessRate24H(item) && (
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Success rate')} {formatSuccessRate24H(item)}
-                          {item.limited_requests_24h != null && (
-                            <>
-                              {' · '}
-                              {formatOptionalNumber(
-                                item.limited_requests_24h
-                              )}{' '}
-                              {t('Rate limited')}
-                            </>
-                          )}
-                        </p>
-                      )}
-                    </>
-                  )}
-                  {!isConductor &&
-                    !isClaudeGateway &&
-                    (isChannel
-                      ? item.balance != null && (
-                          <p className='text-muted-foreground text-xs'>
-                            {t('Balance')} {exactCurrency.format(item.balance)}
-                          </p>
-                        )
-                      : (item.requests != null || item.tokens != null) && (
-                          <p className='text-muted-foreground text-xs'>
-                            {formatOptionalNumber(item.requests)}{' '}
-                            {t('Requests')} /{' '}
-                            {formatOptionalNumber(item.tokens)} {t('Tokens')}
-                          </p>
-                        ))}
-                </TableCell>
-                <TableCell className='whitespace-nowrap'>
-                  <p className='text-sm'>
-                    {formatTimestamp(item.last_activity_at)}
-                  </p>
-                  {item.response_time_ms != null && (
-                    <p className='text-muted-foreground text-xs tabular-nums'>
-                      {item.response_time_ms} ms
-                    </p>
-                  )}
-                </TableCell>
-                {showsSurvival && (
-                  <TableCell className='whitespace-nowrap'>
-                    <p className='text-sm font-medium tabular-nums'>
-                      {formatSurvivalDuration(survivalSeconds, t)}
-                    </p>
-                    {survivalSeconds != null && (
-                      <p className='text-muted-foreground text-xs'>
-                        {t(
-                          item.enabled === false
-                            ? 'Until last call'
-                            : 'Still active'
-                        )}
-                      </p>
+                      </MobileDetail>
                     )}
-                  </TableCell>
-                )}
-                <TableCell className='pe-6 text-right'>
-                  <AvailabilityBadge
-                    enabled={item.enabled}
-                    rateLimited={rateLimited}
-                  />
+                  </div>
                   {item.error_message && (
-                    <p
+                    <div
                       className={cn(
-                        'ms-auto mt-1 max-w-40 truncate text-xs',
-                        rateLimited ? 'text-warning' : 'text-destructive'
+                        'mt-3 rounded-md border px-3 py-2 text-xs break-words',
+                        rateLimited
+                          ? 'border-warning/30 bg-warning/5 text-warning'
+                          : 'border-destructive/30 bg-destructive/5 text-destructive'
                       )}
-                      title={item.error_message}
                     >
                       {t(item.error_message)}
-                    </p>
+                    </div>
                   )}
-                </TableCell>
-              </TableRow>
+                </AccordionContent>
+              </AccordionItem>
             )
           })}
-        </TableBody>
-      </Table>
+        </Accordion>
+        <div className='hidden overflow-x-auto md:block'>
+          <Table className={tableMinWidth}>
+            <TableHeader className='bg-muted/35'>
+              <TableRow>
+                <TableHead className='ps-6'>
+                  {t(isChannel ? 'Channel' : 'Account')}
+                </TableHead>
+                <TableHead>{t('Instance')}</TableHead>
+                <TableHead>
+                  {isConductor ? '工作节点' : `${t('Platform')} / ${t('Type')}`}
+                </TableHead>
+                <TableHead>
+                  {t(isChannel ? 'Created At' : 'Uploaded at')}
+                </TableHead>
+                <TableHead className='text-right'>
+                  {isConductor ? '运行负载' : usageColumnLabel}
+                </TableHead>
+                <TableHead>{t('Last activity')}</TableHead>
+                {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
+                <TableHead className='pe-6 text-right'>
+                  {t('Available')}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className='[&>tr]:h-16'>
+              {props.rows.map(({ instance, item, source }) => {
+                const descriptors = [
+                  item.platform,
+                  item.type,
+                  item.group,
+                ].filter(
+                  (value, index, values): value is string =>
+                    Boolean(value) && values.indexOf(value) === index
+                )
+                const survivalSeconds = showsSurvival
+                  ? getSurvivalSeconds(item)
+                  : null
+                const rateLimited = isRateLimitedAccount(item)
+                return (
+                  <TableRow key={`${instance.id}:${item.id}`}>
+                    <TableCell className='ps-6'>
+                      <div className='max-w-52 min-w-36'>
+                        <p className='truncate font-medium'>
+                          {item.name || `#${item.id}`}
+                        </p>
+                        <p className='text-muted-foreground text-xs tabular-nums'>
+                          #{item.id}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        to='/instances/$id'
+                        params={{ id: String(instance.id) }}
+                        className='block max-w-40 truncate text-sm hover:underline'
+                      >
+                        {instance.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      {isConductor ? (
+                        <SourceCell
+                          source={source}
+                          sourceID={item.source_id}
+                          onOpen={(nextSource) =>
+                            setSelectedSource({ instance, source: nextSource })
+                          }
+                        />
+                      ) : (
+                        <span className='block max-w-44 truncate text-sm'>
+                          {descriptors.join(' / ') || '--'}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className='text-muted-foreground whitespace-nowrap'>
+                      {formatTimestamp(item.created_at)}
+                    </TableCell>
+                    <TableCell className='text-right tabular-nums'>
+                      {isConductor ? (
+                        <>
+                          <p className='font-medium'>
+                            {formatOptionalNumber(item.rpm)} RPM
+                          </p>
+                          <p className='text-muted-foreground text-xs'>
+                            {formatOptionalNumber(item.active_sessions)} 个会话
+                            ·{' '}
+                            {item.utilization_5h == null
+                              ? '--'
+                              : `${(item.utilization_5h * 100).toFixed(1)}%`}{' '}
+                            / 5h
+                          </p>
+                        </>
+                      ) : (
+                        <p className='font-medium'>{formatCost(item)}</p>
+                      )}
+                      {isClaudeGateway && (
+                        <>
+                          <p className='text-muted-foreground text-xs'>
+                            {formatOptionalNumber(item.requests_24h)}{' '}
+                            {t('Requests')} / 24h
+                          </p>
+                          {formatSuccessRate24H(item) && (
+                            <p className='text-muted-foreground text-xs'>
+                              {t('Success rate')} {formatSuccessRate24H(item)}
+                              {item.limited_requests_24h != null && (
+                                <>
+                                  {' · '}
+                                  {formatOptionalNumber(
+                                    item.limited_requests_24h
+                                  )}{' '}
+                                  {t('Rate limited')}
+                                </>
+                              )}
+                            </p>
+                          )}
+                        </>
+                      )}
+                      {!isConductor &&
+                        !isClaudeGateway &&
+                        (isChannel
+                          ? item.balance != null && (
+                              <p className='text-muted-foreground text-xs'>
+                                {t('Balance')}{' '}
+                                {exactCurrency.format(item.balance)}
+                              </p>
+                            )
+                          : (item.requests != null || item.tokens != null) && (
+                              <p className='text-muted-foreground text-xs'>
+                                {formatOptionalNumber(item.requests)}{' '}
+                                {t('Requests')} /{' '}
+                                {formatOptionalNumber(item.tokens)}{' '}
+                                {t('Tokens')}
+                              </p>
+                            ))}
+                    </TableCell>
+                    <TableCell className='whitespace-nowrap'>
+                      <p className='text-sm'>
+                        {formatTimestamp(item.last_activity_at)}
+                      </p>
+                      {item.response_time_ms != null && (
+                        <p className='text-muted-foreground text-xs tabular-nums'>
+                          {item.response_time_ms} ms
+                        </p>
+                      )}
+                    </TableCell>
+                    {showsSurvival && (
+                      <TableCell className='whitespace-nowrap'>
+                        <p className='text-sm font-medium tabular-nums'>
+                          {formatSurvivalDuration(survivalSeconds, t)}
+                        </p>
+                        {survivalSeconds != null && (
+                          <p className='text-muted-foreground text-xs'>
+                            {t(
+                              item.enabled === false
+                                ? 'Until last call'
+                                : 'Still active'
+                            )}
+                          </p>
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell className='pe-6 text-right'>
+                      <AvailabilityBadge
+                        enabled={item.enabled}
+                        rateLimited={rateLimited}
+                      />
+                      {item.error_message && (
+                        <p
+                          className={cn(
+                            'ms-auto mt-1 max-w-40 truncate text-xs',
+                            rateLimited ? 'text-warning' : 'text-destructive'
+                          )}
+                          title={item.error_message}
+                        >
+                          {t(item.error_message)}
+                        </p>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </>
     )
   }
 
   return (
     <Card className={PANEL_CLASS}>
-      <CardHeader className='border-border/70 flex-row flex-wrap items-start justify-between gap-3 space-y-0 border-b py-3.5'>
+      <CardHeader className='border-border/70 flex flex-col items-stretch gap-3 space-y-0 border-b py-3.5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between'>
         <div className='min-w-0'>
           <CardTitle className='flex items-center gap-2'>
             <Users className='text-muted-foreground size-4' />
@@ -1796,7 +2069,7 @@ function AccountTable(props: {
             )}
           </p>
         </div>
-        <div className='flex max-w-full flex-wrap items-center justify-end gap-1.5'>
+        <div className='grid w-full grid-cols-[minmax(0,1fr)_7rem_auto] gap-1.5 sm:flex sm:w-auto sm:max-w-full sm:flex-wrap sm:items-center sm:justify-end'>
           <Select
             items={sortOptions}
             value={props.sortKey}
@@ -1804,7 +2077,10 @@ function AccountTable(props: {
               value && props.onSortKeyChange(value as AccountSortKey)
             }
           >
-            <SelectTrigger className='h-7 w-36 text-xs' aria-label={t('Sort')}>
+            <SelectTrigger
+              className='h-11 w-full text-xs sm:h-7 sm:w-36'
+              aria-label={t('Sort')}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent align='end'>
@@ -1822,7 +2098,10 @@ function AccountTable(props: {
               value && props.onSortDirectionChange(value as SortDirection)
             }
           >
-            <SelectTrigger className='h-7 w-20 text-xs' aria-label={t('Sort')}>
+            <SelectTrigger
+              className='h-11 w-full text-xs sm:h-7 sm:w-20'
+              aria-label={t('Sort')}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent align='end'>
@@ -1833,7 +2112,10 @@ function AccountTable(props: {
               ))}
             </SelectContent>
           </Select>
-          <Badge variant='secondary' className='tabular-nums'>
+          <Badge
+            variant='secondary'
+            className='h-11 justify-center tabular-nums sm:h-auto'
+          >
             {props.rows.length === props.total
               ? props.total
               : `${props.rows.length} / ${props.total}`}
@@ -1845,7 +2127,7 @@ function AccountTable(props: {
           {t('Some account data could not be loaded')}
         </div>
       )}
-      <CardContent className='overflow-x-auto px-0'>{content}</CardContent>
+      <CardContent className='min-w-0 px-0'>{content}</CardContent>
       <SourceDetailsDialog
         selected={selectedSource}
         onOpenChange={(open) => !open && setSelectedSource(null)}

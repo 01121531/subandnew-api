@@ -24,8 +24,15 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import { SectionPageLayout } from '@/components/layout'
 import { MultiSelect, type MultiSelectOption } from '@/components/multi-select'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -37,6 +44,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -1395,7 +1406,123 @@ export function BillingAlerts() {
                   </Button>
                 )}
               </div>
-              <div className='overflow-x-auto rounded-lg border'>
+              <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
+                {rules.map((rule) => (
+                  <AccordionItem
+                    key={rule.id}
+                    value={String(rule.id)}
+                    className='border-0'
+                  >
+                    <div className='flex min-w-0 items-stretch'>
+                      <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                        <div className='min-w-0 flex-1'>
+                          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                            <span className='min-w-0 font-medium break-words'>
+                              {rule.name}
+                            </span>
+                            <Badge
+                              variant={rule.enabled ? 'default' : 'secondary'}
+                            >
+                              {rule.enabled ? '运行中' : '已停用'}
+                            </Badge>
+                          </div>
+                          <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                            <span>#{rule.id}</span>
+                            <span>{rule.instance_ids.length} 个实例</span>
+                            <span>{rule.thresholds.length} 个档位</span>
+                            <span>{rule.recipients.length} 个收件人</span>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <div className='flex shrink-0 items-center gap-1 pe-2'>
+                        {rule.instance_ids[0] && (
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='size-11'
+                            aria-label='立即统计'
+                            onClick={async () => {
+                              try {
+                                await evaluateBillingRule(
+                                  rule.id,
+                                  rule.instance_ids[0]
+                                )
+                                toast.success('已加入统计队列')
+                              } catch {
+                                toast.error('提交统计失败')
+                              }
+                            }}
+                          >
+                            <Play />
+                          </Button>
+                        )}
+                        {isRoot && (
+                          <DataTableRowActionMenu
+                            ariaLabel='更多账单预警操作'
+                            triggerClassName='size-11'
+                          >
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setEditingRule(rule)
+                                setRuleOpen(true)
+                              }}
+                            >
+                              <Pencil />
+                              编辑规则
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              variant='destructive'
+                              onClick={() => setDeleteRule(rule)}
+                            >
+                              <Trash2 />
+                              删除规则
+                            </DropdownMenuItem>
+                          </DataTableRowActionMenu>
+                        )}
+                      </div>
+                    </div>
+                    <AccordionContent className='px-3 pb-4'>
+                      <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                        <MobileBillingDetail label='账期 / 汇率'>
+                          {rule.cycle_type}
+                          <span className='text-muted-foreground mt-1 block text-xs'>
+                            {rule.exchange_override
+                              ? rule.exchange_mode
+                              : '跟随全局'}{' '}
+                            · {rule.timezone}
+                          </span>
+                        </MobileBillingDetail>
+                        <MobileBillingDetail label='实例'>
+                          <div className='flex flex-wrap gap-1'>
+                            {rule.instance_ids.map((id) => (
+                              <Badge key={id} variant='outline'>
+                                {instanceMap.get(id)?.name ?? `#${id}`}
+                              </Badge>
+                            ))}
+                          </div>
+                        </MobileBillingDetail>
+                        <MobileBillingDetail label='档位'>
+                          {rule.thresholds
+                            .map((item) => `${item.currency} ${item.amount}`)
+                            .join(' / ')}
+                        </MobileBillingDetail>
+                        <MobileBillingDetail label='收件人'>
+                          <span className='break-words'>
+                            {rule.recipients.join(', ') || '—'}
+                          </span>
+                        </MobileBillingDetail>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+                {!rules.length && (
+                  <div className='text-muted-foreground flex min-h-32 items-center justify-center px-4 text-sm'>
+                    暂无预警规则
+                  </div>
+                )}
+              </Accordion>
+              <div className='hidden overflow-x-auto rounded-lg border md:block'>
                 <Table>
                   <TableHeader className='bg-muted/40'>
                     <TableRow>
@@ -1532,7 +1659,93 @@ export function BillingAlerts() {
                   </Button>
                 )}
               </div>
-              <div className='overflow-x-auto rounded-lg border'>
+              <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
+                {templates.map((template) => (
+                  <AccordionItem
+                    key={template.id}
+                    value={String(template.id)}
+                    className='border-0'
+                  >
+                    <div className='flex min-w-0 items-stretch'>
+                      <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                        <div className='min-w-0 flex-1'>
+                          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                            <span className='min-w-0 font-medium break-words'>
+                              {template.name}
+                            </span>
+                            <Badge variant='secondary' className='font-normal'>
+                              {templateSystemLabel(template.system_kind)}
+                            </Badge>
+                          </div>
+                          <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                            <span>v{template.current_version}</span>
+                            <span>
+                              {Object.keys(template.filters).length} 个筛选条件
+                            </span>
+                            <span>
+                              {dateTime.format(
+                                new Date(template.updated_at * 1000)
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      {isRoot && (
+                        <div className='flex shrink-0 items-center gap-1 pe-2'>
+                          <Button
+                            variant='ghost'
+                            size='icon'
+                            className='size-11'
+                            aria-label='编辑模板'
+                            onClick={() => {
+                              setEditingTemplate(template)
+                              setTemplateOpen(true)
+                            }}
+                          >
+                            <Pencil />
+                          </Button>
+                          <DataTableRowActionMenu
+                            ariaLabel='更多模板操作'
+                            triggerClassName='size-11'
+                          >
+                            <DropdownMenuItem
+                              variant='destructive'
+                              onClick={() => setDeleteTemplate(template)}
+                            >
+                              <Trash2 />
+                              删除模板
+                            </DropdownMenuItem>
+                          </DataTableRowActionMenu>
+                        </div>
+                      )}
+                    </div>
+                    <AccordionContent className='px-3 pb-4'>
+                      <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                        <MobileBillingDetail label='说明'>
+                          {template.description || '—'}
+                        </MobileBillingDetail>
+                        <MobileBillingDetail label='筛选条件'>
+                          <div className='flex flex-wrap gap-1'>
+                            {Object.entries(template.filters).map(
+                              ([key, values]) => (
+                                <Badge key={key} variant='outline'>
+                                  {key} · {values.length}
+                                </Badge>
+                              )
+                            )}
+                          </div>
+                        </MobileBillingDetail>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+                {!templates.length && (
+                  <div className='text-muted-foreground flex min-h-32 items-center justify-center px-4 text-sm'>
+                    暂无筛选模板
+                  </div>
+                )}
+              </Accordion>
+              <div className='hidden overflow-x-auto rounded-lg border md:block'>
                 <Table>
                   <TableHeader className='bg-muted/40'>
                     <TableRow>
@@ -1785,6 +1998,17 @@ function ExchangeSettings() {
             ))}
           </TableBody>
         </Table>
+      </div>
+    </div>
+  )
+}
+
+function MobileBillingDetail(props: { label: string; children: ReactNode }) {
+  return (
+    <div className='min-w-0'>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div className='mt-1 text-sm break-words tabular-nums'>
+        {props.children}
       </div>
     </div>
   )

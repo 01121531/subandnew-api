@@ -560,6 +560,7 @@ export function UsageRecords() {
         <Button
           variant='outline'
           size='icon-sm'
+          className='size-11 sm:size-8'
           aria-label='刷新'
           onClick={() => {
             void recordsQuery.refetch()
@@ -577,6 +578,7 @@ export function UsageRecords() {
         </Button>
         <Button
           size='sm'
+          className='min-h-11 sm:min-h-0'
           onClick={() => void download()}
           disabled={!selectedId || exporting}
         >
@@ -586,15 +588,15 @@ export function UsageRecords() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='grid gap-4'>
-          <div className='border-border bg-card flex flex-wrap items-center gap-2 rounded-lg border p-2 shadow-xs'>
-            <div className='bg-muted flex h-8 items-center rounded-md p-0.5'>
+          <div className='border-border bg-card grid min-w-0 gap-2 rounded-lg border p-2 shadow-xs sm:flex sm:flex-wrap sm:items-center'>
+            <div className='bg-muted flex h-11 w-full min-w-0 items-center overflow-x-auto rounded-md p-0.5 sm:h-8 sm:w-auto'>
               {(['new_api', 'sub2api', 'conductor'] as const).map((value) => (
                 <button
                   key={value}
                   type='button'
                   aria-pressed={system === value}
                   className={cn(
-                    'h-7 rounded px-3 text-sm font-medium transition-colors',
+                    'h-10 min-w-max flex-1 rounded px-3 text-sm font-medium transition-colors sm:h-7 sm:flex-none',
                     system === value
                       ? 'bg-background text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground'
@@ -707,15 +709,26 @@ export function UsageRecords() {
             </div>
             <div
               className={cn(
-                'border-border items-center justify-end gap-2 border-t px-3 py-2 sm:flex',
+                'border-border grid grid-cols-2 items-center gap-2 border-t px-3 py-2 sm:flex sm:justify-end',
                 filtersOpen ? 'flex' : 'hidden'
               )}
             >
-              <Button type='button' variant='ghost' size='sm' onClick={reset}>
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                className='min-h-11 sm:min-h-0'
+                onClick={reset}
+              >
                 <RotateCcw />
                 重置
               </Button>
-              <Button type='submit' size='sm' disabled={!selectedId}>
+              <Button
+                type='submit'
+                size='sm'
+                className='min-h-11 sm:min-h-0'
+                disabled={!selectedId}
+              >
                 <Search />
                 查询
               </Button>
@@ -737,21 +750,21 @@ export function UsageRecords() {
           />
 
           <div className='border-border bg-card overflow-hidden rounded-lg border shadow-xs'>
-            <div className='border-border flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5'>
+            <div className='border-border grid gap-3 border-b px-3 py-2.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between'>
               <div>
                 <div className='text-sm font-semibold'>记录明细</div>
                 <div className='text-muted-foreground text-xs tabular-nums'>
                   共 {total.toLocaleString('zh-CN')} 条
                 </div>
               </div>
-              <div className='flex max-w-full flex-wrap items-center justify-end gap-1.5'>
+              <div className='grid grid-cols-[minmax(0,1fr)_7rem_auto] items-center gap-1.5 sm:flex sm:max-w-full sm:flex-wrap sm:justify-end'>
                 <NativeSelect
                   value={sortKey}
                   onChange={(event) => {
                     setSortKey(event.target.value as UsageSortKey)
                     setPage(1)
                   }}
-                  className='h-7 w-28 text-xs'
+                  className='h-11 w-full text-xs sm:h-7 sm:w-28'
                   aria-label={t('Sort')}
                 >
                   <NativeSelectOption value='created_at'>
@@ -766,7 +779,7 @@ export function UsageRecords() {
                     setSortDirection(event.target.value as SortDirection)
                     setPage(1)
                   }}
-                  className='h-7 w-20 text-xs'
+                  className='h-11 w-full text-xs sm:h-7 sm:w-20'
                   aria-label={t('Sort')}
                 >
                   <NativeSelectOption value='desc'>
@@ -791,7 +804,7 @@ export function UsageRecords() {
               onRetry={() => void recordsQuery.refetch()}
             />
             {(total > 0 || records.length > 0) && (
-              <div className='border-border flex items-center justify-between border-t px-3 py-2'>
+              <div className='border-border flex flex-col gap-2 border-t px-3 py-2 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
                 <span className='text-muted-foreground text-xs tabular-nums'>
                   {usesDateOnly(system)
                     ? `第 ${page} 页 · 本页 ${records.length} 条`
@@ -801,6 +814,7 @@ export function UsageRecords() {
                   <Button
                     variant='outline'
                     size='sm'
+                    className='min-h-11 min-[420px]:min-h-0'
                     disabled={page <= 1 || recordsQuery.isFetching}
                     onClick={() => setPage((value) => value - 1)}
                   >
@@ -809,6 +823,7 @@ export function UsageRecords() {
                   <Button
                     variant='outline'
                     size='sm'
+                    className='min-h-11 min-[420px]:min-h-0'
                     disabled={!hasNextPage || recordsQuery.isFetching}
                     onClick={() => setPage((value) => value + 1)}
                   >
