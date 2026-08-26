@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 		&ManagedRPMHistory{},
 		&ManagedInstanceAlert{},
 		&ManagedUsageExport{},
+		&ManagedExportItem{},
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
 		&BillingFilterTemplate{},
@@ -88,6 +89,7 @@ func truncateTables(t *testing.T) {
 			"managed_instance_audits", "managed_instance_snapshots", "managed_rpm_history",
 			"managed_instance_alerts", "managed_instances",
 			"managed_usage_exports",
+			"managed_export_items",
 			"managed_instance_config_bindings", "managed_config_templates",
 		} {
 			DB.Exec("DELETE FROM " + table)

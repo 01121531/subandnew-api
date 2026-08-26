@@ -150,7 +150,11 @@ export interface ManagedInstanceObservation<T> {
 
 export interface ManagedInstanceInventoryItem {
   id: number
+  id_text?: string
   name: string
+  email?: string
+  note?: string
+  ownership?: string
   type?: string
   platform?: string
   source_id?: string

@@ -198,6 +198,7 @@ func controlPlaneModels() []interface{} {
 		&ManagedRPMHistory{},
 		&ManagedInstanceAlert{},
 		&ManagedUsageExport{},
+		&ManagedExportItem{},
 		&ManagedInstanceAudit{},
 		&ManagedInstanceOperation{},
 		&ManagedInstanceOperationBatch{},

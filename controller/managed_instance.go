@@ -622,6 +622,25 @@ func CreateManagedInstanceUsageRecordExport(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
 }
 
+func CreateManagedAccountExport(c *gin.Context) {
+	var request service.ManagedAccountExportRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid account export request"})
+		return
+	}
+	task, err := service.EnqueueManagedAccountExport(c.GetInt("id"), request)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	view, err := service.GetManagedUsageExportView(task.TaskID, c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
+}
+
 func ListManagedUsageExports(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
@@ -631,7 +650,7 @@ func ListManagedUsageExports(c *gin.Context) {
 		actorID = c.GetInt("id")
 	}
 	result, err := service.ListManagedUsageExports(model.ManagedUsageExportListFilter{
-		Status: c.Query("status"), InstanceID: instanceID, ActorID: actorID,
+		Status: c.Query("status"), ExportKind: c.Query("export_kind"), InstanceID: instanceID, ActorID: actorID,
 		Page: page, PageSize: pageSize,
 	})
 	if err != nil {
@@ -666,7 +685,7 @@ func DownloadManagedUsageExport(c *gin.Context) {
 	}
 	if record.Status == model.ManagedUsageExportStatusExpired || (record.ExpiresAt > 0 && record.ExpiresAt <= time.Now().Unix()) {
 		_ = model.ExpireManagedUsageExport(record.TaskID)
-		managedinstance.RemoveUsageRecordExportArtifact(record.TaskID)
+		managedinstance.RemoveManagedExportArtifact(record.TaskID, record.FileFormat)
 		c.JSON(http.StatusGone, gin.H{"success": false, "message": "usage export file expired"})
 		return
 	}
@@ -674,7 +693,7 @@ func DownloadManagedUsageExport(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "usage export is not ready"})
 		return
 	}
-	file, err := managedinstance.OpenUsageRecordExportArtifact(record.TaskID)
+	file, err := managedinstance.OpenManagedExportArtifact(record.TaskID, record.FileFormat)
 	if err != nil {
 		_ = model.ExpireManagedUsageExport(record.TaskID)
 		c.JSON(http.StatusGone, gin.H{"success": false, "message": "usage export file unavailable"})
@@ -686,7 +705,11 @@ func DownloadManagedUsageExport(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.DataFromReader(http.StatusOK, info.Size(), "text/csv; charset=utf-8", file, map[string]string{
+	contentType := "text/csv; charset=utf-8"
+	if record.FileFormat == model.ManagedExportFormatXLSX {
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	}
+	c.DataFromReader(http.StatusOK, info.Size(), contentType, file, map[string]string{
 		"Content-Disposition":    `attachment; filename="` + record.FileName + `"`,
 		"X-Content-Type-Options": "nosniff",
 	})

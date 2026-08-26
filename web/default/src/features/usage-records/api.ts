@@ -39,7 +39,11 @@ export type UsageRecordExportTask = {
   instance_kind: string
   actor_id: number
   actor_name: string
+  export_kind: 'usage_records' | 'accounts'
+  file_format: 'csv' | 'xlsx'
+  source?: 'inventory' | 'account_output'
   filters: Record<string, string[]>
+  snapshot?: Record<string, unknown>
   status:
     | 'pending'
     | 'running'
@@ -54,12 +58,24 @@ export type UsageRecordExportTask = {
   file_name: string
   file_size: number
   record_count: number
+  warning_count: number
   error_code: string
   started_at: number
   finished_at: number
   expires_at: number
   created_at: number
   updated_at: number
+}
+
+export type ManagedAccountExportRequest = {
+  source: 'inventory' | 'account_output'
+  window: { start: number; end: number; timezone: string }
+  locale: string
+  search?: string
+  exclude_search?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  items: Array<{ instance_id: number; account_id: string }>
 }
 
 export type UsageRecordExportList = {
@@ -134,11 +150,22 @@ export async function createUsageRecordsExport(
   return response.data
 }
 
+export async function createManagedAccountExport(
+  request: ManagedAccountExportRequest
+): Promise<ApiResponse<UsageRecordExportTask>> {
+  const response = await api.post<ApiResponse<UsageRecordExportTask>>(
+    '/api/managed-account-exports',
+    request,
+    { disableDuplicate: true }
+  )
+  return response.data
+}
+
 export async function getUsageRecordsExport(
   taskId: string
 ): Promise<ApiResponse<UsageRecordExportTask>> {
   const response = await api.get<ApiResponse<UsageRecordExportTask>>(
-    `/api/managed-usage-exports/${encodeURIComponent(taskId)}`,
+    `/api/managed-exports/${encodeURIComponent(taskId)}`,
     { disableDuplicate: true }
   )
   return response.data
@@ -146,13 +173,13 @@ export async function getUsageRecordsExport(
 
 export async function downloadUsageRecordsExport(taskId: string) {
   const response = await api.get(
-    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/download`,
+    `/api/managed-exports/${encodeURIComponent(taskId)}/download`,
     { responseType: 'blob', disableDuplicate: true }
   )
   const disposition = String(response.headers['content-disposition'] ?? '')
   const filename =
     disposition.match(/filename="?([^";]+)"?/i)?.[1] ??
-    `usage-records-${taskId}.csv`
+    `managed-export-${taskId}`
   const objectUrl = URL.createObjectURL(response.data)
   const anchor = document.createElement('a')
   anchor.href = objectUrl
@@ -169,6 +196,7 @@ export async function listUsageRecordsExports(filters: {
   status?: string
   instance_id?: number
   actor_id?: number
+  export_kind?: string
 }): Promise<ApiResponse<UsageRecordExportList>> {
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([key, value]) => {
@@ -177,7 +205,7 @@ export async function listUsageRecordsExports(filters: {
     }
   })
   const response = await api.get<ApiResponse<UsageRecordExportList>>(
-    `/api/managed-usage-exports?${params.toString()}`,
+    `/api/managed-exports?${params.toString()}`,
     { disableDuplicate: true }
   )
   return response.data
@@ -185,7 +213,7 @@ export async function listUsageRecordsExports(filters: {
 
 export async function cancelUsageRecordsExport(taskId: string) {
   const response = await api.post<ApiResponse<unknown>>(
-    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/cancel`,
+    `/api/managed-exports/${encodeURIComponent(taskId)}/cancel`,
     null,
     { disableDuplicate: true }
   )
@@ -194,7 +222,7 @@ export async function cancelUsageRecordsExport(taskId: string) {
 
 export async function retryUsageRecordsExport(taskId: string) {
   const response = await api.post<ApiResponse<UsageRecordExportTask>>(
-    `/api/managed-usage-exports/${encodeURIComponent(taskId)}/retry`,
+    `/api/managed-exports/${encodeURIComponent(taskId)}/retry`,
     null,
     { disableDuplicate: true }
   )
@@ -203,7 +231,7 @@ export async function retryUsageRecordsExport(taskId: string) {
 
 export async function deleteUsageRecordsExport(taskId: string) {
   const response = await api.delete<ApiResponse<unknown>>(
-    `/api/managed-usage-exports/${encodeURIComponent(taskId)}`,
+    `/api/managed-exports/${encodeURIComponent(taskId)}`,
     { disableDuplicate: true }
   )
   return response.data

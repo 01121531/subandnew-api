@@ -162,6 +162,31 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	return view, nil
 }
 
+// GetManagedAccountInventorySnapshot returns the last successful inventory used by
+// account management. Export creation uses this snapshot to freeze selected rows.
+func GetManagedAccountInventorySnapshot(instanceID int64) (*managedinstance.InventoryPage, error) {
+	if instanceID <= 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	if err := backfillManagedAccountInventory(instanceID); err != nil {
+		return nil, err
+	}
+	snapshot, err := findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	if err != nil || snapshot == nil || snapshot.ObservedAt <= 0 || strings.TrimSpace(snapshot.Payload) == "" {
+		return nil, err
+	}
+	var page managedinstance.InventoryPage
+	if err := json.Unmarshal([]byte(snapshot.Payload), &page); err != nil {
+		return nil, err
+	}
+	for index := range page.Items {
+		if page.Items[index].IDText == "" {
+			page.Items[index].IDText = strconv.FormatInt(page.Items[index].ID, 10)
+		}
+	}
+	return &page, nil
+}
+
 func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange ManagedAccountRange, force bool) (*ManagedAccountRefreshView, error) {
 	if instanceID <= 0 || accountRange.RangeKey == "" {
 		return nil, managedinstance.ErrInvalidInstance

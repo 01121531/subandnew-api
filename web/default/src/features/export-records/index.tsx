@@ -88,6 +88,11 @@ const STATUS_OPTIONS = [
   ['cancelled', '已取消'],
   ['expired', '已过期'],
 ] as const
+const EXPORT_KIND_OPTIONS = [
+  ['', '全部类型'],
+  ['usage_records', '使用记录'],
+  ['accounts', '账号导出'],
+] as const
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -128,6 +133,9 @@ function ExportProgress({ item }: { item: UsageRecordExportTask }) {
     return (
       <div className='text-xs tabular-nums'>
         {item.record_count.toLocaleString()} 条 · {formatBytes(item.file_size)}
+        {item.warning_count > 0 && (
+          <span className='text-warning'> · {item.warning_count} 条警告</span>
+        )}
       </div>
     )
   }
@@ -175,11 +183,41 @@ function ExportActionButton({
   )
 }
 
+function ExportKindBadge({ item }: { item: UsageRecordExportTask }) {
+  const accountExport = item.export_kind === 'accounts'
+  return (
+    <Badge
+      variant='outline'
+      className={cn(
+        'h-5 rounded px-1.5 text-[10px] font-medium',
+        accountExport
+          ? 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-300'
+          : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300'
+      )}
+    >
+      {accountExport ? '账号导出 · XLSX' : '使用记录 · CSV'}
+    </Badge>
+  )
+}
+
+function ExportWarningBadge({ item }: { item: UsageRecordExportTask }) {
+  if (item.status !== 'succeeded' || item.warning_count <= 0) return null
+  return (
+    <Badge
+      className='border-warning/30 bg-warning/10 text-warning'
+      variant='outline'
+    >
+      完成但有警告
+    </Badge>
+  )
+}
+
 export function ExportRecords() {
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = user?.role === ROLE.SUPER_ADMIN
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState('')
+  const [exportKind, setExportKind] = useState('')
   const [instanceId, setInstanceId] = useState('')
   const [actorId, setActorId] = useState('')
   const [busyTask, setBusyTask] = useState('')
@@ -191,10 +229,11 @@ export function ExportRecords() {
       page,
       page_size: PAGE_SIZE,
       status: status || undefined,
+      export_kind: exportKind || undefined,
       instance_id: Number(instanceId) || undefined,
       actor_id: isRoot ? Number(actorId) || undefined : undefined,
     }),
-    [actorId, instanceId, isRoot, page, status]
+    [actorId, exportKind, instanceId, isRoot, page, status]
   )
   const exportsQuery = useQuery({
     queryKey: ['managed-usage-exports', queryFilters],
@@ -293,6 +332,22 @@ export function ExportRecords() {
                 ))}
               </NativeSelect>
             </label>
+            <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-36'>
+              类型
+              <NativeSelect
+                value={exportKind}
+                onChange={(event) => {
+                  setExportKind(event.target.value)
+                  setPage(1)
+                }}
+              >
+                {EXPORT_KIND_OPTIONS.map(([value, label]) => (
+                  <NativeSelectOption key={value} value={value}>
+                    {label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </label>
             <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-48'>
               实例
               <NativeSelect
@@ -378,6 +433,8 @@ export function ExportRecords() {
                                 {item.instance_name}
                               </span>
                               <ExportStatusBadge status={item.status} />
+                              <ExportWarningBadge item={item} />
+                              <ExportKindBadge item={item} />
                             </div>
                             <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
                               <span>{formatTime(item.created_at)}</span>
@@ -412,7 +469,7 @@ export function ExportRecords() {
                               variant='ghost'
                               size='icon'
                               className='size-11'
-                              aria-label='下载 CSV'
+                              aria-label={`下载 ${item.file_format.toUpperCase()}`}
                               disabled={busyTask === item.task_id}
                               onClick={() => void download(item.task_id)}
                             >
@@ -541,6 +598,7 @@ export function ExportRecords() {
                         >
                           <div className='grid gap-1'>
                             <ExportStatusBadge status={item.status} />
+                            <ExportWarningBadge item={item} />
                             {item.queue_position > 0 && (
                               <span className='text-muted-foreground text-xs tabular-nums'>
                                 队列第 {item.queue_position} 位
@@ -553,6 +611,7 @@ export function ExportRecords() {
                             {item.instance_name}
                           </div>
                           <div className='mt-1 flex items-center gap-1.5'>
+                            <ExportKindBadge item={item} />
                             <Badge
                               variant='outline'
                               className={cn(
@@ -563,7 +622,9 @@ export function ExportRecords() {
                               {exportInstanceKindLabel(item.instance_kind)}
                             </Badge>
                             <span className='text-muted-foreground text-xs tabular-nums'>
-                              #{item.instance_id}
+                              {item.instance_id > 0
+                                ? `#${item.instance_id}`
+                                : '跨实例'}
                             </span>
                           </div>
                         </TableCell>
@@ -604,7 +665,7 @@ export function ExportRecords() {
                             )}
                             {item.status === 'succeeded' && (
                               <ExportActionButton
-                                label='下载 CSV'
+                                label={`下载 ${item.file_format.toUpperCase()}`}
                                 icon={Download}
                                 disabled={busyTask === item.task_id}
                                 onClick={() => void download(item.task_id)}
@@ -678,7 +739,7 @@ export function ExportRecords() {
           }
         }}
         title='删除导出记录'
-        desc='删除后将同时清理已生成的 CSV 文件，且无法恢复。'
+        desc='删除后将同时清理已生成的导出文件，且无法恢复。'
         confirmText='删除记录'
         destructive
         isLoading={deleteTarget != null && busyTask === deleteTarget.task_id}

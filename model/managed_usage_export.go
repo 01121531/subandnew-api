@@ -8,6 +8,11 @@ import (
 )
 
 const (
+	ManagedExportKindUsageRecords = "usage_records"
+	ManagedExportKindAccounts     = "accounts"
+	ManagedExportFormatCSV        = "csv"
+	ManagedExportFormatXLSX       = "xlsx"
+
 	ManagedUsageExportStatusPending   = "pending"
 	ManagedUsageExportStatusRunning   = "running"
 	ManagedUsageExportStatusSucceeded = "succeeded"
@@ -26,6 +31,9 @@ type ManagedUsageExport struct {
 	InstanceKind string `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
 	ActorID      int    `json:"actor_id" gorm:"not null;index"`
 	ActorName    string `json:"actor_name" gorm:"type:varchar(128);not null"`
+	ExportKind   string `json:"export_kind" gorm:"type:varchar(32);not null;default:'usage_records';index"`
+	FileFormat   string `json:"file_format" gorm:"type:varchar(16);not null;default:'csv'"`
+	Source       string `json:"source,omitempty" gorm:"type:varchar(32)"`
 	Query        string `json:"-" gorm:"type:text;not null"`
 	Status       string `json:"status" gorm:"type:varchar(32);not null;index"`
 	Progress     int    `json:"progress" gorm:"not null;default:0"`
@@ -34,6 +42,7 @@ type ManagedUsageExport struct {
 	FileName     string `json:"file_name" gorm:"type:varchar(255)"`
 	FileSize     int64  `json:"file_size" gorm:"bigint;not null;default:0"`
 	RecordCount  int    `json:"record_count" gorm:"not null;default:0"`
+	WarningCount int    `json:"warning_count" gorm:"not null;default:0"`
 	ErrorCode    string `json:"error_code" gorm:"type:varchar(128)"`
 	StartedAt    int64  `json:"started_at" gorm:"bigint;not null;default:0"`
 	FinishedAt   int64  `json:"finished_at" gorm:"bigint;not null;default:0"`
@@ -42,12 +51,36 @@ type ManagedUsageExport struct {
 	UpdatedAt    int64  `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
+type ManagedExportItem struct {
+	ID         int64  `json:"id" gorm:"primaryKey"`
+	TaskID     string `json:"task_id" gorm:"type:varchar(64);not null;index:idx_managed_export_item_task,priority:1"`
+	InstanceID int64  `json:"instance_id" gorm:"not null;index;index:idx_managed_export_item_task,priority:2"`
+	ResourceID int64  `json:"resource_id" gorm:"not null;index:idx_managed_export_item_task,priority:3"`
+	Metadata   string `json:"-" gorm:"type:text;not null"`
+	CreatedAt  int64  `json:"created_at" gorm:"bigint;not null"`
+}
+
+func (ManagedExportItem) TableName() string { return "managed_export_items" }
+
+func (item *ManagedExportItem) BeforeCreate(_ *gorm.DB) error {
+	if item.CreatedAt == 0 {
+		item.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
 func (ManagedUsageExport) TableName() string { return "managed_usage_exports" }
 
 func (export *ManagedUsageExport) BeforeCreate(_ *gorm.DB) error {
 	now := common.GetTimestamp()
 	if export.Status == "" {
 		export.Status = ManagedUsageExportStatusPending
+	}
+	if export.ExportKind == "" {
+		export.ExportKind = ManagedExportKindUsageRecords
+	}
+	if export.FileFormat == "" {
+		export.FileFormat = ManagedExportFormatCSV
 	}
 	if export.CreatedAt == 0 {
 		export.CreatedAt = now
@@ -58,6 +91,7 @@ func (export *ManagedUsageExport) BeforeCreate(_ *gorm.DB) error {
 
 type ManagedUsageExportListFilter struct {
 	Status     string
+	ExportKind string
 	InstanceID int64
 	ActorID    int
 	Page       int
@@ -73,7 +107,11 @@ type ManagedUsageExportList struct {
 }
 
 func CreateManagedUsageExport(record *ManagedUsageExport, payload any, state any) (*SystemTask, error) {
-	if record == nil || record.InstanceID <= 0 || record.ActorID <= 0 {
+	return CreateManagedUsageExportWithItems(record, payload, state, nil)
+}
+
+func CreateManagedUsageExportWithItems(record *ManagedUsageExport, payload any, state any, items []*ManagedExportItem) (*SystemTask, error) {
+	if record == nil || record.ActorID <= 0 || (record.ExportKind != ManagedExportKindAccounts && record.InstanceID <= 0) {
 		return nil, errors.New("invalid managed usage export")
 	}
 	taskID, err := GenerateSystemTaskID()
@@ -94,11 +132,23 @@ func CreateManagedUsageExport(record *ManagedUsageExport, payload any, state any
 	}
 	record.TaskID = taskID
 	record.Status = ManagedUsageExportStatusPending
+	for _, item := range items {
+		if item == nil || item.InstanceID <= 0 || item.ResourceID <= 0 {
+			return nil, errors.New("invalid managed export item")
+		}
+		item.TaskID = taskID
+	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(task).Error; err != nil {
 			return err
 		}
-		return tx.Create(record).Error
+		if err := tx.Create(record).Error; err != nil {
+			return err
+		}
+		if len(items) > 0 {
+			return tx.CreateInBatches(items, 500).Error
+		}
+		return nil
 	})
 	return task, err
 }
@@ -141,13 +191,22 @@ func managedUsageExportListQuery(filter ManagedUsageExportListFilter) *gorm.DB {
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}
+	if filter.ExportKind != "" {
+		query = query.Where("export_kind = ?", filter.ExportKind)
+	}
 	if filter.InstanceID > 0 {
-		query = query.Where("instance_id = ?", filter.InstanceID)
+		query = query.Where("(instance_id = ? OR EXISTS (SELECT 1 FROM managed_export_items WHERE managed_export_items.task_id = managed_usage_exports.task_id AND managed_export_items.instance_id = ?))", filter.InstanceID, filter.InstanceID)
 	}
 	if filter.ActorID > 0 {
 		query = query.Where("actor_id = ?", filter.ActorID)
 	}
 	return query
+}
+
+func ListManagedExportItems(taskID string) ([]*ManagedExportItem, error) {
+	var items []*ManagedExportItem
+	err := DB.Where("task_id = ?", taskID).Order("id ASC").Find(&items).Error
+	return items, err
 }
 
 func GetManagedUsageExport(taskID string) (*ManagedUsageExport, error) {
@@ -206,14 +265,15 @@ func UpdateManagedUsageExportProgress(taskID string, progress int, processed int
 		}).Error
 }
 
-func FinishManagedUsageExport(taskID string, status string, fileName string, fileSize int64, recordCount int, errorCode string, expiresAt int64) error {
+func FinishManagedUsageExport(taskID string, status string, fileName string, fileSize int64, recordCount int, warningCount int, errorCode string, expiresAt int64) error {
 	now := common.GetTimestamp()
 	return DB.Model(&ManagedUsageExport{}).
 		Where("task_id = ? AND status = ?", taskID, ManagedUsageExportStatusRunning).
 		Updates(map[string]any{
 			"status": status, "progress": map[bool]int{true: 100, false: 0}[status == ManagedUsageExportStatusSucceeded],
 			"file_name": fileName, "file_size": fileSize, "record_count": recordCount,
-			"error_code": errorCode, "finished_at": now, "expires_at": expiresAt, "updated_at": now,
+			"warning_count": warningCount,
+			"error_code":    errorCode, "finished_at": now, "expires_at": expiresAt, "updated_at": now,
 		}).Error
 }
 
@@ -277,7 +337,7 @@ func RequeueExpiredManagedUsageExportLease(tx *gorm.DB, taskID string, now int64
 	).Error
 }
 
-func ExpireManagedUsageExports(now int64) ([]string, error) {
+func ExpireManagedUsageExports(now int64) ([]*ManagedUsageExport, error) {
 	var records []*ManagedUsageExport
 	if err := DB.Where("status = ? AND expires_at > 0 AND expires_at <= ?", ManagedUsageExportStatusSucceeded, now).Find(&records).Error; err != nil {
 		return nil, err
@@ -291,7 +351,7 @@ func ExpireManagedUsageExports(now int64) ([]string, error) {
 	}
 	err := DB.Model(&ManagedUsageExport{}).Where("task_id IN ?", taskIDs).
 		Updates(map[string]any{"status": ManagedUsageExportStatusExpired, "updated_at": now}).Error
-	return taskIDs, err
+	return records, err
 }
 
 func ExpireManagedUsageExport(taskID string) error {
@@ -318,6 +378,9 @@ func DeleteManagedUsageExport(taskID string, actorID int, root bool) (*ManagedUs
 			return ErrManagedUsageExportConflict
 		}
 		if err := tx.Where("task_id = ?", taskID).Delete(&SystemTask{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_id = ?", taskID).Delete(&ManagedExportItem{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Delete(&record).Error; err != nil {

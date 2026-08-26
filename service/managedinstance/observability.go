@@ -40,7 +40,11 @@ type TimeWindow struct {
 
 type InventoryItem struct {
 	ID                    int64    `json:"id"`
+	IDText                string   `json:"id_text,omitempty"`
 	Name                  string   `json:"name"`
+	Email                 string   `json:"email,omitempty"`
+	Note                  string   `json:"note,omitempty"`
+	Ownership             string   `json:"ownership,omitempty"`
 	Type                  string   `json:"type,omitempty"`
 	Platform              string   `json:"platform,omitempty"`
 	SourceID              string   `json:"source_id,omitempty"`
@@ -1311,8 +1315,10 @@ func normalizeInventoryItem(raw json.RawMessage) (InventoryItem, bool) {
 		balanceValue = &balance
 	}
 	return InventoryItem{
-		ID: id, Name: firstJSONText(fields, "name", "username", "email", "label"),
-		Type: firstJSONText(fields, "type", "provider"), Platform: firstJSONText(fields, "platform"),
+		ID: id, IDText: strconv.FormatInt(id, 10), Name: firstJSONText(fields, "name", "username", "email", "label"),
+		Email: firstJSONText(fields, "email"), Note: firstJSONText(fields, "note", "remark", "label"),
+		Ownership: firstJSONText(fields, "ownership", "owner", "source_name", "channel_name"),
+		Type:      firstJSONText(fields, "type", "provider"), Platform: firstJSONText(fields, "platform"),
 		Group: firstJSONText(fields, "group", "group_name"), Status: status, Enabled: normalizedEnabled(fields, status),
 		CreatedAt: createdAt, LastActivityAt: lastActivityAt, Cost: costValue, CostUnit: costUnit,
 		Balance: balanceValue, ResponseTimeMS: responseTimeValue,

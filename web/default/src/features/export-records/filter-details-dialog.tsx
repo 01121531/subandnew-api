@@ -142,6 +142,30 @@ function getFilterSummary(filters: Record<string, string[]>) {
   return { label, count: visible.length }
 }
 
+function accountExportEntries(item: UsageRecordExportTask): FilterEntry[] {
+  const snapshot = item.snapshot ?? {}
+  const window =
+    snapshot.window && typeof snapshot.window === 'object'
+      ? (snapshot.window as Record<string, unknown>)
+      : {}
+  const entries: FilterEntry[] = []
+  const add = (key: string, label: string, value: unknown) => {
+    if (value == null || value === '') return
+    entries.push({ key, label, values: [String(value)] })
+  }
+  add('start_timestamp', '开始时间', window.start)
+  add('end_timestamp', '结束时间', window.end)
+  add('timezone', '时区', window.timezone)
+  add('search', '包含搜索', snapshot.search)
+  add('exclude_search', '排除搜索', snapshot.exclude_search)
+  add('sort_by', '排序字段', snapshot.sort_by)
+  add('sort_order', '排序方向', snapshot.sort_order)
+  add('source', '数据来源', snapshot.source)
+  add('selection_count', '账号数量', snapshot.selection_count)
+  add('instance_count', '实例数量', snapshot.instance_count)
+  return entries
+}
+
 export function ExportStatusBadge({
   status,
   className,
@@ -198,7 +222,10 @@ function FilterSection({
 }
 
 export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
-  const entries = nonEmptyFilterEntries(item.filters)
+  const entries =
+    item.export_kind === 'accounts'
+      ? accountExportEntries(item)
+      : nonEmptyFilterEntries(item.filters)
   const timeEntries = entries.filter(({ key }) => TIME_KEYS.has(key))
   const parameterEntries = entries.filter(({ key }) =>
     EXPORT_PARAMETER_KEYS.has(key)
@@ -206,7 +233,13 @@ export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
   const conditionEntries = entries.filter(
     ({ key }) => !TIME_KEYS.has(key) && !EXPORT_PARAMETER_KEYS.has(key)
   )
-  const summary = getFilterSummary(item.filters)
+  const summary =
+    item.export_kind === 'accounts'
+      ? {
+          label: `${String(item.snapshot?.selection_count ?? item.record_count ?? 0)} 个账号`,
+          count: entries.length,
+        }
+      : getFilterSummary(item.filters)
 
   return (
     <Dialog>
@@ -236,7 +269,11 @@ export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
             <div className='bg-primary/10 text-primary flex size-8 items-center justify-center rounded-md'>
               <Filter className='size-4' />
             </div>
-            <DialogTitle>筛选条件详情</DialogTitle>
+            <DialogTitle>
+              {item.export_kind === 'accounts'
+                ? '账号导出详情'
+                : '筛选条件详情'}
+            </DialogTitle>
             <ExportStatusBadge status={item.status} />
           </div>
           <DialogDescription>

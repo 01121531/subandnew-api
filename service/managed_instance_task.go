@@ -37,36 +37,73 @@ type ManagedInstanceSyncPayload struct {
 type managedInstanceSyncHandler struct{}
 
 type ManagedUsageExportPayload struct {
-	InstanceID int64      `json:"instance_id"`
-	ActorID    int        `json:"actor_id"`
-	Query      url.Values `json:"query"`
+	ExportKind string                     `json:"export_kind,omitempty"`
+	InstanceID int64                      `json:"instance_id,omitempty"`
+	ActorID    int                        `json:"actor_id"`
+	Query      url.Values                 `json:"query,omitempty"`
+	Source     string                     `json:"source,omitempty"`
+	Window     managedinstance.TimeWindow `json:"window,omitempty"`
+	Locale     string                     `json:"locale,omitempty"`
+}
+
+type ManagedAccountExportItemInput struct {
+	InstanceID int64  `json:"instance_id"`
+	AccountID  string `json:"account_id"`
+}
+
+type ManagedAccountExportRequest struct {
+	Source        string                          `json:"source"`
+	Window        managedinstance.TimeWindow      `json:"window"`
+	Locale        string                          `json:"locale"`
+	Search        string                          `json:"search,omitempty"`
+	ExcludeSearch string                          `json:"exclude_search,omitempty"`
+	SortBy        string                          `json:"sort_by,omitempty"`
+	SortOrder     string                          `json:"sort_order,omitempty"`
+	Items         []ManagedAccountExportItemInput `json:"items"`
+}
+
+type managedAccountExportSnapshot struct {
+	Source         string                     `json:"source"`
+	Window         managedinstance.TimeWindow `json:"window"`
+	Locale         string                     `json:"locale"`
+	Search         string                     `json:"search,omitempty"`
+	ExcludeSearch  string                     `json:"exclude_search,omitempty"`
+	SortBy         string                     `json:"sort_by,omitempty"`
+	SortOrder      string                     `json:"sort_order,omitempty"`
+	SelectionCount int                        `json:"selection_count"`
+	InstanceCount  int                        `json:"instance_count"`
 }
 
 type managedUsageExportHandler struct{}
 
 type ManagedUsageExportView struct {
-	ID            int64      `json:"id"`
-	TaskID        string     `json:"task_id"`
-	InstanceID    int64      `json:"instance_id"`
-	InstanceName  string     `json:"instance_name"`
-	InstanceKind  string     `json:"instance_kind"`
-	ActorID       int        `json:"actor_id"`
-	ActorName     string     `json:"actor_name"`
-	Filters       url.Values `json:"filters"`
-	Status        string     `json:"status"`
-	QueuePosition int64      `json:"queue_position"`
-	Progress      int        `json:"progress"`
-	Processed     int64      `json:"processed"`
-	Total         int64      `json:"total"`
-	FileName      string     `json:"file_name"`
-	FileSize      int64      `json:"file_size"`
-	RecordCount   int        `json:"record_count"`
-	ErrorCode     string     `json:"error_code"`
-	StartedAt     int64      `json:"started_at"`
-	FinishedAt    int64      `json:"finished_at"`
-	ExpiresAt     int64      `json:"expires_at"`
-	CreatedAt     int64      `json:"created_at"`
-	UpdatedAt     int64      `json:"updated_at"`
+	ID            int64          `json:"id"`
+	TaskID        string         `json:"task_id"`
+	InstanceID    int64          `json:"instance_id"`
+	InstanceName  string         `json:"instance_name"`
+	InstanceKind  string         `json:"instance_kind"`
+	ActorID       int            `json:"actor_id"`
+	ActorName     string         `json:"actor_name"`
+	ExportKind    string         `json:"export_kind"`
+	FileFormat    string         `json:"file_format"`
+	Source        string         `json:"source,omitempty"`
+	Filters       url.Values     `json:"filters"`
+	Snapshot      map[string]any `json:"snapshot,omitempty"`
+	Status        string         `json:"status"`
+	QueuePosition int64          `json:"queue_position"`
+	Progress      int            `json:"progress"`
+	Processed     int64          `json:"processed"`
+	Total         int64          `json:"total"`
+	FileName      string         `json:"file_name"`
+	FileSize      int64          `json:"file_size"`
+	RecordCount   int            `json:"record_count"`
+	WarningCount  int            `json:"warning_count"`
+	ErrorCode     string         `json:"error_code"`
+	StartedAt     int64          `json:"started_at"`
+	FinishedAt    int64          `json:"finished_at"`
+	ExpiresAt     int64          `json:"expires_at"`
+	CreatedAt     int64          `json:"created_at"`
+	UpdatedAt     int64          `json:"updated_at"`
 }
 
 type ManagedUsageExportListView struct {
@@ -123,12 +160,148 @@ func EnqueueManagedUsageExport(instanceID int64, actorID int, query url.Values) 
 	if err != nil {
 		return nil, err
 	}
-	payload := ManagedUsageExportPayload{InstanceID: instanceID, ActorID: actorID, Query: querySnapshot}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindUsageRecords, InstanceID: instanceID, ActorID: actorID, Query: querySnapshot}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Processed: 0, Total: 0, Stage: "queued"}
 	task, err := model.CreateManagedUsageExport(&model.ManagedUsageExport{
 		InstanceID: instanceID, InstanceName: instance.Name, InstanceKind: instance.Kind,
-		ActorID: actorID, ActorName: actorName, Query: string(queryJSON),
+		ActorID: actorID, ActorName: actorName, ExportKind: model.ManagedExportKindUsageRecords,
+		FileFormat: model.ManagedExportFormatCSV, Query: string(queryJSON),
 	}, payload, state)
+	if err == nil {
+		notifySystemTaskRunner()
+	}
+	return task, err
+}
+
+func managedExportActorName(actorID int) string {
+	actorName := fmt.Sprintf("#%d", actorID)
+	if actor, err := model.GetUserById(actorID, false); err == nil && actor != nil {
+		actorName = actor.Username
+		if actor.DisplayName != "" {
+			actorName = actor.DisplayName
+		}
+	}
+	return actorName
+}
+
+func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*model.SystemTask, error) {
+	request.Source = strings.TrimSpace(request.Source)
+	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	if request.Window.Timezone == "" {
+		request.Window.Timezone = "Asia/Shanghai"
+	}
+	if _, err := time.LoadLocation(request.Window.Timezone); err != nil {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	if request.Locale == "" {
+		request.Locale = "zh-CN"
+	}
+
+	type parsedAccountExportItem struct {
+		instanceID int64
+		accountID  int64
+	}
+	type accountExportInventoryContext struct {
+		instance  *managedinstance.InstanceView
+		inventory map[int64]managedinstance.InventoryItem
+		sources   map[string]string
+	}
+	parsedItems := make([]parsedAccountExportItem, 0, len(request.Items))
+	requestedInstances := make(map[int64]struct{})
+	seenSelections := make(map[string]struct{}, len(request.Items))
+	for _, item := range request.Items {
+		accountID, err := strconv.ParseInt(strings.TrimSpace(item.AccountID), 10, 64)
+		if err != nil || item.InstanceID <= 0 || accountID <= 0 {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		key := strconv.FormatInt(item.InstanceID, 10) + ":" + strconv.FormatInt(accountID, 10)
+		if _, duplicate := seenSelections[key]; duplicate {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		seenSelections[key] = struct{}{}
+		parsedItems = append(parsedItems, parsedAccountExportItem{instanceID: item.InstanceID, accountID: accountID})
+		requestedInstances[item.InstanceID] = struct{}{}
+	}
+	if len(requestedInstances) == 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+
+	selections := make([]managedinstance.AccountExportSelection, 0, len(request.Items))
+	exportItems := make([]*model.ManagedExportItem, 0, len(request.Items))
+	instanceNames := make([]string, 0, len(requestedInstances))
+	instanceKinds := make(map[string]struct{})
+	contexts := make(map[int64]accountExportInventoryContext, len(requestedInstances))
+	var soleInstanceID int64
+	for instanceID := range requestedInstances {
+		instance, err := managedinstance.Get(instanceID)
+		if err != nil {
+			return nil, err
+		}
+		page, err := GetManagedAccountInventorySnapshot(instanceID)
+		if err != nil || page == nil {
+			return nil, managedinstance.ErrRemoteDataUnavailable
+		}
+		inventory := make(map[int64]managedinstance.InventoryItem, len(page.Items))
+		for _, item := range page.Items {
+			inventory[item.ID] = item
+		}
+		sources := make(map[string]string, len(page.Sources))
+		for _, source := range page.Sources {
+			sources[source.ID] = source.Name
+		}
+		contexts[instanceID] = accountExportInventoryContext{instance: instance, inventory: inventory, sources: sources}
+		soleInstanceID = instanceID
+		instanceNames = append(instanceNames, instance.Name)
+		instanceKinds[instance.Kind] = struct{}{}
+	}
+	for _, item := range parsedItems {
+		context := contexts[item.instanceID]
+		account, ok := context.inventory[item.accountID]
+		if !ok {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		selection := managedinstance.AccountExportSelection{
+			InstanceID: item.instanceID, InstanceName: context.instance.Name, InstanceKind: context.instance.Kind,
+			SourceName: context.sources[account.SourceID], Account: account,
+		}
+		metadata, err := json.Marshal(selection)
+		if err != nil {
+			return nil, err
+		}
+		selections = append(selections, selection)
+		exportItems = append(exportItems, &model.ManagedExportItem{InstanceID: item.instanceID, ResourceID: item.accountID, Metadata: string(metadata)})
+	}
+	if len(requestedInstances) > 1 {
+		soleInstanceID = 0
+	}
+	instanceName := strings.Join(instanceNames, "、")
+	if len(instanceNames) > 1 {
+		instanceName = fmt.Sprintf("%d 个实例", len(instanceNames))
+	}
+	instanceKind := "mixed"
+	if len(instanceKinds) == 1 {
+		for kind := range instanceKinds {
+			instanceKind = kind
+		}
+	}
+	snapshot := managedAccountExportSnapshot{
+		Source: request.Source, Window: request.Window, Locale: request.Locale,
+		Search: request.Search, ExcludeSearch: request.ExcludeSearch, SortBy: request.SortBy, SortOrder: request.SortOrder,
+		SelectionCount: len(selections), InstanceCount: len(requestedInstances),
+	}
+	queryJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: request.Source, Window: request.Window, Locale: request.Locale}
+	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(selections)), Stage: "queued"}
+	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
+		InstanceID: soleInstanceID, InstanceName: instanceName, InstanceKind: instanceKind,
+		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
+		FileFormat: model.ManagedExportFormatXLSX, Source: request.Source, Query: string(queryJSON),
+	}, payload, state, exportItems)
 	if err == nil {
 		notifySystemTaskRunner()
 	}
@@ -151,14 +324,21 @@ func managedUsageExportView(record *model.ManagedUsageExport) *ManagedUsageExpor
 		return nil
 	}
 	filters := url.Values{}
-	_ = json.Unmarshal([]byte(record.Query), &filters)
+	snapshot := map[string]any{}
+	if record.ExportKind == model.ManagedExportKindAccounts {
+		_ = json.Unmarshal([]byte(record.Query), &snapshot)
+	} else {
+		_ = json.Unmarshal([]byte(record.Query), &filters)
+	}
 	return &ManagedUsageExportView{
 		ID: record.ID, TaskID: record.TaskID, InstanceID: record.InstanceID,
 		InstanceName: record.InstanceName, InstanceKind: record.InstanceKind,
-		ActorID: record.ActorID, ActorName: record.ActorName, Filters: filters,
+		ActorID: record.ActorID, ActorName: record.ActorName,
+		ExportKind: record.ExportKind, FileFormat: record.FileFormat, Source: record.Source,
+		Filters: filters, Snapshot: snapshot,
 		Status: record.Status, QueuePosition: model.ManagedUsageExportQueuePosition(record),
 		Progress: record.Progress, Processed: record.Processed, Total: record.Total,
-		FileName: record.FileName, FileSize: record.FileSize, RecordCount: record.RecordCount,
+		FileName: record.FileName, FileSize: record.FileSize, RecordCount: record.RecordCount, WarningCount: record.WarningCount,
 		ErrorCode: record.ErrorCode, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt,
 		ExpiresAt: record.ExpiresAt, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	}
@@ -195,12 +375,12 @@ func GetManagedUsageExportView(taskID string, actorID int, root bool) (*ManagedU
 }
 
 func CleanupExpiredManagedUsageExports() error {
-	taskIDs, err := model.ExpireManagedUsageExports(common.GetTimestamp())
+	records, err := model.ExpireManagedUsageExports(common.GetTimestamp())
 	if err != nil {
 		return err
 	}
-	for _, taskID := range taskIDs {
-		managedinstance.RemoveUsageRecordExportArtifact(taskID)
+	for _, record := range records {
+		managedinstance.RemoveManagedExportArtifact(record.TaskID, record.FileFormat)
 	}
 	managedinstance.CleanupStaleUsageRecordExportParts()
 	return nil
@@ -215,7 +395,7 @@ func DeleteManagedUsageExport(taskID string, actorID int, root bool) (*model.Man
 	if err != nil || record == nil {
 		return record, err
 	}
-	managedinstance.RemoveUsageRecordExportArtifact(taskID)
+	managedinstance.RemoveManagedExportArtifact(taskID, record.FileFormat)
 	return record, nil
 }
 
@@ -227,11 +407,59 @@ func RetryManagedUsageExport(taskID string, actorID int, root bool) (*model.Syst
 	if record.Status != model.ManagedUsageExportStatusFailed && record.Status != model.ManagedUsageExportStatusExpired {
 		return nil, model.ErrManagedUsageExportConflict
 	}
+	if record.ExportKind == model.ManagedExportKindAccounts {
+		items, err := model.ListManagedExportItems(taskID)
+		if err != nil {
+			return nil, err
+		}
+		selections := make([]managedinstance.AccountExportSelection, 0, len(items))
+		for _, item := range items {
+			var selection managedinstance.AccountExportSelection
+			if json.Unmarshal([]byte(item.Metadata), &selection) != nil {
+				return nil, managedinstance.ErrInvalidInstance
+			}
+			selections = append(selections, selection)
+		}
+		var snapshot managedAccountExportSnapshot
+		if json.Unmarshal([]byte(record.Query), &snapshot) != nil {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		return enqueueManagedAccountExportSelections(actorID, record, snapshot, selections)
+	}
 	query := url.Values{}
 	if err := json.Unmarshal([]byte(record.Query), &query); err != nil {
 		return nil, err
 	}
 	return EnqueueManagedUsageExport(record.InstanceID, actorID, query)
+}
+
+func enqueueManagedAccountExportSelections(actorID int, original *model.ManagedUsageExport, snapshot managedAccountExportSnapshot, selections []managedinstance.AccountExportSelection) (*model.SystemTask, error) {
+	if original == nil || actorID <= 0 || len(selections) == 0 || len(selections) > 10000 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	items := make([]*model.ManagedExportItem, 0, len(selections))
+	for _, selection := range selections {
+		metadata, err := json.Marshal(selection)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, &model.ManagedExportItem{InstanceID: selection.InstanceID, ResourceID: selection.Account.ID, Metadata: string(metadata)})
+	}
+	queryJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: snapshot.Source, Window: snapshot.Window, Locale: snapshot.Locale}
+	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(items)), Stage: "queued"}
+	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
+		InstanceID: original.InstanceID, InstanceName: original.InstanceName, InstanceKind: original.InstanceKind,
+		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
+		FileFormat: model.ManagedExportFormatXLSX, Source: snapshot.Source, Query: string(queryJSON),
+	}, payload, state, items)
+	if err == nil {
+		notifySystemTaskRunner()
+	}
+	return task, err
 }
 
 func GetManagedUsageExportTask(taskID string, instanceID int64, actorID int) (*model.SystemTask, error) {
@@ -248,7 +476,14 @@ func GetManagedUsageExportTask(taskID string, instanceID int64, actorID int) (*m
 
 func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	payload := ManagedUsageExportPayload{}
-	if err := task.DecodePayload(&payload); err != nil || payload.InstanceID <= 0 || payload.ActorID <= 0 || task.ScopeKey != "" {
+	if err := task.DecodePayload(&payload); err != nil || payload.ActorID <= 0 || task.ScopeKey != "" {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_usage_export_payload")
+		return
+	}
+	if payload.ExportKind == "" {
+		payload.ExportKind = model.ManagedExportKindUsageRecords
+	}
+	if payload.ExportKind == model.ManagedExportKindUsageRecords && payload.InstanceID <= 0 {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_usage_export_payload")
 		return
 	}
@@ -256,41 +491,68 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "usage_export_status_conflict")
 		return
 	}
-	artifact, err := managedinstance.ExportUsageRecordsCSVToTaskFile(
-		ctx,
-		payload.InstanceID,
-		task.TaskID,
-		payload.Query,
-		func(progress managedinstance.UsageRecordExportProgress) error {
-			if err := model.UpdateManagedUsageExportProgress(task.TaskID, progress.Progress, progress.Processed, progress.Total); err != nil {
-				return err
+	progressCallback := func(progress managedinstance.UsageRecordExportProgress) error {
+		if err := model.UpdateManagedUsageExportProgress(task.TaskID, progress.Progress, progress.Processed, progress.Total); err != nil {
+			return err
+		}
+		return model.UpdateSystemTaskState(task.TaskID, runnerID, progress)
+	}
+	var artifact *managedinstance.UsageRecordExportArtifact
+	var err error
+	if payload.ExportKind == model.ManagedExportKindAccounts {
+		items, listErr := model.ListManagedExportItems(task.TaskID)
+		if listErr != nil {
+			err = listErr
+		} else {
+			selections := make([]managedinstance.AccountExportSelection, 0, len(items))
+			for _, item := range items {
+				var selection managedinstance.AccountExportSelection
+				if decodeErr := json.Unmarshal([]byte(item.Metadata), &selection); decodeErr != nil {
+					err = decodeErr
+					break
+				}
+				selections = append(selections, selection)
 			}
-			return model.UpdateSystemTaskState(task.TaskID, runnerID, progress)
-		},
-	)
+			if err == nil {
+				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections}, progressCallback)
+			}
+		}
+	} else {
+		artifact, err = managedinstance.ExportUsageRecordsCSVToTaskFile(ctx, payload.InstanceID, task.TaskID, payload.Query, progressCallback)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
-			managedinstance.RemoveUsageRecordExportArtifact(task.TaskID)
+			record, _ := model.GetManagedUsageExport(task.TaskID)
+			if record != nil {
+				managedinstance.RemoveManagedExportArtifact(task.TaskID, record.FileFormat)
+			}
 			if model.RequeueManagedUsageExport(task.TaskID, runnerID) == nil {
 				notifySystemTaskRunner()
 			}
 			return
 		}
-		managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, 0, err)
+		if payload.ExportKind == model.ManagedExportKindUsageRecords {
+			managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, 0, err)
+		}
 		errorCode := "usage_export_failed"
 		if errors.Is(err, managedinstance.ErrUsageExportTooLarge) {
 			errorCode = "usage_export_too_large"
 		} else if errors.Is(err, managedinstance.ErrUsageExportIncomplete) {
 			errorCode = "usage_export_incomplete"
 		}
+		if payload.ExportKind == model.ManagedExportKindAccounts {
+			errorCode = "account_export_failed"
+		}
 		if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode) == nil {
-			_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, errorCode, 0)
+			_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, 0, errorCode, 0)
 		}
 		return
 	}
-	managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, artifact.RecordCount, nil)
+	if payload.ExportKind == model.ManagedExportKindUsageRecords {
+		managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, artifact.RecordCount, nil)
+	}
 	if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, artifact, "") == nil {
-		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusSucceeded, artifact.FileName, artifact.Size, artifact.RecordCount, "", artifact.ExpiresAt)
+		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusSucceeded, artifact.FileName, artifact.Size, artifact.RecordCount, artifact.WarningCount, "", artifact.ExpiresAt)
 	}
 }
 

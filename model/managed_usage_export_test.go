@@ -115,9 +115,10 @@ func TestExpireManagedUsageExportsKeepsRecord(t *testing.T) {
 		Query: `{}`, Status: ManagedUsageExportStatusSucceeded, ExpiresAt: 100,
 	}
 	require.NoError(t, DB.Create(record).Error)
-	taskIDs, err := ExpireManagedUsageExports(101)
+	records, err := ExpireManagedUsageExports(101)
 	require.NoError(t, err)
-	require.Equal(t, []string{"systask_expired"}, taskIDs)
+	require.Len(t, records, 1)
+	require.Equal(t, "systask_expired", records[0].TaskID)
 	reloaded, err := GetManagedUsageExport("systask_expired")
 	require.NoError(t, err)
 	require.Equal(t, ManagedUsageExportStatusExpired, reloaded.Status)
@@ -138,6 +139,26 @@ func TestManagedUsageExportListIncludesCompletedRecords(t *testing.T) {
 	require.Equal(t, int64(1), list.Total)
 	require.Len(t, list.Items, 1)
 	require.Equal(t, record.TaskID, list.Items[0].TaskID)
+}
+
+func TestCreateManagedAccountExportPersistsFrozenItems(t *testing.T) {
+	truncateTables(t)
+	record := &ManagedUsageExport{
+		InstanceName: "two instances", InstanceKind: "mixed", ActorID: 10, ActorName: "admin",
+		ExportKind: ManagedExportKindAccounts, FileFormat: ManagedExportFormatXLSX, Query: `{}`,
+	}
+	task, err := CreateManagedUsageExportWithItems(record, map[string]any{"export_kind": ManagedExportKindAccounts}, map[string]any{}, []*ManagedExportItem{
+		{InstanceID: 1, ResourceID: 42, Metadata: `{"account":{"id":42}}`},
+		{InstanceID: 2, ResourceID: 42, Metadata: `{"account":{"id":42}}`},
+	})
+	require.NoError(t, err)
+	items, err := ListManagedExportItems(task.TaskID)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, int64(1), items[0].InstanceID)
+	require.Equal(t, int64(2), items[1].InstanceID)
+	require.Equal(t, ManagedExportKindAccounts, record.ExportKind)
+	require.Equal(t, ManagedExportFormatXLSX, record.FileFormat)
 }
 
 func TestDeleteManagedUsageExportOnlyDeletesOwnedTerminalRecord(t *testing.T) {

@@ -17,6 +17,19 @@ type permissionRoute struct {
 }
 
 func registerManagedInstanceRoutes(apiRouter *gin.RouterGroup) {
+	accountExportGroup := apiRouter.Group("/managed-account-exports")
+	accountExportGroup.Use(middleware.AdminAuth(), middleware.RequirePermission(authz.ManagedInstanceUsageView))
+	accountExportGroup.POST("", controller.CreateManagedAccountExport)
+
+	unifiedExportGroup := apiRouter.Group("/managed-exports")
+	unifiedExportGroup.Use(middleware.AdminAuth(), middleware.RequirePermission(authz.ManagedInstanceUsageView))
+	unifiedExportGroup.GET("", controller.ListManagedUsageExports)
+	unifiedExportGroup.GET("/:task_id", controller.GetManagedUsageExport)
+	unifiedExportGroup.GET("/:task_id/download", controller.DownloadManagedUsageExport)
+	unifiedExportGroup.POST("/:task_id/cancel", controller.CancelManagedUsageExport)
+	unifiedExportGroup.POST("/:task_id/retry", controller.RetryManagedUsageExport)
+	unifiedExportGroup.DELETE("/:task_id", controller.DeleteManagedUsageExport)
+
 	exportGroup := apiRouter.Group("/managed-usage-exports")
 	exportGroup.Use(middleware.AdminAuth(), middleware.RequirePermission(authz.ManagedInstanceUsageView))
 	exportGroup.GET("", controller.ListManagedUsageExports)

@@ -41,6 +41,7 @@ func TestMain(m *testing.M) {
 		&model.ManagedRPMHistory{},
 		&model.ManagedInstanceAlert{},
 		&model.ManagedUsageExport{},
+		&model.ManagedExportItem{},
 		&model.BillingFilterTemplate{},
 		&model.BillingFilterTemplateVersion{},
 		&model.BillingAlertRule{},
@@ -76,6 +77,7 @@ func truncate(t *testing.T) {
 			"managed_instance_audits", "managed_instance_snapshots", "managed_dashboard_snapshots", "managed_account_snapshots", "managed_rpm_history",
 			"managed_instance_alerts", "managed_instances",
 			"managed_usage_exports",
+			"managed_export_items",
 		} {
 			model.DB.Exec("DELETE FROM " + table)
 		}

@@ -30,6 +30,7 @@ import {
   CircleHelp,
   CircleDollarSign,
   DatabaseZap,
+  FileSpreadsheet,
   Gauge,
   Network,
   RadioTower,
@@ -43,6 +44,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import {
@@ -54,10 +56,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -101,6 +105,7 @@ import type {
   ManagedInstanceRealtimeState,
 } from '@/features/managed-instances/types'
 import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
+import { createManagedAccountExport } from '@/features/usage-records/api'
 import { cn } from '@/lib/utils'
 
 type AccountFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
@@ -116,6 +121,11 @@ type SourceRow = {
 type OutputRow = {
   instance: ManagedInstance
   output: ManagedInstanceAccountOutputItem
+}
+type AccountExportSelection = {
+  key: string
+  instanceId: number
+  accountId: string
 }
 type SortDirection = 'asc' | 'desc'
 type OutputSortKey =
@@ -375,6 +385,198 @@ function matchesAccountFilter(
   )
 }
 
+function inventoryAccountID(item: ManagedInstanceInventoryItem) {
+  return item.id_text || String(item.id)
+}
+
+function accountSelection(
+  instance: ManagedInstance,
+  item: ManagedInstanceInventoryItem
+): AccountExportSelection {
+  const accountId = inventoryAccountID(item)
+  return {
+    key: `${instance.id}:${accountId}`,
+    instanceId: instance.id,
+    accountId,
+  }
+}
+
+function useAccountExportSelection(
+  available: AccountExportSelection[],
+  scopeKey: string
+) {
+  const [selected, setSelected] = useState<Map<string, AccountExportSelection>>(
+    () => new Map()
+  )
+  useEffect(() => setSelected(new Map()), [scopeKey])
+  const selectedInFilter = available.filter((item) => selected.has(item.key))
+  const allFilteredSelected =
+    available.length > 0 && selectedInFilter.length === available.length
+  const toggle = (item: AccountExportSelection, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Map(current)
+      if (checked) next.set(item.key, item)
+      else next.delete(item.key)
+      return next
+    })
+  }
+  const toggleFiltered = (checked: boolean) => {
+    setSelected((current) => {
+      const next = new Map(current)
+      available.forEach((item) => {
+        if (checked) next.set(item.key, item)
+        else next.delete(item.key)
+      })
+      return next
+    })
+  }
+  return {
+    selected,
+    selectedInFilter,
+    allFilteredSelected,
+    toggle,
+    toggleFiltered,
+    clear: () => setSelected(new Map()),
+  }
+}
+
+function AccountExportBar(props: {
+  source: 'inventory' | 'account_output'
+  available: AccountExportSelection[]
+  selection: ReturnType<typeof useAccountExportSelection>
+  window: { start: number; end: number; timezone: string }
+  search: string
+  excludeSearch: string
+  sortBy: string
+  sortOrder: SortDirection
+}) {
+  const { t, i18n } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const selectedItems = [...props.selection.selected.values()]
+  const instanceCount = new Set(selectedItems.map((item) => item.instanceId))
+    .size
+  const submit = async () => {
+    setSubmitting(true)
+    try {
+      await createManagedAccountExport({
+        source: props.source,
+        window: props.window,
+        locale: i18n.language || 'zh-CN',
+        search: props.search || undefined,
+        exclude_search: props.excludeSearch || undefined,
+        sort_by: props.sortBy,
+        sort_order: props.sortOrder,
+        items: selectedItems.map((item) => ({
+          instance_id: item.instanceId,
+          account_id: item.accountId,
+        })),
+      })
+      setOpen(false)
+      props.selection.clear()
+      toast.success(t('Account export added to queue'), {
+        action: {
+          label: t('View export records'),
+          onClick: () => window.location.assign('/export-records'),
+        },
+      })
+    } catch {
+      toast.error(t('Failed to create account export'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return (
+    <>
+      <div className='border-border/70 bg-muted/20 flex min-w-0 flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center'>
+        <label className='flex min-h-11 cursor-pointer items-center gap-2 text-sm sm:min-h-0'>
+          <Checkbox
+            checked={props.selection.allFilteredSelected}
+            onCheckedChange={(checked) =>
+              props.selection.toggleFiltered(checked === true)
+            }
+            aria-label={t('Select all filtered accounts')}
+          />
+          <span className='tabular-nums'>
+            {t('Selected {{selected}} / filtered {{filtered}}', {
+              selected: selectedItems.length,
+              filtered: props.available.length,
+            })}
+          </span>
+        </label>
+        <div className='flex flex-1 flex-wrap items-center justify-end gap-2'>
+          {selectedItems.length > 0 && (
+            <Button variant='ghost' size='sm' onClick={props.selection.clear}>
+              {t('Clear selection')}
+            </Button>
+          )}
+          <Button
+            size='sm'
+            className='min-h-11 sm:min-h-0'
+            disabled={selectedItems.length === 0}
+            onClick={() => setOpen(true)}
+          >
+            <FileSpreadsheet />
+            {t('Export Excel')}
+          </Button>
+        </div>
+      </div>
+      <Dialog open={open} onOpenChange={(next) => !submitting && setOpen(next)}>
+        <DialogContent className='max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle>{t('Confirm account export')}</DialogTitle>
+            <DialogDescription>
+              {t(
+                'The export will run in the background and can be downloaded from export records.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className='bg-muted/35 grid grid-cols-2 gap-3 rounded-md p-4 text-sm'>
+            <MobileDetail label={t('Accounts')}>
+              {selectedItems.length}
+            </MobileDetail>
+            <MobileDetail label={t('Instances')}>{instanceCount}</MobileDetail>
+            <MobileDetail label={t('Data source')}>
+              {t(
+                props.source === 'inventory'
+                  ? 'Account details'
+                  : 'New account output'
+              )}
+            </MobileDetail>
+            <MobileDetail label={t('Timezone')}>
+              {props.window.timezone}
+            </MobileDetail>
+            <div className='col-span-2'>
+              <MobileDetail label={t('Time range')}>
+                {formatTimestamp(props.window.start)} -{' '}
+                {formatTimestamp(props.window.end)}
+              </MobileDetail>
+            </div>
+          </div>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Unsupported period statistics remain blank and each failed account is retained with a warning.'
+            )}
+          </p>
+          <DialogFooter className='sticky bottom-0'>
+            <Button
+              variant='outline'
+              disabled={submitting}
+              onClick={() => setOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button disabled={submitting} onClick={() => void submit()}>
+              <FileSpreadsheet />
+              {submitting ? t('Submitting') : t('Add to export queue')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 export function ManagedAccounts() {
   const { t } = useTranslation()
   const initialPreferences = useMemo(readPreferences, [])
@@ -464,6 +666,15 @@ export function ManagedAccounts() {
   const rangeQueryKey = timeRange.presetDays
     ? `preset-${timeRange.presetDays}`
     : `${accountRangeInput.start}-${accountRangeInput.end}`
+  const exportWindow = useMemo(() => {
+    const resolved = resolveFleetTimeRange(timeRange)
+    return {
+      start: Math.floor(resolved.start.getTime() / 1000),
+      end: Math.floor(resolved.end.getTime() / 1000),
+      timezone: 'Asia/Shanghai',
+    }
+  }, [timeRange])
+  const selectionScopeKey = `${family}:${effectiveInstanceID}:${rangeQueryKey}`
 
   const snapshotQueries = useQueries({
     queries: instances.map((instance) => ({
@@ -871,6 +1082,10 @@ export function ManagedAccounts() {
           loading={outputLoading}
           error={outputError}
           searching={filtering}
+          selectionScopeKey={selectionScopeKey}
+          window={exportWindow}
+          search={search}
+          excludeSearch={excludeSearch}
         />
         <AccountTable
           family={family}
@@ -883,6 +1098,10 @@ export function ManagedAccounts() {
           sortDirection={sortDirection}
           onSortKeyChange={setSortKey}
           onSortDirectionChange={setSortDirection}
+          selectionScopeKey={selectionScopeKey}
+          window={exportWindow}
+          search={search}
+          excludeSearch={excludeSearch}
         />
       </div>
     )
@@ -1287,6 +1506,10 @@ function AccountOutputPanel(props: {
   loading: boolean
   error: boolean
   searching: boolean
+  selectionScopeKey: string
+  window: { start: number; end: number; timezone: string }
+  search: string
+  excludeSearch: string
 }) {
   const { t } = useTranslation()
   const summary = [
@@ -1337,7 +1560,14 @@ function AccountOutputPanel(props: {
   } else {
     detailContent = (
       <div className='min-w-0'>
-        <AccountOutputTable family={props.family} rows={props.rows} />
+        <AccountOutputTable
+          family={props.family}
+          rows={props.rows}
+          selectionScopeKey={props.selectionScopeKey}
+          window={props.window}
+          search={props.search}
+          excludeSearch={props.excludeSearch}
+        />
       </div>
     )
   }
@@ -1387,9 +1617,17 @@ function AccountOutputPanel(props: {
 function AccountOutputTable({
   family,
   rows,
+  selectionScopeKey,
+  window,
+  search,
+  excludeSearch,
 }: {
   family: AccountFamily
   rows: OutputRow[]
+  selectionScopeKey: string
+  window: { start: number; end: number; timezone: string }
+  search: string
+  excludeSearch: string
 }) {
   const { t } = useTranslation()
   const isChannel = family === 'new_api'
@@ -1450,6 +1688,17 @@ function AccountOutputTable({
     })
     return result
   }, [rows, sortDirection, sortKey])
+  const exportable = useMemo(
+    () =>
+      rows.map(({ instance, output }) =>
+        accountSelection(instance, output.account)
+      ),
+    [rows]
+  )
+  const exportSelection = useAccountExportSelection(
+    exportable,
+    selectionScopeKey
+  )
   const changeSort = (nextKey: OutputSortKey) => {
     if (nextKey === sortKey) {
       setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
@@ -1518,6 +1767,16 @@ function AccountOutputTable({
   ]
   return (
     <>
+      <AccountExportBar
+        source='account_output'
+        available={exportable}
+        selection={exportSelection}
+        window={window}
+        search={search}
+        excludeSearch={excludeSearch}
+        sortBy={sortKey}
+        sortOrder={sortDirection}
+      />
       <div className='border-b p-3 md:hidden'>
         <div className='grid grid-cols-[minmax(0,1fr)_7rem] gap-2'>
           <Select
@@ -1561,30 +1820,42 @@ function AccountOutputTable({
       <Accordion className='divide-border divide-y md:hidden'>
         {sortedRows.map(({ instance, output }) => {
           const succeeded = output.collection_status === 'succeeded'
+          const selectable = accountSelection(instance, output.account)
           return (
             <AccordionItem
-              key={`${instance.id}:${output.account.id}`}
-              value={`${instance.id}:${output.account.id}`}
+              key={selectable.key}
+              value={selectable.key}
               className='border-0'
             >
-              <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
-                <div className='min-w-0 flex-1'>
-                  <div className='flex min-w-0 items-center justify-between gap-3'>
-                    <span className='min-w-0 font-medium break-words'>
-                      {output.account.name || `#${output.account.id}`}
-                    </span>
-                    <span className='shrink-0 font-mono text-sm font-semibold tabular-nums'>
-                      {succeeded
-                        ? formatOutputAmount(output.amount, output.currency)
-                        : t('Collection failed')}
-                    </span>
-                  </div>
-                  <div className='text-muted-foreground mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs'>
-                    <span className='break-words'>{instance.name}</span>
-                    <span className='tabular-nums'>#{output.account.id}</span>
-                  </div>
+              <div className='flex min-w-0 items-stretch'>
+                <div className='flex w-11 shrink-0 items-center justify-center'>
+                  <Checkbox
+                    checked={exportSelection.selected.has(selectable.key)}
+                    onCheckedChange={(checked) =>
+                      exportSelection.toggle(selectable, checked === true)
+                    }
+                    aria-label={t('Select account')}
+                  />
                 </div>
-              </AccordionTrigger>
+                <AccordionTrigger className='min-h-20 min-w-0 flex-1 gap-3 rounded-none px-2 py-3 pe-4 hover:no-underline'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex min-w-0 items-center justify-between gap-3'>
+                      <span className='min-w-0 font-medium break-words'>
+                        {output.account.name || `#${output.account.id}`}
+                      </span>
+                      <span className='shrink-0 font-mono text-sm font-semibold tabular-nums'>
+                        {succeeded
+                          ? formatOutputAmount(output.amount, output.currency)
+                          : t('Collection failed')}
+                      </span>
+                    </div>
+                    <div className='text-muted-foreground mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs'>
+                      <span className='break-words'>{instance.name}</span>
+                      <span className='tabular-nums'>#{output.account.id}</span>
+                    </div>
+                  </div>
+                </AccordionTrigger>
+              </div>
               <AccordionContent className='px-4 pb-4'>
                 <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
                   <MobileDetail
@@ -1615,6 +1886,15 @@ function AccountOutputTable({
         <Table className='min-w-[860px]'>
           <TableHeader className='bg-muted/35'>
             <TableRow>
+              <TableHead className='w-12 ps-4'>
+                <Checkbox
+                  checked={exportSelection.allFilteredSelected}
+                  onCheckedChange={(checked) =>
+                    exportSelection.toggleFiltered(checked === true)
+                  }
+                  aria-label={t('Select all filtered accounts')}
+                />
+              </TableHead>
               {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
               {sortableHead('instance', t('Instance'))}
               {sortableHead(
@@ -1627,37 +1907,49 @@ function AccountOutputTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedRows.map(({ instance, output }) => (
-              <TableRow key={`${instance.id}:${output.account.id}`}>
-                <TableCell className='ps-6'>
-                  <p className='max-w-52 truncate font-medium'>
-                    {output.account.name || `#${output.account.id}`}
-                  </p>
-                  <p className='text-muted-foreground text-xs tabular-nums'>
-                    #{output.account.id}
-                  </p>
-                </TableCell>
-                <TableCell>{instance.name}</TableCell>
-                <TableCell className='whitespace-nowrap'>
-                  {formatTimestamp(output.account.created_at)}
-                </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  {output.collection_status === 'succeeded'
-                    ? formatOptionalNumber(output.total_requests)
-                    : '--'}
-                </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  {output.collection_status === 'succeeded'
-                    ? formatOptionalNumber(output.total_tokens)
-                    : '--'}
-                </TableCell>
-                <TableCell className='pe-6 text-right font-medium tabular-nums'>
-                  {output.collection_status === 'succeeded'
-                    ? formatOutputAmount(output.amount, output.currency)
-                    : t('Collection failed')}
-                </TableCell>
-              </TableRow>
-            ))}
+            {sortedRows.map(({ instance, output }) => {
+              const selectable = accountSelection(instance, output.account)
+              return (
+                <TableRow key={selectable.key}>
+                  <TableCell className='ps-4'>
+                    <Checkbox
+                      checked={exportSelection.selected.has(selectable.key)}
+                      onCheckedChange={(checked) =>
+                        exportSelection.toggle(selectable, checked === true)
+                      }
+                      aria-label={t('Select account')}
+                    />
+                  </TableCell>
+                  <TableCell className='ps-6'>
+                    <p className='max-w-52 truncate font-medium'>
+                      {output.account.name || `#${output.account.id}`}
+                    </p>
+                    <p className='text-muted-foreground text-xs tabular-nums'>
+                      #{output.account.id}
+                    </p>
+                  </TableCell>
+                  <TableCell>{instance.name}</TableCell>
+                  <TableCell className='whitespace-nowrap'>
+                    {formatTimestamp(output.account.created_at)}
+                  </TableCell>
+                  <TableCell className='text-right tabular-nums'>
+                    {output.collection_status === 'succeeded'
+                      ? formatOptionalNumber(output.total_requests)
+                      : '--'}
+                  </TableCell>
+                  <TableCell className='text-right tabular-nums'>
+                    {output.collection_status === 'succeeded'
+                      ? formatOptionalNumber(output.total_tokens)
+                      : '--'}
+                  </TableCell>
+                  <TableCell className='pe-6 text-right font-medium tabular-nums'>
+                    {output.collection_status === 'succeeded'
+                      ? formatOutputAmount(output.amount, output.currency)
+                      : t('Collection failed')}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       </div>
@@ -1685,9 +1977,22 @@ function AccountTable(props: {
   sortDirection: SortDirection
   onSortKeyChange: (sortKey: AccountSortKey) => void
   onSortDirectionChange: (direction: SortDirection) => void
+  selectionScopeKey: string
+  window: { start: number; end: number; timezone: string }
+  search: string
+  excludeSearch: string
 }) {
   const { t } = useTranslation()
   const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
+  const exportable = useMemo(
+    () =>
+      props.rows.map(({ instance, item }) => accountSelection(instance, item)),
+    [props.rows]
+  )
+  const exportSelection = useAccountExportSelection(
+    exportable,
+    props.selectionScopeKey
+  )
   const isChannel = props.family === 'new_api'
   const isConductor = props.family === 'conductor'
   const isClaudeGateway = props.family === 'claude_gateway'
@@ -1740,42 +2045,54 @@ function AccountTable(props: {
               ? getSurvivalSeconds(item)
               : null
             const rateLimited = isRateLimitedAccount(item)
+            const selectable = accountSelection(instance, item)
             return (
               <AccordionItem
-                key={`${instance.id}:${item.id}`}
-                value={`${instance.id}:${item.id}`}
+                key={selectable.key}
+                value={selectable.key}
                 className='border-0'
               >
-                <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex min-w-0 items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <div className='font-medium break-words'>
-                          {item.name || `#${item.id}`}
-                        </div>
-                        <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs'>
-                          <span className='break-words'>{instance.name}</span>
-                          <span className='tabular-nums'>#{item.id}</span>
-                        </div>
-                      </div>
-                      <AvailabilityBadge
-                        enabled={item.enabled}
-                        rateLimited={rateLimited}
-                      />
-                    </div>
-                    <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
-                      <span>
-                        {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
-                        {formatTimestamp(item.created_at)}
-                      </span>
-                      {!isConductor && (
-                        <span className='text-foreground font-medium'>
-                          {usageColumnLabel}: {formatCost(item)}
-                        </span>
-                      )}
-                    </div>
+                <div className='flex min-w-0 items-stretch'>
+                  <div className='flex w-11 shrink-0 items-center justify-center'>
+                    <Checkbox
+                      checked={exportSelection.selected.has(selectable.key)}
+                      onCheckedChange={(checked) =>
+                        exportSelection.toggle(selectable, checked === true)
+                      }
+                      aria-label={t('Select account')}
+                    />
                   </div>
-                </AccordionTrigger>
+                  <AccordionTrigger className='min-h-20 min-w-0 flex-1 gap-3 rounded-none px-2 py-3 pe-4 hover:no-underline'>
+                    <div className='min-w-0 flex-1'>
+                      <div className='flex min-w-0 items-start justify-between gap-3'>
+                        <div className='min-w-0'>
+                          <div className='font-medium break-words'>
+                            {item.name || `#${item.id}`}
+                          </div>
+                          <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs'>
+                            <span className='break-words'>{instance.name}</span>
+                            <span className='tabular-nums'>#{item.id}</span>
+                          </div>
+                        </div>
+                        <AvailabilityBadge
+                          enabled={item.enabled}
+                          rateLimited={rateLimited}
+                        />
+                      </div>
+                      <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+                        <span>
+                          {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
+                          {formatTimestamp(item.created_at)}
+                        </span>
+                        {!isConductor && (
+                          <span className='text-foreground font-medium'>
+                            {usageColumnLabel}: {formatCost(item)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                </div>
                 <AccordionContent className='px-4 pb-4'>
                   <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
                     <MobileDetail label={t('Instance')}>
@@ -1869,6 +2186,15 @@ function AccountTable(props: {
           <Table className={tableMinWidth}>
             <TableHeader className='bg-muted/35'>
               <TableRow>
+                <TableHead className='w-12 ps-4'>
+                  <Checkbox
+                    checked={exportSelection.allFilteredSelected}
+                    onCheckedChange={(checked) =>
+                      exportSelection.toggleFiltered(checked === true)
+                    }
+                    aria-label={t('Select all filtered accounts')}
+                  />
+                </TableHead>
                 <TableHead className='ps-6'>
                   {t(isChannel ? 'Channel' : 'Account')}
                 </TableHead>
@@ -1903,8 +2229,18 @@ function AccountTable(props: {
                   ? getSurvivalSeconds(item)
                   : null
                 const rateLimited = isRateLimitedAccount(item)
+                const selectable = accountSelection(instance, item)
                 return (
-                  <TableRow key={`${instance.id}:${item.id}`}>
+                  <TableRow key={selectable.key}>
+                    <TableCell className='ps-4'>
+                      <Checkbox
+                        checked={exportSelection.selected.has(selectable.key)}
+                        onCheckedChange={(checked) =>
+                          exportSelection.toggle(selectable, checked === true)
+                        }
+                        aria-label={t('Select account')}
+                      />
+                    </TableCell>
                     <TableCell className='ps-6'>
                       <div className='max-w-52 min-w-36'>
                         <p className='truncate font-medium'>
@@ -2127,6 +2463,16 @@ function AccountTable(props: {
           {t('Some account data could not be loaded')}
         </div>
       )}
+      <AccountExportBar
+        source='inventory'
+        available={exportable}
+        selection={exportSelection}
+        window={props.window}
+        search={props.search}
+        excludeSearch={props.excludeSearch}
+        sortBy={props.sortKey}
+        sortOrder={props.sortDirection}
+      />
       <CardContent className='min-w-0 px-0'>{content}</CardContent>
       <SourceDetailsDialog
         selected={selectedSource}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
@@ -108,6 +109,39 @@ func TestManagedAccountInventoryBackfillsLegacySnapshot(t *testing.T) {
 	require.NotNil(t, view.Inventory.Observation)
 	require.EqualValues(t, 5678, view.Inventory.Observation.ObservedAt)
 	require.Equal(t, "legacy-etag", view.Inventory.Observation.ETag)
+}
+
+func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
+	truncate(t)
+	instance := &model.ManagedInstance{Name: "export-source", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://export.example.com"}
+	require.NoError(t, model.DB.Create(instance).Error)
+	page := managedinstance.InventoryPage{
+		ResourceKind: "account", Total: 1,
+		Items:   []managedinstance.InventoryItem{{ID: 6822196335042536000, IDText: "6822196335042536000", Name: "selected", Email: "selected@example.com", SourceID: "9"}},
+		Sources: []managedinstance.InventorySource{{ID: "9", Name: "worker-nine"}},
+	}
+	payload, err := json.Marshal(page)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
+		RangeKey: managedAccountInventoryRangeKey, Timezone: managedAccountDefaultTimezone,
+		ObservedAt: 100, Payload: string(payload), LastAttemptAt: 100,
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+
+	task, err := EnqueueManagedAccountExport(7, ManagedAccountExportRequest{
+		Source: "inventory", Locale: "zh-CN",
+		Window: managedinstance.TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"},
+		Items:  []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: "6822196335042536000"}},
+	})
+	require.NoError(t, err)
+	items, err := model.ListManagedExportItems(task.TaskID)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	var frozen managedinstance.AccountExportSelection
+	require.NoError(t, json.Unmarshal([]byte(items[0].Metadata), &frozen))
+	require.Equal(t, "selected@example.com", frozen.Account.Email)
+	require.Equal(t, "worker-nine", frozen.SourceName)
 }
 
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {

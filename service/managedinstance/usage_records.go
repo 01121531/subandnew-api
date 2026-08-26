@@ -87,10 +87,11 @@ type UsageRecordExportProgress struct {
 }
 
 type UsageRecordExportArtifact struct {
-	FileName    string `json:"file_name"`
-	RecordCount int    `json:"record_count"`
-	Size        int64  `json:"size"`
-	ExpiresAt   int64  `json:"expires_at"`
+	FileName     string `json:"file_name"`
+	RecordCount  int    `json:"record_count"`
+	WarningCount int    `json:"warning_count,omitempty"`
+	Size         int64  `json:"size"`
+	ExpiresAt    int64  `json:"expires_at"`
 }
 
 type UsageRecordExportProgressCallback func(UsageRecordExportProgress) error
@@ -359,6 +360,8 @@ func CleanupStaleUsageRecordExportParts() {
 		directory = filepath.Join(".", "exports", "usage-records")
 	}
 	paths, _ := filepath.Glob(filepath.Join(directory, "managed-usage-systask_*.part"))
+	accountParts, _ := filepath.Glob(filepath.Join(directory, "managed-account-systask_*.xlsx.part"))
+	paths = append(paths, accountParts...)
 	cutoff := time.Now().Add(-2 * time.Hour)
 	for _, path := range paths {
 		if info, err := os.Stat(path); err == nil && info.ModTime().Before(cutoff) {

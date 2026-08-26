@@ -254,7 +254,8 @@ func conductorAccountItem(account conductorAccount) (InventoryItem, bool) {
 	activeSessions := account.ActiveSessionCount
 	u5, u7, u7oi := account.Utilization5H, account.Utilization7D, account.Utilization7DOI
 	return InventoryItem{
-		ID: id, Name: name, Type: account.AuthType, Platform: account.Source, SourceID: strings.TrimSpace(account.Source), Group: account.SubscriptionType,
+		ID: id, IDText: strings.TrimSpace(account.AccountID), Name: name, Email: strings.TrimSpace(account.Email), Note: strings.TrimSpace(account.Label), Ownership: strings.TrimSpace(account.Source),
+		Type: account.AuthType, Platform: account.Source, SourceID: strings.TrimSpace(account.Source), Group: account.SubscriptionType,
 		Status: status, Enabled: &enabled, CreatedAt: normalizeConductorUnixTime(account.CreatedAt), LastActivityAt: normalizeConductorUnixTime(account.DispatchStateChangedAt),
 		ActiveSessions: &activeSessions, RPM: account.RPMCurrent, Utilization5H: &u5, Utilization7D: &u7, Utilization7DOI: &u7oi,
 		ErrorMessage: errorMessage, RateLimited: conductorAccountRateLimited(account),
