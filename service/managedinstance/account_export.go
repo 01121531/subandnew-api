@@ -50,7 +50,8 @@ type AccountExportRow struct {
 
 type accountExportMetrics struct {
 	requests, input, output, cacheWrite, cacheRead, amount float64
-	hasAmount                                              bool
+	totalTokens                                            float64
+	hasRequests, hasTotalTokens, hasAmount                 bool
 }
 
 func ExportAccountsXLSXToTaskFile(ctx context.Context, taskID string, input AccountExportInput, onProgress UsageRecordExportProgressCallback) (*UsageRecordExportArtifact, error) {
@@ -90,7 +91,7 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 		case model.ManagedInstanceKindSub2API, model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
 			results, failures, collectionErr = collectPagedAccountExportMetrics(ctx, instanceID, input.ActorID, indexes, input.Selected, input.Window)
 		case model.ManagedInstanceKindClaudeGateway:
-			collectionErr = ErrUnsupportedCapability
+			results = collectClaudeGatewayAccountExportMetrics(indexes, input.Selected, input.Source, input.Window)
 		default:
 			collectionErr = ErrUnsupportedCapability
 		}
@@ -115,13 +116,22 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 				warnings++
 			} else {
 				row.Status = model.ManagedInstanceCollectionSucceeded
-				row.Requests = float64Pointer(metrics.requests)
-				row.InputTokens = float64Pointer(metrics.input)
-				row.OutputTokens = float64Pointer(metrics.output)
-				row.CacheWriteTokens = float64Pointer(metrics.cacheWrite)
-				row.CacheReadTokens = float64Pointer(metrics.cacheRead)
-				total := metrics.input + metrics.output + metrics.cacheWrite + metrics.cacheRead
-				row.TotalTokens = float64Pointer(total)
+				if kind == model.ManagedInstanceKindClaudeGateway {
+					if metrics.hasRequests {
+						row.Requests = float64Pointer(metrics.requests)
+					}
+					if metrics.hasTotalTokens {
+						row.TotalTokens = float64Pointer(metrics.totalTokens)
+					}
+				} else {
+					row.Requests = float64Pointer(metrics.requests)
+					row.InputTokens = float64Pointer(metrics.input)
+					row.OutputTokens = float64Pointer(metrics.output)
+					row.CacheWriteTokens = float64Pointer(metrics.cacheWrite)
+					row.CacheReadTokens = float64Pointer(metrics.cacheRead)
+					total := metrics.input + metrics.output + metrics.cacheWrite + metrics.cacheRead
+					row.TotalTokens = float64Pointer(total)
+				}
 				if metrics.hasAmount {
 					row.Amount = float64Pointer(metrics.amount)
 				}
@@ -133,6 +143,43 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 		}
 	}
 	return rows, warnings, nil
+}
+
+func collectClaudeGatewayAccountExportMetrics(indexes []int, selected []AccountExportSelection, source string, window TimeWindow) map[int64]accountExportMetrics {
+	result := make(map[int64]accountExportMetrics, len(indexes))
+	for _, index := range indexes {
+		account := selected[index].Account
+		// Account-output rows only contain accounts created inside the selected
+		// window, so their lifetime counters are also valid period totals.
+		if source != "account_output" && !claudeGatewayUsageWindowMatches(account, window) {
+			continue
+		}
+		metrics := accountExportMetrics{}
+		if account.Requests != nil {
+			metrics.requests = *account.Requests
+			metrics.hasRequests = true
+		}
+		if account.Tokens != nil {
+			metrics.totalTokens = *account.Tokens
+			metrics.hasTotalTokens = true
+		}
+		if account.Cost != nil && strings.EqualFold(account.CostUnit, "usd") {
+			metrics.amount = *account.Cost
+			metrics.hasAmount = true
+		}
+		if metrics.hasRequests || metrics.hasTotalTokens || metrics.hasAmount {
+			result[account.ID] = metrics
+		}
+	}
+	return result
+}
+
+func claudeGatewayUsageWindowMatches(account InventoryItem, window TimeWindow) bool {
+	if account.UsageWindowDays <= 0 || window.End <= window.Start {
+		return false
+	}
+	days := int((window.End - window.Start + 1 + 86399) / 86400)
+	return days == account.UsageWindowDays
 }
 
 func collectConductorAccountExportMetrics(ctx context.Context, instanceID int64, actorID int, window TimeWindow) (map[int64]accountExportMetrics, error) {

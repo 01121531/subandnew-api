@@ -2,6 +2,7 @@ package managedinstance
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"io"
 	"testing"
@@ -43,6 +44,9 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	t.Cleanup(func() { _ = workbook.Close() })
 	require.Equal(t, "账号归属", mustCell(t, workbook, "A1"))
 	require.Equal(t, "消费金额 ($)", mustCell(t, workbook, "L1"))
+	require.Equal(t, "实例", mustCell(t, workbook, "M1"))
+	require.Equal(t, "平台", mustCell(t, workbook, "N1"))
+	require.Equal(t, "统计状态", mustCell(t, workbook, "R1"))
 	require.Equal(t, "统计错误", mustCell(t, workbook, "S1"))
 	require.Equal(t, "account@example.com", mustCell(t, workbook, "B2"))
 	require.Equal(t, "6822196335042536000", mustCell(t, workbook, "O2"))
@@ -53,6 +57,33 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	require.Equal(t, 1, panes.YSplit)
 	require.NotZero(t, mustStyle(t, workbook, "A1"))
 	requireWorksheetAutoFilter(t, path)
+}
+
+func TestCollectAccountExportRowsUsesClaudeGatewayOutputCounters(t *testing.T) {
+	requests, tokens, amount := 1476.0, 66_759_000.0, 294.8689
+	enabled := true
+	rows, warnings, err := collectAccountExportRows(context.Background(), AccountExportInput{
+		Source: "account_output",
+		Window: TimeWindow{Start: 1787587200, End: 1787759999, Timezone: "Asia/Shanghai"},
+		Selected: []AccountExportSelection{{
+			InstanceID: 3, InstanceName: "gateway", InstanceKind: model.ManagedInstanceKindClaudeGateway,
+			Account: InventoryItem{
+				ID: 1, IDText: "1", Name: "leo-4", CreatedAt: 1787711520, Enabled: &enabled,
+				Requests: &requests, Tokens: &tokens, Cost: &amount, CostUnit: "usd",
+			},
+		}},
+	}, nil)
+	require.NoError(t, err)
+	require.Zero(t, warnings)
+	require.Len(t, rows, 1)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, rows[0].Status)
+	require.Equal(t, requests, *rows[0].Requests)
+	require.Equal(t, tokens, *rows[0].TotalTokens)
+	require.Equal(t, amount, *rows[0].Amount)
+	require.Nil(t, rows[0].InputTokens)
+	require.Nil(t, rows[0].OutputTokens)
+	require.Nil(t, rows[0].CacheWriteTokens)
+	require.Nil(t, rows[0].CacheReadTokens)
 }
 
 func mustCell(t *testing.T, workbook *excelize.File, cell string) string {
