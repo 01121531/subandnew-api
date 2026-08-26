@@ -24,10 +24,12 @@ import {
   type ReactNode,
 } from 'react'
 
+import { cn } from '@/lib/utils'
+
 import { Main } from './main'
 import { PageFooterProvider } from './page-footer'
 
-type SlotProps = { children?: ReactNode }
+type SlotProps = { children?: ReactNode; className?: string }
 
 function SectionPageLayoutTitle(_props: SlotProps) {
   return null
@@ -61,6 +63,7 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
 
   let title: ReactNode = null
   let actions: ReactNode = null
+  let actionsClassName: string | undefined
   let content: ReactNode = null
   let breadcrumb: ReactNode = null
 
@@ -70,6 +73,7 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
     if (child.type === SectionPageLayoutTitle) title = child.props.children
     else if (child.type === SectionPageLayoutActions) {
       actions = child.props.children
+      actionsClassName = child.props.className
     } else if (child.type === SectionPageLayoutContent) {
       content = child.props.children
     } else if (child.type === SectionPageLayoutBreadcrumb) {
@@ -91,7 +95,12 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
               </h2>
             </div>
             {actions != null && (
-              <div className='flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-x-4'>
+              <div
+                className={cn(
+                  'flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-x-4',
+                  actionsClassName
+                )}
+              >
                 {actions}
               </div>
             )}

@@ -49,6 +49,12 @@ import {
 } from 'recharts'
 
 import { SectionPageLayout } from '@/components/layout'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -59,6 +65,13 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -162,7 +175,7 @@ const FLEET_FAMILIES: readonly FleetFamily[] = [
 ]
 const ALL_SITES_VALUE = 'all'
 const DASHBOARD_PREFERENCES_KEY = 'fleet-dashboard-preferences-v1'
-const PANEL_CARD_CLASS = 'gap-0 rounded-lg py-0 shadow-xs'
+const PANEL_CARD_CLASS = 'min-w-0 gap-0 rounded-lg py-0 shadow-xs'
 const PANEL_HEADER_CLASS = 'border-border/70 border-b py-3.5'
 
 const EMPTY_INSTANCES: ManagedInstance[] = []
@@ -961,7 +974,7 @@ export function FleetDashboard() {
     content = <DashboardSkeleton />
   } else {
     content = (
-      <div className='grid gap-4'>
+      <div className='grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4'>
         {connectionFailed && (
           <InstanceConnectionAlert
             onRetry={refresh}
@@ -1000,38 +1013,52 @@ export function FleetDashboard() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Fleet overview')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
-        <Button
-          variant='outline'
-          size='icon-sm'
-          aria-label={t('Refresh')}
-          onClick={refresh}
-        >
-          <RefreshCw className={isRefreshing ? 'animate-spin' : ''} />
-        </Button>
+      <SectionPageLayout.Actions className='max-md:w-full'>
+        <div className='flex w-full min-w-0 items-center gap-2 md:w-auto'>
+          <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          <Button
+            variant='outline'
+            size='icon-sm'
+            className='size-11 shrink-0 md:size-8'
+            aria-label={t('Refresh')}
+            onClick={refresh}
+          >
+            <RefreshCw className={isRefreshing ? 'animate-spin' : ''} />
+          </Button>
+        </div>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='grid gap-4'>
-          <div className='bg-card border-border/80 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-2.5 py-2 shadow-xs sm:px-3'>
-            <div className='min-w-0 flex-1'>
-              <InstanceTabs
-                instances={supportedInstances}
-                value={selectedInstance ? String(selectedInstance.id) : ''}
-                onChange={handleInstanceChange}
-              />
+        <div className='grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 overflow-x-hidden'>
+          <div className='bg-card border-border/80 flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2 shadow-xs sm:gap-3 sm:px-3'>
+            <div className='w-full min-w-0 md:flex-1'>
+              <div className='md:hidden'>
+                <InstanceSelect
+                  instances={supportedInstances}
+                  value={selectedInstance ? String(selectedInstance.id) : ''}
+                  onChange={handleInstanceChange}
+                />
+              </div>
+              <div className='hidden md:block'>
+                <InstanceTabs
+                  instances={supportedInstances}
+                  value={selectedInstance ? String(selectedInstance.id) : ''}
+                  onChange={handleInstanceChange}
+                />
+              </div>
             </div>
-            <div className='flex min-w-0 items-center gap-2 text-xs'>
-              <span className='border-success/20 bg-success/5 text-success flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium'>
+            <div className='flex w-full min-w-0 items-center gap-2 text-xs md:w-auto'>
+              <span className='border-success/20 bg-success/5 text-success flex min-h-9 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 py-1 font-medium md:min-h-0 md:flex-none'>
                 <Radio
                   className={cn('size-3.5', isRefreshing && 'animate-pulse')}
                 />
-                {t('Auto-refreshing every {{seconds}}s', {
-                  seconds: 60,
-                })}
+                <span className='min-w-0 break-words'>
+                  {t('Auto-refreshing every {{seconds}}s', {
+                    seconds: 60,
+                  })}
+                </span>
               </span>
               {lastObservedAt > 0 && (
-                <span className='text-muted-foreground hidden tabular-nums sm:inline'>
+                <span className='text-muted-foreground hidden tabular-nums md:inline'>
                   {t('Updated {{time}}', {
                     time: new Date(lastObservedAt * 1000).toLocaleTimeString(),
                   })}
@@ -1103,7 +1130,7 @@ function DashboardContent(props: DashboardContentProps) {
     ...props.rows.map((row) => row.summaryObservedAt)
   )
   return (
-    <div className='grid gap-4 pb-6'>
+    <div className='grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 pb-6'>
       <SummaryGrid {...props} />
       <DailyUsagePanel
         family={props.family}
@@ -1188,35 +1215,75 @@ function DailyUsagePanel(props: {
       <CardHeader
         className={cn(
           PANEL_HEADER_CLASS,
-          'flex-row items-start justify-between gap-4 space-y-0'
+          'flex flex-col items-stretch justify-between gap-3 space-y-0 md:flex-row md:items-start md:gap-4'
         )}
       >
-        <div>
+        <div className='min-w-0'>
           <CardTitle>
             {isSuccessRate ? t('Success rate trend') : t('Daily usage trend')}
           </CardTitle>
-          <p className='text-muted-foreground mt-1 text-sm'>{subtitle}</p>
+          <p className='text-muted-foreground mt-1 text-sm break-words'>
+            {subtitle}
+          </p>
         </div>
-        <div className='flex flex-wrap items-center justify-end gap-2'>
-          <SegmentedControl
+        <div className='grid w-full gap-2 md:flex md:w-auto md:flex-wrap md:items-center md:justify-end'>
+          <NativeSelect
+            className='w-full md:hidden [&_select]:h-11'
+            name='dashboard-trend-metric'
             value={props.metric}
-            options={metricOptions}
-            getLabel={trendMetricLabel}
-            onChange={props.onMetricChange}
-          />
-          {isRealtimeHistory && (
+            aria-label={t('Daily usage trend')}
+            onChange={(event) =>
+              props.onMetricChange(event.target.value as TrendMetricKey)
+            }
+          >
+            {metricOptions.map((option) => (
+              <NativeSelectOption key={option} value={option}>
+                {trendMetricLabel(option)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <div className='hidden md:block'>
             <SegmentedControl
-              value={props.rpmHistoryBucket}
-              options={['minute', 'hour']}
-              getLabel={(value) =>
-                t(value === 'minute' ? 'By minute' : 'By hour')
-              }
-              onChange={props.onRPMHistoryBucketChange}
+              value={props.metric}
+              options={metricOptions}
+              getLabel={trendMetricLabel}
+              onChange={props.onMetricChange}
             />
+          </div>
+          {isRealtimeHistory && (
+            <>
+              <NativeSelect
+                className='w-full md:hidden [&_select]:h-11'
+                name='dashboard-history-bucket'
+                value={props.rpmHistoryBucket}
+                aria-label={t('Time Range')}
+                onChange={(event) =>
+                  props.onRPMHistoryBucketChange(
+                    event.target.value as ManagedInstanceRPMHistoryBucket
+                  )
+                }
+              >
+                {(['minute', 'hour'] as const).map((option) => (
+                  <NativeSelectOption key={option} value={option}>
+                    {t(option === 'minute' ? 'By minute' : 'By hour')}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <div className='hidden md:block'>
+                <SegmentedControl
+                  value={props.rpmHistoryBucket}
+                  options={['minute', 'hour']}
+                  getLabel={(value) =>
+                    t(value === 'minute' ? 'By minute' : 'By hour')
+                  }
+                  onChange={props.onRPMHistoryBucketChange}
+                />
+              </div>
+            </>
           )}
         </div>
       </CardHeader>
-      <CardContent className='py-4'>
+      <CardContent className='px-2 py-4 sm:px-6'>
         {isRealtimeHistory &&
           props.rpmHistoryLoading &&
           historyData.length === 0 && (
@@ -1230,12 +1297,12 @@ function DailyUsagePanel(props: {
             config={
               isSuccessRate ? SUCCESS_RATE_CHART_CONFIG : RPM_CHART_CONFIG
             }
-            className='aspect-auto h-[300px] w-full'
+            className='aspect-auto h-[240px] w-full min-[420px]:h-[260px] sm:h-[280px] md:h-[300px]'
           >
             <LineChart
               accessibilityLayer
               data={historyData}
-              margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
+              margin={{ top: 10, right: 8, left: -6, bottom: 4 }}
             >
               <CartesianGrid vertical={false} strokeDasharray='3 3' />
               <XAxis
@@ -1243,7 +1310,7 @@ function DailyUsagePanel(props: {
                 axisLine={false}
                 tickLine={false}
                 tickMargin={10}
-                minTickGap={36}
+                minTickGap={44}
                 tickFormatter={(value: number) =>
                   formatRPMTimestamp(
                     value,
@@ -1256,7 +1323,7 @@ function DailyUsagePanel(props: {
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                width={54}
+                width={48}
                 domain={[0, 'auto']}
                 tickFormatter={(value: number) =>
                   isSuccessRate
@@ -1268,6 +1335,7 @@ function DailyUsagePanel(props: {
                 cursor={{ stroke: 'var(--color-border)' }}
                 content={
                   <ChartTooltipContent
+                    className='max-w-[calc(100vw-2rem)]'
                     indicator='dot'
                     labelFormatter={(_, payload) =>
                       formatRPMTimestamp(
@@ -1279,7 +1347,7 @@ function DailyUsagePanel(props: {
                       const point = item.payload as RPMHistoryData
                       if (isSuccessRate) {
                         return (
-                          <div className='flex w-full min-w-44 items-center gap-2'>
+                          <div className='flex w-full min-w-0 items-center gap-2'>
                             <span
                               className='size-2 shrink-0 rounded-sm'
                               style={{ backgroundColor: item.color }}
@@ -1298,7 +1366,7 @@ function DailyUsagePanel(props: {
                           ? (point.rpm / point.capacity) * 100
                           : null
                       return (
-                        <div className='flex w-full min-w-44 items-center gap-2'>
+                        <div className='flex w-full min-w-0 items-center gap-2'>
                           <span
                             className='size-2 shrink-0 rounded-sm'
                             style={{ backgroundColor: item.color }}
@@ -1381,12 +1449,12 @@ function DailyUsagePanel(props: {
         {usageMetric && !props.loading && props.data.length > 0 && (
           <ChartContainer
             config={CONSUMPTION_CHART_CONFIG}
-            className='aspect-auto h-[300px] w-full'
+            className='aspect-auto h-[240px] w-full min-[420px]:h-[260px] sm:h-[280px] md:h-[300px]'
           >
             <LineChart
               accessibilityLayer
               data={props.data}
-              margin={{ top: 10, right: 12, left: -12, bottom: 4 }}
+              margin={{ top: 10, right: 8, left: -6, bottom: 4 }}
             >
               <CartesianGrid vertical={false} strokeDasharray='3 3' />
               <XAxis
@@ -1400,7 +1468,7 @@ function DailyUsagePanel(props: {
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                width={54}
+                width={48}
                 tickFormatter={(value: number) =>
                   formatUsageMetric(usageMetric, value, props.family)
                 }
@@ -1409,6 +1477,7 @@ function DailyUsagePanel(props: {
                 cursor={{ stroke: 'var(--color-border)' }}
                 content={
                   <ChartTooltipContent
+                    className='max-w-[calc(100vw-2rem)]'
                     indicator='line'
                     labelFormatter={(label) =>
                       formatTrendDate(String(label), true)
@@ -1539,7 +1608,7 @@ function SummaryGrid(props: DashboardContentProps) {
     <section
       aria-label={t('Fleet summary')}
       className={cn(
-        'bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border shadow-xs sm:grid-cols-3',
+        'bg-border border-border/80 grid grid-cols-1 gap-px overflow-hidden rounded-lg border shadow-xs min-[420px]:grid-cols-2 md:grid-cols-3',
         props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
         props.family === 'claude_gateway' && 'xl:grid-cols-4 2xl:grid-cols-8',
@@ -1584,6 +1653,7 @@ function SummaryGrid(props: DashboardContentProps) {
             <Button
               variant='ghost'
               size='icon-xs'
+              className='size-11 md:size-6'
               aria-label={t('Refresh')}
               title={t('Refresh')}
               onClick={props.onRPMRefresh}
@@ -1609,6 +1679,7 @@ function SummaryGrid(props: DashboardContentProps) {
           <Button
             variant='ghost'
             size='icon-xs'
+            className='size-11 md:size-6'
             aria-label={t('Refresh')}
             title={t('Refresh')}
             onClick={props.onRPMRefresh}
@@ -1751,34 +1822,53 @@ function ConsumptionPanel(props: {
       <CardHeader
         className={cn(
           PANEL_HEADER_CLASS,
-          'flex-row items-start justify-between gap-4 space-y-0'
+          'flex flex-col items-stretch justify-between gap-3 space-y-0 md:flex-row md:items-start md:gap-4'
         )}
       >
-        <div>
+        <div className='min-w-0'>
           <CardTitle>{t('Instance consumption')}</CardTitle>
-          <p className='text-muted-foreground mt-1 text-sm'>
+          <p className='text-muted-foreground mt-1 text-sm break-words'>
             {t('Top instances in the selected period')}
           </p>
         </div>
         {props.family !== 'conductor' && (
-          <SegmentedControl
-            value={props.metric}
-            options={['requests', 'tokens', 'quota']}
-            getLabel={(value) => t(metricLabel(value, props.family))}
-            onChange={props.onMetricChange}
-          />
+          <>
+            <NativeSelect
+              className='w-full md:hidden [&_select]:h-11'
+              name='dashboard-consumption-metric'
+              value={props.metric}
+              aria-label={t('Instance consumption')}
+              onChange={(event) =>
+                props.onMetricChange(event.target.value as MetricKey)
+              }
+            >
+              {(['requests', 'tokens', 'quota'] as const).map((option) => (
+                <NativeSelectOption key={option} value={option}>
+                  {t(metricLabel(option, props.family))}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <div className='hidden md:block'>
+              <SegmentedControl
+                value={props.metric}
+                options={['requests', 'tokens', 'quota']}
+                getLabel={(value) => t(metricLabel(value, props.family))}
+                onChange={props.onMetricChange}
+              />
+            </div>
+          </>
         )}
       </CardHeader>
-      <CardContent className='py-4'>
+      <CardContent className='px-2 py-4 sm:px-6'>
         {props.data.length ? (
           <ChartContainer
             config={CONSUMPTION_CHART_CONFIG}
-            className='aspect-auto h-[280px] w-full'
+            className='aspect-auto h-[240px] w-full min-[420px]:h-[260px] sm:h-[280px]'
           >
             <BarChart
               accessibilityLayer
               data={props.data}
-              margin={{ top: 8, right: 8, left: -12, bottom: 4 }}
+              margin={{ top: 8, right: 8, left: -6, bottom: 4 }}
             >
               <CartesianGrid vertical={false} strokeDasharray='3 3' />
               <XAxis
@@ -1794,7 +1884,7 @@ function ConsumptionPanel(props: {
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                width={54}
+                width={48}
                 tickFormatter={(value: number) =>
                   formatUsageMetric(props.metric, value, props.family)
                 }
@@ -1803,6 +1893,7 @@ function ConsumptionPanel(props: {
                 cursor={{ fill: 'var(--color-muted)', opacity: 0.45 }}
                 content={
                   <ChartTooltipContent
+                    className='max-w-[calc(100vw-2rem)]'
                     formatter={(value) => (
                       <span className='grid gap-0.5'>
                         <span className='font-mono font-medium tabular-nums'>
@@ -1855,7 +1946,7 @@ function HealthPanel({ data, total }: { data: HealthData[]; total: number }) {
         </p>
       </CardHeader>
       <CardContent className='grid gap-4 py-4 sm:grid-cols-[180px_1fr] xl:grid-cols-1'>
-        <div className='relative mx-auto h-[180px] w-[180px]'>
+        <div className='relative mx-auto size-40 sm:size-[180px]'>
           <ChartContainer
             config={HEALTH_CHART_CONFIG}
             className='aspect-square h-full w-full'
@@ -1895,7 +1986,7 @@ function HealthPanel({ data, total }: { data: HealthData[]; total: number }) {
                   className='size-2.5 shrink-0 rounded-full'
                   style={{ backgroundColor: item.color }}
                 />
-                <span className='text-muted-foreground truncate'>
+                <span className='text-muted-foreground break-words'>
                   {item.label}
                 </span>
               </span>
@@ -1929,22 +2020,32 @@ function PerformanceTable({
       <CardHeader
         className={cn(
           PANEL_HEADER_CLASS,
-          'flex-row items-center justify-between space-y-0'
+          'flex flex-col items-stretch justify-between gap-3 space-y-0 sm:flex-row sm:items-center'
         )}
       >
-        <div>
+        <div className='min-w-0'>
           <CardTitle>{t('Instance performance')}</CardTitle>
-          <p className='text-muted-foreground mt-1 text-sm'>
+          <p className='text-muted-foreground mt-1 text-sm break-words'>
             {t('Consumption and collection status by instance')}
           </p>
         </div>
-        <Button variant='outline' size='sm' render={<Link to='/instances' />}>
+        <Button
+          variant='outline'
+          size='sm'
+          className='h-11 w-full sm:h-8 sm:w-auto'
+          render={<Link to='/instances' />}
+        >
           <Server />
           {t('Manage instances')}
         </Button>
       </CardHeader>
       <CardContent className='px-0'>
-        <div className='overflow-x-auto'>
+        <MobilePerformanceList
+          family={family}
+          rows={sortedRows}
+          className='md:hidden'
+        />
+        <div className='hidden overflow-x-auto md:block'>
           <Table>
             <TableHeader className='bg-muted/35'>
               <TableRow>
@@ -2080,6 +2181,175 @@ function PerformanceTable({
   )
 }
 
+function MobilePerformanceList(props: {
+  family: FleetFamily
+  rows: InstanceMetricRow[]
+  className?: string
+}) {
+  const { t } = useTranslation()
+  const showsAccountMetrics =
+    props.family === 'conductor' ||
+    props.family === 'sub2api' ||
+    props.family === 'claude_gateway'
+
+  const summaryMetrics = (row: InstanceMetricRow) => {
+    if (props.family === 'new_api') {
+      return [
+        [t('Requests'), formatMetric(row.requests, false)],
+        ['RPM', formatMetric(row.rpm, false)],
+      ]
+    }
+    if (props.family === 'sub2api') {
+      return [
+        [
+          t('Concurrency'),
+          row.concurrencyUsed != null && row.concurrencyMax != null
+            ? `${formatMetric(row.concurrencyUsed, false)} / ${formatMetric(row.concurrencyMax, false)}`
+            : '-- / --',
+        ],
+        [
+          t('Today consumption'),
+          formatUsageMetric('quota', row.todayCost, props.family, false),
+        ],
+      ]
+    }
+    if (props.family === 'claude_gateway') {
+      return [
+        ['RPM', formatMetric(row.rpm, false)],
+        [
+          t('Success rate'),
+          row.successRate == null
+            ? '--'
+            : `${(row.successRate * 100).toFixed(2)}%`,
+        ],
+      ]
+    }
+    return [
+      ['RPM', formatMetric(row.rpm, false)],
+      [t('Available accounts'), formatMetric(row.accountsAvailable, false)],
+    ]
+  }
+
+  const detailMetrics = (row: InstanceMetricRow) => {
+    const details: { label: string; value: string }[] = []
+    if (props.family === 'new_api') {
+      details.push(
+        { label: t('Requests'), value: formatMetric(row.requests, false) },
+        { label: t('Tokens'), value: formatMetric(row.tokens, false) }
+      )
+    }
+    if (props.family === 'sub2api') {
+      details.push({
+        label: t('Concurrency'),
+        value:
+          row.concurrencyUsed != null && row.concurrencyMax != null
+            ? `${formatMetric(row.concurrencyUsed, false)} / ${formatMetric(row.concurrencyMax, false)}`
+            : '-- / --',
+      })
+    }
+    if (props.family !== 'sub2api') {
+      details.push({ label: 'RPM', value: formatMetric(row.rpm, false) })
+    }
+    if (props.family === 'claude_gateway') {
+      details.push({
+        label: t('Success rate'),
+        value:
+          row.successRate == null
+            ? '--'
+            : `${(row.successRate * 100).toFixed(2)}%`,
+      })
+    }
+    if (showsAccountMetrics) {
+      details.push(
+        {
+          label: t('Available accounts'),
+          value: formatMetric(row.accountsAvailable, false),
+        },
+        {
+          label: t('Total accounts'),
+          value: formatMetric(row.accountsTotal, false),
+        }
+      )
+    }
+    details.push({
+      label: t(metricLabel('quota', props.family)),
+      value: formatUsageMetric('quota', row.quota, props.family, false),
+    })
+    if (props.family !== 'new_api') {
+      details.push({
+        label: t('Today consumption'),
+        value: formatUsageMetric('quota', row.todayCost, props.family, false),
+      })
+    }
+    details.push(
+      { label: t('Version'), value: row.instance.version || '--' },
+      {
+        label: t('Last seen'),
+        value: row.instance.last_seen_at
+          ? new Date(row.instance.last_seen_at * 1000).toLocaleString()
+          : '--',
+      },
+      { label: 'URL', value: row.instance.base_url }
+    )
+    return details
+  }
+
+  return (
+    <Accordion className={props.className}>
+      {props.rows.map((row) => (
+        <AccordionItem key={row.instance.id} value={String(row.instance.id)}>
+          <AccordionTrigger className='min-h-20 gap-3 rounded-none px-4 py-3 hover:no-underline'>
+            <div className='min-w-0 flex-1 space-y-2'>
+              <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                <span className='min-w-0 font-medium break-words'>
+                  {row.instance.name}
+                </span>
+                <StatusBadge status={row.instance.status} />
+              </div>
+              <div className='grid grid-cols-2 gap-x-4 gap-y-1'>
+                {summaryMetrics(row).map(([label, value]) => (
+                  <span key={label} className='min-w-0 text-xs'>
+                    <span className='text-muted-foreground'>{label}</span>
+                    <span className='ml-1 font-mono break-words tabular-nums'>
+                      {value}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className='px-4 pb-4'>
+            <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3 min-[420px]:grid-cols-3'>
+              {detailMetrics(row).map((detail) => (
+                <div key={detail.label} className='min-w-0'>
+                  <p className='text-muted-foreground mb-1 text-xs'>
+                    {detail.label}
+                  </p>
+                  <p className='font-mono text-xs leading-5 break-all tabular-nums'>
+                    {detail.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <Button
+              variant='outline'
+              className='mt-3 h-11 w-full'
+              render={
+                <Link
+                  to='/instances/$id'
+                  params={{ id: String(row.instance.id) }}
+                />
+              }
+            >
+              {t('Details')}
+            </Button>
+          </AccordionContent>
+        </AccordionItem>
+      ))}
+    </Accordion>
+  )
+}
+
 type MetricCardTone =
   | 'success'
   | 'blue'
@@ -2100,6 +2370,7 @@ function MetricCard(props: {
   stale?: boolean
 }) {
   const { t } = useTranslation()
+  const compactValue = String(props.value).length > 14
   const toneClass: Record<MetricCardTone, string> = {
     success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
     blue: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
@@ -2109,9 +2380,9 @@ function MetricCard(props: {
     neutral: 'bg-muted text-muted-foreground',
   }
   return (
-    <div className='bg-card min-h-28 min-w-0 px-3 py-3.5 sm:px-4 sm:py-4'>
+    <div className='bg-card min-h-32 min-w-0 px-3 py-3.5 sm:min-h-28 sm:px-4 sm:py-4'>
       <div className='flex min-w-0 items-center justify-between gap-2'>
-        <p className='text-muted-foreground truncate text-xs font-medium'>
+        <p className='text-muted-foreground min-w-0 text-xs leading-4 font-medium break-words'>
           {props.label}
         </p>
         <div className='flex shrink-0 items-center gap-1'>
@@ -2132,7 +2403,11 @@ function MetricCard(props: {
             render={
               <button
                 type='button'
-                className='focus-visible:ring-ring mt-2 block max-w-full cursor-help truncate text-left font-mono text-xl font-semibold tracking-tight tabular-nums outline-none focus-visible:ring-2 sm:text-2xl'
+                className={cn(
+                  'focus-visible:ring-ring mt-2 block max-w-full cursor-help break-words text-left font-mono leading-tight font-semibold tracking-tight tabular-nums outline-none focus-visible:ring-2',
+                  'min-h-11 py-1',
+                  compactValue ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'
+                )}
               />
             }
           >
@@ -2154,11 +2429,16 @@ function MetricCard(props: {
           </TooltipContent>
         </Tooltip>
       ) : (
-        <p className='mt-2 font-mono text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
+        <p
+          className={cn(
+            'mt-2 break-words font-mono leading-tight font-semibold tracking-tight tabular-nums',
+            compactValue ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'
+          )}
+        >
           {props.value}
         </p>
       )}
-      <p className='text-muted-foreground mt-1 truncate text-xs'>
+      <p className='text-muted-foreground mt-1 text-xs leading-4 break-words'>
         {props.detail}
       </p>
     </div>
@@ -2190,6 +2470,95 @@ function SegmentedControl<T extends string>(props: {
         </button>
       ))}
     </div>
+  )
+}
+
+function InstanceSelect(props: {
+  instances: ManagedInstance[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation()
+  const selected = props.instances.find(
+    (instance) => String(instance.id) === props.value
+  )
+  const selectedFamily = selected ? instanceFamily(selected) : null
+  const statusLabel = (instance: ManagedInstance) => {
+    return t(
+      instance.status
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+    )
+  }
+  const statusDot = (instance: ManagedInstance) =>
+    cn(
+      'size-2 shrink-0 rounded-full',
+      instance.status === 'healthy' && 'bg-emerald-500',
+      instance.status === 'degraded' && 'bg-amber-500',
+      instance.status === 'offline' && 'bg-red-500',
+      instance.status === 'auth_failed' && 'bg-fuchsia-500',
+      instance.status === 'unknown' && 'bg-muted-foreground/50'
+    )
+
+  return (
+    <Select
+      items={props.instances.map((instance) => ({
+        value: String(instance.id),
+        label: instance.name,
+      }))}
+      value={props.value}
+      onValueChange={(value) => value && props.onChange(value)}
+    >
+      <SelectTrigger
+        className='h-auto min-h-14 w-full min-w-0 px-3 py-2 whitespace-normal'
+        aria-label={t('Select site')}
+      >
+        {selected ? (
+          <span className='grid min-w-0 flex-1 gap-0.5 text-left'>
+            <span className='min-w-0 leading-5 font-medium break-words'>
+              {selected.name}
+            </span>
+            <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-1.5 text-xs'>
+              <span className={statusDot(selected)} aria-hidden='true' />
+              <span>
+                {selectedFamily
+                  ? t(familyLabel(selectedFamily))
+                  : selected.kind}
+              </span>
+              <span aria-hidden='true'>·</span>
+              <span>{statusLabel(selected)}</span>
+            </span>
+          </span>
+        ) : (
+          <span className='text-muted-foreground'>{t('Select site')}</span>
+        )}
+      </SelectTrigger>
+      <SelectContent align='start' className='max-h-[min(60vh,24rem)]'>
+        {props.instances.map((instance) => {
+          const family = instanceFamily(instance)
+          return (
+            <SelectItem
+              key={instance.id}
+              value={String(instance.id)}
+              className='min-h-12 whitespace-normal'
+            >
+              <span className='grid min-w-0 flex-1 gap-0.5'>
+                <span className='leading-5 font-medium break-words'>
+                  {instance.name}
+                </span>
+                <span className='text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs'>
+                  <span className={statusDot(instance)} aria-hidden='true' />
+                  <span>{family ? t(familyLabel(family)) : instance.kind}</span>
+                  <span aria-hidden='true'>·</span>
+                  <span>{statusLabel(instance)}</span>
+                </span>
+              </span>
+            </SelectItem>
+          )
+        })}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -2312,9 +2681,9 @@ function DashboardError({ onRetry }: { onRetry: () => void }) {
 function DashboardSkeleton() {
   return (
     <div className='grid gap-4'>
-      <div className='bg-border border-border/80 grid grid-cols-2 gap-px overflow-hidden rounded-lg border sm:grid-cols-3 xl:grid-cols-6'>
+      <div className='bg-border border-border/80 grid grid-cols-1 gap-px overflow-hidden rounded-lg border min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6'>
         {KPI_SKELETON_KEYS.map((key) => (
-          <Skeleton key={key} className='h-28 rounded-none' />
+          <Skeleton key={key} className='h-32 rounded-none sm:h-28' />
         ))}
       </div>
       <div className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>

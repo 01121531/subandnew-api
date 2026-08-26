@@ -53,7 +53,7 @@ export function InstanceConnectionAlert(props: {
       <Button
         variant='outline'
         size='sm'
-        className='bg-background'
+        className='bg-background h-11 w-full md:h-8 md:w-auto'
         onClick={props.onRetry}
         disabled={props.retrying}
       >

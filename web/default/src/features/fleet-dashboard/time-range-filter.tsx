@@ -100,7 +100,7 @@ export function FleetTimeRangeFilter(props: {
             type='button'
             variant='outline'
             size='sm'
-            className='max-w-72 min-w-32 justify-start sm:min-w-40'
+            className='h-11 min-w-0 flex-1 justify-start md:h-8 md:max-w-72 md:min-w-40 md:flex-none'
             aria-label={`${t('Time Range')}: ${appliedLabel}`}
           />
         }
