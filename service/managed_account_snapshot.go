@@ -187,6 +187,45 @@ func GetManagedAccountInventorySnapshot(instanceID int64) (*managedinstance.Inve
 	return &page, nil
 }
 
+// GetManagedAccountOutputSnapshot returns the account-output rows for the
+// selected range. Older clients may omit rangeKey, so fall back to the latest
+// successful output snapshot in that case.
+func GetManagedAccountOutputSnapshot(instanceID int64, rangeKey string) (*managedinstance.AccountOutputResult, error) {
+	if instanceID <= 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	var snapshot *model.ManagedAccountSnapshot
+	var err error
+	if strings.TrimSpace(rangeKey) != "" {
+		snapshot, err = findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindOutput, strings.TrimSpace(rangeKey))
+	} else {
+		var latest model.ManagedAccountSnapshot
+		err = model.DB.Where(
+			"instance_id = ? AND snapshot_kind = ? AND observed_at > 0 AND payload <> ''",
+			instanceID, model.ManagedAccountSnapshotKindOutput,
+		).Order("observed_at desc").First(&latest).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		if err == nil {
+			snapshot = &latest
+		}
+	}
+	if err != nil || snapshot == nil || snapshot.ObservedAt <= 0 || strings.TrimSpace(snapshot.Payload) == "" {
+		return nil, err
+	}
+	var result managedinstance.AccountOutputResult
+	if err := json.Unmarshal([]byte(snapshot.Payload), &result); err != nil {
+		return nil, err
+	}
+	for index := range result.Items {
+		if result.Items[index].Account.IDText == "" {
+			result.Items[index].Account.IDText = strconv.FormatInt(result.Items[index].Account.ID, 10)
+		}
+	}
+	return &result, nil
+}
+
 func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange ManagedAccountRange, force bool) (*ManagedAccountRefreshView, error) {
 	if instanceID <= 0 || accountRange.RangeKey == "" {
 		return nil, managedinstance.ErrInvalidInstance

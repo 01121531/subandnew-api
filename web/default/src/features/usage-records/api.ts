@@ -69,6 +69,7 @@ export type UsageRecordExportTask = {
 
 export type ManagedAccountExportRequest = {
   source: 'inventory' | 'account_output'
+  range_key?: string
   window: { start: number; end: number; timezone: string }
   locale: string
   search?: string
@@ -156,7 +157,7 @@ export async function createManagedAccountExport(
   const response = await api.post<ApiResponse<UsageRecordExportTask>>(
     '/api/managed-account-exports',
     request,
-    { disableDuplicate: true }
+    { disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }

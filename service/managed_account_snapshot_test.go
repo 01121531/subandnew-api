@@ -144,6 +144,50 @@ func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 	require.Equal(t, "worker-nine", frozen.SourceName)
 }
 
+func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {
+	truncate(t)
+	instance := &model.ManagedInstance{Name: "output-source", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://output.example.com"}
+	require.NoError(t, model.DB.Create(instance).Error)
+	inventoryPayload, err := json.Marshal(managedinstance.InventoryPage{
+		ResourceKind: "account", Total: 1,
+		Items: []managedinstance.InventoryItem{{ID: 2, IDText: "2", Name: "latest-inventory"}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
+		RangeKey: managedAccountInventoryRangeKey, Timezone: managedAccountDefaultTimezone,
+		ObservedAt: 200, Payload: string(inventoryPayload), LastAttemptAt: 200,
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	outputPayload, err := json.Marshal(managedinstance.AccountOutputResult{
+		SourceInstanceID: instance.Id,
+		Items: []managedinstance.AccountOutputItem{{
+			Account: managedinstance.InventoryItem{ID: 1, IDText: "1", Name: "selected-output", Email: "selected@example.com"},
+		}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindOutput,
+		RangeKey: "preset-30", PresetDays: 30, Timezone: managedAccountDefaultTimezone,
+		ObservedAt: 150, Payload: string(outputPayload), LastAttemptAt: 150,
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+
+	task, err := EnqueueManagedAccountExport(7, ManagedAccountExportRequest{
+		Source: "account_output", RangeKey: "preset-30", Locale: "zh-CN",
+		Window: managedinstance.TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"},
+		Items:  []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: "1"}},
+	})
+	require.NoError(t, err)
+	items, err := model.ListManagedExportItems(task.TaskID)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	var frozen managedinstance.AccountExportSelection
+	require.NoError(t, json.Unmarshal([]byte(items[0].Metadata), &frozen))
+	require.Equal(t, "selected-output", frozen.Account.Name)
+	require.Equal(t, "selected@example.com", frozen.Account.Email)
+}
+
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	instance := &model.ManagedInstance{Id: 9, Kind: model.ManagedInstanceKindSub2API}
 	now := int64(10_000)

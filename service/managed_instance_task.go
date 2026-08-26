@@ -53,6 +53,7 @@ type ManagedAccountExportItemInput struct {
 
 type ManagedAccountExportRequest struct {
 	Source        string                          `json:"source"`
+	RangeKey      string                          `json:"range_key,omitempty"`
 	Window        managedinstance.TimeWindow      `json:"window"`
 	Locale        string                          `json:"locale"`
 	Search        string                          `json:"search,omitempty"`
@@ -64,6 +65,7 @@ type ManagedAccountExportRequest struct {
 
 type managedAccountExportSnapshot struct {
 	Source         string                     `json:"source"`
+	RangeKey       string                     `json:"range_key,omitempty"`
 	Window         managedinstance.TimeWindow `json:"window"`
 	Locale         string                     `json:"locale"`
 	Search         string                     `json:"search,omitempty"`
@@ -239,17 +241,33 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 		if err != nil {
 			return nil, err
 		}
-		page, err := GetManagedAccountInventorySnapshot(instanceID)
-		if err != nil || page == nil {
+		inventory := make(map[int64]managedinstance.InventoryItem)
+		sources := make(map[string]string)
+		page, inventoryErr := GetManagedAccountInventorySnapshot(instanceID)
+		if page != nil {
+			for _, item := range page.Items {
+				inventory[item.ID] = item
+			}
+			for _, source := range page.Sources {
+				sources[source.ID] = source.Name
+			}
+		}
+		if request.Source == "account_output" {
+			output, outputErr := GetManagedAccountOutputSnapshot(instanceID, request.RangeKey)
+			if output != nil {
+				for _, item := range output.Items {
+					inventory[item.Account.ID] = item.Account
+				}
+			}
+			if len(inventory) == 0 && outputErr != nil {
+				return nil, outputErr
+			}
+		}
+		if len(inventory) == 0 {
+			if inventoryErr != nil {
+				return nil, inventoryErr
+			}
 			return nil, managedinstance.ErrRemoteDataUnavailable
-		}
-		inventory := make(map[int64]managedinstance.InventoryItem, len(page.Items))
-		for _, item := range page.Items {
-			inventory[item.ID] = item
-		}
-		sources := make(map[string]string, len(page.Sources))
-		for _, source := range page.Sources {
-			sources[source.ID] = source.Name
 		}
 		contexts[instanceID] = accountExportInventoryContext{instance: instance, inventory: inventory, sources: sources}
 		soleInstanceID = instanceID
@@ -287,7 +305,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 		}
 	}
 	snapshot := managedAccountExportSnapshot{
-		Source: request.Source, Window: request.Window, Locale: request.Locale,
+		Source: request.Source, RangeKey: request.RangeKey, Window: request.Window, Locale: request.Locale,
 		Search: request.Search, ExcludeSearch: request.ExcludeSearch, SortBy: request.SortBy, SortOrder: request.SortOrder,
 		SelectionCount: len(selections), InstanceCount: len(requestedInstances),
 	}

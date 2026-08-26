@@ -442,6 +442,7 @@ function useAccountExportSelection(
 
 function AccountExportBar(props: {
   source: 'inventory' | 'account_output'
+  rangeKey?: string
   available: AccountExportSelection[]
   selection: ReturnType<typeof useAccountExportSelection>
   window: { start: number; end: number; timezone: string }
@@ -461,6 +462,7 @@ function AccountExportBar(props: {
     try {
       await createManagedAccountExport({
         source: props.source,
+        range_key: props.rangeKey,
         window: props.window,
         locale: i18n.language || 'zh-CN',
         search: props.search || undefined,
@@ -697,6 +699,10 @@ export function ManagedAccounts() {
       },
     })),
   })
+  const exportRangeKey =
+    snapshotQueries.find((query) => query.data?.data.range.range_key)?.data
+      ?.data.range.range_key ??
+    (timeRange.presetDays ? `preset-${timeRange.presetDays}` : undefined)
   const rows = useMemo<ResourceRow[]>(
     () =>
       instances.flatMap((instance, index) => {
@@ -1083,6 +1089,7 @@ export function ManagedAccounts() {
           error={outputError}
           searching={filtering}
           selectionScopeKey={selectionScopeKey}
+          rangeKey={exportRangeKey}
           window={exportWindow}
           search={search}
           excludeSearch={excludeSearch}
@@ -1507,6 +1514,7 @@ function AccountOutputPanel(props: {
   error: boolean
   searching: boolean
   selectionScopeKey: string
+  rangeKey?: string
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
@@ -1564,6 +1572,7 @@ function AccountOutputPanel(props: {
           family={props.family}
           rows={props.rows}
           selectionScopeKey={props.selectionScopeKey}
+          rangeKey={props.rangeKey}
           window={props.window}
           search={props.search}
           excludeSearch={props.excludeSearch}
@@ -1618,6 +1627,7 @@ function AccountOutputTable({
   family,
   rows,
   selectionScopeKey,
+  rangeKey,
   window,
   search,
   excludeSearch,
@@ -1625,6 +1635,7 @@ function AccountOutputTable({
   family: AccountFamily
   rows: OutputRow[]
   selectionScopeKey: string
+  rangeKey?: string
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
@@ -1769,6 +1780,7 @@ function AccountOutputTable({
     <>
       <AccountExportBar
         source='account_output'
+        rangeKey={rangeKey}
         available={exportable}
         selection={exportSelection}
         window={window}
