@@ -20,6 +20,9 @@ import { useQueries, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Calculator,
   AlertTriangle,
   CheckCircle2,
@@ -108,6 +111,13 @@ type OutputRow = {
   output: ManagedInstanceAccountOutputItem
 }
 type SortDirection = 'asc' | 'desc'
+type OutputSortKey =
+  | 'account'
+  | 'instance'
+  | 'created_at'
+  | 'requests'
+  | 'tokens'
+  | 'amount'
 type AccountSortKey =
   | 'name'
   | 'instance'
@@ -1307,24 +1317,135 @@ function AccountOutputTable({
 }) {
   const { t } = useTranslation()
   const isChannel = family === 'new_api'
+  const [sortKey, setSortKey] = useState<OutputSortKey>('created_at')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const sortedRows = useMemo(() => {
+    const compareText = (left: string, right: string) =>
+      left.localeCompare(right, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      })
+    const compareNumber = (left: number, right: number) => left - right
+    const result = [...rows].sort((left, right) => {
+      const leftSucceeded = left.output.collection_status === 'succeeded'
+      const rightSucceeded = right.output.collection_status === 'succeeded'
+      if (leftSucceeded !== rightSucceeded) return leftSucceeded ? -1 : 1
+
+      let compared = 0
+      switch (sortKey) {
+        case 'account':
+          compared = compareText(
+            left.output.account.name || String(left.output.account.id),
+            right.output.account.name || String(right.output.account.id)
+          )
+          break
+        case 'instance':
+          compared = compareText(left.instance.name, right.instance.name)
+          break
+        case 'created_at':
+          compared = compareNumber(
+            left.output.account.created_at ?? 0,
+            right.output.account.created_at ?? 0
+          )
+          break
+        case 'requests':
+          compared = compareNumber(
+            left.output.total_requests,
+            right.output.total_requests
+          )
+          break
+        case 'tokens':
+          compared = compareNumber(
+            left.output.total_tokens,
+            right.output.total_tokens
+          )
+          break
+        case 'amount':
+          compared = compareNumber(left.output.amount, right.output.amount)
+          break
+      }
+      if (compared === 0) {
+        compared = compareText(
+          String(left.output.account.id),
+          String(right.output.account.id)
+        )
+      }
+      return sortDirection === 'asc' ? compared : -compared
+    })
+    return result
+  }, [rows, sortDirection, sortKey])
+  const changeSort = (nextKey: OutputSortKey) => {
+    if (nextKey === sortKey) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortKey(nextKey)
+    setSortDirection(
+      nextKey === 'account' || nextKey === 'instance' ? 'asc' : 'desc'
+    )
+  }
+  const sortableHead = (
+    key: OutputSortKey,
+    label: string,
+    align: 'left' | 'right' = 'left'
+  ) => {
+    const active = sortKey === key
+    let SortIcon = ArrowUpDown
+    let ariaSort: 'ascending' | 'descending' | 'none' = 'none'
+    if (active && sortDirection === 'asc') {
+      SortIcon = ArrowUp
+      ariaSort = 'ascending'
+    } else if (active) {
+      SortIcon = ArrowDown
+      ariaSort = 'descending'
+    }
+    return (
+      <TableHead
+        className={cn(
+          key === 'account' && 'ps-6',
+          key === 'amount' && 'pe-6',
+          align === 'right' && 'text-right'
+        )}
+        aria-sort={ariaSort}
+      >
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className={cn(
+            '-mx-2 h-8 gap-1.5 px-2 font-medium',
+            align === 'right' && 'ms-auto'
+          )}
+          onClick={() => changeSort(key)}
+        >
+          {label}
+          <SortIcon
+            className={cn(
+              'size-3.5 shrink-0',
+              active ? 'text-foreground' : 'text-muted-foreground/70'
+            )}
+          />
+        </Button>
+      </TableHead>
+    )
+  }
   return (
     <Table className='min-w-[860px]'>
       <TableHeader className='bg-muted/35'>
         <TableRow>
-          <TableHead className='ps-6'>
-            {t(isChannel ? 'Channel' : 'Account')}
-          </TableHead>
-          <TableHead>{t('Instance')}</TableHead>
-          <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
-          <TableHead className='text-right'>{t('Requests')}</TableHead>
-          <TableHead className='text-right'>{t('Tokens')}</TableHead>
-          <TableHead className='pe-6 text-right'>
-            {t('Output amount')}
-          </TableHead>
+          {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
+          {sortableHead('instance', t('Instance'))}
+          {sortableHead(
+            'created_at',
+            t(isChannel ? 'Created At' : 'Uploaded at')
+          )}
+          {sortableHead('requests', t('Requests'), 'right')}
+          {sortableHead('tokens', t('Tokens'), 'right')}
+          {sortableHead('amount', t('Output amount'), 'right')}
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map(({ instance, output }) => (
+        {sortedRows.map(({ instance, output }) => (
           <TableRow key={`${instance.id}:${output.account.id}`}>
             <TableCell className='ps-6'>
               <p className='max-w-52 truncate font-medium'>
