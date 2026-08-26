@@ -93,6 +93,44 @@ func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	require.Equal(t, 2, *item.ActiveSessions)
 }
 
+func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"windowed",
+		"name":"windowed",
+		"status":"active",
+		"health_status":"cooldown",
+		"failure_kind":"rate_limit",
+		"recovery_state":"cooldown",
+		"created_at":"2026-08-25T08:00:00Z",
+		"last_used_at":"",
+		"disabled_at":"2026-08-25T09:30:00Z",
+		"expires_at":"1787721160537",
+		"total_requests":"0",
+		"total_tokens":"0",
+		"total_cost":"0.0000",
+		"req_24h":120,
+		"ok_24h":100,
+		"limited_24h":15,
+		"usage_windows":{"req_30d":300,"tokens_30d":4000,"cost_30d":12.345678},
+		"stats":{"cooldown":false,"cooldown_remaining_seconds":0}
+	}`), &account))
+
+	item := claudeGatewayAccountItem(account)
+	require.NotNil(t, item.Enabled)
+	require.False(t, *item.Enabled)
+	require.True(t, item.RateLimited)
+	require.Equal(t, int64(1787650200), item.DisabledAt)
+	require.Equal(t, int64(1787721160), item.ExpiresAt)
+	require.Equal(t, 30, item.UsageWindowDays)
+	require.Equal(t, 300.0, *item.Requests)
+	require.Equal(t, 4000.0, *item.Tokens)
+	require.Equal(t, 12.345678, *item.Cost)
+	require.Equal(t, 120.0, *item.Requests24H)
+	require.Equal(t, 100.0, *item.SuccessfulRequests24H)
+	require.Equal(t, 15.0, *item.LimitedRequests24H)
+}
+
 func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	resetNewAPIRealtimeCacheForTest()
@@ -121,7 +159,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 4, state.AccountsTotal)
-	require.Equal(t, 2, state.AccountsAvailable)
+	require.Equal(t, 1, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 4)
 }

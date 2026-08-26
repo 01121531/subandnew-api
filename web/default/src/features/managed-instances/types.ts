@@ -159,10 +159,16 @@ export interface ManagedInstanceInventoryItem {
   enabled?: boolean
   created_at?: number
   last_activity_at?: number
+  disabled_at?: number
+  expires_at?: number
   requests?: number
   tokens?: number
   cost?: number
   cost_unit?: 'usd' | 'quota'
+  usage_window_days?: number
+  requests_24h?: number
+  successful_requests_24h?: number
+  limited_requests_24h?: number
   balance?: number
   response_time_ms?: number
   error_message?: string

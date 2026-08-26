@@ -221,7 +221,7 @@ function getSurvivalSeconds(item: ManagedInstanceInventoryItem) {
   if (item.enabled === true) {
     end = Math.floor(Date.now() / 1000)
   } else if (item.enabled === false) {
-    end = item.last_activity_at
+    end = item.last_activity_at || item.disabled_at
   }
   const normalizedEnd = normalizeTimestampSeconds(end)
   if (normalizedEnd == null || normalizedEnd < createdAt) return null
@@ -324,6 +324,12 @@ function formatCost(item: ManagedInstanceInventoryItem) {
   if (item.cost == null) return '--'
   if (item.cost_unit === 'usd') return exactCurrency.format(item.cost)
   return exactNumber.format(item.cost)
+}
+
+function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
+  if (item.requests_24h == null || item.requests_24h <= 0) return null
+  const successful = Math.max(0, item.successful_requests_24h ?? 0)
+  return `${Math.min(100, (successful / item.requests_24h) * 100).toFixed(2)}%`
 }
 
 export function ManagedAccounts() {
@@ -1370,7 +1376,11 @@ function AccountTable(props: {
   const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
   const isChannel = props.family === 'new_api'
   const isConductor = props.family === 'conductor'
+  const isClaudeGateway = props.family === 'claude_gateway'
   const showsSurvival = !isChannel
+  let usageColumnLabel = t('Total consumption')
+  if (isChannel) usageColumnLabel = t('Used quota')
+  if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -1417,9 +1427,7 @@ function AccountTable(props: {
             </TableHead>
             <TableHead>{t(isChannel ? 'Created At' : 'Uploaded at')}</TableHead>
             <TableHead className='text-right'>
-              {isConductor
-                ? '运行负载'
-                : t(isChannel ? 'Used quota' : 'Total consumption')}
+              {isConductor ? '运行负载' : usageColumnLabel}
             </TableHead>
             <TableHead>{t('Last activity')}</TableHead>
             {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
@@ -1492,7 +1500,30 @@ function AccountTable(props: {
                   ) : (
                     <p className='font-medium'>{formatCost(item)}</p>
                   )}
+                  {isClaudeGateway && (
+                    <>
+                      <p className='text-muted-foreground text-xs'>
+                        {formatOptionalNumber(item.requests_24h)}{' '}
+                        {t('Requests')} / 24h
+                      </p>
+                      {formatSuccessRate24H(item) && (
+                        <p className='text-muted-foreground text-xs'>
+                          {t('Success rate')} {formatSuccessRate24H(item)}
+                          {item.limited_requests_24h != null && (
+                            <>
+                              {' · '}
+                              {formatOptionalNumber(
+                                item.limited_requests_24h
+                              )}{' '}
+                              {t('Rate limited')}
+                            </>
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )}
                   {!isConductor &&
+                    !isClaudeGateway &&
                     (isChannel
                       ? item.balance != null && (
                           <p className='text-muted-foreground text-xs'>

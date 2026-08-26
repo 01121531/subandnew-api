@@ -70,13 +70,25 @@ type claudeGatewayAccount struct {
 	GroupName        string              `json:"group_name"`
 	CreatedAt        string              `json:"created_at"`
 	LastUsedAt       string              `json:"last_used_at"`
+	DisabledAt       string              `json:"disabled_at"`
+	ExpiresAt        string              `json:"expires_at"`
 	TotalRequests    claudeGatewayNumber `json:"total_requests"`
 	TotalTokens      claudeGatewayNumber `json:"total_tokens"`
 	TotalCost        claudeGatewayNumber `json:"total_cost"`
+	Requests24H      claudeGatewayNumber `json:"req_24h"`
+	Successful24H    claudeGatewayNumber `json:"ok_24h"`
+	Limited24H       claudeGatewayNumber `json:"limited_24h"`
+	RecoveryState    string              `json:"recovery_state"`
 	UsageWindows     struct {
-		Requests7D claudeGatewayNumber `json:"req_7d"`
-		Tokens7D   claudeGatewayNumber `json:"tokens_7d"`
-		Cost7D     claudeGatewayNumber `json:"cost_7d"`
+		Requests5H  claudeGatewayNumber `json:"req_5h"`
+		Tokens5H    claudeGatewayNumber `json:"tokens_5h"`
+		Cost5H      claudeGatewayNumber `json:"cost_5h"`
+		Requests7D  claudeGatewayNumber `json:"req_7d"`
+		Tokens7D    claudeGatewayNumber `json:"tokens_7d"`
+		Cost7D      claudeGatewayNumber `json:"cost_7d"`
+		Requests30D claudeGatewayNumber `json:"req_30d"`
+		Tokens30D   claudeGatewayNumber `json:"tokens_30d"`
+		Cost30D     claudeGatewayNumber `json:"cost_30d"`
 	} `json:"usage_windows"`
 	Stats struct {
 		RPM               int                 `json:"rpm"`
@@ -383,15 +395,47 @@ func claudeGatewayInventoryPage(accounts []claudeGatewayAccount) *InventoryPage 
 func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 	name := firstNonEmpty(account.Name, account.Email, account.ID)
 	status := firstNonEmpty(account.HealthStatus, account.Status)
-	enabled := strings.EqualFold(strings.TrimSpace(account.Status), "active") && !account.Stats.Cooldown
+	rateLimited := claudeGatewayRateLimited(account)
+	healthStatus := strings.TrimSpace(account.HealthStatus)
+	healthy := strings.EqualFold(healthStatus, "healthy")
+	if healthStatus == "" {
+		healthy = strings.EqualFold(strings.TrimSpace(account.Status), "active")
+	}
+	enabled := strings.EqualFold(strings.TrimSpace(account.Status), "active") && healthy && !rateLimited
 	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
+	usageWindowDays := 0
+	windowRequests := float64(account.UsageWindows.Requests30D)
+	windowTokens := float64(account.UsageWindows.Tokens30D)
+	windowCost := float64(account.UsageWindows.Cost30D)
+	if requests == 0 && windowRequests != 0 {
+		requests = windowRequests
+		usageWindowDays = 30
+	}
+	if tokens == 0 && windowTokens != 0 {
+		tokens = windowTokens
+		usageWindowDays = 30
+	}
+	if cost == 0 && windowCost != 0 {
+		cost = windowCost
+		usageWindowDays = 30
+	}
+	requests24H := float64(account.Requests24H)
+	successful24H := float64(account.Successful24H)
+	limited24H := float64(account.Limited24H)
 	rpm, sessions := account.Stats.RPM, account.Stats.ActiveSessions
+	recoveryError := strings.TrimSpace(account.RecoveryState)
+	if strings.EqualFold(recoveryError, "none") {
+		recoveryError = ""
+	}
 	return InventoryItem{
 		ID: claudeGatewayStableID(account.ID), Name: name, Type: firstNonEmpty(account.AccountType, account.AuthKind),
 		Platform: firstNonEmpty(account.Provider, account.InferenceBackend), Group: account.GroupName,
 		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
-		Requests: &requests, Tokens: &tokens, Cost: &cost, CostUnit: "usd", RPM: &rpm, ActiveSessions: &sessions,
-		RateLimited: claudeGatewayRateLimited(account), ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason),
+		DisabledAt: parseClaudeGatewayTime(account.DisabledAt), ExpiresAt: parseClaudeGatewayTime(account.ExpiresAt),
+		Requests: &requests, Tokens: &tokens, Cost: &cost, CostUnit: "usd", UsageWindowDays: usageWindowDays,
+		Requests24H: &requests24H, SuccessfulRequests24H: &successful24H, LimitedRequests24H: &limited24H,
+		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
+		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
 	}
 }
 
@@ -427,9 +471,9 @@ func claudeGatewayRateLimited(account claudeGatewayAccount) bool {
 	if account.Stats.Cooldown && account.Stats.CooldownRemaining > 0 {
 		return true
 	}
-	for _, value := range []string{account.FailureKind, account.LastError, account.Stats.CooldownReason} {
+	for _, value := range []string{account.HealthStatus, account.FailureKind, account.RecoveryState, account.LastError, account.Stats.CooldownReason} {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if strings.Contains(value, "rate_limit") || strings.Contains(value, "rate limit") || strings.Contains(value, "429") {
+		if value == "cooldown" || strings.Contains(value, "rate_limit") || strings.Contains(value, "rate limit") || strings.Contains(value, "429") {
 			return true
 		}
 	}
