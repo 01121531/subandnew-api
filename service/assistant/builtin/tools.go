@@ -16,6 +16,10 @@ import (
 	"gorm.io/gorm"
 )
 
+const assistantTimezone = "Asia/Shanghai"
+
+var assistantLocation = time.FixedZone(assistantTimezone, 8*60*60)
+
 type listInstancesInput struct {
 	InstanceScope string `json:"instance_scope,omitempty"`
 	Kind          string `json:"kind,omitempty"`
@@ -363,13 +367,13 @@ func instanceSelectionSchema(includePreset bool) json.RawMessage {
 
 func freshnessForSnapshot(observedAt int64, stale bool) tool.Freshness {
 	if observedAt <= 0 {
-		return tool.Freshness{State: tool.FreshnessUnknown}
+		return tool.Freshness{State: tool.FreshnessUnknown, Timezone: assistantTimezone}
 	}
 	state := tool.FreshnessSnapshot
 	if stale {
 		state = tool.FreshnessStale
 	}
-	return tool.Freshness{State: state, ObservedAt: unixTime(observedAt)}
+	return tool.Freshness{State: state, ObservedAt: unixTime(observedAt), Timezone: assistantTimezone}
 }
 
 func conservativeTimestamp(current int64, candidate int64) int64 {
@@ -386,5 +390,5 @@ func unixTime(timestamp int64) time.Time {
 	if timestamp <= 0 {
 		return time.Time{}
 	}
-	return time.Unix(timestamp, 0).UTC()
+	return time.Unix(timestamp, 0).In(assistantLocation)
 }

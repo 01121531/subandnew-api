@@ -117,6 +117,7 @@ type Freshness struct {
 	State      FreshnessState `json:"state"`
 	ObservedAt time.Time      `json:"observed_at,omitempty"`
 	ExpiresAt  time.Time      `json:"expires_at,omitempty"`
+	Timezone   string         `json:"timezone,omitempty"`
 }
 
 // Output is returned by a strongly typed tool handler.

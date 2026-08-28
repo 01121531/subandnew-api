@@ -105,7 +105,10 @@ func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tool.FreshnessSnapshot, result.Freshness.State)
 	require.Equal(t, now, result.Freshness.ObservedAt.Unix())
+	require.Equal(t, assistantTimezone, result.Freshness.Timezone)
+	require.Equal(t, assistantTimezone, result.Freshness.ObservedAt.Location().String())
 	require.Equal(t, "managed_dashboard_snapshots", result.Provenance[0].Source)
+	require.Equal(t, assistantTimezone, result.Provenance[0].ObservedAt.Location().String())
 	require.Contains(t, string(result.Data), `"observed_at":`)
 }
 
