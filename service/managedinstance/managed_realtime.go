@@ -23,13 +23,17 @@ type ManagedRealtimeState struct {
 	ConcurrencyUsed          MetricSample      `json:"concurrency_used"`
 	ConcurrencyMax           MetricSample      `json:"concurrency_max"`
 	ConcurrencyStatus        string            `json:"concurrency_collection_status,omitempty"`
+	ConcurrencyObservedAt    int64             `json:"-"`
 	TodayCost                MetricSample      `json:"today_cost"`
+	TodayCostObservedAt      int64             `json:"-"`
 	AccountsTotal            int               `json:"accounts_total,omitempty"`
 	AccountsAvailable        int               `json:"accounts_available,omitempty"`
 	AccountsRateLimited      int               `json:"accounts_rate_limited,omitempty"`
 	AccountsCollectionStatus string            `json:"accounts_collection_status,omitempty"`
+	AccountsObservedAt       int64             `json:"-"`
 	AccountsReporting        int               `json:"accounts_reporting,omitempty"`
 	ActiveSessions           int               `json:"active_sessions,omitempty"`
+	ActiveSessionsObservedAt int64             `json:"-"`
 	Accounts                 []InventoryItem   `json:"accounts,omitempty"`
 	Sources                  []InventorySource `json:"sources,omitempty"`
 }
@@ -151,8 +155,10 @@ func managedRealtimeFromSub2(state Sub2RealtimeState) ManagedRealtimeState {
 		InstanceID: state.InstanceID, ObservedAt: max(state.ObservedAt, state.DetailsObservedAt), LastAttemptAt: state.LastAttemptAt,
 		StreamStatus: status, Stale: state.Stale, ErrorCode: state.ErrorCode, RPM: state.RPM,
 		ConcurrencyUsed: state.ConcurrencyUsed, ConcurrencyMax: state.ConcurrencyMax, ConcurrencyStatus: state.ConcurrencyStatus,
-		TodayCost: state.TodayCost, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
+		ConcurrencyObservedAt: state.DetailsObservedAt,
+		TodayCost:             state.TodayCost, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
 		AccountsRateLimited: state.AccountsRateLimited, AccountsCollectionStatus: state.AccountsCollectionStatus,
+		AccountsObservedAt: state.DetailsObservedAt,
 	}
 }
 
@@ -164,7 +170,8 @@ func managedRealtimeFromConductor(state ConductorRealtimeState) ManagedRealtimeS
 		AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
 		AccountsRateLimited: state.AccountsRateLimited, AccountsReporting: state.AccountsReporting,
 		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded,
-		ActiveSessions:           state.ActiveSessions, Accounts: state.Accounts, Sources: state.Sources,
+		AccountsObservedAt:       state.ObservedAt,
+		ActiveSessions:           state.ActiveSessions, ActiveSessionsObservedAt: state.ObservedAt, Accounts: state.Accounts, Sources: state.Sources,
 	}
 }
 
@@ -211,6 +218,30 @@ func latestManagedRPMState(instanceID int64) (ManagedRealtimeState, bool) {
 	if history.SuccessRateSampleCount > 0 && history.SuccessRateLast >= 0 && history.SuccessRateLast <= 1 {
 		state.SuccessRate = supportedMetric(history.SuccessRateLast, "ratio")
 		state.SuccessRateObservedAt = history.UpdatedAt
+	}
+	if history.ConcurrencyUsedSamples > 0 {
+		state.ConcurrencyUsed = supportedMetric(history.ConcurrencyUsedLast, "concurrency")
+	}
+	if history.ConcurrencyMaxSamples > 0 {
+		state.ConcurrencyMax = supportedMetric(history.ConcurrencyMaxLast, "concurrency")
+	}
+	if history.ConcurrencyUsedSamples > 0 || history.ConcurrencyMaxSamples > 0 {
+		state.ConcurrencyStatus = model.ManagedInstanceCollectionSucceeded
+		state.ConcurrencyObservedAt = history.UpdatedAt
+	}
+	if history.TodayCostSampleCount > 0 {
+		state.TodayCost = supportedMetric(history.TodayCostLast, "usd")
+		state.TodayCostObservedAt = history.UpdatedAt
+	}
+	if history.AccountSampleCount > 0 {
+		state.AccountsAvailable = history.AccountsAvailableLast
+		state.AccountsTotal = history.AccountsTotalLast
+		state.AccountsCollectionStatus = model.ManagedInstanceCollectionSucceeded
+		state.AccountsObservedAt = history.UpdatedAt
+	}
+	if history.ActiveSessionSamples > 0 {
+		state.ActiveSessions = history.ActiveSessionsLast
+		state.ActiveSessionsObservedAt = history.UpdatedAt
 	}
 	return state, true
 }

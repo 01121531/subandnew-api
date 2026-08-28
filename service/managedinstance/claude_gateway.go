@@ -564,12 +564,15 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		RPM: supportedMetric(rpm, "request/min"), ConcurrencyUsed: supportedMetric(concurrency, "concurrency"),
 		ConcurrencyMax: unsupportedMetric("concurrency"), ConcurrencyStatus: model.ManagedInstanceCollectionSucceeded,
 		AccountsTotal: len(accounts), AccountsAvailable: available, AccountsReporting: reporting,
-		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, ActiveSessions: sessions, Accounts: page.Items,
+		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, AccountsObservedAt: now,
+		ActiveSessions: sessions, ActiveSessionsObservedAt: now, ConcurrencyObservedAt: now, Accounts: page.Items,
 	}
 	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
 		state.TodayCost = supportedMetric(float64(summary.TotalCost), "usd")
+		state.TodayCostObservedAt = now
 	} else if previous, ok := currentNewAPIRealtime(instanceID); ok {
 		state.TodayCost = previous.TodayCost
+		state.TodayCostObservedAt = previous.TodayCostObservedAt
 	} else {
 		state.TodayCost = unsupportedMetric("usd")
 	}

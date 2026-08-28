@@ -111,7 +111,11 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&AssistantRun{}, "uidx_assistant_run_public_id"))
 	require.True(t, db.Migrator().HasIndex(&AssistantToolCall{}, "uidx_assistant_tool_call_order"))
 	require.True(t, db.Migrator().HasIndex(&AssistantOutbox{}, "uidx_assistant_outbox_reply_key"))
-	for _, column := range []string{"accounts_available_last", "accounts_total_last", "account_sample_count"} {
+	for _, column := range []string{
+		"accounts_available_last", "accounts_total_last", "account_sample_count",
+		"concurrency_used_last", "concurrency_max_last", "concurrency_sample_count", "concurrency_used_samples", "concurrency_max_samples",
+		"today_cost_last", "today_cost_sample_count", "active_sessions_last", "active_session_samples",
+	} {
 		require.Truef(t, db.Migrator().HasColumn(&ManagedRPMHistory{}, column), "managed_rpm_history.%s must exist", column)
 	}
 	for _, table := range representativeLegacyTables {

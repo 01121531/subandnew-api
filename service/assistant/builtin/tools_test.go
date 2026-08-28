@@ -23,7 +23,7 @@ func newBuiltinTestContext(t *testing.T) (*gorm.DB, tool.ExecutionContext, model
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{}, &model.AssistantSetting{},
-		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedDashboardSnapshot{}, &model.ManagedInstanceAlert{},
+		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedDashboardSnapshot{}, &model.ManagedInstanceAlert{}, &model.ManagedRPMHistory{},
 	))
 	previousDB := model.DB
 	model.DB = db
@@ -120,6 +120,94 @@ func TestRealtimeMetricsDoesNotExposeAccountDetails(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tool.FreshnessUnknown, result.Freshness.State)
 	require.NotContains(t, string(result.Data), `"accounts"`)
+}
+
+func TestMetricHistoryUsesDefaultInstanceAndShanghaiTime(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	require.NoError(t, db.Model(&model.AssistantIdentity{}).Where("id = ?", execution.IdentityID).Update("default_instance_id", visible.Id).Error)
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	bucket := time.Date(2026, 8, 28, 15, 0, 0, 0, location).Unix()
+	require.NoError(t, db.Create(&model.ManagedRPMHistory{
+		InstanceID: visible.Id, BucketStart: bucket, RPMSum: 92, RPMLast: 50, SampleCount: 2,
+	}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+
+	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
+		"metrics":["rpm","accounts_available"],"mode":"point","point_at":"2026-08-28 15:00:10","granularity":"minute"
+	}`))
+	require.NoError(t, err)
+	var output metricHistoryOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, []int64{visible.Id}, output.InstanceIDs)
+	require.Equal(t, assistantTimezone, output.Timezone)
+	require.Len(t, output.Points, 1)
+	require.Equal(t, 50.0, *output.Points[0].Values["rpm"])
+	require.Equal(t, "unsupported", output.MetricStatus["accounts_available"].Status)
+	require.Equal(t, "2026-08-28 15:00:00", output.Points[0].Time)
+}
+
+func TestMetricHistoryReadsAuxiliarySampleWithoutRPM(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	require.NoError(t, db.Model(&visible).Update("kind", model.ManagedInstanceKindSub2API).Error)
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	bucket := time.Date(2026, 8, 28, 16, 0, 0, 0, location).Unix()
+	require.NoError(t, db.Create(&model.ManagedRPMHistory{
+		InstanceID: visible.Id, BucketStart: bucket, ConcurrencyUsedLast: 0, ConcurrencyMaxLast: 400,
+		ConcurrencySampleCount: 1, ConcurrencyUsedSamples: 1, ConcurrencyMaxSamples: 1,
+	}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+
+	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
+		"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["concurrency_used","concurrency_max"],
+		"mode":"point","point_at":"2026-08-28 16:00:30","granularity":"minute"
+	}`))
+	require.NoError(t, err)
+	var output metricHistoryOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Len(t, output.Points, 1)
+	require.NotNil(t, output.Points[0].Values["concurrency_used"])
+	require.Zero(t, *output.Points[0].Values["concurrency_used"])
+	require.Equal(t, 400.0, *output.Points[0].Values["concurrency_max"])
+}
+
+func TestMetricHistoryReadsDailyDashboardTrend(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	now := time.Now().Unix()
+	payload, err := json.Marshal(managedinstance.SummaryResult{Trend: []managedinstance.UsageTrendPoint{
+		{Date: "2026-08-27", Requests: 12, Tokens: 34, Cost: 5.6789},
+		{Date: "2026-08-28", Requests: 56, Tokens: 78, Cost: 9.0123},
+	}})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.ManagedDashboardSnapshot{
+		InstanceID: visible.Id, RangeKey: "preset-30", PresetDays: 30, ObservedAt: now, Payload: string(payload),
+		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+
+	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
+		"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["requests","tokens","actual_cost"],
+		"mode":"series","start_at":"2026-08-27","end_at":"2026-08-28","granularity":"day"
+	}`))
+	require.NoError(t, err)
+	var output metricHistoryOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Len(t, output.Points, 2)
+	require.Equal(t, 68.0, *output.Statistics["requests"].Sum)
+	require.Equal(t, 9.0123, *output.Statistics["actual_cost"].Latest)
+}
+
+func TestMetricHistoryRejectsOverlongAndOversizedRanges(t *testing.T) {
+	_, err := normalizeMetricHistoryQuery(metricHistoryInput{
+		Metrics: []string{"rpm"}, Mode: "series", StartAt: "2026-07-01", EndAt: "2026-08-28", Granularity: "day",
+	})
+	require.Error(t, err)
+	_, err = normalizeMetricHistoryQuery(metricHistoryInput{
+		Metrics: []string{"rpm"}, Mode: "series", StartAt: "2026-08-27", EndAt: "2026-08-28", Granularity: "minute",
+	})
+	require.Error(t, err)
 }
 
 func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {

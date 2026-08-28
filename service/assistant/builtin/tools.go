@@ -141,6 +141,9 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err := registerRealtimeMetrics(registry, db); err != nil {
 		return nil, err
 	}
+	if err := registerMetricHistory(registry, db); err != nil {
+		return nil, err
+	}
 	if err := registerInstanceHealth(registry, db); err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 const (
 	ConductorRPMBucketMinute = "minute"
 	ConductorRPMBucketHour   = "hour"
+	ConductorRPMBucketDay    = "day"
 
 	conductorRPMSampleInterval = 10 * time.Second
 	conductorRPMRetention      = 31 * 24 * time.Hour
@@ -22,15 +23,22 @@ const (
 )
 
 type ConductorRPMHistoryPoint struct {
-	Timestamp          int64    `json:"timestamp"`
-	RPM                float64  `json:"rpm"`
-	Capacity           *float64 `json:"capacity"`
-	Samples            int      `json:"samples"`
-	SuccessRate        *float64 `json:"success_rate"`
-	SuccessRateSamples int      `json:"success_rate_samples"`
-	AccountsAvailable  *int     `json:"accounts_available"`
-	AccountsTotal      *int     `json:"accounts_total"`
-	AccountSamples     int      `json:"account_samples"`
+	Timestamp            int64    `json:"timestamp"`
+	RPM                  float64  `json:"rpm"`
+	Capacity             *float64 `json:"capacity"`
+	Samples              int      `json:"samples"`
+	SuccessRate          *float64 `json:"success_rate"`
+	SuccessRateSamples   int      `json:"success_rate_samples"`
+	AccountsAvailable    *int     `json:"accounts_available"`
+	AccountsTotal        *int     `json:"accounts_total"`
+	AccountSamples       int      `json:"account_samples"`
+	ConcurrencyUsed      *float64 `json:"concurrency_used"`
+	ConcurrencyMax       *float64 `json:"concurrency_max"`
+	ConcurrencySamples   int      `json:"concurrency_samples"`
+	TodayCost            *float64 `json:"today_cost"`
+	TodayCostSamples     int      `json:"today_cost_samples"`
+	ActiveSessions       *int     `json:"active_sessions"`
+	ActiveSessionSamples int      `json:"active_session_samples"`
 }
 
 type ConductorRPMHistoryResult struct {
@@ -62,14 +70,15 @@ func (stream *conductorRealtimeStream) sampleRPM(ctx context.Context) {
 	stream.mu.Lock()
 	state := stream.snapshotLocked()
 	stream.mu.Unlock()
-	if state.StreamStatus != "connected" || state.Stale || state.RPM.Value == nil || state.RPM.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+	if state.StreamStatus != "connected" || state.Stale {
 		return
 	}
-	if state.RPMCapacity.Value != nil && state.RPMCapacity.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
-		_ = recordConductorRPMSample(ctx, stream.instanceID, common.GetTimestamp(), *state.RPM.Value, *state.RPMCapacity.Value)
-		return
+	sample := ManagedRealtimeHistorySample{
+		RPM: metricHistoryValue(state.RPM), RPMCapacity: metricHistoryValue(state.RPMCapacity),
+		TodayCost: metricHistoryValue(state.TodayCost), AccountsAvailable: &state.AccountsAvailable,
+		AccountsTotal: &state.AccountsTotal, ActiveSessions: &state.ActiveSessions,
 	}
-	_ = recordConductorRPMSample(ctx, stream.instanceID, common.GetTimestamp(), *state.RPM.Value)
+	_ = RecordManagedRealtimeHistorySample(ctx, stream.instanceID, common.GetTimestamp(), sample)
 }
 
 func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacities ...float64) error {
@@ -77,51 +86,104 @@ func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt 
 	if len(capacities) > 0 {
 		capacity = &capacities[0]
 	}
-	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, capacity, nil, 0, nil, nil)
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, ManagedRealtimeHistorySample{RPM: &rpm, RPMCapacity: capacity})
 }
 
-func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacity *float64, successRate *float64, successRateWeight float64, accountsAvailable *int, accountsTotal *int) error {
-	if model.DB == nil || instanceID <= 0 || observedAt <= 0 || rpm < 0 {
+type ManagedRealtimeHistorySample struct {
+	RPM               *float64
+	RPMCapacity       *float64
+	SuccessRate       *float64
+	SuccessRateWeight float64
+	AccountsAvailable *int
+	AccountsTotal     *int
+	ConcurrencyUsed   *float64
+	ConcurrencyMax    *float64
+	TodayCost         *float64
+	ActiveSessions    *int
+}
+
+func metricHistoryValue(sample MetricSample) *float64 {
+	if sample.CollectionStatus != model.ManagedInstanceCollectionSucceeded || sample.Value == nil {
+		return nil
+	}
+	return sample.Value
+}
+
+func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, sample ManagedRealtimeHistorySample) error {
+	if model.DB == nil || instanceID <= 0 || observedAt <= 0 {
 		return ErrInvalidInstance
 	}
-	hasCapacity := capacity != nil && *capacity >= 0
-	hasSuccessRate := successRate != nil && *successRate >= 0 && *successRate <= 1
-	hasAccounts := accountsAvailable != nil && accountsTotal != nil && *accountsAvailable >= 0 && *accountsTotal >= 0 && *accountsAvailable <= *accountsTotal
-	if successRate != nil && !hasSuccessRate {
+	hasRPM := sample.RPM != nil && *sample.RPM >= 0
+	hasCapacity := sample.RPMCapacity != nil && *sample.RPMCapacity >= 0
+	hasSuccessRate := sample.SuccessRate != nil && *sample.SuccessRate >= 0 && *sample.SuccessRate <= 1
+	hasAccounts := sample.AccountsAvailable != nil && sample.AccountsTotal != nil && *sample.AccountsAvailable >= 0 && *sample.AccountsTotal >= 0 && *sample.AccountsAvailable <= *sample.AccountsTotal
+	hasConcurrencyUsed := sample.ConcurrencyUsed != nil && *sample.ConcurrencyUsed >= 0
+	hasConcurrencyMax := sample.ConcurrencyMax != nil && *sample.ConcurrencyMax >= 0
+	hasTodayCost := sample.TodayCost != nil && *sample.TodayCost >= 0
+	hasActiveSessions := sample.ActiveSessions != nil && *sample.ActiveSessions >= 0
+	if sample.RPM != nil && !hasRPM || sample.RPMCapacity != nil && !hasCapacity || sample.SuccessRate != nil && !hasSuccessRate {
 		return ErrInvalidInstance
 	}
-	if accountsAvailable != nil || accountsTotal != nil {
+	if sample.AccountsAvailable != nil || sample.AccountsTotal != nil {
 		if !hasAccounts {
 			return ErrInvalidInstance
 		}
 	}
-	if hasSuccessRate && successRateWeight <= 0 {
-		successRateWeight = 1
+	if sample.ConcurrencyUsed != nil && !hasConcurrencyUsed || sample.ConcurrencyMax != nil && !hasConcurrencyMax {
+		return ErrInvalidInstance
+	}
+	if sample.TodayCost != nil && !hasTodayCost || sample.ActiveSessions != nil && !hasActiveSessions {
+		return ErrInvalidInstance
+	}
+	if !hasRPM && !hasCapacity && !hasSuccessRate && !hasAccounts && !hasConcurrencyUsed && !hasConcurrencyMax && !hasTodayCost && !hasActiveSessions {
+		return ErrInvalidInstance
+	}
+	if hasSuccessRate && sample.SuccessRateWeight <= 0 {
+		sample.SuccessRateWeight = 1
 	}
 	bucketStart := observedAt - observedAt%60
 	now := common.GetTimestamp()
 	update := func() *gorm.DB {
-		updates := map[string]any{
-			"rpm_sum":      gorm.Expr("rpm_sum + ?", rpm),
-			"sample_count": gorm.Expr("sample_count + 1"),
-			"rpm_last":     rpm,
-			"updated_at":   now,
+		updates := map[string]any{"updated_at": now}
+		if hasRPM {
+			updates["rpm_sum"] = gorm.Expr("rpm_sum + ?", *sample.RPM)
+			updates["sample_count"] = gorm.Expr("sample_count + 1")
+			updates["rpm_last"] = *sample.RPM
 		}
 		if hasCapacity {
-			updates["capacity_sum"] = gorm.Expr("capacity_sum + ?", *capacity)
+			updates["capacity_sum"] = gorm.Expr("capacity_sum + ?", *sample.RPMCapacity)
 			updates["capacity_sample_count"] = gorm.Expr("capacity_sample_count + 1")
-			updates["capacity_last"] = *capacity
+			updates["capacity_last"] = *sample.RPMCapacity
 		}
 		if hasSuccessRate {
-			updates["success_rate_weighted_sum"] = gorm.Expr("success_rate_weighted_sum + ?", *successRate*successRateWeight)
-			updates["success_rate_weight_sum"] = gorm.Expr("success_rate_weight_sum + ?", successRateWeight)
+			updates["success_rate_weighted_sum"] = gorm.Expr("success_rate_weighted_sum + ?", *sample.SuccessRate*sample.SuccessRateWeight)
+			updates["success_rate_weight_sum"] = gorm.Expr("success_rate_weight_sum + ?", sample.SuccessRateWeight)
 			updates["success_rate_sample_count"] = gorm.Expr("success_rate_sample_count + 1")
-			updates["success_rate_last"] = *successRate
+			updates["success_rate_last"] = *sample.SuccessRate
 		}
 		if hasAccounts {
-			updates["accounts_available_last"] = *accountsAvailable
-			updates["accounts_total_last"] = *accountsTotal
+			updates["accounts_available_last"] = *sample.AccountsAvailable
+			updates["accounts_total_last"] = *sample.AccountsTotal
 			updates["account_sample_count"] = gorm.Expr("account_sample_count + 1")
+		}
+		if hasConcurrencyUsed {
+			updates["concurrency_used_last"] = *sample.ConcurrencyUsed
+			updates["concurrency_used_samples"] = gorm.Expr("concurrency_used_samples + 1")
+		}
+		if hasConcurrencyMax {
+			updates["concurrency_max_last"] = *sample.ConcurrencyMax
+			updates["concurrency_max_samples"] = gorm.Expr("concurrency_max_samples + 1")
+		}
+		if hasConcurrencyUsed || hasConcurrencyMax {
+			updates["concurrency_sample_count"] = gorm.Expr("concurrency_sample_count + 1")
+		}
+		if hasTodayCost {
+			updates["today_cost_last"] = *sample.TodayCost
+			updates["today_cost_sample_count"] = gorm.Expr("today_cost_sample_count + 1")
+		}
+		if hasActiveSessions {
+			updates["active_sessions_last"] = *sample.ActiveSessions
+			updates["active_session_samples"] = gorm.Expr("active_session_samples + 1")
 		}
 		return model.DB.WithContext(ctx).Model(&model.ManagedRPMHistory{}).
 			Where("instance_id = ? AND bucket_start = ?", instanceID, bucketStart).
@@ -134,24 +196,46 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 	if query.RowsAffected > 0 {
 		return nil
 	}
-	history := &model.ManagedRPMHistory{
-		InstanceID: instanceID, BucketStart: bucketStart, RPMSum: rpm, SampleCount: 1, RPMLast: rpm,
+	history := &model.ManagedRPMHistory{InstanceID: instanceID, BucketStart: bucketStart}
+	if hasRPM {
+		history.RPMSum = *sample.RPM
+		history.SampleCount = 1
+		history.RPMLast = *sample.RPM
 	}
 	if hasCapacity {
-		history.CapacitySum = *capacity
+		history.CapacitySum = *sample.RPMCapacity
 		history.CapacitySampleCount = 1
-		history.CapacityLast = *capacity
+		history.CapacityLast = *sample.RPMCapacity
 	}
 	if hasSuccessRate {
-		history.SuccessRateWeightedSum = *successRate * successRateWeight
-		history.SuccessRateWeightSum = successRateWeight
+		history.SuccessRateWeightedSum = *sample.SuccessRate * sample.SuccessRateWeight
+		history.SuccessRateWeightSum = sample.SuccessRateWeight
 		history.SuccessRateSampleCount = 1
-		history.SuccessRateLast = *successRate
+		history.SuccessRateLast = *sample.SuccessRate
 	}
 	if hasAccounts {
-		history.AccountsAvailableLast = *accountsAvailable
-		history.AccountsTotalLast = *accountsTotal
+		history.AccountsAvailableLast = *sample.AccountsAvailable
+		history.AccountsTotalLast = *sample.AccountsTotal
 		history.AccountSampleCount = 1
+	}
+	if hasConcurrencyUsed {
+		history.ConcurrencyUsedLast = *sample.ConcurrencyUsed
+		history.ConcurrencyUsedSamples = 1
+	}
+	if hasConcurrencyMax {
+		history.ConcurrencyMaxLast = *sample.ConcurrencyMax
+		history.ConcurrencyMaxSamples = 1
+	}
+	if hasConcurrencyUsed || hasConcurrencyMax {
+		history.ConcurrencySampleCount = 1
+	}
+	if hasTodayCost {
+		history.TodayCostLast = *sample.TodayCost
+		history.TodayCostSampleCount = 1
+	}
+	if hasActiveSessions {
+		history.ActiveSessionsLast = *sample.ActiveSessions
+		history.ActiveSessionSamples = 1
 	}
 	createErr := model.DB.WithContext(ctx).Create(history).Error
 	if createErr == nil {
@@ -172,11 +256,18 @@ func RecordManagedRPMSample(ctx context.Context, instanceID int64, observedAt in
 }
 
 func RecordManagedRealtimeSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, successRate *float64, successRateWeight float64) error {
-	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight, nil, nil)
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, ManagedRealtimeHistorySample{RPM: &rpm, SuccessRate: successRate, SuccessRateWeight: successRateWeight})
 }
 
 func RecordManagedRealtimeSampleWithAccounts(ctx context.Context, instanceID int64, observedAt int64, rpm float64, successRate *float64, successRateWeight float64, accountsAvailable int, accountsTotal int) error {
-	return recordManagedRealtimeSample(ctx, instanceID, observedAt, rpm, nil, successRate, successRateWeight, &accountsAvailable, &accountsTotal)
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, ManagedRealtimeHistorySample{
+		RPM: &rpm, SuccessRate: successRate, SuccessRateWeight: successRateWeight,
+		AccountsAvailable: &accountsAvailable, AccountsTotal: &accountsTotal,
+	})
+}
+
+func RecordManagedRealtimeHistorySample(ctx context.Context, instanceID int64, observedAt int64, sample ManagedRealtimeHistorySample) error {
+	return recordManagedRealtimeSample(ctx, instanceID, observedAt, sample)
 }
 
 func cleanupConductorRPMHistory(ctx context.Context, now int64) {
@@ -197,7 +288,7 @@ func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket str
 
 func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket string, start int64, end int64) (*ConductorRPMHistoryResult, error) {
 	bucket = strings.TrimSpace(strings.ToLower(bucket))
-	if bucket != ConductorRPMBucketMinute && bucket != ConductorRPMBucketHour {
+	if bucket != ConductorRPMBucketMinute && bucket != ConductorRPMBucketHour && bucket != ConductorRPMBucketDay {
 		return nil, ErrInvalidInstance
 	}
 	instanceIDs = uniquePositiveInt64s(instanceIDs)
@@ -226,6 +317,9 @@ func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket strin
 	if bucket == ConductorRPMBucketHour {
 		maxRange = int64(conductorRPMHourMaxRange / time.Second)
 		defaultRange = int64(24 * time.Hour / time.Second)
+	} else if bucket == ConductorRPMBucketDay {
+		maxRange = int64(conductorRPMHourMaxRange / time.Second)
+		defaultRange = int64(7 * 24 * time.Hour / time.Second)
 	}
 	if start <= 0 {
 		start = end - defaultRange
@@ -236,7 +330,7 @@ func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket strin
 	var rows []model.ManagedRPMHistory
 	queryStart := start - start%60
 	if err := model.DB.WithContext(ctx).
-		Where("instance_id IN ? AND bucket_start >= ? AND bucket_start <= ? AND sample_count > 0", instanceIDs, queryStart, end).
+		Where("instance_id IN ? AND bucket_start >= ? AND bucket_start <= ?", instanceIDs, queryStart, end).
 		Order("bucket_start asc").Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -286,14 +380,14 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		minute.capacityComplete = minute.capacityCount > 0 && (expected == 0 || minute.capacityCount == expected)
 	}
 	aggregates := minutes
-	if bucket == ConductorRPMBucketHour {
+	if bucket == ConductorRPMBucketHour || bucket == ConductorRPMBucketDay {
 		aggregates = map[int64]*aggregate{}
 		for timestamp, minute := range minutes {
-			hour := timestamp - timestamp%3600
-			value := aggregates[hour]
+			period := managedHistoryBucketStart(timestamp, bucket)
+			value := aggregates[period]
 			if value == nil {
 				value = &aggregate{}
-				aggregates[hour] = value
+				aggregates[period] = value
 			}
 			value.sum += minute.sum
 			value.count++
@@ -309,16 +403,17 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 	}
 	points := make([]ConductorRPMHistoryPoint, 0, len(aggregates))
 	accountPoints := aggregateManagedAccountHistory(rows, bucket, start, end, expected)
+	auxiliaryPoints := aggregateManagedAuxiliaryHistory(rows, bucket, start, end, expected)
 	for timestamp, value := range aggregates {
 		rpm := value.sum
-		if bucket == ConductorRPMBucketHour && value.count > 0 {
+		if bucket != ConductorRPMBucketMinute && value.count > 0 {
 			rpm /= float64(value.count)
 		}
 		var capacity *float64
 		if bucket == ConductorRPMBucketMinute && value.capacityComplete {
 			capacityValue := value.capacitySum
 			capacity = &capacityValue
-		} else if bucket == ConductorRPMBucketHour && value.capacityCount > 0 {
+		} else if bucket != ConductorRPMBucketMinute && value.capacityCount > 0 {
 			capacityValue := value.capacitySum / float64(value.capacityCount)
 			capacity = &capacityValue
 		}
@@ -336,10 +431,122 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			point.AccountsTotal = accounts.total
 			point.AccountSamples = accounts.samples
 		}
+		if auxiliary, ok := auxiliaryPoints[timestamp]; ok {
+			point.ConcurrencyUsed = auxiliary.concurrencyUsed
+			point.ConcurrencyMax = auxiliary.concurrencyMax
+			point.ConcurrencySamples = auxiliary.concurrencySamples
+			point.TodayCost = auxiliary.todayCost
+			point.TodayCostSamples = auxiliary.todayCostSamples
+			point.ActiveSessions = auxiliary.activeSessions
+			point.ActiveSessionSamples = auxiliary.activeSessionSamples
+		}
 		points = append(points, point)
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
 	return points
+}
+
+type managedAuxiliaryHistoryPoint struct {
+	concurrencyUsed      *float64
+	concurrencyMax       *float64
+	concurrencySamples   int
+	todayCost            *float64
+	todayCostSamples     int
+	activeSessions       *int
+	activeSessionSamples int
+}
+
+func aggregateManagedAuxiliaryHistory(rows []model.ManagedRPMHistory, bucket string, start int64, end int64, expectedInstances int) map[int64]managedAuxiliaryHistoryPoint {
+	type value struct {
+		bucketStart int64
+		used        *float64
+		maximum     *float64
+		todayCost   *float64
+		sessions    *int
+	}
+	buckets := map[int64]map[int64]value{}
+	sampleCounts := map[int64]managedAuxiliaryHistoryPoint{}
+	for _, row := range rows {
+		if row.BucketStart < start || row.BucketStart > end {
+			continue
+		}
+		timestamp := row.BucketStart
+		if bucket != ConductorRPMBucketMinute {
+			timestamp = managedHistoryBucketStart(timestamp, bucket)
+		}
+		byInstance := buckets[timestamp]
+		if byInstance == nil {
+			byInstance = map[int64]value{}
+			buckets[timestamp] = byInstance
+		}
+		current, exists := byInstance[row.InstanceID]
+		if exists && current.bucketStart > row.BucketStart {
+			continue
+		}
+		current.bucketStart = row.BucketStart
+		if row.ConcurrencyUsedSamples > 0 {
+			used := row.ConcurrencyUsedLast
+			current.used = &used
+		}
+		if row.ConcurrencyMaxSamples > 0 {
+			maximum := row.ConcurrencyMaxLast
+			current.maximum = &maximum
+		}
+		if row.TodayCostSampleCount > 0 {
+			cost := row.TodayCostLast
+			current.todayCost = &cost
+		}
+		if row.ActiveSessionSamples > 0 {
+			sessions := row.ActiveSessionsLast
+			current.sessions = &sessions
+		}
+		byInstance[row.InstanceID] = current
+		counts := sampleCounts[timestamp]
+		counts.concurrencySamples += max(row.ConcurrencyUsedSamples, row.ConcurrencyMaxSamples)
+		counts.todayCostSamples += row.TodayCostSampleCount
+		counts.activeSessionSamples += row.ActiveSessionSamples
+		sampleCounts[timestamp] = counts
+	}
+	result := make(map[int64]managedAuxiliaryHistoryPoint, len(buckets))
+	for timestamp, byInstance := range buckets {
+		point := sampleCounts[timestamp]
+		used, maximum, cost := 0.0, 0.0, 0.0
+		sessions := 0
+		usedCount, maxCount, costCount, sessionCount := 0, 0, 0, 0
+		for _, item := range byInstance {
+			if item.used != nil {
+				used += *item.used
+				usedCount++
+			}
+			if item.maximum != nil {
+				maximum += *item.maximum
+				maxCount++
+			}
+			if item.todayCost != nil {
+				cost += *item.todayCost
+				costCount++
+			}
+			if item.sessions != nil {
+				sessions += *item.sessions
+				sessionCount++
+			}
+		}
+		complete := func(count int) bool { return count > 0 && (expectedInstances == 0 || count == expectedInstances) }
+		if complete(usedCount) {
+			point.concurrencyUsed = &used
+		}
+		if complete(maxCount) {
+			point.concurrencyMax = &maximum
+		}
+		if complete(costCount) {
+			point.todayCost = &cost
+		}
+		if complete(sessionCount) {
+			point.activeSessions = &sessions
+		}
+		result[timestamp] = point
+	}
+	return result
 }
 
 type managedAccountHistoryPoint struct {
@@ -364,8 +571,8 @@ func aggregateManagedAccountHistory(rows []model.ManagedRPMHistory, bucket strin
 			continue
 		}
 		timestamp := row.BucketStart
-		if bucket == ConductorRPMBucketHour {
-			timestamp -= timestamp % 3600
+		if bucket != ConductorRPMBucketMinute {
+			timestamp = managedHistoryBucketStart(timestamp, bucket)
 		}
 		value := buckets[timestamp]
 		if value == nil {
@@ -397,6 +604,18 @@ func aggregateManagedAccountHistory(rows []model.ManagedRPMHistory, bucket strin
 		result[timestamp] = point
 	}
 	return result
+}
+
+func managedHistoryBucketStart(timestamp int64, bucket string) int64 {
+	if bucket == ConductorRPMBucketHour {
+		return timestamp - timestamp%3600
+	}
+	if bucket == ConductorRPMBucketDay {
+		location := time.FixedZone("Asia/Shanghai", 8*60*60)
+		local := time.Unix(timestamp, 0).In(location)
+		return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location).Unix()
+	}
+	return timestamp - timestamp%60
 }
 
 func uniquePositiveInt64s(values []int64) []int64 {

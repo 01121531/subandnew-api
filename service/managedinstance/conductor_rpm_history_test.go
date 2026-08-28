@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,55 @@ func TestManagedRealtimeHistoryRejectsInvalidGatewayAccountValues(t *testing.T) 
 	var count int64
 	require.NoError(t, db.Model(&model.ManagedRPMHistory{}).Where("instance_id = ?", instance.Id).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestManagedRealtimeHistoryStoresAuxiliaryMetricsAndRealZero(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, db.Create(&instance).Error)
+	start := int64(1_788_000_000)
+	rpm, used, maximum, cost := 10.0, 3.0, 20.0, 4.25
+	available, total, sessions := 2, 5, 7
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, start+10, ManagedRealtimeHistorySample{
+		RPM: &rpm, ConcurrencyUsed: &used, ConcurrencyMax: &maximum, TodayCost: &cost,
+		AccountsAvailable: &available, AccountsTotal: &total, ActiveSessions: &sessions,
+	}))
+	zero, zeroCost, zeroSessions := 0.0, 0.0, 0
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, start+20, ManagedRealtimeHistorySample{
+		RPM: &rpm, ConcurrencyUsed: &zero, ConcurrencyMax: &maximum, TodayCost: &zeroCost,
+		AccountsAvailable: &available, AccountsTotal: &total, ActiveSessions: &zeroSessions,
+	}))
+
+	history, err := GetManagedRPMHistory(t.Context(), []int64{instance.Id}, ConductorRPMBucketMinute, start, start+59)
+	require.NoError(t, err)
+	require.Len(t, history.Points, 1)
+	point := history.Points[0]
+	require.NotNil(t, point.ConcurrencyUsed)
+	require.Zero(t, *point.ConcurrencyUsed)
+	require.Equal(t, 20.0, *point.ConcurrencyMax)
+	require.NotNil(t, point.TodayCost)
+	require.Zero(t, *point.TodayCost)
+	require.NotNil(t, point.ActiveSessions)
+	require.Zero(t, *point.ActiveSessions)
+	require.Equal(t, 2, point.ConcurrencySamples)
+	require.Equal(t, 2, point.TodayCostSamples)
+	require.Equal(t, 2, point.ActiveSessionSamples)
+}
+
+func TestManagedRealtimeHistoryDayBucketsUseShanghaiMidnight(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, db.Create(&instance).Error)
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	dayStart := time.Date(2026, 8, 28, 0, 0, 0, 0, location).Unix()
+	require.NoError(t, RecordManagedRPMSample(t.Context(), instance.Id, dayStart+60, 20))
+	require.NoError(t, RecordManagedRPMSample(t.Context(), instance.Id, dayStart+3600, 40))
+
+	history, err := GetManagedRPMHistory(t.Context(), []int64{instance.Id}, ConductorRPMBucketDay, dayStart, dayStart+86399)
+	require.NoError(t, err)
+	require.Len(t, history.Points, 1)
+	require.Equal(t, dayStart, history.Points[0].Timestamp)
+	require.Equal(t, 30.0, history.Points[0].RPM)
 }
 
 func TestManagedRPMHistoryRejectsGenericInstances(t *testing.T) {

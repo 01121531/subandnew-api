@@ -227,29 +227,41 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 		target.Kind == model.ManagedInstanceKindConductor {
 		publishManagedRealtimeState("accounts", state)
 	}
-	if err == nil && !state.Stale && state.RPM.Value != nil && state.RPM.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
+	if err == nil && !state.Stale {
 		observedAt := state.ObservedAt
 		if observedAt <= 0 {
 			observedAt = common.GetTimestamp()
 		}
-		var successRate *float64
-		successRateWeight := 0.0
-		if target.Kind == model.ManagedInstanceKindClaudeGateway &&
-			state.SuccessRateObservedAt == observedAt &&
-			state.SuccessRate.Value != nil &&
-			state.SuccessRate.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
-			successRate = state.SuccessRate.Value
-			successRateWeight = state.SuccessRateSampleCount
+		sample := managedinstance.ManagedRealtimeHistorySample{
+			RPM: metricValueForHistory(state.RPM), RPMCapacity: metricValueForHistory(state.RPMCapacity),
 		}
-		if target.Kind == model.ManagedInstanceKindClaudeGateway && state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded {
-			_ = managedinstance.RecordManagedRealtimeSampleWithAccounts(
-				ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight,
-				state.AccountsAvailable, state.AccountsTotal,
-			)
-		} else {
-			_ = managedinstance.RecordManagedRealtimeSample(ctx, target.InstanceID, observedAt, *state.RPM.Value, successRate, successRateWeight)
+		if state.ConcurrencyObservedAt == 0 || state.ConcurrencyObservedAt == observedAt {
+			sample.ConcurrencyUsed = metricValueForHistory(state.ConcurrencyUsed)
+			sample.ConcurrencyMax = metricValueForHistory(state.ConcurrencyMax)
 		}
+		if state.TodayCostObservedAt == 0 || state.TodayCostObservedAt == observedAt {
+			sample.TodayCost = metricValueForHistory(state.TodayCost)
+		}
+		if state.SuccessRateObservedAt == observedAt {
+			sample.SuccessRate = metricValueForHistory(state.SuccessRate)
+			sample.SuccessRateWeight = state.SuccessRateSampleCount
+		}
+		if state.AccountsCollectionStatus == model.ManagedInstanceCollectionSucceeded && (state.AccountsObservedAt == 0 || state.AccountsObservedAt == observedAt) {
+			sample.AccountsAvailable = &state.AccountsAvailable
+			sample.AccountsTotal = &state.AccountsTotal
+			if target.Kind == model.ManagedInstanceKindClaudeGateway && (state.ActiveSessionsObservedAt == 0 || state.ActiveSessionsObservedAt == observedAt) {
+				sample.ActiveSessions = &state.ActiveSessions
+			}
+		}
+		_ = managedinstance.RecordManagedRealtimeHistorySample(ctx, target.InstanceID, observedAt, sample)
 	}
+}
+
+func metricValueForHistory(sample managedinstance.MetricSample) *float64 {
+	if sample.CollectionStatus != model.ManagedInstanceCollectionSucceeded || sample.Value == nil {
+		return nil
+	}
+	return sample.Value
 }
 
 func refreshManagedRealtimeTarget(ctx context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {

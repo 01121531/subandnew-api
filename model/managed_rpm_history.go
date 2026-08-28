@@ -23,6 +23,15 @@ type ManagedRPMHistory struct {
 	AccountsAvailableLast  int     `json:"accounts_available_last" gorm:"not null;default:0"`
 	AccountsTotalLast      int     `json:"accounts_total_last" gorm:"not null;default:0"`
 	AccountSampleCount     int     `json:"account_sample_count" gorm:"not null;default:0"`
+	ConcurrencyUsedLast    float64 `json:"concurrency_used_last" gorm:"not null;default:0"`
+	ConcurrencyMaxLast     float64 `json:"concurrency_max_last" gorm:"not null;default:0"`
+	ConcurrencySampleCount int     `json:"concurrency_sample_count" gorm:"not null;default:0"`
+	ConcurrencyUsedSamples int     `json:"concurrency_used_samples" gorm:"not null;default:0"`
+	ConcurrencyMaxSamples  int     `json:"concurrency_max_samples" gorm:"not null;default:0"`
+	TodayCostLast          float64 `json:"today_cost_last" gorm:"not null;default:0"`
+	TodayCostSampleCount   int     `json:"today_cost_sample_count" gorm:"not null;default:0"`
+	ActiveSessionsLast     int     `json:"active_sessions_last" gorm:"not null;default:0"`
+	ActiveSessionSamples   int     `json:"active_session_samples" gorm:"not null;default:0"`
 	CreatedAt              int64   `json:"created_at" gorm:"bigint;not null"`
 	UpdatedAt              int64   `json:"updated_at" gorm:"bigint;not null;index"`
 }
