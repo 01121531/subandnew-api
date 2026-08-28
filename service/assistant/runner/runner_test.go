@@ -17,6 +17,16 @@ type fakeClient struct {
 	requests  []provider.Request
 }
 
+type fakeStreamingClient struct {
+	fakeClient
+	streamCalls int
+}
+
+func (client *fakeStreamingClient) GenerateStream(_ context.Context, request provider.Request) (provider.Response, error) {
+	client.streamCalls++
+	return client.fakeClient.Generate(context.Background(), request)
+}
+
 func (client *fakeClient) Generate(_ context.Context, request provider.Request) (provider.Response, error) {
 	client.requests = append(client.requests, request)
 	if len(client.responses) == 0 {
@@ -86,6 +96,23 @@ func TestRunnerExecutesToolAndReturnsGroundedAnswer(t *testing.T) {
 	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"freshness"`)
 	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"observed_at":"2026-08-29T01:05:58+08:00"`)
 	require.NotContains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `1787936758`)
+}
+
+func TestRunnerPrefersStreamingAndAccumulatesCacheUsage(t *testing.T) {
+	client := &fakeStreamingClient{fakeClient: fakeClient{responses: []provider.Response{
+		{Message: provider.Message{Role: provider.RoleAssistant, Content: "done"}, Usage: provider.Usage{
+			InputTokens: 100, OutputTokens: 5, TotalTokens: 105, CachedInputTokens: 80, CacheObservedInputTokens: 100,
+		}},
+	}}}
+	runner, err := New(client, newRunnerRegistry(t), Config{SystemPrompt: "stable"})
+	require.NoError(t, err)
+	outcome, err := runner.Run(t.Context(), tool.ExecutionContext{
+		RunID: "run", ConversationID: "conversation", Channel: "wechat", IdentityID: 1, UserID: 7,
+	}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
+	require.NoError(t, err)
+	require.Equal(t, 1, client.streamCalls)
+	require.Equal(t, 80, outcome.Usage.CachedInputTokens)
+	require.Equal(t, 100, outcome.Usage.CacheObservedInputTokens)
 }
 
 func TestRunnerFailsClosedOnAuthorization(t *testing.T) {

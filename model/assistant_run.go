@@ -27,25 +27,27 @@ const (
 // AssistantRun persists the lifecycle and bounded accounting metadata for one
 // assistant turn. It intentionally stores no full prompt or model response.
 type AssistantRun struct {
-	ID               int64  `json:"id" gorm:"primaryKey"`
-	RunID            string `json:"run_id" gorm:"type:varchar(64);not null;uniqueIndex:uidx_assistant_run_public_id"`
-	ConversationID   int64  `json:"conversation_id" gorm:"not null;index"`
-	TriggerMessageID int64  `json:"trigger_message_id" gorm:"not null;index"`
-	ModelProfileID   int64  `json:"model_profile_id" gorm:"not null;default:0;index"`
-	Model            string `json:"model" gorm:"type:varchar(160);not null"`
-	PromptVersion    string `json:"prompt_version" gorm:"type:varchar(64);not null"`
-	Status           string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
-	DeadlineAt       int64  `json:"deadline_at" gorm:"bigint;not null;default:0;index"`
-	InputTokens      int64  `json:"input_tokens" gorm:"bigint;not null;default:0"`
-	OutputTokens     int64  `json:"output_tokens" gorm:"bigint;not null;default:0"`
-	TotalTokens      int64  `json:"total_tokens" gorm:"bigint;not null;default:0"`
-	Cost             string `json:"cost" gorm:"type:varchar(64);not null;default:'0'"`
-	ErrorCode        string `json:"error_code,omitempty" gorm:"type:varchar(128);index"`
-	TraceID          string `json:"trace_id" gorm:"type:varchar(64);not null;index"`
-	StartedAt        int64  `json:"started_at" gorm:"bigint;not null;default:0"`
-	FinishedAt       int64  `json:"finished_at" gorm:"bigint;not null;default:0"`
-	CreatedAt        int64  `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt        int64  `json:"updated_at" gorm:"bigint;not null;index"`
+	ID                       int64  `json:"id" gorm:"primaryKey"`
+	RunID                    string `json:"run_id" gorm:"type:varchar(64);not null;uniqueIndex:uidx_assistant_run_public_id"`
+	ConversationID           int64  `json:"conversation_id" gorm:"not null;index"`
+	TriggerMessageID         int64  `json:"trigger_message_id" gorm:"not null;index"`
+	ModelProfileID           int64  `json:"model_profile_id" gorm:"not null;default:0;index"`
+	Model                    string `json:"model" gorm:"type:varchar(160);not null"`
+	PromptVersion            string `json:"prompt_version" gorm:"type:varchar(64);not null"`
+	Status                   string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
+	DeadlineAt               int64  `json:"deadline_at" gorm:"bigint;not null;default:0;index"`
+	InputTokens              int64  `json:"input_tokens" gorm:"bigint;not null;default:0"`
+	OutputTokens             int64  `json:"output_tokens" gorm:"bigint;not null;default:0"`
+	TotalTokens              int64  `json:"total_tokens" gorm:"bigint;not null;default:0"`
+	CachedInputTokens        int64  `json:"cached_input_tokens" gorm:"bigint;not null;default:0"`
+	CacheObservedInputTokens int64  `json:"cache_observed_input_tokens" gorm:"bigint;not null;default:0"`
+	Cost                     string `json:"cost" gorm:"type:varchar(64);not null;default:'0'"`
+	ErrorCode                string `json:"error_code,omitempty" gorm:"type:varchar(128);index"`
+	TraceID                  string `json:"trace_id" gorm:"type:varchar(64);not null;index"`
+	StartedAt                int64  `json:"started_at" gorm:"bigint;not null;default:0"`
+	FinishedAt               int64  `json:"finished_at" gorm:"bigint;not null;default:0"`
+	CreatedAt                int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt                int64  `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 func (AssistantRun) TableName() string { return "assistant_runs" }

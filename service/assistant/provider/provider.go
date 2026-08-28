@@ -40,9 +40,11 @@ type Request struct {
 }
 
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+	CachedInputTokens        int `json:"cached_input_tokens"`
+	CacheObservedInputTokens int `json:"cache_observed_input_tokens"`
 }
 
 type Response struct {
@@ -53,6 +55,12 @@ type Response struct {
 
 type Client interface {
 	Generate(context.Context, Request) (Response, error)
+}
+
+// StreamingClient is optional so existing providers and test doubles can keep
+// using the non-streaming Client contract. Runners prefer it when available.
+type StreamingClient interface {
+	GenerateStream(context.Context, Request) (Response, error)
 }
 
 var ErrInvalidRequest = errors.New("invalid assistant model request")

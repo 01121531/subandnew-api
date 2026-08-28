@@ -109,6 +109,8 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&AssistantConversation{}, "uidx_assistant_conversation_peer"))
 	require.True(t, db.Migrator().HasIndex(&AssistantMessage{}, "uidx_assistant_message_turn"))
 	require.True(t, db.Migrator().HasIndex(&AssistantRun{}, "uidx_assistant_run_public_id"))
+	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cached_input_tokens"))
+	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cache_observed_input_tokens"))
 	require.True(t, db.Migrator().HasIndex(&AssistantToolCall{}, "uidx_assistant_tool_call_order"))
 	require.True(t, db.Migrator().HasIndex(&AssistantOutbox{}, "uidx_assistant_outbox_reply_key"))
 	for _, column := range []string{

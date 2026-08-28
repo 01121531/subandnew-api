@@ -107,6 +107,8 @@ export type AssistantRun = {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cached_input_tokens: number
+  cache_observed_input_tokens: number
   cost: string
   error_code?: string
   trace_id: string

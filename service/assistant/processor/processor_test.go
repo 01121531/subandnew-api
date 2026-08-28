@@ -13,7 +13,6 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
-	assistantaccess "github.com/01121531/subandnew-api/service/assistant/access"
 	"github.com/01121531/subandnew-api/service/assistant/builtin"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/01121531/subandnew-api/service/assistant/provider"
@@ -24,18 +23,15 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestSystemPromptDescribesEffectiveDefaultAndFallback(t *testing.T) {
-	prompt := systemPrompt(assistantaccess.InstanceResolution{
-		DefaultID: 7, DefaultName: "primary", Source: assistantaccess.DefaultSourceGlobal,
-		Fallback: true,
-	})
-	require.Contains(t, prompt, "primary（#7）")
+func TestSystemPromptIsStableAndUsesRuntimeContextTool(t *testing.T) {
+	prompt := systemPrompt()
 	require.Contains(t, prompt, `instance_scope="all"`)
 	require.Contains(t, prompt, "Asia/Shanghai")
 	require.Contains(t, prompt, "禁止再次增加或扣减 8 小时")
-	require.Contains(t, prompt, "当前中国标准时间")
+	require.Contains(t, prompt, "get_runtime_context")
 	require.Contains(t, prompt, "get_metric_history")
-	require.Contains(t, prompt, "默认实例失效")
+	require.NotContains(t, prompt, "当前中国标准时间：")
+	require.Equal(t, prompt, systemPrompt())
 }
 
 type sequenceClient struct {
@@ -131,8 +127,12 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	require.Len(t, eventIDs, 1)
 
 	modelClient := &sequenceClient{responses: []provider.Response{
-		{Message: provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "list_instances", Arguments: json.RawMessage(`{}`)}}}},
-		{Message: provider.Message{Role: provider.RoleAssistant, Content: "共 1 个实例，prod 状态正常；数据来自控制平面快照。"}},
+		{Message: provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "list_instances", Arguments: json.RawMessage(`{}`)}}}, Usage: provider.Usage{
+			InputTokens: 100, TotalTokens: 100, CachedInputTokens: 80, CacheObservedInputTokens: 100,
+		}},
+		{Message: provider.Message{Role: provider.RoleAssistant, Content: "共 1 个实例，prod 状态正常；数据来自控制平面快照。"}, Usage: provider.Usage{
+			InputTokens: 120, OutputTokens: 20, TotalTokens: 140, CachedInputTokens: 90, CacheObservedInputTokens: 120,
+		}},
 	}}
 	processor, err := New(db, cipher, channels,
 		func(context.Context) (provider.Client, *model.AssistantModelProfile, error) {
@@ -152,6 +152,8 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	require.NoError(t, db.First(&run).Error)
 	require.Equal(t, model.AssistantRunStatusSucceeded, run.Status)
 	require.EqualValues(t, 75, run.DeadlineAt-run.StartedAt)
+	require.EqualValues(t, 170, run.CachedInputTokens)
+	require.EqualValues(t, 220, run.CacheObservedInputTokens)
 	require.Len(t, modelClient.requests, 2)
 	require.Len(t, modelClient.requests[0].Messages, 2)
 	require.Equal(t, provider.RoleUser, modelClient.requests[0].Messages[1].Role)

@@ -97,9 +97,10 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 	seenCallIDs := make(map[string]struct{})
 
 	for step := 1; step <= r.config.MaxSteps; step++ {
-		response, err := r.client.Generate(runContext, provider.Request{
+		request := provider.Request{
 			Messages: messages, Tools: definitions, MaxOutputTokens: r.config.MaxOutputTokens,
-		})
+		}
+		response, err := generate(runContext, r.client, request)
 		if err != nil {
 			return outcome, err
 		}
@@ -169,6 +170,15 @@ func addUsage(total *provider.Usage, current provider.Usage) {
 	total.InputTokens += current.InputTokens
 	total.OutputTokens += current.OutputTokens
 	total.TotalTokens += current.TotalTokens
+	total.CachedInputTokens += current.CachedInputTokens
+	total.CacheObservedInputTokens += current.CacheObservedInputTokens
+}
+
+func generate(ctx context.Context, client provider.Client, request provider.Request) (provider.Response, error) {
+	if streaming, ok := client.(provider.StreamingClient); ok {
+		return streaming.GenerateStream(ctx, request)
+	}
+	return client.Generate(ctx, request)
 }
 
 func hashArguments(arguments json.RawMessage) string {

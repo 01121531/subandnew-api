@@ -182,6 +182,9 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err := registerListInstances(registry, db); err != nil {
 		return nil, err
 	}
+	if err := registerRuntimeContext(registry, db); err != nil {
+		return nil, err
+	}
 	if err := registerDashboardSummary(registry, db); err != nil {
 		return nil, err
 	}

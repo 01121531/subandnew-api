@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -90,37 +92,88 @@ func chatCompletionsPath(basePath string) string {
 }
 
 func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) (Response, error) {
+	return c.generateJSON(ctx, request)
+}
+
+func (c *OpenAICompatibleClient) GenerateStream(ctx context.Context, request Request) (Response, error) {
+	if err := c.validateRequest(request); err != nil {
+		return Response{}, err
+	}
+	response, received, err := c.generateSSE(ctx, request, true)
+	if err == nil || received || !streamCompatibilityError(err) {
+		return response, err
+	}
+	response, received, err = c.generateSSE(ctx, request, false)
+	if err == nil || received || !streamCompatibilityError(err) {
+		return response, err
+	}
+	return c.generateJSON(ctx, request)
+}
+
+func (c *OpenAICompatibleClient) generateJSON(ctx context.Context, request Request) (Response, error) {
+	if err := c.validateRequest(request); err != nil {
+		return Response{}, err
+	}
+	payload, err := c.requestPayload(request)
+	if err != nil {
+		return Response{}, err
+	}
+	response, err := c.doRequest(ctx, payload)
+	if err != nil {
+		return Response{}, err
+	}
+	defer response.Body.Close()
+	responseBody, err := readLimitedBody(response.Body)
+	if err != nil {
+		return Response{}, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return Response{}, decodeHTTPError(response.StatusCode, responseBody)
+	}
+	return decodeOpenAIResponse(responseBody)
+}
+
+func (c *OpenAICompatibleClient) validateRequest(request Request) error {
 	if c == nil || c.httpClient == nil {
-		return Response{}, errors.New("assistant model client is nil")
+		return errors.New("assistant model client is nil")
 	}
 	if len(request.Messages) == 0 {
-		return Response{}, fmt.Errorf("%w: at least one message is required", ErrInvalidRequest)
+		return fmt.Errorf("%w: at least one message is required", ErrInvalidRequest)
 	}
 	for _, message := range request.Messages {
 		if !validRole(message.Role) {
-			return Response{}, fmt.Errorf("%w: unsupported message role %q", ErrInvalidRequest, message.Role)
+			return fmt.Errorf("%w: unsupported message role %q", ErrInvalidRequest, message.Role)
 		}
 	}
+	for _, tool := range request.Tools {
+		if strings.TrimSpace(tool.Name) == "" || len(tool.InputSchema) == 0 || !json.Valid(tool.InputSchema) {
+			return fmt.Errorf("%w: tool name and valid schema are required", ErrInvalidRequest)
+		}
+	}
+	return nil
+}
 
+func (c *OpenAICompatibleClient) requestPayload(request Request) (openAIRequest, error) {
 	payload := openAIRequest{Model: c.model, Messages: make([]openAIMessage, 0, len(request.Messages)), MaxTokens: request.MaxOutputTokens}
 	for _, message := range request.Messages {
 		payload.Messages = append(payload.Messages, toOpenAIMessage(message))
 	}
 	for _, tool := range request.Tools {
-		if strings.TrimSpace(tool.Name) == "" || len(tool.InputSchema) == 0 || !json.Valid(tool.InputSchema) {
-			return Response{}, fmt.Errorf("%w: tool name and valid schema are required", ErrInvalidRequest)
-		}
 		payload.Tools = append(payload.Tools, openAITool{Type: "function", Function: openAIFunction{
 			Name: tool.Name, Description: tool.Description, Parameters: tool.InputSchema,
 		}})
 	}
+	return payload, nil
+}
+
+func (c *OpenAICompatibleClient) doRequest(ctx context.Context, payload openAIRequest) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return Response{}, fmt.Errorf("encode assistant model request: %w", err)
+		return nil, fmt.Errorf("encode assistant model request: %w", err)
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Response{}, fmt.Errorf("create assistant model request: %w", err)
+		return nil, fmt.Errorf("create assistant model request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -129,21 +182,23 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) 
 
 	response, err := c.httpClient.Do(httpRequest)
 	if err != nil {
-		return Response{}, fmt.Errorf("send assistant model request: %w", err)
+		return nil, fmt.Errorf("send assistant model request: %w", err)
 	}
-	defer response.Body.Close()
-	limited := io.LimitReader(response.Body, maxProviderResponseBytes+1)
-	responseBody, err := io.ReadAll(limited)
+	return response, nil
+}
+
+func readLimitedBody(body io.Reader) ([]byte, error) {
+	responseBody, err := io.ReadAll(io.LimitReader(body, maxProviderResponseBytes+1))
 	if err != nil {
-		return Response{}, fmt.Errorf("read assistant model response: %w", err)
+		return nil, fmt.Errorf("read assistant model response: %w", err)
 	}
 	if len(responseBody) > maxProviderResponseBytes {
-		return Response{}, errors.New("assistant model response exceeds size limit")
+		return nil, errors.New("assistant model response exceeds size limit")
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return Response{}, decodeHTTPError(response.StatusCode, responseBody)
-	}
+	return responseBody, nil
+}
 
+func decodeOpenAIResponse(responseBody []byte) (Response, error) {
 	var decoded openAIResponse
 	if err := json.Unmarshal(responseBody, &decoded); err != nil {
 		return Response{}, errors.New("decode assistant model response")
@@ -159,10 +214,162 @@ func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) 
 	return Response{
 		Message:      message,
 		FinishReason: choice.FinishReason,
-		Usage: Usage{
-			InputTokens: decoded.Usage.PromptTokens, OutputTokens: decoded.Usage.CompletionTokens, TotalTokens: decoded.Usage.TotalTokens,
-		},
+		Usage:        decoded.Usage.providerUsage(),
 	}, nil
+}
+
+func (c *OpenAICompatibleClient) generateSSE(ctx context.Context, request Request, includeUsage bool) (Response, bool, error) {
+	payload, err := c.requestPayload(request)
+	if err != nil {
+		return Response{}, false, err
+	}
+	payload.Stream = true
+	if includeUsage {
+		payload.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+	}
+	response, err := c.doRequest(ctx, payload)
+	if err != nil {
+		return Response{}, false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, readErr := readLimitedBody(response.Body)
+		if readErr != nil {
+			return Response{}, false, readErr
+		}
+		return Response{}, false, decodeHTTPError(response.StatusCode, body)
+	}
+	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "application/json") {
+		body, readErr := readLimitedBody(response.Body)
+		if readErr != nil {
+			return Response{}, true, readErr
+		}
+		decoded, decodeErr := decodeOpenAIResponse(body)
+		return decoded, true, decodeErr
+	}
+	return decodeOpenAIStream(response.Body)
+}
+
+type streamToolCall struct {
+	id        string
+	name      string
+	arguments strings.Builder
+}
+
+func decodeOpenAIStream(body io.Reader) (Response, bool, error) {
+	limited := &io.LimitedReader{R: body, N: maxProviderResponseBytes + 1}
+	scanner := bufio.NewScanner(limited)
+	scanner.Buffer(make([]byte, 64*1024), maxProviderResponseBytes)
+	result := Response{Message: Message{Role: RoleAssistant}}
+	toolCalls := map[int]*streamToolCall{}
+	received := false
+	done := false
+	dataLines := make([]string, 0, 1)
+	flush := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		data := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		if strings.TrimSpace(data) == "[DONE]" {
+			done = true
+			return nil
+		}
+		var chunk openAIStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return errors.New("decode assistant model stream")
+		}
+		received = true
+		if chunk.Usage != nil {
+			result.Usage = chunk.Usage.providerUsage()
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Role != "" {
+				result.Message.Role = choice.Delta.Role
+			}
+			result.Message.Content += choice.Delta.Content
+			if choice.FinishReason != "" {
+				result.FinishReason = choice.FinishReason
+			}
+			for _, delta := range choice.Delta.ToolCalls {
+				call := toolCalls[delta.Index]
+				if call == nil {
+					call = &streamToolCall{}
+					toolCalls[delta.Index] = call
+				}
+				if delta.ID != "" {
+					call.id = delta.ID
+				}
+				call.name += delta.Function.Name
+				call.arguments.WriteString(delta.Function.Arguments)
+			}
+		}
+		return nil
+	}
+	for scanner.Scan() {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		if line == "" {
+			if err := flush(); err != nil {
+				return Response{}, received, err
+			}
+			if done {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if limited.N <= 0 || strings.Contains(strings.ToLower(err.Error()), "token too long") {
+			return Response{}, received, errors.New("assistant model response exceeds size limit")
+		}
+		return Response{}, received, fmt.Errorf("read assistant model stream: %w", err)
+	}
+	if limited.N <= 0 {
+		return Response{}, received, errors.New("assistant model response exceeds size limit")
+	}
+	if !done {
+		if err := flush(); err != nil {
+			return Response{}, received, err
+		}
+		if result.FinishReason == "" {
+			return Response{}, received, errors.New("assistant model stream ended before completion")
+		}
+	}
+	if !received {
+		return Response{}, false, errors.New("assistant model stream has no events")
+	}
+	indexes := make([]int, 0, len(toolCalls))
+	for index := range toolCalls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		call := toolCalls[index]
+		arguments := call.arguments.String()
+		if strings.TrimSpace(call.id) == "" || strings.TrimSpace(call.name) == "" || !json.Valid([]byte(arguments)) {
+			return Response{}, true, errors.New("assistant model returned an invalid tool call")
+		}
+		result.Message.ToolCalls = append(result.Message.ToolCalls, ToolCall{ID: call.id, Name: call.name, Arguments: json.RawMessage(arguments)})
+	}
+	return result, true, nil
+}
+
+func streamCompatibilityError(err error) bool {
+	var httpError *HTTPError
+	if !errors.As(err, &httpError) {
+		return false
+	}
+	if httpError.StatusCode == http.StatusUnsupportedMediaType {
+		return true
+	}
+	if httpError.StatusCode != http.StatusBadRequest && httpError.StatusCode != http.StatusUnprocessableEntity {
+		return false
+	}
+	detail := strings.ToLower(httpError.Code + " " + httpError.Message)
+	return strings.Contains(detail, "stream") || strings.Contains(detail, "include_usage") || strings.Contains(detail, "unsupported")
 }
 
 func validRole(role string) bool {
@@ -175,10 +382,16 @@ func validRole(role string) bool {
 }
 
 type openAIRequest struct {
-	Model     string          `json:"model"`
-	Messages  []openAIMessage `json:"messages"`
-	Tools     []openAITool    `json:"tools,omitempty"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
+	Model         string               `json:"model"`
+	Messages      []openAIMessage      `json:"messages"`
+	Tools         []openAITool         `json:"tools,omitempty"`
+	MaxTokens     int                  `json:"max_tokens,omitempty"`
+	Stream        bool                 `json:"stream,omitempty"`
+	StreamOptions *openAIStreamOptions `json:"stream_options,omitempty"`
+}
+
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAIMessage struct {
@@ -201,6 +414,7 @@ type openAIFunction struct {
 }
 
 type openAIToolCall struct {
+	Index    int    `json:"index,omitempty"`
 	ID       string `json:"id"`
 	Type     string `json:"type"`
 	Function struct {
@@ -214,11 +428,50 @@ type openAIResponse struct {
 		Message      openAIMessage `json:"message"`
 		FinishReason string        `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage openAIUsage `json:"usage"`
+}
+
+type openAIStreamChunk struct {
+	Choices []struct {
+		Delta        openAIMessage `json:"delta"`
+		FinishReason string        `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *openAIUsage `json:"usage,omitempty"`
+}
+
+type openAIUsage struct {
+	PromptTokens       int `json:"prompt_tokens"`
+	CompletionTokens   int `json:"completion_tokens"`
+	TotalTokens        int `json:"total_tokens"`
+	PromptTokenDetails *struct {
+		CachedTokens *int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+	PromptCacheHitTokens  *int `json:"prompt_cache_hit_tokens,omitempty"`
+	PromptCacheMissTokens *int `json:"prompt_cache_miss_tokens,omitempty"`
+}
+
+func (usage openAIUsage) providerUsage() Usage {
+	result := Usage{InputTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens}
+	if usage.PromptTokenDetails != nil && usage.PromptTokenDetails.CachedTokens != nil {
+		result.CachedInputTokens = max(0, *usage.PromptTokenDetails.CachedTokens)
+		result.CacheObservedInputTokens = max(0, usage.PromptTokens)
+		return result
+	}
+	if usage.PromptCacheHitTokens != nil || usage.PromptCacheMissTokens != nil {
+		hit, miss := 0, 0
+		if usage.PromptCacheHitTokens != nil {
+			hit = max(0, *usage.PromptCacheHitTokens)
+		}
+		if usage.PromptCacheMissTokens != nil {
+			miss = max(0, *usage.PromptCacheMissTokens)
+		}
+		result.CachedInputTokens = hit
+		result.CacheObservedInputTokens = hit + miss
+		if result.CacheObservedInputTokens == 0 && usage.PromptTokens > 0 {
+			result.CacheObservedInputTokens = usage.PromptTokens
+		}
+	}
+	return result
 }
 
 func toOpenAIMessage(message Message) openAIMessage {

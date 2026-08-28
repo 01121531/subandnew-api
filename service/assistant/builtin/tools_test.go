@@ -75,6 +75,24 @@ func TestAssistantToolTimesUseSingleShanghaiRepresentation(t *testing.T) {
 	require.NotContains(t, string(encoded), jsonNumber(observedAt))
 }
 
+func TestRuntimeContextReturnsShanghaiTimeAndEffectiveDefault(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	require.NoError(t, db.Model(&model.AssistantIdentity{}).Where("id = ?", execution.IdentityID).Update("default_instance_id", visible.Id).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "get_runtime_context", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	var output runtimeContextOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, assistantTimezone, output.Timezone)
+	require.Equal(t, visible.Id, *output.DefaultInstanceID)
+	require.Equal(t, visible.Name, output.DefaultInstance)
+	parsed, err := time.Parse(time.RFC3339, output.CurrentTime)
+	require.NoError(t, err)
+	_, offset := parsed.Zone()
+	require.Equal(t, 8*60*60, offset)
+}
+
 func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)

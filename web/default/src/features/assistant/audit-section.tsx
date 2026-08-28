@@ -102,6 +102,54 @@ function formatDuration(run: AssistantRun, t: TFunction) {
   return t('{{count}} s', { count: (milliseconds / 1000).toFixed(1) })
 }
 
+function CacheUsage(props: { run: AssistantRun }) {
+  const { t } = useTranslation()
+  const observedValue = Number(props.run.cache_observed_input_tokens)
+  const observed = Number.isFinite(observedValue)
+    ? Math.max(0, observedValue)
+    : 0
+  if (observed === 0) {
+    return (
+      <p className='text-muted-foreground mt-1 text-xs'>
+        {t('Cache metrics unavailable')}
+      </p>
+    )
+  }
+
+  const cachedValue = Number(props.run.cached_input_tokens)
+  const cached = Math.min(
+    observed,
+    Number.isFinite(cachedValue) ? Math.max(0, cachedValue) : 0
+  )
+  const uncached = observed - cached
+  const rate = (cached / observed) * 100
+  const inputValue = Number(props.run.input_tokens)
+  const inputTokens = Number.isFinite(inputValue) ? Math.max(0, inputValue) : 0
+  const complete = observed >= inputTokens
+
+  return (
+    <div className='mt-1 space-y-1 text-xs'>
+      <div className='flex flex-wrap items-center gap-1.5'>
+        <span className='text-muted-foreground'>
+          {t('{{cached}} cached / {{observed}} observed', {
+            cached: cached.toLocaleString(),
+            observed: observed.toLocaleString(),
+          })}
+        </span>
+        <Badge variant='outline' className='h-5 px-1.5 text-[10px]'>
+          {complete ? t('Complete report') : t('Partial report')}
+        </Badge>
+      </div>
+      <p className='text-muted-foreground'>
+        {t('{{rate}} hit rate · {{uncached}} uncached', {
+          rate: `${rate.toFixed(1)}%`,
+          uncached: uncached.toLocaleString(),
+        })}
+      </p>
+    </div>
+  )
+}
+
 function argumentHash(redacted?: string) {
   if (!redacted) return ''
   return redacted.match(/[a-fA-F0-9]{64}/)?.[0] ?? ''
@@ -261,6 +309,7 @@ function RunRow(props: {
               output: props.run.output_tokens,
             })}
           </dd>
+          <CacheUsage run={props.run} />
         </div>
         <div>
           <dt className='text-muted-foreground text-xs'>{t('Started')}</dt>
