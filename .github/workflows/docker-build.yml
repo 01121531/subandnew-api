@@ -9,7 +9,29 @@ env:
   IMAGE_NAME: ghcr.io/01121531/subandnew-api
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '>=1.25.1'
+      - name: Verify source
+        run: |
+          go test ./... -count=1
+          go vet ./...
+          cd web
+          bun install --frozen-lockfile
+          cd default
+          bun run typecheck
+          bun run lint
+          bun run build
+
   publish:
+    needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: read

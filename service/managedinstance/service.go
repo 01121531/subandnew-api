@@ -63,6 +63,7 @@ type UpdateInput struct {
 }
 
 type ListFilter struct {
+	IDs              []int64
 	Kind             string
 	Environment      string
 	Status           string
@@ -209,6 +210,9 @@ func List(filter ListFilter) (*ListResult, error) {
 		filter.PageSize = 100
 	}
 	query := model.DB.Model(&model.ManagedInstance{})
+	if len(filter.IDs) > 0 {
+		query = query.Where("id IN ?", filter.IDs)
+	}
 	if filter.Kind != "" {
 		query = query.Where("kind = ?", filter.Kind)
 	}

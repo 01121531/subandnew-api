@@ -8,6 +8,7 @@ License, or (at your option) any later version.
 */
 import {
   BellRing,
+  Bot,
   LayoutDashboard,
   FileClock,
   ScrollText,
@@ -44,6 +45,11 @@ export function useSidebarData(): SidebarData {
     user,
     ADMIN_PERMISSION_RESOURCES.BILLING_ALERT,
     ADMIN_PERMISSION_ACTIONS.VIEW
+  )
+  const canManageAssistant = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.ASSISTANT,
+    ADMIN_PERMISSION_ACTIONS.MANAGE
   )
 
   return {
@@ -92,6 +98,15 @@ export function useSidebarData(): SidebarData {
                   url: '/billing-alerts',
                   activeUrls: ['/billing-alerts', '/billing-alert-records'],
                   icon: BellRing,
+                },
+              ]
+            : []),
+          ...(canManageAssistant
+            ? [
+                {
+                  title: t('AI Assistant'),
+                  url: '/assistant',
+                  icon: Bot,
                 },
               ]
             : []),

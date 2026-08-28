@@ -6,6 +6,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/i18n"
+	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,18 @@ func authHelper(c *gin.Context, minRole int) {
 		c.Abort()
 		return
 	}
+	user, err := model.GetUserById(id, false)
+	if err != nil || user == nil || user.Id != id {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn),
+		})
+		c.Abort()
+		return
+	}
+	username = user.Username
+	role = user.Role
+	status = user.Status
 	if status != common.UserStatusEnabled {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,

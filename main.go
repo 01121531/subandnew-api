@@ -24,6 +24,8 @@ import (
 	"github.com/01121531/subandnew-api/pkg/systemupdate"
 	"github.com/01121531/subandnew-api/router"
 	"github.com/01121531/subandnew-api/service"
+	assistantsecrets "github.com/01121531/subandnew-api/service/assistant/secrets"
+	assistantworker "github.com/01121531/subandnew-api/service/assistant/worker"
 	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/billingalert"
 	_ "github.com/01121531/subandnew-api/setting/performance_setting"
@@ -84,6 +86,9 @@ func main() {
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
 	}
+	if strings.TrimSpace(os.Getenv("SESSION_SECRET")) == "" {
+		common.SysError("SESSION_SECRET is not configured; sessions will be invalidated on restart and cannot be shared across nodes")
+	}
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
@@ -100,6 +105,20 @@ func main() {
 	service.StartManagedDashboardCollector()
 	service.StartManagedConductorRealtimeCollector()
 	service.StartManagedPollingRealtimeCollector()
+	var aiAssistantWorker *assistantworker.Worker
+	if common.IsMasterNode && !strings.EqualFold(strings.TrimSpace(os.Getenv("ASSISTANT_WORKER_ENABLED")), "false") {
+		configuredWorker, workerErr := assistantworker.NewDefault(model.DB, common.NodeName)
+		switch {
+		case workerErr == nil:
+			aiAssistantWorker = configuredWorker
+			aiAssistantWorker.Start()
+			common.SysLog("AI assistant worker started")
+		case errors.Is(workerErr, assistantsecrets.ErrKeyNotConfigured):
+			common.SysLog("AI assistant worker disabled: ASSISTANT_SECRET_KEY or ASSISTANT_SECRET_KEYS is not configured")
+		default:
+			common.SysError("AI assistant worker failed to initialize: " + workerErr.Error())
+		}
+	}
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
@@ -116,6 +135,15 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	trustedProxies := make([]string, 0)
+	for _, proxy := range strings.Split(os.Getenv("TRUSTED_PROXIES"), ",") {
+		if proxy = strings.TrimSpace(proxy); proxy != "" {
+			trustedProxies = append(trustedProxies, proxy)
+		}
+	}
+	if err := server.SetTrustedProxies(trustedProxies); err != nil {
+		common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
+	}
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -189,6 +217,11 @@ func main() {
 		// "sql: database is closed" during forced upgrade termination.
 		if closeErr := srv.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
 			common.SysError(fmt.Sprintf("failed to close active server connections: %v", closeErr))
+		}
+	}
+	if aiAssistantWorker != nil {
+		if err := aiAssistantWorker.Stop(ctx); err != nil {
+			common.SysError("AI assistant worker did not stop before shutdown deadline: " + err.Error())
 		}
 	}
 	if err := service.StopManagedConductorRealtimeCollector(ctx); err != nil {

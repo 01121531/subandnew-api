@@ -33,6 +33,7 @@ import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedBillingAlertsIndexRouteImport } from './routes/_authenticated/billing-alerts/index'
 import { Route as AuthenticatedBillingAlertRecordsIndexRouteImport } from './routes/_authenticated/billing-alert-records/index'
+import { Route as AuthenticatedAssistantIndexRouteImport } from './routes/_authenticated/assistant/index'
 import { Route as AuthenticatedAccountManagementIndexRouteImport } from './routes/_authenticated/account-management/index'
 import { Route as AuthenticatedSystemSettingsInspectionAlertsRouteImport } from './routes/_authenticated/system-settings/inspection-alerts'
 import { Route as AuthenticatedInstancesIdRouteImport } from './routes/_authenticated/instances/$id'
@@ -170,6 +171,12 @@ const AuthenticatedBillingAlertRecordsIndexRoute =
     path: '/billing-alert-records/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAssistantIndexRoute =
+  AuthenticatedAssistantIndexRouteImport.update({
+    id: '/assistant/',
+    path: '/assistant/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAccountManagementIndexRoute =
   AuthenticatedAccountManagementIndexRouteImport.update({
     id: '/account-management/',
@@ -236,6 +243,7 @@ export interface FileRoutesByFullPath {
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/account-management/': typeof AuthenticatedAccountManagementIndexRoute
+  '/assistant/': typeof AuthenticatedAssistantIndexRoute
   '/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -267,6 +275,7 @@ export interface FileRoutesByTo {
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/account-management': typeof AuthenticatedAccountManagementIndexRoute
+  '/assistant': typeof AuthenticatedAssistantIndexRoute
   '/billing-alert-records': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts': typeof AuthenticatedBillingAlertsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
@@ -302,6 +311,7 @@ export interface FileRoutesById {
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/_authenticated/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
   '/_authenticated/account-management/': typeof AuthenticatedAccountManagementIndexRoute
+  '/_authenticated/assistant/': typeof AuthenticatedAssistantIndexRoute
   '/_authenticated/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/_authenticated/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/instances/$id'
     | '/system-settings/inspection-alerts'
     | '/account-management/'
+    | '/assistant/'
     | '/billing-alert-records/'
     | '/billing-alerts/'
     | '/dashboard/'
@@ -367,6 +378,7 @@ export interface FileRouteTypes {
     | '/instances/$id'
     | '/system-settings/inspection-alerts'
     | '/account-management'
+    | '/assistant'
     | '/billing-alert-records'
     | '/billing-alerts'
     | '/dashboard'
@@ -401,6 +413,7 @@ export interface FileRouteTypes {
     | '/_authenticated/instances/$id'
     | '/_authenticated/system-settings/inspection-alerts'
     | '/_authenticated/account-management/'
+    | '/_authenticated/assistant/'
     | '/_authenticated/billing-alert-records/'
     | '/_authenticated/billing-alerts/'
     | '/_authenticated/dashboard/'
@@ -600,6 +613,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedBillingAlertRecordsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/assistant/': {
+      id: '/_authenticated/assistant/'
+      path: '/assistant'
+      fullPath: '/assistant/'
+      preLoaderRoute: typeof AuthenticatedAssistantIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/account-management/': {
       id: '/_authenticated/account-management/'
       path: '/account-management'
@@ -710,6 +730,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedInstancesIdRoute: typeof AuthenticatedInstancesIdRoute
   AuthenticatedAccountManagementIndexRoute: typeof AuthenticatedAccountManagementIndexRoute
+  AuthenticatedAssistantIndexRoute: typeof AuthenticatedAssistantIndexRoute
   AuthenticatedBillingAlertRecordsIndexRoute: typeof AuthenticatedBillingAlertRecordsIndexRoute
   AuthenticatedBillingAlertsIndexRoute: typeof AuthenticatedBillingAlertsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
@@ -728,6 +749,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInstancesIdRoute: AuthenticatedInstancesIdRoute,
   AuthenticatedAccountManagementIndexRoute:
     AuthenticatedAccountManagementIndexRoute,
+  AuthenticatedAssistantIndexRoute: AuthenticatedAssistantIndexRoute,
   AuthenticatedBillingAlertRecordsIndexRoute:
     AuthenticatedBillingAlertRecordsIndexRoute,
   AuthenticatedBillingAlertsIndexRoute: AuthenticatedBillingAlertsIndexRoute,

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -77,13 +78,37 @@ type ConnectorStream struct {
 	Body       io.ReadCloser
 }
 
+// NewRestrictedHTTPClient builds an HTTP client with the same DNS rebinding,
+// private-network and redirect protections used for managed instances. It is
+// intended for other administrator-configured upstreams such as AI providers.
+func NewRestrictedHTTPClient(target string, timeout time.Duration) (*http.Client, error) {
+	policy, err := ConnectorPolicyFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	instance := &model.ManagedInstance{BaseURL: target, TLSVerify: true, RequestTimeoutSeconds: int(timeout.Seconds())}
+	connector, err := NewConnector(instance, policy)
+	if err != nil {
+		return nil, err
+	}
+	client := *connector.client
+	client.Timeout = timeout
+	return &client, nil
+}
+
 func ConnectorPolicyFromEnvironment() (ConnectorPolicy, error) {
-	allowed, err := parseAllowedCIDRs("0.0.0.0/0,::/0")
+	allowed, err := parseAllowedCIDRs(os.Getenv(managedInstanceAllowedCIDRsEnv))
+	if err != nil {
+		return ConnectorPolicy{}, err
+	}
+	allowed = append(allowed, connectorLocalProxyCIDRs()...)
+	ports, err := parseAllowedPorts(os.Getenv(managedInstanceAllowedPortsEnv))
 	if err != nil {
 		return ConnectorPolicy{}, err
 	}
 	return ConnectorPolicy{
-		AllowedCIDRs: allowed, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
+		AllowedCIDRs: allowed, AllowedHosts: parseAllowedHosts(os.Getenv(managedInstanceAllowedHostsEnv)),
+		AllowedPorts: ports, Resolver: net.DefaultResolver, MaxBodyBytes: defaultConnectorMaxBodyBytes,
 	}, nil
 }
 
@@ -115,8 +140,11 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 		return nil, ErrInvalidInstance
 	}
 	baseURL, err := url.Parse(instance.BaseURL)
-	if err != nil || baseURL.Host == "" {
+	if err != nil || baseURL.Host == "" || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.User != nil {
 		return nil, ErrInvalidInstance
+	}
+	if !connectorHostAllowed(baseURL.Hostname(), policy.AllowedHosts) || !connectorPortAllowed(effectivePort(baseURL), policy.AllowedPorts) {
+		return nil, ErrConnectorTargetBlocked
 	}
 	if policy.Resolver == nil {
 		policy.Resolver = net.DefaultResolver
@@ -144,6 +172,9 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 		if err != nil {
 			return nil, err
 		}
+		if !connectorHostAllowed(host, policy.AllowedHosts) || !connectorPortAllowed(port, policy.AllowedPorts) {
+			return nil, ErrConnectorTargetBlocked
+		}
 		ips, err := resolveAllowedIPs(ctx, policy.Resolver, host, policy.AllowedCIDRs)
 		if err != nil {
 			return nil, err
@@ -166,6 +197,9 @@ func NewConnector(instance *model.ManagedInstance, policy ConnectorPolicy) (*Con
 		Timeout:   timeout,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
+				return ErrConnectorRedirect
+			}
+			if len(via) == 0 || !sameOrigin(via[0].URL, request.URL) {
 				return ErrConnectorRedirect
 			}
 			return nil

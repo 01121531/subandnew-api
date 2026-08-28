@@ -90,6 +90,8 @@ openssl rand -base64 32
 SESSION_SECRET=replace-with-a-random-session-secret
 MANAGED_INSTANCE_SECRET_KEY=replace-with-the-base64-value
 MANAGED_INSTANCE_SECRET_KEY_VERSION=v1
+ASSISTANT_SECRET_KEY=replace-with-a-separate-base64-value
+ASSISTANT_SECRET_CURRENT_KEY_VERSION=v1
 MANAGED_USAGE_EXPORT_DIR=./exports/usage-records
 ```
 
@@ -130,15 +132,31 @@ go build ./...
 | `SQLITE_PATH` | SQLite 文件路径 |
 | `REDIS_CONN_STRING` | 可选 Redis 连接 |
 | `SESSION_SECRET` | 登录会话签名密钥 |
+| `TRUSTED_PROXIES` | 可选反向代理 IP/CIDR 白名单；默认不信任代理转发头 |
 | `MANAGED_INSTANCE_SECRET_KEY` | 32 字节标准 Base64 主密钥 |
 | `MANAGED_INSTANCE_SECRET_KEY_VERSION` | 当前凭据密钥版本 |
 | `MANAGED_INSTANCE_PROBE_MAX_CONCURRENCY` | 巡检全局并发上限，默认 `8` |
 | `MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY` | 受控操作全局并发上限，默认 `4` |
 | `MANAGED_INSTANCE_OPERATION_MAX_PER_HOST` | 同一远端主机的操作并发上限，默认 `2` |
 | `MANAGED_INSTANCE_BATCH_MAX_CONCURRENCY` | 同一批次的操作并发上限，默认 `2` |
+| `MANAGED_INSTANCE_ALLOWED_CIDRS` | 允许实例和 AI 模型连接访问的额外 CIDR；默认阻断私网、回环与特殊用途网络 |
+| `MANAGED_INSTANCE_ALLOWED_HOSTS` | 可选目标主机白名单，支持 `*.example.com`；启用微信时需包含 `ilinkai.weixin.qq.com` 和实际使用的官方 `*.weixin.qq.com` 区域主机 |
+| `MANAGED_INSTANCE_ALLOWED_PORTS` | 可选目标端口白名单，例如 `443,8443` |
 | `MANAGED_USAGE_EXPORT_DIR` | 使用记录后台导出的持久化目录，默认 `./exports/usage-records`；Docker 建议设为 `/data/exports/usage-records` |
+| `ASSISTANT_SECRET_KEY` | AI 助手独立的 32 字节标准 Base64 密钥，用于模型密钥、微信凭据和对话内容加密 |
+| `ASSISTANT_SECRET_KEYS` | 可选版本化密钥环，JSON 格式；轮换期间保留旧版本以便解密历史数据 |
+| `ASSISTANT_SECRET_CURRENT_KEY_VERSION` | AI 助手当前写入密钥版本，默认 `v1` |
+| `ASSISTANT_WORKER_ENABLED` | 是否在 master 节点启动微信长轮询与消息 worker，默认 `true` |
 
-实例连接不限制目标 IP、主机或端口，并允许最多 5 次跨源重定向。请仅将控制台部署在受信任的内部网络，并严格限制实例管理权限。
+实例连接和 AI 模型端点默认拒绝私网、回环及特殊用途 IP，并在每次连接前重新校验 DNS 结果；仅允许最多 5 次同源重定向。确需访问内网实例或本地模型时，必须通过上述 CIDR、主机和端口白名单显式放行。
+
+## 微信 AI 助手
+
+Root 用户可从侧栏进入 `/assistant`：先配置一个启用的 OpenAI-compatible 主模型，再扫码连接具备 iLink/OpenBot 准入的微信账号。用户在该页面生成 5 分钟、单次使用的绑定码，并在微信中发送 `/绑定 XXXX-XXXX` 完成身份绑定。
+
+首版助手提供只读查询：实例清单与健康状态、Dashboard 汇总和实时指标。工具调用会在执行前重新校验当前用户状态、角色、细粒度权限和实例范围；微信凭据、模型密钥、context token、收发消息及短期对话记忆均加密存储。默认保留最近 12 条对话消息，发送 `/清空上下文` 可立即删除。
+
+生产部署建议使用 PostgreSQL。只有 master 节点运行 assistant worker，每个微信账号另有数据库租约；inbox/outbox 均持久化并带幂等键。未配置 `ASSISTANT_SECRET_KEY(S)` 时，管理 API 会拒绝保存密钥且 worker 不启动。
 
 ## 权限
 
@@ -154,6 +172,9 @@ go build ./...
 | `managed_instance.audit` | 查看详细审计信息 |
 | `managed_template.view` | 查看配置模板、绑定、漂移和差异 |
 | `managed_template.apply` | 管理模板、绑定并执行配置应用，仅 Root 默认拥有 |
+| `assistant.access` | 允许用户生成绑定码并通过微信使用只读助手 |
+| `assistant.manage` | 管理模型、微信通道与绑定，默认仅 Root 拥有 |
+| `assistant.audit` | 查看助手运行与工具审计，管理员默认拥有 |
 
 ## 验证
 

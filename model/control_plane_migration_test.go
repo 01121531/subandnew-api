@@ -13,6 +13,19 @@ import (
 )
 
 var expectedControlPlaneTables = []string{
+	"assistant_binding_codes",
+	"assistant_channel_leases",
+	"assistant_channel_secrets",
+	"assistant_channels",
+	"assistant_conversations",
+	"assistant_identities",
+	"assistant_identity_instance_scopes",
+	"assistant_inbox",
+	"assistant_messages",
+	"assistant_model_profiles",
+	"assistant_outbox",
+	"assistant_runs",
+	"assistant_tool_calls",
 	"authz_roles",
 	"billing_alert_events",
 	"billing_alert_exports",
@@ -86,6 +99,16 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.Equal(t, expectedControlPlaneTables, sqliteUserTables(t, db))
 	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatch{}, "uidx_managed_instance_batch_idempotency"))
 	require.True(t, db.Migrator().HasIndex(&ManagedInstanceOperationBatchItem{}, "uidx_managed_instance_batch_target"))
+	require.True(t, db.Migrator().HasIndex(&AssistantChannel{}, "uidx_assistant_channel_account"))
+	require.True(t, db.Migrator().HasIndex(&AssistantChannelSecret{}, "idx_assistant_channel_secrets_channel_id"))
+	require.True(t, db.Migrator().HasIndex(&AssistantIdentity{}, "uidx_assistant_identity_external"))
+	require.True(t, db.Migrator().HasIndex(&AssistantIdentityInstanceScope{}, "uidx_assistant_identity_instance"))
+	require.True(t, db.Migrator().HasIndex(&AssistantInboundEvent{}, "uidx_assistant_inbound_external"))
+	require.True(t, db.Migrator().HasIndex(&AssistantConversation{}, "uidx_assistant_conversation_peer"))
+	require.True(t, db.Migrator().HasIndex(&AssistantMessage{}, "uidx_assistant_message_turn"))
+	require.True(t, db.Migrator().HasIndex(&AssistantRun{}, "uidx_assistant_run_public_id"))
+	require.True(t, db.Migrator().HasIndex(&AssistantToolCall{}, "uidx_assistant_tool_call_order"))
+	require.True(t, db.Migrator().HasIndex(&AssistantOutbox{}, "uidx_assistant_outbox_reply_key"))
 	for _, column := range []string{"accounts_available_last", "accounts_total_last", "account_sample_count"} {
 		require.Truef(t, db.Migrator().HasColumn(&ManagedRPMHistory{}, column), "managed_rpm_history.%s must exist", column)
 	}

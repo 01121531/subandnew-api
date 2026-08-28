@@ -15,6 +15,7 @@ import (
 
 func TestProbeGenericDetectsClaudeGateway(t *testing.T) {
 	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/status", "/health", "/api/v1/auth/login", "/api/v1/system/health":
@@ -60,6 +61,7 @@ func TestProbeGenericDetectsClaudeGateway(t *testing.T) {
 
 func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
@@ -164,6 +166,7 @@ func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
 
 func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/api/admin/oauth-accounts", request.URL.Path)
 		response.Header().Set("Content-Type", "application/json")
@@ -192,6 +195,7 @@ func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	resetNewAPIRealtimeCacheForTest()
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
@@ -224,6 +228,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 
 func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {
 	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		require.Equal(t, "/api/admin/usage/keys", request.URL.Path)
 		require.Equal(t, "custom", request.URL.Query().Get("range"))

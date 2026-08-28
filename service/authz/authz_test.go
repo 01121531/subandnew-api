@@ -37,6 +37,9 @@ func TestInitSeedsControlPlanePoliciesOnce(t *testing.T) {
 	assert.True(t, Can(1, common.RoleRootUser, ManagedInstanceSecretRotate))
 	assert.True(t, Can(2, common.RoleAdminUser, ManagedInstanceView))
 	assert.True(t, Can(2, common.RoleAdminUser, ManagedInstanceUsageView))
+	assert.True(t, Can(2, common.RoleAdminUser, AssistantAccess))
+	assert.True(t, Can(2, common.RoleAdminUser, AssistantAudit))
+	assert.False(t, Can(2, common.RoleAdminUser, AssistantManage))
 	assert.False(t, Can(2, common.RoleAdminUser, ManagedInstanceOperate))
 	assert.False(t, Can(3, common.RoleCommonUser, ManagedInstanceView))
 }
