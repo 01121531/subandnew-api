@@ -394,7 +394,8 @@ function WeChatChannelSection() {
     queryFn: () => checkAssistantChannelLogin(login?.channel_id ?? 0),
     enabled:
       login != null && (login.state === 'pending' || login.state === 'scanned'),
-    retry: false,
+    retry: 2,
+    retryDelay: (attempt) => Math.min(2000, 500 * 2 ** attempt),
     refetchInterval: (query) => {
       const state = query.state.data?.state
       return state == null || state === 'pending' || state === 'scanned'

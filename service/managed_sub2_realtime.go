@@ -222,7 +222,9 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 		eventType = "status"
 	}
 	publishManagedRealtimeState(eventType, state)
-	if target.Kind == model.ManagedInstanceKindSub2API || target.Kind == model.ManagedInstanceKindClaudeGateway {
+	if target.Kind == model.ManagedInstanceKindSub2API ||
+		target.Kind == model.ManagedInstanceKindClaudeGateway ||
+		target.Kind == model.ManagedInstanceKindConductor {
 		publishManagedRealtimeState("accounts", state)
 	}
 	if err == nil && !state.Stale && state.RPM.Value != nil && state.RPM.CollectionStatus == model.ManagedInstanceCollectionSucceeded {

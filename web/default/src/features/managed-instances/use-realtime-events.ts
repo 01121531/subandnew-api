@@ -25,15 +25,37 @@ import type { ManagedInstanceRealtimeState } from './types'
 type StreamStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'error'
 
 const MAX_BACKOFF_MS = 30_000
+const EMPTY_METRIC = {
+  value: null,
+  unit: '',
+  collection_status: 'unsupported' as const,
+}
+
+type ManagedInstanceRealtimePatch = Partial<ManagedInstanceRealtimeState> &
+  Pick<ManagedInstanceRealtimeState, 'instance_id'>
+
+function initialRealtimeState(
+  instanceID: number
+): ManagedInstanceRealtimeState {
+  return {
+    instance_id: instanceID,
+    observed_at: 0,
+    stream_status: 'connecting',
+    stale: true,
+    rpm: EMPTY_METRIC,
+    rpm_capacity: EMPTY_METRIC,
+    success_rate: EMPTY_METRIC,
+  }
+}
 
 function parseEvent(
   eventType: string,
   data: string,
-  onState: (state: ManagedInstanceRealtimeState) => void
+  onState: (eventType: string, state: ManagedInstanceRealtimePatch) => void
 ) {
   if (!['rpm', 'accounts', 'sources', 'status'].includes(eventType)) return
   try {
-    onState(JSON.parse(data) as ManagedInstanceRealtimeState)
+    onState(eventType, JSON.parse(data) as ManagedInstanceRealtimePatch)
   } catch {
     // A malformed frame is isolated; the next complete state repairs the view.
   }
@@ -98,10 +120,18 @@ export function useManagedInstanceRealtimeEvents(
         `/api/managed-instances/realtime-events?${query.toString()}`,
         currentController.signal,
         (eventType, data) =>
-          parseEvent(eventType, data, (state) => {
+          parseEvent(eventType, data, (_topic, state) => {
             attempts = 0
             setStatus('open')
-            setStates((current) => ({ ...current, [state.instance_id]: state }))
+            setStates((current) => {
+              const previous =
+                current[state.instance_id] ??
+                initialRealtimeState(state.instance_id)
+              return {
+                ...current,
+                [state.instance_id]: { ...previous, ...state },
+              }
+            })
           })
       ).catch((error: unknown) => {
         if (disposed || currentController.signal.aborted) return

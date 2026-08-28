@@ -305,7 +305,7 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 	}
 	subscriptions := make([]subscription, 0, len(instanceIDs))
 	for _, instanceID := range instanceIDs {
-		events, unsubscribe, subscribeErr := service.SubscribeManagedRealtime(instanceID)
+		events, unsubscribe, subscribeErr := service.SubscribeManagedRealtime(instanceID, topics)
 		if subscribeErr != nil {
 			for _, item := range subscriptions {
 				item.unsubscribe()
@@ -365,7 +365,7 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 			if _, ok := topics[event.Type]; !ok {
 				continue
 			}
-			payload, marshalErr := json.Marshal(event.State)
+			payload, marshalErr := json.Marshal(service.ManagedRealtimeEventPayload(event))
 			if marshalErr != nil {
 				continue
 			}

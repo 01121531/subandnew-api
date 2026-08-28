@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/managedinstance"
@@ -29,7 +30,22 @@ var managedRealtimeSubscribers = struct {
 	items map[*managedRealtimeSubscriber]struct{}
 }{items: map[*managedRealtimeSubscriber]struct{}{}}
 
-func SubscribeManagedRealtime(instanceID int64) (<-chan ManagedRealtimeEvent, func(), error) {
+var managedRealtimeAccountPublishInterval = 30 * time.Second
+
+type managedRealtimeAccountPublishSlot struct {
+	lastPublished time.Time
+	pending       *managedinstance.ManagedRealtimeState
+	timer         *time.Timer
+}
+
+var managedRealtimeAccountPublishes = struct {
+	sync.Mutex
+	items map[int64]*managedRealtimeAccountPublishSlot
+}{items: map[int64]*managedRealtimeAccountPublishSlot{}}
+
+var managedRealtimeForceAccounts sync.Map
+
+func SubscribeManagedRealtime(instanceID int64, topics map[string]struct{}) (<-chan ManagedRealtimeEvent, func(), error) {
 	instance, err := managedinstance.Get(instanceID)
 	if err != nil {
 		return nil, nil, err
@@ -48,8 +64,11 @@ func SubscribeManagedRealtime(instanceID int64) (<-chan ManagedRealtimeEvent, fu
 				RPM: managedinstance.MetricSample{Unit: "request/min", CollectionStatus: model.ManagedInstanceCollectionUnsupported},
 			}
 		}
-		subscriber.events <- ManagedRealtimeEvent{Type: "status", State: state}
-		subscriber.events <- ManagedRealtimeEvent{Type: "rpm", State: state}
+		for _, topic := range []string{"status", "rpm", "accounts", "sources"} {
+			if _, requested := topics[topic]; requested {
+				subscriber.events <- ManagedRealtimeEvent{Type: topic, State: state}
+			}
+		}
 	}
 	var once sync.Once
 	unsubscribe := func() {
@@ -66,6 +85,62 @@ func SubscribeManagedRealtime(instanceID int64) (<-chan ManagedRealtimeEvent, fu
 }
 
 func publishManagedRealtimeState(eventType string, state managedinstance.ManagedRealtimeState) {
+	if eventType == "accounts" && state.Accounts != nil {
+		force := false
+		if _, requested := managedRealtimeForceAccounts.LoadAndDelete(state.InstanceID); requested {
+			force = true
+		}
+		publishManagedRealtimeAccounts(state, force)
+		return
+	}
+	broadcastManagedRealtimeState(eventType, state)
+}
+
+func publishManagedRealtimeAccounts(state managedinstance.ManagedRealtimeState, force bool) {
+	now := time.Now()
+	managedRealtimeAccountPublishes.Lock()
+	slot := managedRealtimeAccountPublishes.items[state.InstanceID]
+	if slot == nil {
+		slot = &managedRealtimeAccountPublishSlot{}
+		managedRealtimeAccountPublishes.items[state.InstanceID] = slot
+	}
+	if force || slot.lastPublished.IsZero() || now.Sub(slot.lastPublished) >= managedRealtimeAccountPublishInterval {
+		if slot.timer != nil {
+			slot.timer.Stop()
+			slot.timer = nil
+		}
+		slot.pending = nil
+		slot.lastPublished = now
+		managedRealtimeAccountPublishes.Unlock()
+		broadcastManagedRealtimeState("accounts", state)
+		return
+	}
+
+	latest := state
+	slot.pending = &latest
+	if slot.timer == nil {
+		remaining := managedRealtimeAccountPublishInterval - now.Sub(slot.lastPublished)
+		var timer *time.Timer
+		timer = time.AfterFunc(remaining, func() {
+			managedRealtimeAccountPublishes.Lock()
+			current := managedRealtimeAccountPublishes.items[state.InstanceID]
+			if current == nil || current.timer != timer || current.pending == nil {
+				managedRealtimeAccountPublishes.Unlock()
+				return
+			}
+			pending := *current.pending
+			current.pending = nil
+			current.timer = nil
+			current.lastPublished = time.Now()
+			managedRealtimeAccountPublishes.Unlock()
+			broadcastManagedRealtimeState("accounts", pending)
+		})
+		slot.timer = timer
+	}
+	managedRealtimeAccountPublishes.Unlock()
+}
+
+func broadcastManagedRealtimeState(eventType string, state managedinstance.ManagedRealtimeState) {
 	event := ManagedRealtimeEvent{Type: eventType, State: state}
 	managedRealtimeSubscribers.RLock()
 	defer managedRealtimeSubscribers.RUnlock()
@@ -88,6 +163,44 @@ func publishManagedRealtimeState(eventType string, state managedinstance.Managed
 	}
 }
 
+func ManagedRealtimeEventPayload(event ManagedRealtimeEvent) map[string]any {
+	state := event.State
+	payload := map[string]any{
+		"instance_id":     state.InstanceID,
+		"observed_at":     state.ObservedAt,
+		"last_attempt_at": state.LastAttemptAt,
+		"stream_status":   state.StreamStatus,
+		"stale":           state.Stale,
+		"error_code":      state.ErrorCode,
+	}
+	switch event.Type {
+	case "rpm":
+		payload["rpm"] = state.RPM
+		payload["rpm_capacity"] = state.RPMCapacity
+		payload["success_rate"] = state.SuccessRate
+		payload["success_rate_sample_count"] = state.SuccessRateSampleCount
+		payload["today_cost"] = state.TodayCost
+		payload["concurrency_used"] = state.ConcurrencyUsed
+		payload["concurrency_max"] = state.ConcurrencyMax
+		payload["concurrency_collection_status"] = state.ConcurrencyStatus
+	case "accounts":
+		payload["accounts_total"] = state.AccountsTotal
+		payload["accounts_available"] = state.AccountsAvailable
+		payload["accounts_rate_limited"] = state.AccountsRateLimited
+		payload["accounts_collection_status"] = state.AccountsCollectionStatus
+		payload["accounts_reporting"] = state.AccountsReporting
+		payload["active_sessions"] = state.ActiveSessions
+		if state.Accounts != nil {
+			payload["accounts"] = state.Accounts
+		}
+	case "sources":
+		if state.Sources != nil {
+			payload["sources"] = state.Sources
+		}
+	}
+	return payload
+}
+
 func RefreshManagedRealtime(instanceIDs []int64) ([]ManagedRealtimeRefreshView, error) {
 	if len(instanceIDs) == 0 || len(instanceIDs) > 100 {
 		return nil, fmt.Errorf("%w: realtime refresh requires 1 to 100 instances", managedinstance.ErrInvalidInstance)
@@ -106,6 +219,9 @@ func RefreshManagedRealtime(instanceIDs []int64) ([]ManagedRealtimeRefreshView, 
 		if err != nil {
 			return nil, err
 		}
+		if target.Kind == model.ManagedInstanceKindConductor || target.Kind == model.ManagedInstanceKindClaudeGateway {
+			managedRealtimeForceAccounts.Store(instanceID, struct{}{})
+		}
 		enqueued := enqueueManagedRealtimeTarget(target)
 		views = append(views, ManagedRealtimeRefreshView{InstanceID: instanceID, Enqueued: enqueued})
 	}
@@ -119,4 +235,13 @@ func resetManagedRealtimeSubscribersForTest() {
 		delete(managedRealtimeSubscribers.items, subscriber)
 	}
 	managedRealtimeSubscribers.Unlock()
+	managedRealtimeAccountPublishes.Lock()
+	for instanceID, slot := range managedRealtimeAccountPublishes.items {
+		if slot.timer != nil {
+			slot.timer.Stop()
+		}
+		delete(managedRealtimeAccountPublishes.items, instanceID)
+	}
+	managedRealtimeAccountPublishes.Unlock()
+	managedRealtimeForceAccounts.Clear()
 }

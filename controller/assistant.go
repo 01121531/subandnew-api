@@ -10,6 +10,7 @@ import (
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/binding"
+	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/01121531/subandnew-api/service/assistant/profile"
 	"github.com/01121531/subandnew-api/service/assistant/provider"
@@ -422,6 +423,28 @@ func assistantID(c *gin.Context, name string) (int64, bool) {
 }
 
 func assistantError(c *gin.Context, err error) {
+	switch wechatilink.KindOf(err) {
+	case wechatilink.ErrorKindInvalid:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_assistant_channel_request"})
+		return
+	case wechatilink.ErrorKindCanceled:
+		c.JSON(http.StatusRequestTimeout, gin.H{"success": false, "message": "assistant_channel_request_cancelled"})
+		return
+	case wechatilink.ErrorKindRateLimit:
+		c.JSON(http.StatusTooManyRequests, gin.H{"success": false, "message": "assistant_channel_rate_limited"})
+		return
+	case wechatilink.ErrorKindTimeout:
+		c.JSON(http.StatusGatewayTimeout, gin.H{"success": false, "message": "assistant_channel_timeout"})
+		return
+	case wechatilink.ErrorKindAuthentication, wechatilink.ErrorKindSessionExpired:
+		c.JSON(http.StatusGone, gin.H{"success": false, "message": "assistant_channel_login_expired"})
+		return
+	case wechatilink.ErrorKindDNS, wechatilink.ErrorKindTLS, wechatilink.ErrorKindTCP,
+		wechatilink.ErrorKindResponseTooLarge, wechatilink.ErrorKindHTTP,
+		wechatilink.ErrorKindDecode, wechatilink.ErrorKindAPI:
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": "assistant_channel_upstream_unavailable"})
+		return
+	}
 	switch {
 	case errors.Is(err, profile.ErrInvalidInput), errors.Is(err, binding.ErrInvalidBinding):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_assistant_request"})

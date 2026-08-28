@@ -131,6 +131,9 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 		return nil, err
 	}
 	if stored.QRCode == "" {
+		if channel.Status == model.AssistantChannelStatusReauthRequired {
+			return &LoginView{ChannelID: channel.ID, State: loginStateExpired, Channel: channel}, nil
+		}
 		return nil, ErrLoginExpired
 	}
 	client, err := s.client("", stored.BaseURL)
@@ -138,10 +141,13 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 		return nil, err
 	}
 	response, err := client.GetLoginStatus(ctx, stored.QRCode, strings.TrimSpace(verifyCode))
-	if err != nil {
+	if err != nil && !errors.Is(err, wechatilink.ErrSessionExpired) {
 		return nil, err
 	}
-	state, status := loginStatus(response.Status)
+	state, status := loginStateExpired, model.AssistantChannelStatusReauthRequired
+	if err == nil {
+		state, status = loginStatus(response.Status)
+	}
 	channel.Status = status
 	channel.UpdatedBy = channel.CreatedBy
 	if state == loginStateConnected {
@@ -159,13 +165,18 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 		stored.QRCode = ""
 		channel.AccountID = response.BotID
 		channel.Enabled = true
+		channel.ReauthReason = ""
+	} else if state == loginStateExpired {
+		stored.QRCode = ""
+		channel.Enabled = false
+		channel.ReauthReason = "login_expired"
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(channel).Error; err != nil {
 			return err
 		}
-		if state != loginStateConnected {
+		if state != loginStateConnected && state != loginStateExpired {
 			return nil
 		}
 		updated, err := s.encryptSecret(channel.ID, *stored)

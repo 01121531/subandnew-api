@@ -109,6 +109,51 @@ func TestChannelListDoesNotRequireSecretCipher(t *testing.T) {
 	require.ErrorIs(t, err, ErrChannelSecret)
 }
 
+func TestCheckLoginTreatsExpiredSessionAsLoginState(t *testing.T) {
+	statusRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/ilink/bot/get_bot_qrcode":
+			_, _ = response.Write([]byte(`{"qrcode":"expired-qr","qrcode_img_content":"qr-image"}`))
+		case "/ilink/bot/get_qrcode_status":
+			statusRequests++
+			_, _ = response.Write([]byte(`{"ret":1,"errcode":-14,"errmsg":"session expired"}`))
+		default:
+			response.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}))
+	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{7}, 32)}, "v1")
+	require.NoError(t, err)
+	service, err := NewService(db, cipher, Config{BaseURL: server.URL, HTTPClient: server.Client()})
+	require.NoError(t, err)
+
+	login, err := service.StartLogin(t.Context(), 7)
+	require.NoError(t, err)
+	expired, err := service.CheckLogin(t.Context(), login.ChannelID, "")
+	require.NoError(t, err)
+	require.Equal(t, loginStateExpired, expired.State)
+	require.Equal(t, model.AssistantChannelStatusReauthRequired, expired.Channel.Status)
+	require.False(t, expired.Channel.Enabled)
+	require.Equal(t, "login_expired", expired.Channel.ReauthReason)
+
+	again, err := service.CheckLogin(t.Context(), login.ChannelID, "")
+	require.NoError(t, err)
+	require.Equal(t, loginStateExpired, again.State)
+	require.Equal(t, 1, statusRequests)
+
+	var secret model.AssistantChannelSecret
+	require.NoError(t, db.Where("channel_id = ?", login.ChannelID).First(&secret).Error)
+	plaintext, err := cipher.Decrypt(channelSecretPurpose, strconv.FormatInt(login.ChannelID, 10), secret.KeyVersion, secret.Ciphertext)
+	require.NoError(t, err)
+	require.NotContains(t, string(plaintext), "expired-qr")
+}
+
 func countRows(t *testing.T, db *gorm.DB, value any) int64 {
 	t.Helper()
 	var count int64
