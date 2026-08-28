@@ -377,6 +377,7 @@ function WeChatChannelSection() {
   const channelsQuery = useQuery({
     queryKey: assistantQueryKeys.channels,
     queryFn: listAssistantChannels,
+    retry: false,
   })
   const startLoginMutation = useMutation({
     mutationFn: startAssistantChannelLogin,

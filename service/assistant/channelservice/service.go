@@ -80,13 +80,13 @@ func NewService(db *gorm.DB, cipher *secrets.Cipher, config Config) (*Service, e
 	if db == nil {
 		return nil, errors.New("assistant channel database is nil")
 	}
-	if cipher == nil {
-		return nil, ErrChannelSecret
-	}
 	return &Service{db: db, cipher: cipher, baseURL: strings.TrimSpace(config.BaseURL), httpClient: config.HTTPClient}, nil
 }
 
 func (s *Service) StartLogin(ctx context.Context, actorID int) (*LoginView, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, err
+	}
 	client, err := s.client("", s.baseURL)
 	if err != nil {
 		return nil, err
@@ -123,6 +123,9 @@ func (s *Service) StartLogin(ctx context.Context, actorID int) (*LoginView, erro
 }
 
 func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode string) (*LoginView, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, err
+	}
 	channel, stored, secretRow, err := s.loadChannel(ctx, channelID)
 	if err != nil {
 		return nil, err
@@ -209,6 +212,9 @@ func (s *Service) RemoveCredential(ctx context.Context, channelID int64, actorID
 }
 
 func (s *Service) ConnectedClient(ctx context.Context, channelID int64) (*wechatilink.Client, *model.AssistantChannel, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, nil, err
+	}
 	channel, stored, _, err := s.loadChannel(ctx, channelID)
 	if err != nil {
 		return nil, nil, err
@@ -224,6 +230,9 @@ func (s *Service) ConnectedClient(ctx context.Context, channelID int64) (*wechat
 // inbox rows and cursor in the same database transaction. Duplicate external
 // messages are ignored by the inbox unique key.
 func (s *Service) PollOnce(ctx context.Context, channelID int64) ([]int64, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, err
+	}
 	channel, stored, secretRow, err := s.loadChannel(ctx, channelID)
 	if err != nil {
 		return nil, err
@@ -291,6 +300,9 @@ func (s *Service) PollOnce(ctx context.Context, channelID int64) ([]int64, error
 }
 
 func (s *Service) LoadInbound(ctx context.Context, eventID int64) (*model.AssistantInboundEvent, *InboundPayload, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, nil, err
+	}
 	var event model.AssistantInboundEvent
 	if eventID <= 0 || s.db.WithContext(ctx).First(&event, eventID).Error != nil {
 		return nil, nil, errors.New("assistant inbound event not found")
@@ -346,6 +358,9 @@ func (s *Service) loadChannel(ctx context.Context, channelID int64) (*model.Assi
 }
 
 func (s *Service) encryptSecret(channelID int64, stored storedChannelSecret) (*model.AssistantChannelSecret, error) {
+	if err := s.requireCipher(); err != nil {
+		return nil, err
+	}
 	payload, err := json.Marshal(stored)
 	if err != nil {
 		return nil, err
@@ -355,6 +370,13 @@ func (s *Service) encryptSecret(channelID int64, stored storedChannelSecret) (*m
 		return nil, err
 	}
 	return &model.AssistantChannelSecret{ChannelID: channelID, Ciphertext: ciphertext, KeyVersion: version, Fingerprint: fingerprint}, nil
+}
+
+func (s *Service) requireCipher() error {
+	if s == nil || s.cipher == nil {
+		return ErrChannelSecret
+	}
+	return nil
 }
 
 func loginStatus(status wechatilink.LoginStatus) (modelLoginState, string) {

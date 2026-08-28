@@ -143,7 +143,7 @@ go build ./...
 | `MANAGED_INSTANCE_ALLOWED_HOSTS` | 可选目标主机白名单，支持 `*.example.com`；启用微信时需包含 `ilinkai.weixin.qq.com` 和实际使用的官方 `*.weixin.qq.com` 区域主机 |
 | `MANAGED_INSTANCE_ALLOWED_PORTS` | 可选目标端口白名单，例如 `443,8443` |
 | `MANAGED_USAGE_EXPORT_DIR` | 使用记录后台导出的持久化目录，默认 `./exports/usage-records`；Docker 建议设为 `/data/exports/usage-records` |
-| `ASSISTANT_SECRET_KEY` | AI 助手独立的 32 字节标准 Base64 密钥，用于模型密钥、微信凭据和对话内容加密 |
+| `ASSISTANT_SECRET_KEY` | AI 助手独立的 32 字节标准 Base64 密钥，用于模型密钥、微信凭据和对话内容加密；未设置时从 `MANAGED_INSTANCE_SECRET_KEY` 做用途隔离派生 |
 | `ASSISTANT_SECRET_KEYS` | 可选版本化密钥环，JSON 格式；轮换期间保留旧版本以便解密历史数据 |
 | `ASSISTANT_SECRET_CURRENT_KEY_VERSION` | AI 助手当前写入密钥版本，默认 `v1` |
 | `ASSISTANT_WORKER_ENABLED` | 是否在 master 节点启动微信长轮询与消息 worker，默认 `true` |
@@ -156,7 +156,7 @@ Root 用户可从侧栏进入 `/assistant`：先配置一个启用的 OpenAI-com
 
 首版助手提供只读查询：实例清单与健康状态、Dashboard 汇总和实时指标。工具调用会在执行前重新校验当前用户状态、角色、细粒度权限和实例范围；微信凭据、模型密钥、context token、收发消息及短期对话记忆均加密存储。默认保留最近 12 条对话消息，发送 `/清空上下文` 可立即删除。
 
-生产部署建议使用 PostgreSQL。只有 master 节点运行 assistant worker，每个微信账号另有数据库租约；inbox/outbox 均持久化并带幂等键。未配置 `ASSISTANT_SECRET_KEY(S)` 时，管理 API 会拒绝保存密钥且 worker 不启动。
+生产部署建议使用 PostgreSQL。只有 master 节点运行 assistant worker，每个微信账号另有数据库租约；inbox/outbox 均持久化并带幂等键。推荐配置独立的 `ASSISTANT_SECRET_KEY(S)`；未配置时会从 `MANAGED_INSTANCE_SECRET_KEY` 做用途隔离派生。两者均未配置时，涉及秘密的管理操作会被拒绝且 worker 不启动。
 
 ## 权限
 

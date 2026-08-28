@@ -176,7 +176,7 @@ func TestAssistantModelProfile(c *gin.Context) {
 }
 
 func ListAssistantChannels(c *gin.Context) {
-	service, err := assistantChannelService()
+	service, err := assistantChannelService(false)
 	if err != nil {
 		assistantError(c, err)
 		return
@@ -190,7 +190,7 @@ func ListAssistantChannels(c *gin.Context) {
 }
 
 func StartAssistantChannelLogin(c *gin.Context) {
-	service, err := assistantChannelService()
+	service, err := assistantChannelService(true)
 	if err != nil {
 		assistantError(c, err)
 		return
@@ -215,7 +215,7 @@ func CheckAssistantChannelLogin(c *gin.Context) {
 			return
 		}
 	}
-	service, err := assistantChannelService()
+	service, err := assistantChannelService(true)
 	if err != nil {
 		assistantError(c, err)
 		return
@@ -352,7 +352,7 @@ func RemoveAssistantChannelCredential(c *gin.Context) {
 	if !ok {
 		return
 	}
-	service, err := assistantChannelService()
+	service, err := assistantChannelService(false)
 	if err == nil {
 		err = service.RemoveCredential(c.Request.Context(), id, c.GetInt("id"))
 	}
@@ -401,9 +401,12 @@ func assistantProfileService(needsCipher bool) (*profile.Service, error) {
 	return profile.NewService(model.DB, cipher)
 }
 
-func assistantChannelService() (*channelservice.Service, error) {
-	cipher, err := secrets.NewFromEnvironment()
-	if err != nil {
+func assistantChannelService(needsCipher bool) (*channelservice.Service, error) {
+	var cipher *secrets.Cipher
+	configured, err := secrets.NewFromEnvironment()
+	if err == nil {
+		cipher = configured
+	} else if needsCipher {
 		return nil, err
 	}
 	return channelservice.NewService(model.DB, cipher, channelservice.Config{})

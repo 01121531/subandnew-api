@@ -91,6 +91,24 @@ func TestChannelLoginStoresOnlyEncryptedCredentials(t *testing.T) {
 	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannelLease{}))
 }
 
+func TestChannelListDoesNotRequireSecretCipher(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}))
+	require.NoError(t, db.Create(&model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: "bot-1", Status: model.AssistantChannelStatusConnected,
+	}).Error)
+
+	service, err := NewService(db, nil, Config{})
+	require.NoError(t, err)
+	channels, err := service.List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, channels, 1)
+	require.Equal(t, "bot-1", channels[0].AccountID)
+	_, err = service.StartLogin(t.Context(), 1)
+	require.ErrorIs(t, err, ErrChannelSecret)
+}
+
 func countRows(t *testing.T, db *gorm.DB, value any) int64 {
 	t.Helper()
 	var count int64

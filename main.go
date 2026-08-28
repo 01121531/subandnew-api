@@ -114,7 +114,7 @@ func main() {
 			aiAssistantWorker.Start()
 			common.SysLog("AI assistant worker started")
 		case errors.Is(workerErr, assistantsecrets.ErrKeyNotConfigured):
-			common.SysLog("AI assistant worker disabled: ASSISTANT_SECRET_KEY or ASSISTANT_SECRET_KEYS is not configured")
+			common.SysLog("AI assistant worker disabled: configure ASSISTANT_SECRET_KEY(S) or MANAGED_INSTANCE_SECRET_KEY")
 		default:
 			common.SysError("AI assistant worker failed to initialize: " + workerErr.Error())
 		}

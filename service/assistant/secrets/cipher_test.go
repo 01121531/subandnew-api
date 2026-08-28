@@ -58,6 +58,49 @@ func TestCipherFromEnvironment(t *testing.T) {
 	require.Equal(t, "v2", cipher.CurrentVersion())
 }
 
+func TestCipherFromEnvironmentFallsBackToDerivedManagedKey(t *testing.T) {
+	managedKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{6}, 32))
+	t.Setenv(keysEnv, "")
+	t.Setenv(singleKeyEnv, "")
+	t.Setenv(currentKeyVersionEnv, "")
+	t.Setenv(managedKeyEnv, managedKey)
+	t.Setenv(managedKeyVersionEnv, "v3")
+
+	cipher, err := NewFromEnvironment()
+	require.NoError(t, err)
+	require.Equal(t, "managed-v3", cipher.CurrentVersion())
+	ciphertext, version, _, err := cipher.Encrypt("channel", "7", []byte("secret"))
+	require.NoError(t, err)
+	require.Equal(t, "managed-v3", version)
+	plaintext, err := cipher.Decrypt("channel", "7", version, ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, []byte("secret"), plaintext)
+}
+
+func TestCipherFromEnvironmentKeepsDerivedKeyDuringExplicitKeyMigration(t *testing.T) {
+	managedKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	t.Setenv(keysEnv, "")
+	t.Setenv(singleKeyEnv, "")
+	t.Setenv(currentKeyVersionEnv, "")
+	t.Setenv(managedKeyEnv, managedKey)
+	t.Setenv(managedKeyVersionEnv, "v1")
+
+	fallbackCipher, err := NewFromEnvironment()
+	require.NoError(t, err)
+	ciphertext, version, _, err := fallbackCipher.Encrypt("channel", "8", []byte("old-secret"))
+	require.NoError(t, err)
+	require.Equal(t, "managed-v1", version)
+
+	t.Setenv(singleKeyEnv, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32)))
+	t.Setenv(currentKeyVersionEnv, "v2")
+	rotatedCipher, err := NewFromEnvironment()
+	require.NoError(t, err)
+	require.Equal(t, "v2", rotatedCipher.CurrentVersion())
+	plaintext, err := rotatedCipher.Decrypt("channel", "8", version, ciphertext)
+	require.NoError(t, err)
+	require.Equal(t, []byte("old-secret"), plaintext)
+}
+
 func TestCipherRejectsInvalidConfiguration(t *testing.T) {
 	_, err := New(nil, "v1")
 	require.ErrorIs(t, err, ErrKeyNotConfigured)
@@ -68,6 +111,7 @@ func TestCipherRejectsInvalidConfiguration(t *testing.T) {
 
 	t.Setenv(keysEnv, "")
 	t.Setenv(singleKeyEnv, "")
+	t.Setenv(managedKeyEnv, "")
 	_, err = NewFromEnvironment()
 	require.ErrorIs(t, err, ErrKeyNotConfigured)
 }

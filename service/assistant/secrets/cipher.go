@@ -3,6 +3,7 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -19,6 +20,9 @@ const (
 	keysEnv              = "ASSISTANT_SECRET_KEYS"
 	currentKeyVersionEnv = "ASSISTANT_SECRET_CURRENT_KEY_VERSION"
 	singleKeyEnv         = "ASSISTANT_SECRET_KEY"
+	managedKeyEnv        = "MANAGED_INSTANCE_SECRET_KEY"
+	managedKeyVersionEnv = "MANAGED_INSTANCE_SECRET_KEY_VERSION"
+	managedKeyPurpose    = "subandnew-api:assistant-secret-fallback:v1"
 )
 
 var ErrKeyNotConfigured = errors.New("assistant secret key is not configured")
@@ -73,32 +77,81 @@ func NewFromEnvironment() (*Cipher, error) {
 		currentVersion = "v1"
 	}
 
+	keyring := make(map[string][]byte)
+	explicitConfigured := false
 	encodedKeyring := strings.TrimSpace(os.Getenv(keysEnv))
-	if encodedKeyring == "" {
+	if encodedKeyring != "" {
+		var encodedKeys map[string]string
+		if err := json.Unmarshal([]byte(encodedKeyring), &encodedKeys); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", keysEnv, err)
+		}
+		for version, encodedKey := range encodedKeys {
+			key, err := decodeKey(version, encodedKey)
+			if err != nil {
+				return nil, err
+			}
+			keyring[version] = key
+		}
+		explicitConfigured = true
+	} else {
 		encodedKey := strings.TrimSpace(os.Getenv(singleKeyEnv))
-		if encodedKey == "" {
-			return nil, ErrKeyNotConfigured
+		if encodedKey != "" {
+			key, err := decodeKey(currentVersion, encodedKey)
+			if err != nil {
+				return nil, fmt.Errorf("decode %s: %w", singleKeyEnv, err)
+			}
+			keyring[currentVersion] = key
+			explicitConfigured = true
 		}
-		key, err := base64.StdEncoding.DecodeString(encodedKey)
-		if err != nil {
-			return nil, fmt.Errorf("decode %s: %w", singleKeyEnv, err)
-		}
-		return New(map[string][]byte{currentVersion: key}, currentVersion)
 	}
 
-	var encodedKeys map[string]string
-	if err := json.Unmarshal([]byte(encodedKeyring), &encodedKeys); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", keysEnv, err)
+	managedVersion, managedKey, err := derivedManagedInstanceKey()
+	if err != nil {
+		return nil, err
 	}
-	keyring := make(map[string][]byte, len(encodedKeys))
-	for version, encodedKey := range encodedKeys {
-		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encodedKey))
-		if err != nil {
-			return nil, fmt.Errorf("decode assistant secret key %q: %w", version, err)
+	if managedKey != nil {
+		keyring[managedVersion] = managedKey
+		if !explicitConfigured {
+			currentVersion = managedVersion
 		}
-		keyring[version] = key
+	}
+	if len(keyring) == 0 {
+		return nil, ErrKeyNotConfigured
 	}
 	return New(keyring, currentVersion)
+}
+
+func decodeKey(version string, encodedKey string) ([]byte, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encodedKey))
+	if err != nil {
+		return nil, fmt.Errorf("decode assistant secret key %q: %w", version, err)
+	}
+	return key, nil
+}
+
+// derivedManagedInstanceKey keeps older deployments usable without reusing the
+// managed-instance AES key directly. HMAC provides a domain-separated 32-byte
+// assistant key, and its distinct version remains available after operators
+// later configure a dedicated assistant key.
+func derivedManagedInstanceKey() (string, []byte, error) {
+	encodedKey := strings.TrimSpace(os.Getenv(managedKeyEnv))
+	if encodedKey == "" {
+		return "", nil, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("decode %s: %w", managedKeyEnv, err)
+	}
+	if len(key) != 32 {
+		return "", nil, fmt.Errorf("%s must be 32 bytes", managedKeyEnv)
+	}
+	version := strings.TrimSpace(os.Getenv(managedKeyVersionEnv))
+	if version == "" {
+		version = "v1"
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write([]byte(managedKeyPurpose))
+	return "managed-" + version, mac.Sum(nil), nil
 }
 
 func (c *Cipher) Encrypt(purpose string, recordID string, plaintext []byte) (ciphertext string, keyVersion string, fingerprint string, err error) {
