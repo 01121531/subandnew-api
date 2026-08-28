@@ -50,6 +50,7 @@ func TestMain(m *testing.M) {
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
 		&AssistantModelProfile{},
+		&AssistantSetting{},
 		&AssistantBindingCode{},
 		&AssistantChannel{},
 		&AssistantChannelSecret{},

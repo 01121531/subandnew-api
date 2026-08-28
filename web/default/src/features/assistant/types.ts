@@ -163,6 +163,19 @@ export type AssistantIdentityStatus =
 
 export type AssistantInstanceScope = 'none' | 'selected' | 'all'
 
+export type AssistantDefaultSource = 'personal' | 'global' | 'all'
+
+export type AssistantInstanceOption = {
+  id: number
+  name: string
+  kind: string
+  status: string
+}
+
+export type AssistantDefaultInstanceSetting = {
+  default_instance_id: number | null
+}
+
 export type AssistantIdentity = {
   id: number
   channel_id: number
@@ -172,5 +185,11 @@ export type AssistantIdentity = {
   status: AssistantIdentityStatus
   allowed_instance_scope: AssistantInstanceScope
   instance_ids: number[]
+  default_instance_id: number | null
+  effective_default_instance_id: number
+  effective_default_instance_name: string
+  default_source: AssistantDefaultSource
+  default_fallback: boolean
+  instance_options?: AssistantInstanceOption[]
   bound_at: number
 }

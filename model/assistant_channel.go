@@ -76,6 +76,7 @@ type AssistantIdentity struct {
 	UserID               int    `json:"user_id" gorm:"not null;index"`
 	Status               string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
 	AllowedInstanceScope string `json:"allowed_instance_scope" gorm:"type:varchar(16);not null;default:'none';index"`
+	DefaultInstanceID    *int64 `json:"default_instance_id" gorm:"index"`
 	BoundBy              int    `json:"bound_by" gorm:"not null;default:0;index"`
 	BoundAt              int64  `json:"bound_at" gorm:"bigint;not null;default:0"`
 	CreatedAt            int64  `json:"created_at" gorm:"bigint;not null;index"`

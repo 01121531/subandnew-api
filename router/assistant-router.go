@@ -12,6 +12,11 @@ func registerAssistantRoutes(api *gin.RouterGroup) {
 	bindingCode.Use(middleware.UserAuth(), middleware.RequirePermission(authz.AssistantAccess))
 	bindingCode.POST("", controller.CreateAssistantBindingCode)
 
+	assistantSelf := api.Group("/assistant/me")
+	assistantSelf.Use(middleware.UserAuth(), middleware.RequirePermission(authz.AssistantAccess))
+	assistantSelf.GET("/identities", controller.ListMyAssistantIdentities)
+	assistantSelf.PUT("/identities/:identity_id/default-instance", controller.UpdateMyAssistantIdentityDefault)
+
 	assistant := api.Group("/assistant")
 	assistant.Use(middleware.AdminAuth())
 
@@ -34,7 +39,14 @@ func registerAssistantRoutes(api *gin.RouterGroup) {
 	identities := assistant.Group("/identities")
 	identities.Use(middleware.RequirePermission(authz.AssistantManage))
 	identities.GET("", controller.ListAssistantIdentities)
+	identities.PUT("/:identity_id/default-instance", controller.UpdateAssistantIdentityDefault)
 	identities.DELETE("/:identity_id", controller.RevokeAssistantIdentity)
+
+	settings := assistant.Group("/settings")
+	settings.Use(middleware.RequirePermission(authz.AssistantManage))
+	settings.GET("/default-instance", controller.GetAssistantDefaultInstanceSetting)
+	settings.PUT("/default-instance", controller.UpdateAssistantDefaultInstanceSetting)
+	assistant.GET("/instance-options", middleware.RequirePermission(authz.AssistantManage), controller.ListAssistantInstanceOptions)
 
 	runs := assistant.Group("/runs")
 	runs.Use(middleware.RequirePermission(authz.AssistantAudit))

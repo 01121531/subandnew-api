@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/01121531/subandnew-api/model"
+	assistantaccess "github.com/01121531/subandnew-api/service/assistant/access"
 	"github.com/01121531/subandnew-api/service/assistant/binding"
 	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
@@ -301,15 +302,21 @@ func GetAssistantRun(c *gin.Context) {
 }
 
 type assistantIdentityView struct {
-	ID                   int64   `json:"id"`
-	ChannelID            int64   `json:"channel_id"`
-	ExternalUser         string  `json:"external_user"`
-	UserID               int     `json:"user_id"`
-	Username             string  `json:"username"`
-	Status               string  `json:"status"`
-	AllowedInstanceScope string  `json:"allowed_instance_scope"`
-	InstanceIDs          []int64 `json:"instance_ids"`
-	BoundAt              int64   `json:"bound_at"`
+	ID                   int64                            `json:"id"`
+	ChannelID            int64                            `json:"channel_id"`
+	ExternalUser         string                           `json:"external_user"`
+	UserID               int                              `json:"user_id"`
+	Username             string                           `json:"username"`
+	Status               string                           `json:"status"`
+	AllowedInstanceScope string                           `json:"allowed_instance_scope"`
+	InstanceIDs          []int64                          `json:"instance_ids"`
+	DefaultInstanceID    *int64                           `json:"default_instance_id"`
+	EffectiveDefaultID   int64                            `json:"effective_default_instance_id"`
+	EffectiveDefaultName string                           `json:"effective_default_instance_name"`
+	DefaultSource        string                           `json:"default_source"`
+	DefaultFallback      bool                             `json:"default_fallback"`
+	InstanceOptions      []assistantaccess.InstanceOption `json:"instance_options,omitempty"`
+	BoundAt              int64                            `json:"bound_at"`
 }
 
 func ListAssistantIdentities(c *gin.Context) {
@@ -318,24 +325,134 @@ func ListAssistantIdentities(c *gin.Context) {
 		assistantError(c, err)
 		return
 	}
+	views, err := buildAssistantIdentityViews(c.Request.Context(), identities, false)
+	if err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": views})
+}
+
+type assistantDefaultInstanceRequest struct {
+	DefaultInstanceID *int64 `json:"default_instance_id"`
+}
+
+func GetAssistantDefaultInstanceSetting(c *gin.Context) {
+	instanceID, err := assistantaccess.GetGlobalDefaultInstanceID(c.Request.Context(), model.DB)
+	if err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"default_instance_id": instanceID}})
+}
+
+func UpdateAssistantDefaultInstanceSetting(c *gin.Context) {
+	var request assistantDefaultInstanceRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_assistant_default_instance"})
+		return
+	}
+	if err := assistantaccess.UpdateGlobalDefaultInstance(c.Request.Context(), model.DB, request.DefaultInstanceID, c.GetInt("id")); err != nil {
+		assistantError(c, err)
+		return
+	}
+	GetAssistantDefaultInstanceSetting(c)
+}
+
+func ListAssistantInstanceOptions(c *gin.Context) {
+	options, err := assistantaccess.ListAllInstanceOptions(c.Request.Context(), model.DB)
+	if err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": options})
+}
+
+func ListMyAssistantIdentities(c *gin.Context) {
+	identities := make([]model.AssistantIdentity, 0)
+	if err := model.DB.WithContext(c.Request.Context()).Where("user_id = ? AND status = ?", c.GetInt("id"), model.AssistantIdentityStatusActive).Order("id DESC").Find(&identities).Error; err != nil {
+		assistantError(c, err)
+		return
+	}
+	views, err := buildAssistantIdentityViews(c.Request.Context(), identities, true)
+	if err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": views})
+}
+
+func UpdateMyAssistantIdentityDefault(c *gin.Context) {
+	id, ok := assistantID(c, "identity_id")
+	if !ok {
+		return
+	}
+	var identity model.AssistantIdentity
+	if err := model.DB.WithContext(c.Request.Context()).Where("id = ? AND user_id = ?", id, c.GetInt("id")).First(&identity).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "assistant_resource_not_found"})
+		return
+	}
+	updateAssistantIdentityDefault(c, id)
+}
+
+func UpdateAssistantIdentityDefault(c *gin.Context) {
+	id, ok := assistantID(c, "identity_id")
+	if !ok {
+		return
+	}
+	updateAssistantIdentityDefault(c, id)
+}
+
+func updateAssistantIdentityDefault(c *gin.Context, identityID int64) {
+	var request assistantDefaultInstanceRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_assistant_default_instance"})
+		return
+	}
+	if err := assistantaccess.UpdateIdentityDefaultInstance(c.Request.Context(), model.DB, identityID, request.DefaultInstanceID); err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+}
+
+func buildAssistantIdentityViews(ctx context.Context, identities []model.AssistantIdentity, includeOptions bool) ([]assistantIdentityView, error) {
 	views := make([]assistantIdentityView, 0, len(identities))
-	for _, identity := range identities {
+	for index := range identities {
+		identity := &identities[index]
 		var user model.User
-		_ = model.DB.WithContext(c.Request.Context()).Select("id", "username").First(&user, identity.UserID).Error
+		_ = model.DB.WithContext(ctx).Select("id", "username").First(&user, identity.UserID).Error
 		instanceIDs := make([]int64, 0)
 		if identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected {
-			if err := model.DB.WithContext(c.Request.Context()).Model(&model.AssistantIdentityInstanceScope{}).Where("identity_id = ?", identity.ID).Order("instance_id ASC").Pluck("instance_id", &instanceIDs).Error; err != nil {
-				assistantError(c, err)
-				return
+			if err := model.DB.WithContext(ctx).Model(&model.AssistantIdentityInstanceScope{}).Where("identity_id = ?", identity.ID).Order("instance_id ASC").Pluck("instance_id", &instanceIDs).Error; err != nil {
+				return nil, err
+			}
+		}
+		resolution := assistantaccess.InstanceResolution{Source: assistantaccess.DefaultSourceAll}
+		var err error
+		if identity.Status == model.AssistantIdentityStatusActive {
+			resolution, err = assistantaccess.ResolveIdentityDefault(ctx, model.DB, identity)
+			if err != nil && !errors.Is(err, assistantaccess.ErrInstanceDenied) {
+				return nil, err
+			}
+		}
+		var options []assistantaccess.InstanceOption
+		if includeOptions && identity.Status == model.AssistantIdentityStatusActive {
+			options, err = assistantaccess.ListIdentityInstanceOptions(ctx, model.DB, identity)
+			if err != nil {
+				return nil, err
 			}
 		}
 		views = append(views, assistantIdentityView{
 			ID: identity.ID, ChannelID: identity.ChannelID, ExternalUser: maskAssistantExternalID(identity.ExternalUserID),
 			UserID: identity.UserID, Username: user.Username, Status: identity.Status,
-			AllowedInstanceScope: identity.AllowedInstanceScope, InstanceIDs: instanceIDs, BoundAt: identity.BoundAt,
+			AllowedInstanceScope: identity.AllowedInstanceScope, InstanceIDs: instanceIDs,
+			DefaultInstanceID: identity.DefaultInstanceID, EffectiveDefaultID: resolution.DefaultID,
+			EffectiveDefaultName: resolution.DefaultName, DefaultSource: resolution.Source,
+			DefaultFallback: resolution.Fallback, InstanceOptions: options, BoundAt: identity.BoundAt,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": views})
+	return views, nil
 }
 
 func RevokeAssistantIdentity(c *gin.Context) {
@@ -462,13 +579,13 @@ func assistantError(c *gin.Context, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, profile.ErrInvalidInput), errors.Is(err, binding.ErrInvalidBinding):
+	case errors.Is(err, profile.ErrInvalidInput), errors.Is(err, binding.ErrInvalidBinding), errors.Is(err, assistantaccess.ErrInstanceDenied):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_assistant_request"})
-	case errors.Is(err, binding.ErrUserDenied), errors.Is(err, binding.ErrIdentityBound):
+	case errors.Is(err, binding.ErrUserDenied), errors.Is(err, binding.ErrIdentityBound), errors.Is(err, assistantaccess.ErrIdentityDenied):
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "assistant_binding_denied"})
 	case errors.Is(err, binding.ErrCodeInvalid):
 		c.JSON(http.StatusGone, gin.H{"success": false, "message": "assistant_binding_code_expired"})
-	case errors.Is(err, profile.ErrNotFound), errors.Is(err, channelservice.ErrChannelNotFound):
+	case errors.Is(err, profile.ErrNotFound), errors.Is(err, channelservice.ErrChannelNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "assistant_resource_not_found"})
 	case errors.Is(err, profile.ErrSecretMissing), errors.Is(err, secrets.ErrKeyNotConfigured), errors.Is(err, channelservice.ErrChannelSecret):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "assistant_secret_encryption_not_configured"})

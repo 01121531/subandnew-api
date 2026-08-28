@@ -22,7 +22,7 @@ func newBuiltinTestContext(t *testing.T) (*gorm.DB, tool.ExecutionContext, model
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
-		&model.User{}, &model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{},
+		&model.User{}, &model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{}, &model.AssistantSetting{},
 		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedDashboardSnapshot{}, &model.ManagedInstanceAlert{},
 	))
 	previousDB := model.DB
@@ -61,6 +61,30 @@ func TestListInstancesReturnsOnlyScopedRedactedData(t *testing.T) {
 	require.NotEqual(t, hidden.Id, output.Items[0].ID)
 	require.NotContains(t, string(result.Data), "base_url")
 	require.NotContains(t, string(result.Data), "visible.example")
+}
+
+func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
+	db, execution, visible, hidden := newBuiltinTestContext(t)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)
+	require.NoError(t, db.Model(&model.AssistantIdentity{}).Where("id = ?", execution.IdentityID).Update("default_instance_id", visible.Id).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+
+	result, err := registry.Execute(t.Context(), execution, "list_instances", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	var defaultOutput listInstancesOutput
+	require.NoError(t, json.Unmarshal(result.Data, &defaultOutput))
+	require.Equal(t, int64(1), defaultOutput.Total)
+	require.Equal(t, visible.Id, defaultOutput.Items[0].ID)
+
+	result, err = registry.Execute(t.Context(), execution, "list_instances", json.RawMessage(`{"instance_scope":"all"}`))
+	require.NoError(t, err)
+	var allOutput listInstancesOutput
+	require.NoError(t, json.Unmarshal(result.Data, &allOutput))
+	require.Equal(t, int64(2), allOutput.Total)
+
+	_, err = registry.Execute(t.Context(), execution, "list_instances", json.RawMessage(`{"instance_ids":[1],"instance_scope":"all"}`))
+	require.Error(t, err)
 }
 
 func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {

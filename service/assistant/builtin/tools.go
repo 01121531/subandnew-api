@@ -17,15 +17,19 @@ import (
 )
 
 type listInstancesInput struct {
-	Kind        string `json:"kind,omitempty"`
-	Environment string `json:"environment,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Search      string `json:"search,omitempty"`
-	Page        int    `json:"page,omitempty"`
-	PageSize    int    `json:"page_size,omitempty"`
+	InstanceScope string `json:"instance_scope,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	Environment   string `json:"environment,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Search        string `json:"search,omitempty"`
+	Page          int    `json:"page,omitempty"`
+	PageSize      int    `json:"page_size,omitempty"`
 }
 
 func (input listInstancesInput) Validate() error {
+	if err := validateInstanceSelection(nil, input.InstanceScope); err != nil {
+		return err
+	}
 	if input.Page < 0 || input.PageSize < 0 || input.PageSize > 100 {
 		return errors.New("invalid pagination")
 	}
@@ -51,20 +55,22 @@ type listInstancesOutput struct {
 }
 
 type instanceIDsInput struct {
-	InstanceIDs []int64 `json:"instance_ids,omitempty"`
+	InstanceIDs   []int64 `json:"instance_ids,omitempty"`
+	InstanceScope string  `json:"instance_scope,omitempty"`
 }
 
 func (input instanceIDsInput) Validate() error {
-	return validateInstanceIDs(input.InstanceIDs)
+	return validateInstanceSelection(input.InstanceIDs, input.InstanceScope)
 }
 
 type dashboardInput struct {
-	InstanceIDs []int64 `json:"instance_ids,omitempty"`
-	PresetDays  int     `json:"preset_days,omitempty"`
+	InstanceIDs   []int64 `json:"instance_ids,omitempty"`
+	InstanceScope string  `json:"instance_scope,omitempty"`
+	PresetDays    int     `json:"preset_days,omitempty"`
 }
 
 func (input dashboardInput) Validate() error {
-	if err := validateInstanceIDs(input.InstanceIDs); err != nil {
+	if err := validateInstanceSelection(input.InstanceIDs, input.InstanceScope); err != nil {
 		return err
 	}
 	if input.PresetDays == 0 {
@@ -145,14 +151,14 @@ func registerListInstances(registry *tool.Registry, db *gorm.DB) error {
 		Name: "list_instances", Version: "v1", Description: "列出当前用户有权查看的纳管实例及健康状态。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
 		Risk:       tool.RiskLow, ReadOnly: true, Idempotent: true,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"kind":{"type":"string"},"environment":{"type":"string"},"status":{"type":"string"},"search":{"type":"string"},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`),
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"instance_scope":{"type":"string","enum":["all"]},"kind":{"type":"string"},"environment":{"type":"string"},"status":{"type":"string"},"search":{"type":"string"},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`),
 	}, func(ctx context.Context, execution tool.ExecutionContext, input listInstancesInput) (tool.Output[listInstancesOutput], error) {
-		ids, err := access.ResolveInstanceIDs(ctx, db, execution, nil)
+		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, nil, input.InstanceScope)
 		if err != nil {
 			return tool.Output[listInstancesOutput]{}, err
 		}
 		result, err := managedinstance.List(managedinstance.ListFilter{
-			IDs: ids, Kind: input.Kind, Environment: input.Environment, Status: input.Status,
+			IDs: resolution.IDs, Kind: input.Kind, Environment: input.Environment, Status: input.Status,
 			Search: input.Search, Page: input.Page, PageSize: input.PageSize,
 		})
 		if err != nil {
@@ -186,13 +192,13 @@ func registerInstanceHealth(registry *tool.Registry, db *gorm.DB) error {
 		Name: "get_instance_health", Version: "v1", Description: "读取有权实例的健康状态、连续失败次数和最近巡检时间。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionView},
 		Risk:       tool.RiskLow, ReadOnly: true, Idempotent: true,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100}},"additionalProperties":false}`),
+		InputSchema: instanceSelectionSchema(false),
 	}, func(ctx context.Context, execution tool.ExecutionContext, input instanceIDsInput) (tool.Output[healthOutput], error) {
-		ids, err := access.ResolveInstanceIDs(ctx, db, execution, input.InstanceIDs)
+		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, input.InstanceIDs, input.InstanceScope)
 		if err != nil {
 			return tool.Output[healthOutput]{}, err
 		}
-		result, err := managedinstance.List(managedinstance.ListFilter{IDs: ids, Page: 1, PageSize: 100})
+		result, err := managedinstance.List(managedinstance.ListFilter{IDs: resolution.IDs, Page: 1, PageSize: 100})
 		if err != nil {
 			return tool.Output[healthOutput]{}, err
 		}
@@ -217,15 +223,15 @@ func registerOpenAlerts(registry *tool.Registry, db *gorm.DB) error {
 		Name: "get_open_alerts", Version: "v1", Description: "读取有权实例当前未恢复的可用性和凭据告警，不返回通知收件人。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionView},
 		Risk:       tool.RiskLow, ReadOnly: true, Idempotent: true,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100}},"additionalProperties":false}`),
+		InputSchema: instanceSelectionSchema(false),
 	}, func(ctx context.Context, execution tool.ExecutionContext, input instanceIDsInput) (tool.Output[alertsOutput], error) {
-		ids, err := access.ResolveInstanceIDs(ctx, db, execution, input.InstanceIDs)
+		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, input.InstanceIDs, input.InstanceScope)
 		if err != nil {
 			return tool.Output[alertsOutput]{}, err
 		}
 		var alerts []model.ManagedInstanceAlert
-		if len(ids) > 0 {
-			err = db.WithContext(ctx).Where("instance_id IN ? AND status = ?", ids, model.ManagedInstanceAlertStatusOpen).Order("last_seen_at DESC, id DESC").Limit(100).Find(&alerts).Error
+		if len(resolution.IDs) > 0 {
+			err = db.WithContext(ctx).Where("instance_id IN ? AND status = ?", resolution.IDs, model.ManagedInstanceAlertStatusOpen).Order("last_seen_at DESC, id DESC").Limit(100).Find(&alerts).Error
 		}
 		if err != nil {
 			return tool.Output[alertsOutput]{}, err
@@ -250,9 +256,9 @@ func registerDashboardSummary(registry *tool.Registry, db *gorm.DB) error {
 		Name: "get_dashboard_summary", Version: "v1", Description: "读取有权实例的 Dashboard 汇总快照，包含采集时间和部分失败状态。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionView},
 		Risk:       tool.RiskLow, ReadOnly: true, Idempotent: true,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"preset_days":{"type":"integer","enum":[1,7,14,30]}},"additionalProperties":false}`),
+		InputSchema: instanceSelectionSchema(true),
 	}, func(ctx context.Context, execution tool.ExecutionContext, input dashboardInput) (tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView], error) {
-		ids, err := access.ResolveInstanceIDs(ctx, db, execution, input.InstanceIDs)
+		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, input.InstanceIDs, input.InstanceScope)
 		if err != nil {
 			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
 		}
@@ -260,7 +266,7 @@ func registerDashboardSummary(registry *tool.Registry, db *gorm.DB) error {
 		if err != nil {
 			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
 		}
-		result, err := controlplaneservice.GetManagedDashboardSnapshots(ids, dashboardRange)
+		result, err := controlplaneservice.GetManagedDashboardSnapshots(resolution.IDs, dashboardRange)
 		if err != nil {
 			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
 		}
@@ -287,17 +293,17 @@ func registerRealtimeMetrics(registry *tool.Registry, db *gorm.DB) error {
 		Name: "get_realtime_metrics", Version: "v1", Description: "读取有权实例的实时 RPM、成功率、并发、成本和账号汇总，不返回账号明细。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
 		Risk:       tool.RiskMedium, ReadOnly: true, Idempotent: true,
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100}},"additionalProperties":false}`),
+		InputSchema: instanceSelectionSchema(false),
 	}, func(ctx context.Context, execution tool.ExecutionContext, input instanceIDsInput) (tool.Output[realtimeOutput], error) {
-		ids, err := access.ResolveInstanceIDs(ctx, db, execution, input.InstanceIDs)
+		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, input.InstanceIDs, input.InstanceScope)
 		if err != nil {
 			return tool.Output[realtimeOutput]{}, err
 		}
-		output := realtimeOutput{Items: make([]realtimeItem, 0, len(ids))}
-		provenance := make([]tool.Provenance, 0, len(ids))
+		output := realtimeOutput{Items: make([]realtimeItem, 0, len(resolution.IDs))}
+		provenance := make([]tool.Provenance, 0, len(resolution.IDs))
 		observedAt := int64(0)
 		stale := false
-		for _, id := range ids {
+		for _, id := range resolution.IDs {
 			state, available, stateErr := managedinstance.CurrentManagedRealtime(id)
 			item := realtimeItem{InstanceID: id, Status: "unavailable"}
 			if stateErr != nil {
@@ -332,6 +338,27 @@ func validateInstanceIDs(ids []int64) error {
 		}
 	}
 	return nil
+}
+
+func validateInstanceSelection(ids []int64, scope string) error {
+	if err := validateInstanceIDs(ids); err != nil {
+		return err
+	}
+	if scope != "" && scope != access.InstanceSelectionAll {
+		return errors.New("instance_scope must be all")
+	}
+	if scope == access.InstanceSelectionAll && len(ids) > 0 {
+		return errors.New("instance_ids and instance_scope cannot be combined")
+	}
+	return nil
+}
+
+func instanceSelectionSchema(includePreset bool) json.RawMessage {
+	preset := ""
+	if includePreset {
+		preset = `,"preset_days":{"type":"integer","enum":[1,7,14,30]}`
+	}
+	return json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]}` + preset + `},"additionalProperties":false}`)
 }
 
 func freshnessForSnapshot(observedAt int64, stale bool) tool.Freshness {

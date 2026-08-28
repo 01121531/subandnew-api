@@ -13,6 +13,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	assistantaccess "github.com/01121531/subandnew-api/service/assistant/access"
 	"github.com/01121531/subandnew-api/service/assistant/builtin"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/01121531/subandnew-api/service/assistant/provider"
@@ -22,6 +23,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestSystemPromptDescribesEffectiveDefaultAndFallback(t *testing.T) {
+	prompt := systemPrompt(assistantaccess.InstanceResolution{
+		DefaultID: 7, DefaultName: "primary", Source: assistantaccess.DefaultSourceGlobal,
+		Fallback: true,
+	})
+	require.Contains(t, prompt, "primary（#7）")
+	require.Contains(t, prompt, `instance_scope="all"`)
+	require.Contains(t, prompt, "默认实例失效")
+}
 
 type sequenceClient struct {
 	mu        sync.Mutex
@@ -86,7 +97,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.ManagedInstance{}, &model.ManagedInstanceCredential{},
 		&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantIdentity{},
-		&model.AssistantIdentityInstanceScope{}, &model.AssistantBindingCode{}, &model.AssistantInboundEvent{},
+		&model.AssistantIdentityInstanceScope{}, &model.AssistantSetting{}, &model.AssistantBindingCode{}, &model.AssistantInboundEvent{},
 		&model.AssistantConversation{}, &model.AssistantMessage{}, &model.AssistantRun{}, &model.AssistantToolCall{}, &model.AssistantOutbox{},
 	))
 	previousDB := model.DB

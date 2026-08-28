@@ -19,13 +19,14 @@ import { useAuthStore } from '@/stores/auth-store'
 export const Route = createFileRoute('/_authenticated/assistant/')({
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
-    if (
-      !hasPermission(
-        user,
-        ADMIN_PERMISSION_RESOURCES.ASSISTANT,
-        ADMIN_PERMISSION_ACTIONS.MANAGE
-      )
-    ) {
+    const canOpenAssistant = [
+      ADMIN_PERMISSION_ACTIONS.ACCESS,
+      ADMIN_PERMISSION_ACTIONS.MANAGE,
+      ADMIN_PERMISSION_ACTIONS.AUDIT,
+    ].some((action) =>
+      hasPermission(user, ADMIN_PERMISSION_RESOURCES.ASSISTANT, action)
+    )
+    if (!canOpenAssistant) {
       throw redirect({ to: '/403' })
     }
   },

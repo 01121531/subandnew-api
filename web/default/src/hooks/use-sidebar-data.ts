@@ -46,10 +46,12 @@ export function useSidebarData(): SidebarData {
     ADMIN_PERMISSION_RESOURCES.BILLING_ALERT,
     ADMIN_PERMISSION_ACTIONS.VIEW
   )
-  const canManageAssistant = hasPermission(
-    user,
-    ADMIN_PERMISSION_RESOURCES.ASSISTANT,
-    ADMIN_PERMISSION_ACTIONS.MANAGE
+  const canAccessAssistant = [
+    ADMIN_PERMISSION_ACTIONS.ACCESS,
+    ADMIN_PERMISSION_ACTIONS.MANAGE,
+    ADMIN_PERMISSION_ACTIONS.AUDIT,
+  ].some((action) =>
+    hasPermission(user, ADMIN_PERMISSION_RESOURCES.ASSISTANT, action)
   )
 
   return {
@@ -101,7 +103,7 @@ export function useSidebarData(): SidebarData {
                 },
               ]
             : []),
-          ...(canManageAssistant
+          ...(canAccessAssistant
             ? [
                 {
                   title: t('AI Assistant'),

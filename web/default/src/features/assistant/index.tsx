@@ -46,6 +46,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   cancelAssistantChannelLogin,
@@ -61,6 +67,10 @@ import {
   updateAssistantModelProfile,
 } from './api'
 import { AssistantAuditSection } from './audit-section'
+import {
+  GlobalDefaultInstanceSection,
+  MyDefaultInstanceSection,
+} from './default-instance-section'
 import { AssistantIdentitySection } from './identity-section'
 import { ModelProfileDialog } from './model-profile-dialog'
 import type {
@@ -798,17 +808,35 @@ function BindingCodeSection() {
 
 export function AssistantManagement() {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
+  const canAccess = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.ASSISTANT,
+    ADMIN_PERMISSION_ACTIONS.ACCESS
+  )
+  const canManage = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.ASSISTANT,
+    ADMIN_PERMISSION_ACTIONS.MANAGE
+  )
+  const canAudit = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.ASSISTANT,
+    ADMIN_PERMISSION_ACTIONS.AUDIT
+  )
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('AI Assistant')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='mx-auto max-w-6xl space-y-4 pb-4'>
-          <ModelProfilesSection />
-          <WeChatChannelSection />
-          <BindingCodeSection />
-          <AssistantIdentitySection />
-          <AssistantAuditSection />
+          {canManage && <GlobalDefaultInstanceSection />}
+          {canAccess && <MyDefaultInstanceSection />}
+          {canManage && <ModelProfilesSection />}
+          {canManage && <WeChatChannelSection />}
+          {canAccess && <BindingCodeSection />}
+          {canManage && <AssistantIdentitySection />}
+          {canAudit && <AssistantAuditSection />}
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>

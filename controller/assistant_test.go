@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
@@ -60,6 +61,8 @@ func TestAssistantListResponsesUseEmptyArrays(t *testing.T) {
 		&model.AssistantRun{},
 		&model.AssistantIdentity{},
 		&model.AssistantIdentityInstanceScope{},
+		&model.AssistantSetting{},
+		&model.ManagedInstance{},
 	))
 	previousDB := model.DB
 	model.DB = db
@@ -72,8 +75,10 @@ func TestAssistantListResponsesUseEmptyArrays(t *testing.T) {
 	require.Equal(t, http.StatusOK, runRecorder.Code)
 	require.Contains(t, runRecorder.Body.String(), `"items":[]`)
 
+	user := model.User{Username: "assistant-user", Password: "hash", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(&user).Error)
 	identity := model.AssistantIdentity{
-		ChannelID: 1, ExternalUserID: "wx-user", UserID: 1,
+		ChannelID: 1, ExternalUserID: "wx-user", UserID: user.Id,
 		Status: model.AssistantIdentityStatusActive, AllowedInstanceScope: model.AssistantInstanceScopeAll,
 	}
 	require.NoError(t, db.Create(&identity).Error)

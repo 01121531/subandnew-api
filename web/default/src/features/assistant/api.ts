@@ -12,7 +12,9 @@ import type {
   ApiResponse,
   AssistantBindingCode,
   AssistantChannel,
+  AssistantDefaultInstanceSetting,
   AssistantIdentity,
+  AssistantInstanceOption,
   AssistantLoginView,
   AssistantModelProfile,
   AssistantModelProfileInput,
@@ -146,7 +148,69 @@ export async function listAssistantIdentities() {
     instance_ids: Array.isArray(identity.instance_ids)
       ? identity.instance_ids
       : [],
+    instance_options: Array.isArray(identity.instance_options)
+      ? identity.instance_options
+      : [],
   }))
+}
+
+export async function getAssistantDefaultInstanceSetting() {
+  const response = await api.get<ApiResponse<AssistantDefaultInstanceSetting>>(
+    '/api/assistant/settings/default-instance'
+  )
+  return response.data.data
+}
+
+export async function updateAssistantDefaultInstanceSetting(
+  defaultInstanceId: number | null
+) {
+  const response = await api.put<ApiResponse<AssistantDefaultInstanceSetting>>(
+    '/api/assistant/settings/default-instance',
+    { default_instance_id: defaultInstanceId }
+  )
+  return response.data.data
+}
+
+export async function listAssistantInstanceOptions() {
+  const response = await api.get<ApiResponse<AssistantInstanceOption[]>>(
+    '/api/assistant/instance-options'
+  )
+  return Array.isArray(response.data.data) ? response.data.data : []
+}
+
+export async function listMyAssistantIdentities() {
+  const response = await api.get<ApiResponse<AssistantIdentity[]>>(
+    '/api/assistant/me/identities'
+  )
+  const identities = response.data.data
+  if (!Array.isArray(identities)) return []
+  return identities.map((identity) => ({
+    ...identity,
+    instance_ids: Array.isArray(identity.instance_ids)
+      ? identity.instance_ids
+      : [],
+    instance_options: Array.isArray(identity.instance_options)
+      ? identity.instance_options
+      : [],
+  }))
+}
+
+export async function updateMyAssistantIdentityDefault(
+  identityId: number,
+  defaultInstanceId: number | null
+) {
+  await api.put(`/api/assistant/me/identities/${identityId}/default-instance`, {
+    default_instance_id: defaultInstanceId,
+  })
+}
+
+export async function updateAssistantIdentityDefault(
+  identityId: number,
+  defaultInstanceId: number | null
+) {
+  await api.put(`/api/assistant/identities/${identityId}/default-instance`, {
+    default_instance_id: defaultInstanceId,
+  })
 }
 
 export async function revokeAssistantIdentity(identityId: number) {

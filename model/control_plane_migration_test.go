@@ -25,6 +25,7 @@ var expectedControlPlaneTables = []string{
 	"assistant_model_profiles",
 	"assistant_outbox",
 	"assistant_runs",
+	"assistant_settings",
 	"assistant_tool_calls",
 	"authz_roles",
 	"billing_alert_events",

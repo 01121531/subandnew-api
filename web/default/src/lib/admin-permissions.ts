@@ -31,6 +31,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {
+  ACCESS: 'access',
   OPERATE: 'operate',
   VIEW: 'view',
   APPLY: 'apply',

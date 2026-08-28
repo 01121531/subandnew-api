@@ -207,6 +207,7 @@ func controlPlaneModels() []interface{} {
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
 		&AssistantModelProfile{},
+		&AssistantSetting{},
 		&AssistantBindingCode{},
 		&AssistantChannel{},
 		&AssistantChannelSecret{},
