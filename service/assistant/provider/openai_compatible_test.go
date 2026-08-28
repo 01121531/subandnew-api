@@ -38,6 +38,26 @@ func TestOpenAICompatibleGenerateWithTools(t *testing.T) {
 	require.Equal(t, 14, result.Usage.TotalTokens)
 }
 
+func TestOpenAICompatibleAcceptsFullChatCompletionsURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/v1/chat/completions", request.URL.Path)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{
+			"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{
+		BaseURL: server.URL + "/v1/chat/completions/", Model: "test-model", HTTPClient: server.Client(),
+	})
+	require.NoError(t, err)
+	response, err := client.Generate(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "ping"}}})
+	require.NoError(t, err)
+	require.Equal(t, "OK", response.Message.Content)
+}
+
 func TestOpenAICompatibleHTTPErrorIsSanitized(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusTooManyRequests)

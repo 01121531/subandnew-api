@@ -173,7 +173,9 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
                   <Input className='min-h-11' inputMode='url' {...field} />
                 </FormControl>
                 <FormDescription>
-                  {t('The endpoint must use HTTP or HTTPS.')}
+                  {t(
+                    'Enter an API base URL or a complete chat completions URL. HTTP and HTTPS are supported.'
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

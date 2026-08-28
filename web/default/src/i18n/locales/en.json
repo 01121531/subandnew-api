@@ -1490,6 +1490,7 @@
     "Model name is required": "Model name is required",
     "API base URL": "API base URL",
     "Enter a valid API base URL": "Enter a valid API base URL",
+    "Enter an API base URL or a complete chat completions URL. HTTP and HTTPS are supported.": "Enter an API base URL or a complete chat completions URL. HTTP and HTTPS are supported.",
     "The endpoint must use HTTP or HTTPS.": "The endpoint must use HTTP or HTTPS.",
     "Leave blank to keep the current key": "Leave blank to keep the current key",
     "Optional when the endpoint does not require a key": "Optional when the endpoint does not require a key",

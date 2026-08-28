@@ -72,13 +72,21 @@ func NewOpenAICompatibleClient(config OpenAICompatibleConfig) (*OpenAICompatible
 	if client == nil {
 		client = http.DefaultClient
 	}
-	baseURL.Path = path.Join(strings.TrimSuffix(baseURL.Path, "/"), "chat/completions")
+	baseURL.Path = chatCompletionsPath(baseURL.Path)
 	return &OpenAICompatibleClient{
 		endpoint:   baseURL.String(),
 		apiKey:     strings.TrimSpace(config.APIKey),
 		model:      model,
 		httpClient: client,
 	}, nil
+}
+
+func chatCompletionsPath(basePath string) string {
+	normalized := path.Clean("/" + strings.TrimSpace(basePath))
+	if strings.HasSuffix(normalized, "/chat/completions") {
+		return normalized
+	}
+	return path.Join(normalized, "chat/completions")
 }
 
 func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) (Response, error) {

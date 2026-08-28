@@ -1490,6 +1490,7 @@
     "Model name is required": "请输入模型名称",
     "API base URL": "API 基础地址",
     "Enter a valid API base URL": "请输入有效的 API 基础地址",
+    "Enter an API base URL or a complete chat completions URL. HTTP and HTTPS are supported.": "可填写 API 基础地址或完整的 Chat Completions 地址，支持 HTTP 和 HTTPS。",
     "The endpoint must use HTTP or HTTPS.": "端点必须使用 HTTP 或 HTTPS。",
     "Leave blank to keep the current key": "留空将保留当前密钥",
     "Optional when the endpoint does not require a key": "端点无需密钥时可留空",
