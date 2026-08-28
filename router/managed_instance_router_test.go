@@ -110,3 +110,21 @@ func TestManagedUsageExportRoutesAreRegistered(t *testing.T) {
 		assert.Truef(t, routes[route], "%s must be registered", route)
 	}
 }
+
+func TestManagedAccountFilterTemplateRoutesAreRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+	routes := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, route := range []string{
+		"GET /api/managed-account-filter-templates",
+		"POST /api/managed-account-filter-templates",
+		"PUT /api/managed-account-filter-templates/:id",
+		"DELETE /api/managed-account-filter-templates/:id",
+	} {
+		assert.Truef(t, routes[route], "%s must be registered", route)
+	}
+}

@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 		&ManagedInstanceAlert{},
 		&ManagedUsageExport{},
 		&ManagedExportItem{},
+		&ManagedAccountFilterTemplate{},
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
 		&AssistantModelProfile{},
@@ -106,6 +107,7 @@ func truncateTables(t *testing.T) {
 			"managed_instance_alerts", "managed_instances",
 			"managed_usage_exports",
 			"managed_export_items",
+			"managed_account_filter_templates",
 			"managed_instance_config_bindings", "managed_config_templates",
 		} {
 			DB.Exec("DELETE FROM " + table)

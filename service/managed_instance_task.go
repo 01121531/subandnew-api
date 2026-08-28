@@ -52,15 +52,16 @@ type ManagedAccountExportItemInput struct {
 }
 
 type ManagedAccountExportRequest struct {
-	Source        string                          `json:"source"`
-	RangeKey      string                          `json:"range_key,omitempty"`
-	Window        managedinstance.TimeWindow      `json:"window"`
-	Locale        string                          `json:"locale"`
-	Search        string                          `json:"search,omitempty"`
-	ExcludeSearch string                          `json:"exclude_search,omitempty"`
-	SortBy        string                          `json:"sort_by,omitempty"`
-	SortOrder     string                          `json:"sort_order,omitempty"`
-	Items         []ManagedAccountExportItemInput `json:"items"`
+	Source         string                          `json:"source"`
+	RangeKey       string                          `json:"range_key,omitempty"`
+	Window         managedinstance.TimeWindow      `json:"window"`
+	Locale         string                          `json:"locale"`
+	Search         string                          `json:"search,omitempty"`
+	ExcludeSearch  string                          `json:"exclude_search,omitempty"`
+	SortBy         string                          `json:"sort_by,omitempty"`
+	SortOrder      string                          `json:"sort_order,omitempty"`
+	FilterSnapshot json.RawMessage                 `json:"filter_snapshot,omitempty"`
+	Items          []ManagedAccountExportItemInput `json:"items"`
 }
 
 type managedAccountExportSnapshot struct {
@@ -72,6 +73,7 @@ type managedAccountExportSnapshot struct {
 	ExcludeSearch  string                     `json:"exclude_search,omitempty"`
 	SortBy         string                     `json:"sort_by,omitempty"`
 	SortOrder      string                     `json:"sort_order,omitempty"`
+	FilterSnapshot json.RawMessage            `json:"filter_snapshot,omitempty"`
 	SelectionCount int                        `json:"selection_count"`
 	InstanceCount  int                        `json:"instance_count"`
 }
@@ -188,7 +190,7 @@ func managedExportActorName(actorID int) string {
 
 func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*model.SystemTask, error) {
 	request.Source = strings.TrimSpace(request.Source)
-	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start {
+	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
 		return nil, managedinstance.ErrInvalidInstance
 	}
 	if request.Window.Timezone == "" {
@@ -307,6 +309,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 	snapshot := managedAccountExportSnapshot{
 		Source: request.Source, RangeKey: request.RangeKey, Window: request.Window, Locale: request.Locale,
 		Search: request.Search, ExcludeSearch: request.ExcludeSearch, SortBy: request.SortBy, SortOrder: request.SortOrder,
+		FilterSnapshot: request.FilterSnapshot,
 		SelectionCount: len(selections), InstanceCount: len(requestedInstances),
 	}
 	queryJSON, err := json.Marshal(snapshot)

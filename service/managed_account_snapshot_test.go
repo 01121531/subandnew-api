@@ -150,8 +150,9 @@ func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 
 	task, err := EnqueueManagedAccountExport(7, ManagedAccountExportRequest{
 		Source: "inventory", Locale: "zh-CN",
-		Window: managedinstance.TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"},
-		Items:  []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: "6822196335042536000"}},
+		Window:         managedinstance.TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"},
+		Items:          []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: "6822196335042536000"}},
+		FilterSnapshot: json.RawMessage(`{"match_mode":"all","rules":[{"field":"email","operator":"contains","values":["example.com"],"value_mode":"any"}]}`),
 	})
 	require.NoError(t, err)
 	items, err := model.ListManagedExportItems(task.TaskID)
@@ -161,6 +162,11 @@ func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(items[0].Metadata), &frozen))
 	require.Equal(t, "selected@example.com", frozen.Account.Email)
 	require.Equal(t, "worker-nine", frozen.SourceName)
+	export, err := model.GetManagedUsageExport(task.TaskID)
+	require.NoError(t, err)
+	var snapshot managedAccountExportSnapshot
+	require.NoError(t, json.Unmarshal([]byte(export.Query), &snapshot))
+	require.JSONEq(t, `{"match_mode":"all","rules":[{"field":"email","operator":"contains","values":["example.com"],"value_mode":"any"}]}`, string(snapshot.FilterSnapshot))
 }
 
 func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {

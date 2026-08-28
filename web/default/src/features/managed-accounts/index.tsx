@@ -56,6 +56,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import { MultiSelect, type MultiSelectOption } from '@/components/multi-select'
 import {
   Accordion,
   AccordionContent,
@@ -74,7 +75,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -118,6 +118,18 @@ import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/u
 import { createManagedAccountExport } from '@/features/usage-records/api'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { cn } from '@/lib/utils'
+
+import { AccountFilterPanel } from './account-filter-panel'
+import {
+  accountFilterDocument,
+  accountFilterSnapshot,
+  isAccountFilterRuleComplete,
+  matchesAdvancedAccountFilter,
+  matchesQuickAccountFilter,
+  type AccountAdvancedFilter,
+  type AccountFilterDocument,
+  type AccountFilterField,
+} from './account-filtering'
 
 type AccountFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
 type ResourceRow = {
@@ -392,34 +404,64 @@ function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
   return `${Math.min(100, (successful / item.requests_24h) * 100).toFixed(2)}%`
 }
 
-function searchableText(values: Array<unknown>) {
-  return values
-    .filter((value) => value != null)
-    .join(' ')
-    .toLowerCase()
-}
-
-function exclusionTerms(value: string) {
-  return value
-    .split(/[,，\n]+/)
-    .map((term) => term.trim().toLowerCase())
-    .filter(Boolean)
-}
-
-function matchesAccountFilter(
-  values: Array<unknown>,
-  required: string,
-  excluded: string[]
-) {
-  const text = searchableText(values)
-  return (
-    (!required || text.includes(required)) &&
-    !excluded.some((term) => text.includes(term))
-  )
-}
-
 function inventoryAccountID(item: ManagedInstanceInventoryItem) {
   return item.id_text || String(item.id)
+}
+
+function filterAvailability(enabled?: boolean) {
+  if (enabled == null) return 'unknown'
+  return enabled ? 'available' : 'unavailable'
+}
+
+function filterOptionLabel(
+  field: AccountFilterField,
+  value: string,
+  t: TFunction
+) {
+  if (field !== 'available') return value
+  if (value === 'available') return t('Available')
+  if (value === 'unavailable') return t('Unavailable')
+  return t('Unknown')
+}
+
+function resourceFilterDocument(row: ResourceRow): AccountFilterDocument {
+  const { instance, item, source } = row
+  return accountFilterDocument({
+    name: item.name,
+    email: item.email,
+    account_id: inventoryAccountID(item),
+    note: item.note,
+    ownership: item.ownership,
+    instance: instance.name,
+    platform: item.platform || instance.kind,
+    type: item.type,
+    group: item.group,
+    status: item.status,
+    source: source?.name || item.source_id,
+    available: filterAvailability(item.enabled),
+  })
+}
+
+function outputFilterDocument(
+  row: OutputRow,
+  sourceName?: string
+): AccountFilterDocument {
+  const { instance, output } = row
+  const account = output.account
+  return accountFilterDocument({
+    name: account.name,
+    email: account.email,
+    account_id: inventoryAccountID(account),
+    note: account.note,
+    ownership: account.ownership,
+    instance: instance.name,
+    platform: account.platform || instance.kind,
+    type: account.type,
+    group: account.group,
+    status: account.status,
+    source: sourceName || account.source_id,
+    available: filterAvailability(account.enabled),
+  })
 }
 
 function accountSelection(
@@ -481,6 +523,7 @@ function AccountExportBar(props: {
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
+  filterSnapshot: ReturnType<typeof accountFilterSnapshot>
   sortBy: string
   sortOrder: SortDirection
 }) {
@@ -500,6 +543,7 @@ function AccountExportBar(props: {
         locale: i18n.language || 'zh-CN',
         search: props.search || undefined,
         exclude_search: props.excludeSearch || undefined,
+        filter_snapshot: props.filterSnapshot,
         sort_by: props.sortBy,
         sort_order: props.sortOrder,
         items: selectedItems.map((item) => ({
@@ -620,8 +664,12 @@ export function ManagedAccounts() {
     initialPreferences.selectedInstances
   )
   const [pageSizes, setPageSizes] = useState(initialPreferences.pageSizes)
-  const [search, setSearch] = useState('')
-  const [excludeSearch, setExcludeSearch] = useState('')
+  const [searchValues, setSearchValues] = useState<string[]>([])
+  const [excludeSearchValues, setExcludeSearchValues] = useState<string[]>([])
+  const [advancedFilter, setAdvancedFilter] = useState<AccountAdvancedFilter>({
+    match_mode: 'all',
+    rules: [],
+  })
   const [sortKey, setSortKey] = useState<AccountSortKey>('available')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
@@ -813,14 +861,6 @@ export function ManagedAccounts() {
       ),
     }
   }, [conductorSources, rows])
-  const deferredSearch = useDeferredValue(search)
-  const deferredExcludeSearch = useDeferredValue(excludeSearch)
-  const normalizedSearch = deferredSearch.trim().toLowerCase()
-  const excludedTerms = useMemo(
-    () => exclusionTerms(deferredExcludeSearch),
-    [deferredExcludeSearch]
-  )
-  const filtering = normalizedSearch !== '' || excludedTerms.length > 0
   const outputRows = useMemo<OutputRow[]>(
     () =>
       instances.flatMap((instance, index) =>
@@ -831,30 +871,132 @@ export function ManagedAccounts() {
       ),
     [instances, snapshotQueries]
   )
+  const deferredSearchValues = useDeferredValue(searchValues)
+  const deferredExcludeSearchValues = useDeferredValue(excludeSearchValues)
+  const includedTerms = useMemo(
+    () =>
+      [
+        ...new Set(
+          deferredSearchValues.map((value) => value.trim().toLowerCase())
+        ),
+      ].filter(Boolean),
+    [deferredSearchValues]
+  )
+  const excludedTerms = useMemo(
+    () =>
+      [
+        ...new Set(
+          deferredExcludeSearchValues.map((value) => value.trim().toLowerCase())
+        ),
+      ].filter(Boolean),
+    [deferredExcludeSearchValues]
+  )
+  const resourceDocuments = useMemo(
+    () =>
+      new Map(
+        rows.map((row) => [
+          `${row.instance.id}:${inventoryAccountID(row.item)}`,
+          resourceFilterDocument(row),
+        ])
+      ),
+    [rows]
+  )
+  const sourceNames = useMemo(
+    () =>
+      new Map(
+        rows.map((row) => [
+          `${row.instance.id}:${inventoryAccountID(row.item)}`,
+          row.source?.name || row.item.source_id || '',
+        ])
+      ),
+    [rows]
+  )
+  const outputDocuments = useMemo(
+    () =>
+      new Map(
+        outputRows.map((row) => {
+          const key = `${row.instance.id}:${inventoryAccountID(row.output.account)}`
+          return [key, outputFilterDocument(row, sourceNames.get(key))]
+        })
+      ),
+    [outputRows, sourceNames]
+  )
+  const filterOptions = useMemo(() => {
+    const categoryFields: AccountFilterField[] = [
+      'instance',
+      'platform',
+      'type',
+      'group',
+      'status',
+      'source',
+      'available',
+    ]
+    const documents = [
+      ...resourceDocuments.values(),
+      ...outputDocuments.values(),
+    ]
+    return Object.fromEntries(
+      categoryFields.map((field) => {
+        const values = [
+          ...new Set(documents.flatMap((document) => document[field])),
+        ]
+          .filter(Boolean)
+          .sort((left, right) =>
+            left.localeCompare(right, undefined, {
+              numeric: true,
+              sensitivity: 'base',
+            })
+          )
+        const options: MultiSelectOption[] = values.map((value) => ({
+          value,
+          label: filterOptionLabel(field, value, t),
+        }))
+        return [field, options]
+      })
+    ) as Partial<Record<AccountFilterField, MultiSelectOption[]>>
+  }, [outputDocuments, resourceDocuments, t])
+  const activeAdvancedRules = advancedFilter.rules.filter(
+    isAccountFilterRuleComplete
+  )
+  const filtering =
+    includedTerms.length > 0 ||
+    excludedTerms.length > 0 ||
+    activeAdvancedRules.length > 0
+  const filterSnapshot = useMemo(
+    () => accountFilterSnapshot(advancedFilter),
+    [advancedFilter]
+  )
+  const search = searchValues.join(', ')
+  const excludeSearch = excludeSearchValues.join(', ')
+  const filterKey = useMemo(
+    () => JSON.stringify({ searchValues, excludeSearchValues, filterSnapshot }),
+    [excludeSearchValues, filterSnapshot, searchValues]
+  )
   const filteredOutputRows = useMemo(
     () =>
       filtering
-        ? outputRows.filter(({ instance, output }) =>
-            matchesAccountFilter(
-              [
-                output.account.id,
-                output.account.name,
-                output.account.platform,
-                output.account.type,
-                output.account.group,
-                output.account.status,
-                instance.name,
-                output.total_requests,
-                output.total_tokens,
-                output.amount,
-                output.currency,
-              ],
-              normalizedSearch,
-              excludedTerms
+        ? outputRows.filter((row) => {
+            const key = `${row.instance.id}:${inventoryAccountID(row.output.account)}`
+            const document = outputDocuments.get(key)
+            return (
+              document != null &&
+              matchesQuickAccountFilter(
+                document,
+                includedTerms,
+                excludedTerms
+              ) &&
+              matchesAdvancedAccountFilter(document, advancedFilter)
             )
-          )
+          })
         : outputRows,
-    [excludedTerms, filtering, normalizedSearch, outputRows]
+    [
+      advancedFilter,
+      excludedTerms,
+      filtering,
+      includedTerms,
+      outputDocuments,
+      outputRows,
+    ]
   )
   const outputTotals = useMemo(() => {
     const collected = filteredOutputRows.filter(
@@ -889,28 +1031,29 @@ export function ManagedAccounts() {
   }, [filteredOutputRows])
   const filteredRows = useMemo(() => {
     const filtered = filtering
-      ? rows.filter(({ instance, item, source }) =>
-          matchesAccountFilter(
-            [
-              item.id,
-              item.name,
-              item.platform,
-              item.type,
-              item.group,
-              item.status,
-              source?.name,
-              source?.status,
-              instance.name,
-            ],
-            normalizedSearch,
-            excludedTerms
+      ? rows.filter((row) => {
+          const key = `${row.instance.id}:${inventoryAccountID(row.item)}`
+          const document = resourceDocuments.get(key)
+          return (
+            document != null &&
+            matchesQuickAccountFilter(document, includedTerms, excludedTerms) &&
+            matchesAdvancedAccountFilter(document, advancedFilter)
           )
-        )
+        })
       : rows
     return [...filtered].sort((left, right) =>
       compareResourceRows(left, right, sortKey, sortDirection)
     )
-  }, [excludedTerms, filtering, normalizedSearch, rows, sortDirection, sortKey])
+  }, [
+    advancedFilter,
+    excludedTerms,
+    filtering,
+    includedTerms,
+    resourceDocuments,
+    rows,
+    sortDirection,
+    sortKey,
+  ])
   const hasActiveTask = snapshotQueries.some((query) => {
     const task = query.data?.data.task
     return task && ['pending', 'running'].includes(task.status)
@@ -1146,6 +1289,8 @@ export function ManagedAccounts() {
           window={exportWindow}
           search={search}
           excludeSearch={excludeSearch}
+          filterSnapshot={filterSnapshot}
+          filterKey={filterKey}
           pageSize={pageSizes.accountOutput}
           onPageSizeChange={(pageSize) =>
             setPageSizes((current) => ({
@@ -1169,6 +1314,8 @@ export function ManagedAccounts() {
           window={exportWindow}
           search={search}
           excludeSearch={excludeSearch}
+          filterSnapshot={filterSnapshot}
+          filterKey={filterKey}
           pageSize={pageSizes.inventory}
           onPageSizeChange={(pageSize) =>
             setPageSizes((current) => ({ ...current, inventory: pageSize }))
@@ -1263,28 +1410,42 @@ export function ManagedAccounts() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <div className='relative min-w-0 flex-1 sm:ms-auto sm:max-w-xs'>
-              <Search className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
+            <div className='flex min-w-0 flex-1 items-center gap-2 sm:ms-auto sm:max-w-xs'>
+              <Search
+                className='text-muted-foreground size-4 shrink-0'
+                aria-hidden='true'
+              />
+              <MultiSelect
+                options={[]}
+                selected={searchValues}
+                onChange={setSearchValues}
+                allowCreate
+                maxVisibleChips={2}
                 placeholder={t('Search accounts or channels')}
-                aria-label={t('Search accounts or channels')}
-                className='h-10 ps-8 sm:h-8'
+                className='min-h-10 min-w-0 flex-1 sm:min-h-8'
               />
             </div>
-            <div className='relative min-w-0 flex-1 sm:max-w-xs'>
-              <SearchX className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2' />
-              <Input
-                value={excludeSearch}
-                onChange={(event) => setExcludeSearch(event.target.value)}
+            <div className='flex min-w-0 flex-1 items-center gap-2 sm:max-w-xs'>
+              <SearchX
+                className='text-muted-foreground size-4 shrink-0'
+                aria-hidden='true'
+              />
+              <MultiSelect
+                options={[]}
+                selected={excludeSearchValues}
+                onChange={setExcludeSearchValues}
+                allowCreate
+                maxVisibleChips={2}
                 placeholder={t('Exclude accounts or channels')}
-                aria-label={t('Exclude accounts or channels')}
-                title={t('Separate multiple keywords with commas')}
-                className='h-10 ps-8 sm:h-8'
+                className='min-h-10 min-w-0 flex-1 sm:min-h-8'
               />
             </div>
           </div>
+          <AccountFilterPanel
+            value={advancedFilter}
+            onChange={setAdvancedFilter}
+            options={filterOptions}
+          />
           {content}
         </div>
       </SectionPageLayout.Content>
@@ -1582,6 +1743,8 @@ function AccountOutputPanel(props: {
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
+  filterSnapshot: ReturnType<typeof accountFilterSnapshot>
+  filterKey: string
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -1642,6 +1805,8 @@ function AccountOutputPanel(props: {
           window={props.window}
           search={props.search}
           excludeSearch={props.excludeSearch}
+          filterSnapshot={props.filterSnapshot}
+          filterKey={props.filterKey}
           pageSize={props.pageSize}
           onPageSizeChange={props.onPageSizeChange}
         />
@@ -1699,6 +1864,8 @@ function AccountOutputTable({
   window,
   search,
   excludeSearch,
+  filterSnapshot,
+  filterKey,
   pageSize,
   onPageSizeChange,
 }: {
@@ -1709,6 +1876,8 @@ function AccountOutputTable({
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
+  filterSnapshot: ReturnType<typeof accountFilterSnapshot>
+  filterKey: string
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -1793,6 +1962,7 @@ function AccountOutputTable({
     setPageIndex(0)
   }, [
     excludeSearch,
+    filterKey,
     pageSize,
     search,
     selectionScopeKey,
@@ -1878,6 +2048,7 @@ function AccountOutputTable({
         window={window}
         search={search}
         excludeSearch={excludeSearch}
+        filterSnapshot={filterSnapshot}
         sortBy={sortKey}
         sortOrder={sortDirection}
       />
@@ -2167,6 +2338,8 @@ function AccountTable(props: {
   window: { start: number; end: number; timezone: string }
   search: string
   excludeSearch: string
+  filterSnapshot: ReturnType<typeof accountFilterSnapshot>
+  filterKey: string
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
 }) {
@@ -2196,6 +2369,7 @@ function AccountTable(props: {
     setPageIndex(0)
   }, [
     props.excludeSearch,
+    props.filterKey,
     props.pageSize,
     props.search,
     props.selectionScopeKey,
@@ -2703,6 +2877,7 @@ function AccountTable(props: {
         window={props.window}
         search={props.search}
         excludeSearch={props.excludeSearch}
+        filterSnapshot={props.filterSnapshot}
         sortBy={props.sortKey}
         sortOrder={props.sortDirection}
       />

@@ -74,6 +74,15 @@ export type ManagedAccountExportRequest = {
   locale: string
   search?: string
   exclude_search?: string
+  filter_snapshot?: {
+    match_mode: 'all' | 'any'
+    rules: Array<{
+      field: string
+      operator: string
+      values: string[]
+      value_mode: 'all' | 'any'
+    }>
+  }
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   items: Array<{ instance_id: number; account_id: string }>
