@@ -73,7 +73,7 @@ func New(client provider.Client, registry *tool.Registry, config Config) (*Runne
 	if config.Timeout == 0 {
 		config.Timeout = 30 * time.Second
 	}
-	if config.MaxSteps < 1 || config.MaxSteps > 6 || config.MaxToolCalls < 1 || config.MaxToolCalls > 8 || config.MaxOutputTokens < 1 || config.Timeout < time.Second || config.Timeout > time.Minute {
+	if config.MaxSteps < 1 || config.MaxSteps > 6 || config.MaxToolCalls < 1 || config.MaxToolCalls > 8 || config.MaxOutputTokens < 1 || config.Timeout < time.Second || config.Timeout > 2*time.Minute {
 		return nil, ErrInvalidConfiguration
 	}
 	return &Runner{client: client, registry: registry, config: config}, nil

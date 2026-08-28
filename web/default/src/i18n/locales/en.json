@@ -651,6 +651,7 @@
     "Verify TLS certificates": "Verify TLS certificates",
     "Probe policy": "Probe policy",
     "Timeout (seconds)": "Timeout (seconds)",
+    "Reasoning models may need 60 to 120 seconds.": "Reasoning models may need 60 to 120 seconds.",
     "Interval (seconds)": "Interval (seconds)",
     "Management credential": "Management credential",
     "Admin token": "Admin token",

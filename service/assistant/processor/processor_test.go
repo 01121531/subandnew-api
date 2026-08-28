@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -120,7 +121,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	}}
 	processor, err := New(db, cipher, channels,
 		func(context.Context) (provider.Client, *model.AssistantModelProfile, error) {
-			return modelClient, &model.AssistantModelProfile{Id: 1, Model: "test-model", TimeoutSeconds: 30, MaxOutputTokens: 1024}, nil
+			return modelClient, &model.AssistantModelProfile{Id: 1, Model: "test-model", TimeoutSeconds: 75, MaxOutputTokens: 1024}, nil
 		},
 		func() (*tool.Registry, error) { return builtin.NewRegistry(db) },
 	)
@@ -135,6 +136,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	var run model.AssistantRun
 	require.NoError(t, db.First(&run).Error)
 	require.Equal(t, model.AssistantRunStatusSucceeded, run.Status)
+	require.EqualValues(t, 75, run.DeadlineAt-run.StartedAt)
 	require.Len(t, modelClient.requests, 2)
 	require.Len(t, modelClient.requests[0].Messages, 2)
 	require.Equal(t, provider.RoleUser, modelClient.requests[0].Messages[1].Role)
@@ -176,4 +178,9 @@ func TestSafeAssistantAnswerBlocksSensitiveOutputAndBoundsLength(t *testing.T) {
 	bounded := safeAssistantAnswer(strings.Repeat("数", 5000))
 	require.LessOrEqual(t, len([]rune(bounded)), 4020)
 	require.Contains(t, bounded, "已截断")
+}
+
+func TestAssistantRunFailureCodeDistinguishesTimeout(t *testing.T) {
+	require.Equal(t, "agent_run_timeout", assistantRunFailureCode(context.DeadlineExceeded))
+	require.Equal(t, "agent_run_failed", assistantRunFailureCode(errors.New("provider unavailable")))
 }

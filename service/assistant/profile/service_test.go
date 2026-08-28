@@ -33,6 +33,7 @@ func TestProfileLifecycleEncryptsSecret(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotZero(t, created.Id)
+	require.Equal(t, 120, created.TimeoutSeconds)
 	require.NotContains(t, created.APIKeyCiphertext, "top-secret")
 	require.Len(t, created.APIKeyFingerprint, 64)
 

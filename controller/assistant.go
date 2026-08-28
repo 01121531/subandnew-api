@@ -160,7 +160,7 @@ func TestAssistantModelProfile(c *gin.Context) {
 		assistantError(c, err)
 		return
 	}
-	testContext, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	testContext, cancel := context.WithTimeout(c.Request.Context(), time.Duration(modelProfile.TimeoutSeconds)*time.Second)
 	defer cancel()
 	started := time.Now()
 	response, err := client.Generate(testContext, provider.Request{

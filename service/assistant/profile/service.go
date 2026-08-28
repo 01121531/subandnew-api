@@ -259,7 +259,7 @@ func applyDefaults(profile *model.AssistantModelProfile) {
 		profile.Provider = model.AssistantModelProviderOpenAICompatible
 	}
 	if profile.TimeoutSeconds == 0 {
-		profile.TimeoutSeconds = 30
+		profile.TimeoutSeconds = 120
 	}
 	if profile.MaxOutputTokens == 0 {
 		profile.MaxOutputTokens = 2048

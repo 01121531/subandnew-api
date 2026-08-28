@@ -15,7 +15,7 @@ type AssistantModelProfile struct {
 	APIKeyCiphertext  string `json:"-" gorm:"type:text"`
 	APIKeyVersion     string `json:"-" gorm:"type:varchar(50)"`
 	APIKeyFingerprint string `json:"api_key_fingerprint,omitempty" gorm:"type:char(64)"`
-	TimeoutSeconds    int    `json:"timeout_seconds" gorm:"not null;default:30"`
+	TimeoutSeconds    int    `json:"timeout_seconds" gorm:"not null;default:120"`
 	MaxOutputTokens   int    `json:"max_output_tokens" gorm:"not null;default:2048"`
 	Enabled           bool   `json:"enabled" gorm:"not null;default:false;index"`
 	IsPrimary         bool   `json:"is_primary" gorm:"not null;default:false;index"`

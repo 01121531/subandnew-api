@@ -163,10 +163,11 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 	if err != nil {
 		return p.failEvent(ctx, event, "tool_registry_failed", err)
 	}
+	runTimeout := time.Duration(modelProfile.TimeoutSeconds) * time.Second
 	runRow := model.AssistantRun{
 		RunID: uuid.NewString(), ConversationID: conversation.ID, TriggerMessageID: event.ID,
 		ModelProfileID: modelProfile.Id, Model: modelProfile.Model, PromptVersion: promptVersion,
-		Status: model.AssistantRunStatusRunning, DeadlineAt: p.now().Add(30 * time.Second).Unix(),
+		Status: model.AssistantRunStatusRunning, DeadlineAt: p.now().Add(runTimeout).Unix(),
 		TraceID: uuid.NewString(), StartedAt: p.now().Unix(),
 	}
 	if err := p.db.WithContext(ctx).Create(&runRow).Error; err != nil {
@@ -181,7 +182,7 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 	}
 	agent, err := runner.New(client, registry, runner.Config{
 		SystemPrompt: systemPrompt(), MaxSteps: 6, MaxToolCalls: 8,
-		MaxOutputTokens: modelProfile.MaxOutputTokens, Timeout: time.Duration(modelProfile.TimeoutSeconds) * time.Second,
+		MaxOutputTokens: modelProfile.MaxOutputTokens, Timeout: runTimeout,
 	})
 	if err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, "runner_configuration_failed", err)
@@ -192,8 +193,13 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		Channel: model.AssistantChannelTypeWechatILink, IdentityID: identity.ID, UserID: identity.UserID,
 	}, history)
 	if err != nil {
-		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "查询未能完成，请稍后重试。系统已记录本次运行编号："+runRow.RunID)
-		return p.failRunAndEvent(ctx, event, &runRow, "agent_run_failed", err)
+		failureCode := assistantRunFailureCode(err)
+		reply := "查询未能完成，请稍后重试。系统已记录本次运行编号：" + runRow.RunID
+		if failureCode == "agent_run_timeout" {
+			reply = "模型响应超时，请稍后重试或联系管理员调高模型超时时间。系统已记录本次运行编号：" + runRow.RunID
+		}
+		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, reply)
+		return p.failRunAndEvent(ctx, event, &runRow, failureCode, err)
 	}
 	outcome.Answer = safeAssistantAnswer(outcome.Answer)
 	if err := p.persistSuccessfulRun(ctx, &runRow, registry.List(), outcome, started); err != nil {
@@ -206,6 +212,13 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		return p.failRunAndEvent(ctx, event, &runRow, "outbox_failed", err)
 	}
 	return p.finishEvent(ctx, event.ID)
+}
+
+func assistantRunFailureCode(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "agent_run_timeout"
+	}
+	return "agent_run_failed"
 }
 
 func (p *Processor) turnLock(ctx context.Context, eventID int64) (*sync.Mutex, error) {

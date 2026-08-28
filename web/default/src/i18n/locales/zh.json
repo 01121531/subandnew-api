@@ -651,6 +651,7 @@
     "Verify TLS certificates": "验证 TLS 证书",
     "Probe policy": "巡检策略",
     "Timeout (seconds)": "超时（秒）",
+    "Reasoning models may need 60 to 120 seconds.": "推理模型可能需要 60～120 秒。",
     "Interval (seconds)": "间隔（秒）",
     "Management credential": "管理凭据",
     "Admin token": "管理员令牌",

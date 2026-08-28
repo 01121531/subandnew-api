@@ -42,7 +42,7 @@ const defaultValues: AssistantModelProfileInput = {
   base_url: 'https://api.openai.com/v1',
   model: '',
   api_key: '',
-  timeout_seconds: 30,
+  timeout_seconds: 120,
   max_output_tokens: 2048,
   enabled: true,
   is_primary: false,
@@ -225,6 +225,9 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
                       }
                     />
                   </FormControl>
+                  <FormDescription>
+                    {t('Reasoning models may need 60 to 120 seconds.')}
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

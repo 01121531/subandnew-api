@@ -118,3 +118,11 @@ func TestRunnerRejectsDuplicateToolCallAndStepLimit(t *testing.T) {
 	}, []provider.Message{{Role: provider.RoleUser, Content: "list"}})
 	require.ErrorIs(t, err, ErrStepLimit)
 }
+
+func TestRunnerAcceptsConfiguredTimeoutUpToTwoMinutes(t *testing.T) {
+	_, err := New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", Timeout: 120 * time.Second})
+	require.NoError(t, err)
+
+	_, err = New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", Timeout: 121 * time.Second})
+	require.ErrorIs(t, err, ErrInvalidConfiguration)
+}
