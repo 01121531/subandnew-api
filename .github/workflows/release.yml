@@ -16,10 +16,6 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: '>=1.25.1'
-      - name: Verify backend
-        run: |
-          go test ./... -count=1
-          go vet ./...
       - name: Verify frontend
         working-directory: web
         run: |
@@ -28,6 +24,10 @@ jobs:
           bun run typecheck
           bun run lint
           bun run build
+      - name: Verify backend
+        run: |
+          go test ./... -count=1
+          go vet ./...
 
   build:
     needs: quality

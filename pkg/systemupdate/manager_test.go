@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -41,8 +42,8 @@ func TestSelectAssets(t *testing.T) {
 	release := githubRelease{
 		TagName: "v1.2.3",
 		Assets: []githubAsset{
-			{ID: 1, Name: "checksums-windows.txt"},
-			{ID: 3, Name: "subandnew-api-v1.2.3-windows-amd64.exe"},
+			{ID: 1, Name: "checksums-" + releaseArtifactPlatform(runtime.GOOS) + ".txt"},
+			{ID: 3, Name: releaseBinaryName("v1.2.3", runtime.GOOS, runtime.GOARCH)},
 		},
 	}
 	binary, checksum, err := selectAssets(release)
