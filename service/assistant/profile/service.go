@@ -107,7 +107,7 @@ func (s *Service) Create(input CreateInput) (*model.AssistantModelProfile, error
 }
 
 func (s *Service) List() ([]model.AssistantModelProfile, error) {
-	var profiles []model.AssistantModelProfile
+	profiles := make([]model.AssistantModelProfile, 0)
 	err := s.db.Order("is_primary DESC, id ASC").Find(&profiles).Error
 	return profiles, err
 }

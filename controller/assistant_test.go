@@ -6,10 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestAssistantErrorMapsChannelUpstreamFailures(t *testing.T) {
@@ -46,4 +49,38 @@ func TestAssistantErrorMapsCompletedLoginConflict(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Contains(t, recorder.Body.String(), "assistant_channel_login_already_completed")
+}
+
+func TestAssistantListResponsesUseEmptyArrays(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.AssistantRun{},
+		&model.AssistantIdentity{},
+		&model.AssistantIdentityInstanceScope{},
+	))
+	previousDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	runRecorder := httptest.NewRecorder()
+	runContext, _ := gin.CreateTestContext(runRecorder)
+	runContext.Request = httptest.NewRequest(http.MethodGet, "/api/assistant/runs", nil)
+	ListAssistantRuns(runContext)
+	require.Equal(t, http.StatusOK, runRecorder.Code)
+	require.Contains(t, runRecorder.Body.String(), `"items":[]`)
+
+	identity := model.AssistantIdentity{
+		ChannelID: 1, ExternalUserID: "wx-user", UserID: 1,
+		Status: model.AssistantIdentityStatusActive, AllowedInstanceScope: model.AssistantInstanceScopeAll,
+	}
+	require.NoError(t, db.Create(&identity).Error)
+	identityRecorder := httptest.NewRecorder()
+	identityContext, _ := gin.CreateTestContext(identityRecorder)
+	identityContext.Request = httptest.NewRequest(http.MethodGet, "/api/assistant/identities", nil)
+	ListAssistantIdentities(identityContext)
+	require.Equal(t, http.StatusOK, identityRecorder.Code)
+	require.Contains(t, identityRecorder.Body.String(), `"instance_ids":[]`)
 }

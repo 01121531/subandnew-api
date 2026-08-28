@@ -265,7 +265,7 @@ func ListAssistantRuns(c *gin.Context) {
 		}
 	}
 	var total int64
-	var runs []model.AssistantRun
+	runs := make([]model.AssistantRun, 0)
 	if err := query.Count(&total).Error; err != nil {
 		assistantError(c, err)
 		return
@@ -292,7 +292,7 @@ func GetAssistantRun(c *gin.Context) {
 		assistantError(c, err)
 		return
 	}
-	var calls []model.AssistantToolCall
+	calls := make([]model.AssistantToolCall, 0)
 	if err := model.DB.WithContext(c.Request.Context()).Where("run_id = ?", run.ID).Order("sequence ASC").Find(&calls).Error; err != nil {
 		assistantError(c, err)
 		return
@@ -313,7 +313,7 @@ type assistantIdentityView struct {
 }
 
 func ListAssistantIdentities(c *gin.Context) {
-	var identities []model.AssistantIdentity
+	identities := make([]model.AssistantIdentity, 0)
 	if err := model.DB.WithContext(c.Request.Context()).Order("id DESC").Limit(500).Find(&identities).Error; err != nil {
 		assistantError(c, err)
 		return
@@ -322,7 +322,7 @@ func ListAssistantIdentities(c *gin.Context) {
 	for _, identity := range identities {
 		var user model.User
 		_ = model.DB.WithContext(c.Request.Context()).Select("id", "username").First(&user, identity.UserID).Error
-		var instanceIDs []int64
+		instanceIDs := make([]int64, 0)
 		if identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected {
 			if err := model.DB.WithContext(c.Request.Context()).Model(&model.AssistantIdentityInstanceScope{}).Where("identity_id = ?", identity.ID).Order("instance_id ASC").Pluck("instance_id", &instanceIDs).Error; err != nil {
 				assistantError(c, err)

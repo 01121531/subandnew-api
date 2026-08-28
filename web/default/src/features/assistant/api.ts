@@ -26,7 +26,7 @@ export async function listAssistantModelProfiles() {
   const response = await api.get<ApiResponse<AssistantModelProfile[]>>(
     '/api/assistant/model-profiles'
   )
-  return response.data.data
+  return Array.isArray(response.data.data) ? response.data.data : []
 }
 
 export async function createAssistantModelProfile(
@@ -69,7 +69,7 @@ export async function listAssistantChannels() {
   const response = await api.get<ApiResponse<AssistantChannel[]>>(
     '/api/assistant/channels'
   )
-  return response.data.data
+  return Array.isArray(response.data.data) ? response.data.data : []
 }
 
 export async function startAssistantChannelLogin() {
@@ -117,21 +117,36 @@ export async function listAssistantRuns(input: {
   const response = await api.get<ApiResponse<AssistantRunList>>(
     `/api/assistant/runs?${params.toString()}`
   )
-  return response.data.data
+  const data = response.data.data
+  return {
+    ...data,
+    items: Array.isArray(data.items) ? data.items : [],
+  }
 }
 
 export async function getAssistantRun(runId: string) {
   const response = await api.get<ApiResponse<AssistantRunDetail>>(
     `/api/assistant/runs/${encodeURIComponent(runId)}`
   )
-  return response.data.data
+  const data = response.data.data
+  return {
+    ...data,
+    tool_calls: Array.isArray(data.tool_calls) ? data.tool_calls : [],
+  }
 }
 
 export async function listAssistantIdentities() {
   const response = await api.get<ApiResponse<AssistantIdentity[]>>(
     '/api/assistant/identities'
   )
-  return response.data.data
+  const identities = response.data.data
+  if (!Array.isArray(identities)) return []
+  return identities.map((identity) => ({
+    ...identity,
+    instance_ids: Array.isArray(identity.instance_ids)
+      ? identity.instance_ids
+      : [],
+  }))
 }
 
 export async function revokeAssistantIdentity(identityId: number) {

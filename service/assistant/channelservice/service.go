@@ -226,7 +226,7 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 }
 
 func (s *Service) List(ctx context.Context) ([]model.AssistantChannel, error) {
-	var channels []model.AssistantChannel
+	channels := make([]model.AssistantChannel, 0)
 	err := s.db.WithContext(ctx).
 		Where("account_id NOT LIKE ?", pendingAccountPrefix+"%").
 		Order("id DESC").Find(&channels).Error
