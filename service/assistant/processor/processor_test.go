@@ -32,7 +32,7 @@ func TestSystemPromptDescribesEffectiveDefaultAndFallback(t *testing.T) {
 	require.Contains(t, prompt, "primary（#7）")
 	require.Contains(t, prompt, `instance_scope="all"`)
 	require.Contains(t, prompt, "Asia/Shanghai")
-	require.Contains(t, prompt, "禁止直接展示 UTC 时间")
+	require.Contains(t, prompt, "禁止再次增加或扣减 8 小时")
 	require.Contains(t, prompt, "当前中国标准时间")
 	require.Contains(t, prompt, "get_metric_history")
 	require.Contains(t, prompt, "默认实例失效")

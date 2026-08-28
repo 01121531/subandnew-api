@@ -63,6 +63,18 @@ func TestListInstancesReturnsOnlyScopedRedactedData(t *testing.T) {
 	require.NotContains(t, string(result.Data), "visible.example")
 }
 
+func TestAssistantToolTimesUseSingleShanghaiRepresentation(t *testing.T) {
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	observedAt := time.Date(2026, 8, 29, 1, 5, 58, 0, location).Unix()
+	expected := "2026-08-29T01:05:58+08:00"
+	require.Equal(t, expected, assistantTime(observedAt))
+
+	encoded, err := json.Marshal(realtimeOutput{Items: []realtimeItem{{InstanceID: 6, ObservedAt: assistantTime(observedAt), Status: "connected"}}})
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"observed_at":"`+expected+`"`)
+	require.NotContains(t, string(encoded), jsonNumber(observedAt))
+}
+
 func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)
@@ -89,8 +101,10 @@ func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 
 func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
-	now := time.Now().Unix()
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	now := time.Date(2026, 8, 29, 1, 5, 58, 0, location).Unix()
 	payload, err := json.Marshal(managedinstance.SummaryResult{
+		Window:   managedinstance.TimeWindow{Start: now - 3600, End: now, Timezone: assistantTimezone},
 		Requests: managedinstance.MetricSample{Value: floatPointer(123), Unit: "request", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
 	})
 	require.NoError(t, err)
@@ -103,13 +117,17 @@ func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 
 	result, err := registry.Execute(t.Context(), execution, "get_dashboard_summary", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`],"preset_days":7}`))
 	require.NoError(t, err)
-	require.Equal(t, tool.FreshnessSnapshot, result.Freshness.State)
+	require.Equal(t, tool.FreshnessStale, result.Freshness.State)
 	require.Equal(t, now, result.Freshness.ObservedAt.Unix())
 	require.Equal(t, assistantTimezone, result.Freshness.Timezone)
 	require.Equal(t, assistantTimezone, result.Freshness.ObservedAt.Location().String())
 	require.Equal(t, "managed_dashboard_snapshots", result.Provenance[0].Source)
 	require.Equal(t, assistantTimezone, result.Provenance[0].ObservedAt.Location().String())
-	require.Contains(t, string(result.Data), `"observed_at":`)
+	require.Contains(t, string(result.Data), `"observed_at":"2026-08-29T01:05:58+08:00"`)
+	require.Contains(t, string(result.Data), `"end_at":"2026-08-29T01:05:58+08:00"`)
+	require.NotContains(t, string(result.Data), jsonNumber(now))
+	require.NotContains(t, string(result.Data), `"start":`)
+	require.NotContains(t, string(result.Data), `"end":`)
 }
 
 func TestRealtimeMetricsDoesNotExposeAccountDetails(t *testing.T) {
@@ -144,7 +162,10 @@ func TestMetricHistoryUsesDefaultInstanceAndShanghaiTime(t *testing.T) {
 	require.Len(t, output.Points, 1)
 	require.Equal(t, 50.0, *output.Points[0].Values["rpm"])
 	require.Equal(t, "unsupported", output.MetricStatus["accounts_available"].Status)
-	require.Equal(t, "2026-08-28 15:00:00", output.Points[0].Time)
+	require.Equal(t, "2026-08-28T15:00:00+08:00", output.Points[0].Time)
+	require.Equal(t, output.Points[0].Time, output.Statistics["rpm"].LatestAt)
+	require.NotContains(t, string(result.Data), `"timestamp"`)
+	require.NotContains(t, string(result.Data), jsonNumber(bucket))
 }
 
 func TestMetricHistoryReadsAuxiliarySampleWithoutRPM(t *testing.T) {
@@ -210,6 +231,18 @@ func TestMetricHistoryRejectsOverlongAndOversizedRanges(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestMetricHistoryTreatsUTCAndShanghaiInputsAsSameInstant(t *testing.T) {
+	utcQuery, err := normalizeMetricHistoryQuery(metricHistoryInput{
+		Metrics: []string{"rpm"}, Mode: "point", PointAt: "2026-08-28T17:05:58Z", Granularity: "minute",
+	})
+	require.NoError(t, err)
+	shanghaiQuery, err := normalizeMetricHistoryQuery(metricHistoryInput{
+		Metrics: []string{"rpm"}, Mode: "point", PointAt: "2026-08-29 01:05:58", Granularity: "minute",
+	})
+	require.NoError(t, err)
+	require.Equal(t, shanghaiQuery, utcQuery)
+}
+
 func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	now := time.Now().Unix()
@@ -226,6 +259,8 @@ func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {
 	require.Len(t, health.Items, 1)
 	require.Equal(t, visible.Id, health.Items[0].InstanceID)
 	require.Equal(t, 2, health.Items[0].ConsecutiveFailures)
+	require.Equal(t, assistantTime(now), health.Items[0].LastCheckedAt)
+	require.NotContains(t, string(healthResult.Data), jsonNumber(now))
 
 	alertResult, err := registry.Execute(t.Context(), execution, "get_open_alerts", json.RawMessage(`{}`))
 	require.NoError(t, err)
@@ -233,6 +268,8 @@ func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {
 	require.NoError(t, json.Unmarshal(alertResult.Data, &alerts))
 	require.Len(t, alerts.Items, 1)
 	require.Equal(t, visible.Id, alerts.Items[0].InstanceID)
+	require.Equal(t, assistantTime(now), alerts.Items[0].LastSeenAt)
+	require.NotContains(t, string(alertResult.Data), jsonNumber(now))
 	require.NotContains(t, string(alertResult.Data), "email")
 }
 

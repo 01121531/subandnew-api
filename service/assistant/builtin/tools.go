@@ -47,8 +47,8 @@ type instanceSummary struct {
 	Environment   string `json:"environment"`
 	Status        string `json:"status"`
 	Version       string `json:"version,omitempty"`
-	LastSeenAt    int64  `json:"last_seen_at"`
-	LastCheckedAt int64  `json:"last_checked_at"`
+	LastSeenAt    string `json:"last_seen_at,omitempty"`
+	LastCheckedAt string `json:"last_checked_at,omitempty"`
 }
 
 type listInstancesOutput struct {
@@ -90,7 +90,7 @@ func (input dashboardInput) Validate() error {
 
 type realtimeItem struct {
 	InstanceID int64                                  `json:"instance_id"`
-	ObservedAt int64                                  `json:"observed_at,omitempty"`
+	ObservedAt string                                 `json:"observed_at,omitempty"`
 	Status     string                                 `json:"status"`
 	ErrorCode  string                                 `json:"error_code,omitempty"`
 	Metrics    *managedinstance.RealtimeMetricsResult `json:"metrics,omitempty"`
@@ -105,8 +105,8 @@ type healthItem struct {
 	Name                string `json:"name"`
 	Status              string `json:"status"`
 	ConsecutiveFailures int    `json:"consecutive_failures"`
-	LastSeenAt          int64  `json:"last_seen_at"`
-	LastCheckedAt       int64  `json:"last_checked_at"`
+	LastSeenAt          string `json:"last_seen_at,omitempty"`
+	LastCheckedAt       string `json:"last_checked_at,omitempty"`
 }
 
 type healthOutput struct {
@@ -119,12 +119,59 @@ type alertItem struct {
 	AlertType   string `json:"alert_type"`
 	ErrorCode   string `json:"error_code"`
 	Occurrences int    `json:"occurrences"`
-	FirstSeenAt int64  `json:"first_seen_at"`
-	LastSeenAt  int64  `json:"last_seen_at"`
+	FirstSeenAt string `json:"first_seen_at,omitempty"`
+	LastSeenAt  string `json:"last_seen_at,omitempty"`
 }
 
 type alertsOutput struct {
 	Items []alertItem `json:"items"`
+}
+
+type dashboardRangeOutput struct {
+	RangeKey   string `json:"range_key"`
+	PresetDays int    `json:"preset_days"`
+	StartAt    string `json:"start_at,omitempty"`
+	EndAt      string `json:"end_at,omitempty"`
+	Timezone   string `json:"timezone"`
+}
+
+type dashboardSummaryOutput struct {
+	Window    dashboardRangeOutput              `json:"window"`
+	Resources []managedinstance.ResourceSummary `json:"resources"`
+	Requests  managedinstance.MetricSample      `json:"requests"`
+	Tokens    managedinstance.MetricSample      `json:"tokens"`
+	Cost      managedinstance.MetricSample      `json:"cost"`
+	ErrorRate managedinstance.MetricSample      `json:"error_rate"`
+	Latency   managedinstance.MetricSample      `json:"latency"`
+	Trend     []managedinstance.UsageTrendPoint `json:"trend"`
+}
+
+type dashboardObservationOutput struct {
+	SourceInstanceID int64                   `json:"source_instance_id"`
+	ObservedAt       string                  `json:"observed_at"`
+	CollectionStatus string                  `json:"collection_status"`
+	ErrorCode        string                  `json:"error_code,omitempty"`
+	Data             *dashboardSummaryOutput `json:"data,omitempty"`
+}
+
+type dashboardSectionOutput struct {
+	Range             dashboardRangeOutput        `json:"range"`
+	Observation       *dashboardObservationOutput `json:"observation,omitempty"`
+	LastAttemptAt     string                      `json:"last_attempt_at,omitempty"`
+	LastAttemptStatus string                      `json:"last_attempt_status"`
+	LastErrorCode     string                      `json:"last_error_code,omitempty"`
+	Stale             bool                        `json:"stale"`
+}
+
+type dashboardInstanceOutput struct {
+	InstanceID int64                  `json:"instance_id"`
+	Summary    dashboardSectionOutput `json:"summary"`
+	Today      dashboardSectionOutput `json:"today"`
+}
+
+type dashboardOutput struct {
+	Range dashboardRangeOutput      `json:"range"`
+	Items []dashboardInstanceOutput `json:"items"`
 }
 
 func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
@@ -178,7 +225,8 @@ func registerListInstances(registry *tool.Registry, db *gorm.DB) error {
 			instance := view.ManagedInstance
 			items = append(items, instanceSummary{
 				ID: instance.Id, Name: instance.Name, Kind: instance.Kind, Environment: instance.Environment,
-				Status: instance.Status, Version: instance.Version, LastSeenAt: instance.LastSeenAt, LastCheckedAt: instance.LastCheckedAt,
+				Status: instance.Status, Version: instance.Version,
+				LastSeenAt: assistantTime(instance.LastSeenAt), LastCheckedAt: assistantTime(instance.LastCheckedAt),
 			})
 			observedAt = conservativeTimestamp(observedAt, max(instance.LastCheckedAt, instance.UpdatedAt))
 			provenance = append(provenance, tool.Provenance{Source: "managed_instances", Resource: "instance:" + strconv.FormatInt(instance.Id, 10), ObservedAt: unixTime(max(instance.LastCheckedAt, instance.UpdatedAt))})
@@ -214,7 +262,11 @@ func registerInstanceHealth(registry *tool.Registry, db *gorm.DB) error {
 		observedAt := int64(0)
 		for _, view := range result.Items {
 			instance := view.ManagedInstance
-			output.Items = append(output.Items, healthItem{InstanceID: instance.Id, Name: instance.Name, Status: instance.Status, ConsecutiveFailures: instance.ConsecutiveFailures, LastSeenAt: instance.LastSeenAt, LastCheckedAt: instance.LastCheckedAt})
+			output.Items = append(output.Items, healthItem{
+				InstanceID: instance.Id, Name: instance.Name, Status: instance.Status,
+				ConsecutiveFailures: instance.ConsecutiveFailures,
+				LastSeenAt:          assistantTime(instance.LastSeenAt), LastCheckedAt: assistantTime(instance.LastCheckedAt),
+			})
 			observedAt = conservativeTimestamp(observedAt, instance.LastCheckedAt)
 			provenance = append(provenance, tool.Provenance{Source: "managed_instances", Resource: "instance:" + strconv.FormatInt(instance.Id, 10), ObservedAt: unixTime(instance.LastCheckedAt)})
 		}
@@ -247,7 +299,11 @@ func registerOpenAlerts(registry *tool.Registry, db *gorm.DB) error {
 		provenance := make([]tool.Provenance, 0, len(alerts))
 		observedAt := int64(0)
 		for _, alert := range alerts {
-			output.Items = append(output.Items, alertItem{ID: alert.Id, InstanceID: alert.InstanceId, AlertType: alert.AlertType, ErrorCode: alert.ErrorCode, Occurrences: alert.Occurrences, FirstSeenAt: alert.FirstSeenAt, LastSeenAt: alert.LastSeenAt})
+			output.Items = append(output.Items, alertItem{
+				ID: alert.Id, InstanceID: alert.InstanceId, AlertType: alert.AlertType,
+				ErrorCode: alert.ErrorCode, Occurrences: alert.Occurrences,
+				FirstSeenAt: assistantTime(alert.FirstSeenAt), LastSeenAt: assistantTime(alert.LastSeenAt),
+			})
 			observedAt = conservativeTimestamp(observedAt, alert.LastSeenAt)
 			provenance = append(provenance, tool.Provenance{Source: "managed_instance_alerts", Resource: "alert:" + strconv.FormatInt(alert.Id, 10), ObservedAt: unixTime(alert.LastSeenAt)})
 		}
@@ -264,18 +320,18 @@ func registerDashboardSummary(registry *tool.Registry, db *gorm.DB) error {
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionView},
 		Risk:       tool.RiskLow, ReadOnly: true, Idempotent: true,
 		InputSchema: instanceSelectionSchema(true),
-	}, func(ctx context.Context, execution tool.ExecutionContext, input dashboardInput) (tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView], error) {
+	}, func(ctx context.Context, execution tool.ExecutionContext, input dashboardInput) (tool.Output[dashboardOutput], error) {
 		resolution, err := access.ResolveInstanceSelection(ctx, db, execution, input.InstanceIDs, input.InstanceScope)
 		if err != nil {
-			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
+			return tool.Output[dashboardOutput]{}, err
 		}
 		dashboardRange, err := controlplaneservice.NormalizeManagedDashboardRange(input.PresetDays, 0, 0)
 		if err != nil {
-			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
+			return tool.Output[dashboardOutput]{}, err
 		}
 		result, err := controlplaneservice.GetManagedDashboardSnapshots(resolution.IDs, dashboardRange)
 		if err != nil {
-			return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{}, err
+			return tool.Output[dashboardOutput]{}, err
 		}
 		provenance := make([]tool.Provenance, 0, len(result.Items))
 		observedAt := int64(0)
@@ -291,7 +347,7 @@ func registerDashboardSummary(registry *tool.Registry, db *gorm.DB) error {
 		if len(provenance) == 0 {
 			provenance = []tool.Provenance{{Source: "managed_dashboard_snapshots"}}
 		}
-		return tool.Output[*controlplaneservice.ManagedDashboardSnapshotListView]{Data: result, Provenance: provenance, Freshness: freshnessForSnapshot(observedAt, stale)}, nil
+		return tool.Output[dashboardOutput]{Data: dashboardSnapshotOutput(result), Provenance: provenance, Freshness: freshnessForSnapshot(observedAt, stale)}, nil
 	})
 }
 
@@ -317,7 +373,7 @@ func registerRealtimeMetrics(registry *tool.Registry, db *gorm.DB) error {
 				item.ErrorCode = "unsupported_or_unavailable"
 			} else if available {
 				item.Status = state.StreamStatus
-				item.ObservedAt = state.ObservedAt
+				item.ObservedAt = assistantTime(state.ObservedAt)
 				item.ErrorCode = state.ErrorCode
 				item.Metrics = state.Metrics()
 				observedAt = conservativeTimestamp(observedAt, state.ObservedAt)
@@ -387,6 +443,66 @@ func conservativeTimestamp(current int64, candidate int64) int64 {
 		return candidate
 	}
 	return current
+}
+
+func dashboardSnapshotOutput(source *controlplaneservice.ManagedDashboardSnapshotListView) dashboardOutput {
+	output := dashboardOutput{Range: dashboardRange(source.Range), Items: make([]dashboardInstanceOutput, 0, len(source.Items))}
+	for _, item := range source.Items {
+		output.Items = append(output.Items, dashboardInstanceOutput{
+			InstanceID: item.InstanceID,
+			Summary:    dashboardSection(item.Summary),
+			Today:      dashboardSection(item.Today),
+		})
+	}
+	return output
+}
+
+func dashboardSection(source controlplaneservice.ManagedDashboardSnapshotSection) dashboardSectionOutput {
+	output := dashboardSectionOutput{
+		Range: dashboardRange(source.Range), LastAttemptAt: assistantTime(source.LastAttemptAt),
+		LastAttemptStatus: source.LastAttemptStatus, LastErrorCode: source.LastErrorCode, Stale: source.Stale,
+	}
+	if source.Observation == nil {
+		return output
+	}
+	observation := &dashboardObservationOutput{
+		SourceInstanceID: source.Observation.SourceInstanceID,
+		ObservedAt:       assistantTime(source.Observation.ObservedAt),
+		CollectionStatus: source.Observation.CollectionStatus,
+		ErrorCode:        source.Observation.ErrorCode,
+	}
+	if summary, ok := source.Observation.Data.(*managedinstance.SummaryResult); ok && summary != nil {
+		observation.Data = dashboardSummary(summary)
+	} else if summary, ok := source.Observation.Data.(managedinstance.SummaryResult); ok {
+		observation.Data = dashboardSummary(&summary)
+	}
+	output.Observation = observation
+	return output
+}
+
+func dashboardSummary(source *managedinstance.SummaryResult) *dashboardSummaryOutput {
+	return &dashboardSummaryOutput{
+		Window: dashboardRangeOutput{
+			StartAt: assistantTime(source.Window.Start), EndAt: assistantTime(source.Window.End),
+			Timezone: assistantTimezone,
+		},
+		Resources: source.Resources, Requests: source.Requests, Tokens: source.Tokens,
+		Cost: source.Cost, ErrorRate: source.ErrorRate, Latency: source.Latency, Trend: source.Trend,
+	}
+}
+
+func dashboardRange(source controlplaneservice.ManagedDashboardRange) dashboardRangeOutput {
+	return dashboardRangeOutput{
+		RangeKey: source.RangeKey, PresetDays: source.PresetDays,
+		StartAt: assistantTime(source.Start), EndAt: assistantTime(source.End), Timezone: assistantTimezone,
+	}
+}
+
+func assistantTime(timestamp int64) string {
+	if timestamp <= 0 {
+		return ""
+	}
+	return time.Unix(timestamp, 0).In(assistantLocation).Format(time.RFC3339)
 }
 
 func unixTime(timestamp int64) time.Time {

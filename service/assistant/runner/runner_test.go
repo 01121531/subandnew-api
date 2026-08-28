@@ -52,9 +52,9 @@ func newRunnerRegistry(t *testing.T) *tool.Registry {
 		Permission: tool.Permission{Resource: "managed_instance", Action: "view"}, Risk: tool.RiskLow,
 		ReadOnly: true, Idempotent: true, InputSchema: json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer"}},"required":["limit"]}`),
 	}, func(_ context.Context, _ tool.ExecutionContext, input listInput) (tool.Output[map[string]any], error) {
-		now := time.Unix(100, 0).UTC()
+		now := time.Date(2026, 8, 29, 1, 5, 58, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 		return tool.Output[map[string]any]{
-			Data:       map[string]any{"count": input.Limit},
+			Data:       map[string]any{"count": input.Limit, "observed_at": now.Format(time.RFC3339)},
 			Provenance: []tool.Provenance{{Source: "control-plane", ObservedAt: now}},
 			Freshness:  tool.Freshness{State: tool.FreshnessSnapshot, ObservedAt: now},
 		}, nil
@@ -84,6 +84,8 @@ func TestRunnerExecutesToolAndReturnsGroundedAnswer(t *testing.T) {
 	require.Len(t, client.requests[0].Tools, 1)
 	require.Equal(t, provider.RoleTool, client.requests[1].Messages[len(client.requests[1].Messages)-1].Role)
 	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"freshness"`)
+	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"observed_at":"2026-08-29T01:05:58+08:00"`)
+	require.NotContains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `1787936758`)
 }
 
 func TestRunnerFailsClosedOnAuthorization(t *testing.T) {

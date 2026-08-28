@@ -93,7 +93,7 @@ func (input metricHistoryInput) Validate() error {
 }
 
 type metricHistoryPoint struct {
-	Timestamp int64               `json:"timestamp"`
+	timestamp int64
 	Time      string              `json:"time"`
 	Values    map[string]*float64 `json:"values"`
 }
@@ -105,7 +105,7 @@ type metricHistoryStatistics struct {
 	Average  *float64 `json:"average"`
 	Sum      *float64 `json:"sum"`
 	Latest   *float64 `json:"latest"`
-	LatestAt int64    `json:"latest_at,omitempty"`
+	LatestAt string   `json:"latest_at,omitempty"`
 }
 
 type metricHistoryMetricStatus struct {
@@ -126,7 +126,7 @@ type metricHistoryOutput struct {
 	Statistics   map[string]metricHistoryStatistics   `json:"statistics"`
 	MetricStatus map[string]metricHistoryMetricStatus `json:"metric_status"`
 	Complete     bool                                 `json:"complete"`
-	ObservedAt   int64                                `json:"observed_at,omitempty"`
+	ObservedAt   string                               `json:"observed_at,omitempty"`
 }
 
 type metricHistoryQuery struct {
@@ -176,7 +176,7 @@ func registerMetricHistory(registry *tool.Registry, db *gorm.DB) error {
 			status.Status = "unsupported"
 			result.MetricStatus[metric] = status
 		}
-		result.ObservedAt = observedAt
+		result.ObservedAt = assistantTime(observedAt)
 		provenance := []tool.Provenance{{Source: "managed_rpm_history", ObservedAt: unixTime(observedAt)}}
 		if containsDailyMetric(metrics) {
 			provenance = append(provenance, tool.Provenance{Source: "managed_dashboard_snapshots", ObservedAt: unixTime(observedAt)})
@@ -385,7 +385,7 @@ func queryMetricHistory(ctx context.Context, db *gorm.DB, ids []int64, metrics [
 	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
 	for _, timestamp := range timestamps {
 		result.Points = append(result.Points, metricHistoryPoint{
-			Timestamp: timestamp, Time: time.Unix(timestamp, 0).In(assistantLocation).Format("2006-01-02 15:04:05"), Values: points[timestamp],
+			timestamp: timestamp, Time: assistantTime(timestamp), Values: points[timestamp],
 		})
 	}
 	if query.mode == metricHistoryModePoint && len(result.Points) > 1 {
@@ -658,7 +658,7 @@ func calculateMetricHistoryStatistics(points []metricHistoryPoint, metric string
 		sum += *value
 		latest := *value
 		result.Latest = &latest
-		result.LatestAt = point.Timestamp
+		result.LatestAt = point.Time
 		result.Count++
 	}
 	if result.Count > 0 {
