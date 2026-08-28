@@ -81,14 +81,19 @@ export async function startAssistantChannelLogin() {
 
 export async function checkAssistantChannelLogin(
   channelId: number,
-  verifyCode = ''
+  verifyCode = '',
+  signal?: AbortSignal
 ) {
   const response = await api.post<ApiResponse<AssistantLoginView>>(
     `/api/assistant/channels/${channelId}/login/status`,
     { verify_code: verifyCode },
-    { skipErrorHandler: true }
+    { signal, skipErrorHandler: true }
   )
   return response.data.data
+}
+
+export async function cancelAssistantChannelLogin(channelId: number) {
+  await api.delete(`/api/assistant/channels/${channelId}/login`)
 }
 
 export async function createAssistantBindingCode() {

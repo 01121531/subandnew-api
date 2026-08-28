@@ -1504,6 +1504,7 @@
     "Delete model profile": "Delete model profile",
     "This removes {{name}} and its encrypted API key.": "This removes {{name}} and its encrypted API key.",
     "WeChat connection": "WeChat connection",
+    "WeChat ClawBot": "WeChat ClawBot",
     "Scan with WeChat to connect an OpenBot assistant account.": "Scan with WeChat to connect an OpenBot assistant account.",
     "Connect WeChat": "Connect WeChat",
     "Creating QR code...": "Creating QR code...",

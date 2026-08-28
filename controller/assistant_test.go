@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
+	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -34,4 +35,15 @@ func TestAssistantErrorMapsChannelUpstreamFailures(t *testing.T) {
 			require.True(t, strings.Contains(recorder.Body.String(), test.message), recorder.Body.String())
 		})
 	}
+}
+
+func TestAssistantErrorMapsCompletedLoginConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	assistantError(context, channelservice.ErrLoginAlreadyComplete)
+
+	require.Equal(t, http.StatusConflict, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "assistant_channel_login_already_completed")
 }

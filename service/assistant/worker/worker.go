@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	leaseDuration   = 60 * time.Second
-	reconcilePeriod = time.Second
-	backlogPeriod   = 500 * time.Millisecond
-	workerParallel  = 4
+	leaseDuration      = 60 * time.Second
+	reconcilePeriod    = time.Second
+	backlogPeriod      = 500 * time.Millisecond
+	loginCleanupPeriod = time.Minute
+	workerParallel     = 4
 )
 
 type Worker struct {
@@ -113,8 +114,11 @@ func (w *Worker) loop(ctx context.Context) {
 	defer w.waitGroup.Done()
 	reconcileTicker := time.NewTicker(reconcilePeriod)
 	backlogTicker := time.NewTicker(backlogPeriod)
+	loginCleanupTicker := time.NewTicker(loginCleanupPeriod)
 	defer reconcileTicker.Stop()
 	defer backlogTicker.Stop()
+	defer loginCleanupTicker.Stop()
+	w.cleanupPendingLogins(ctx)
 	w.reconcileChannels(ctx)
 	w.dispatchBacklog(ctx)
 	for {
@@ -125,7 +129,15 @@ func (w *Worker) loop(ctx context.Context) {
 			w.reconcileChannels(ctx)
 		case <-backlogTicker.C:
 			w.dispatchBacklog(ctx)
+		case <-loginCleanupTicker.C:
+			w.cleanupPendingLogins(ctx)
 		}
+	}
+}
+
+func (w *Worker) cleanupPendingLogins(ctx context.Context) {
+	if err := w.channels.CleanupExpiredLogins(ctx, w.now()); err != nil {
+		common.SysError("assistant pending login cleanup failed: " + err.Error())
 	}
 }
 

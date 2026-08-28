@@ -20,6 +20,7 @@ import {
   Trash2,
   Unplug,
   Wifi,
+  X,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useMemo, useState } from 'react'
@@ -47,6 +48,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
 
 import {
+  cancelAssistantChannelLogin,
   checkAssistantChannelLogin,
   createAssistantBindingCode,
   createAssistantModelProfile,
@@ -367,6 +369,12 @@ function channelStatusLabel(
   return labels[status]
 }
 
+function maskedBotId(value: string) {
+  const normalized = value.trim()
+  if (normalized.length <= 16) return normalized
+  return `${normalized.slice(0, 7)}...${normalized.slice(-7)}`
+}
+
 function WeChatChannelSection() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -391,7 +399,8 @@ function WeChatChannelSection() {
   })
   const statusQuery = useQuery({
     queryKey: assistantQueryKeys.login(login?.channel_id ?? 0),
-    queryFn: () => checkAssistantChannelLogin(login?.channel_id ?? 0),
+    queryFn: ({ signal }) =>
+      checkAssistantChannelLogin(login?.channel_id ?? 0, '', signal),
     enabled:
       login != null && (login.state === 'pending' || login.state === 'scanned'),
     retry: 2,
@@ -420,6 +429,25 @@ function WeChatChannelSection() {
       if (login?.channel_id === disconnectingChannel?.id) setLogin(null)
       toast.success(t('WeChat channel disconnected'))
       setDisconnectingChannel(null)
+    },
+  })
+  const cancelLoginMutation = useMutation({
+    mutationFn: cancelAssistantChannelLogin,
+    onMutate: async (channelId) => {
+      await queryClient.cancelQueries({
+        queryKey: assistantQueryKeys.login(channelId),
+      })
+      queryClient.removeQueries({
+        queryKey: assistantQueryKeys.login(channelId),
+      })
+    },
+    onSuccess: async () => {
+      setLogin(null)
+      setVerifyCode('')
+      await queryClient.invalidateQueries({
+        queryKey: assistantQueryKeys.channels,
+      })
+      toast.success(t('WeChat channel disconnected'))
     },
   })
   const currentLogin = useMemo(
@@ -459,10 +487,10 @@ function WeChatChannelSection() {
         {currentLogin && (
           <div className='mb-4 rounded-xl border p-4' aria-live='polite'>
             <div className='flex flex-col gap-5 sm:flex-row sm:items-center'>
-              {currentLogin.qr_code && currentLogin.state !== 'connected' && (
+              {currentLogin.qr_image && currentLogin.state !== 'connected' && (
                 <div className='mx-auto flex size-52 shrink-0 items-center justify-center rounded-xl bg-white p-3 ring-1 ring-black/10 sm:mx-0'>
                   <QRCodeSVG
-                    value={currentLogin.qr_code}
+                    value={currentLogin.qr_image}
                     size={184}
                     level='M'
                     title={t('WeChat login QR code')}
@@ -537,6 +565,20 @@ function WeChatChannelSection() {
                     {t('Generate a new QR code')}
                   </Button>
                 )}
+                {currentLogin.state !== 'connected' &&
+                  currentLogin.state !== 'expired' && (
+                    <Button
+                      variant='outline'
+                      className='min-h-11'
+                      disabled={cancelLoginMutation.isPending}
+                      onClick={() =>
+                        cancelLoginMutation.mutate(currentLogin.channel_id)
+                      }
+                    >
+                      <X />
+                      {t('Cancel')}
+                    </Button>
+                  )}
                 {statusQuery.isError && (
                   <Alert variant='destructive'>
                     <AlertTitle>{t('Status check failed')}</AlertTitle>
@@ -608,13 +650,23 @@ function WeChatChannelSection() {
                   <div className='flex items-center justify-between gap-3'>
                     <div className='min-w-0'>
                       <p className='truncate font-medium'>
-                        {channel.account_id.startsWith('pending-')
-                          ? t('Pending WeChat account')
-                          : channel.account_id}
+                        {t('WeChat ClawBot')}
                       </p>
-                      <p className='text-muted-foreground mt-1 text-xs'>
-                        {t('Channel #{{id}}', { id: channel.id })}
-                      </p>
+                      <div className='text-muted-foreground mt-1 flex min-w-0 items-center gap-1 text-xs'>
+                        <span className='truncate font-mono'>
+                          {maskedBotId(channel.account_id)}
+                        </span>
+                        <CopyButton
+                          value={channel.account_id}
+                          className='size-7'
+                          iconClassName='size-3.5'
+                          tooltip={t('Account ID')}
+                          aria-label={t('Account ID')}
+                        />
+                        <span className='shrink-0'>
+                          {t('Channel #{{id}}', { id: channel.id })}
+                        </span>
+                      </div>
                     </div>
                     <Badge variant={badgeVariant}>
                       {channelStatusLabel(channel.status, t)}

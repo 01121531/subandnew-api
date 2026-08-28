@@ -76,7 +76,6 @@ export type AssistantLoginState =
 export type AssistantLoginView = {
   channel_id: number
   state: AssistantLoginState
-  qr_code?: string
   qr_image?: string
   expires_at?: number
   channel?: AssistantChannel

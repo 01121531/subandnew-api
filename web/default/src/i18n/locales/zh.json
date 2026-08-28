@@ -1504,6 +1504,7 @@
     "Delete model profile": "删除模型配置",
     "This removes {{name}} and its encrypted API key.": "将删除 {{name}} 及其加密 API 密钥。",
     "WeChat connection": "微信连接",
+    "WeChat ClawBot": "微信 ClawBot",
     "Scan with WeChat to connect an OpenBot assistant account.": "使用微信扫码，连接 OpenBot 智能助手账号。",
     "Connect WeChat": "连接微信",
     "Creating QR code...": "正在生成二维码...",

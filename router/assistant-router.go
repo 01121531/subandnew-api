@@ -28,6 +28,7 @@ func registerAssistantRoutes(api *gin.RouterGroup) {
 	channels.GET("", controller.ListAssistantChannels)
 	channels.POST("/login", controller.StartAssistantChannelLogin)
 	channels.POST("/:channel_id/login/status", controller.CheckAssistantChannelLogin)
+	channels.DELETE("/:channel_id/login", controller.CancelAssistantChannelLogin)
 	channels.DELETE("/:channel_id/credential", controller.RemoveAssistantChannelCredential)
 
 	identities := assistant.Group("/identities")

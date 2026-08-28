@@ -3,10 +3,12 @@ package channelservice
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/secrets"
@@ -45,6 +47,10 @@ func TestChannelLoginStoresOnlyEncryptedCredentials(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, loginStatePending, login.State)
 	require.Equal(t, "qr-image", login.QRImage)
+	encodedLogin, err := json.Marshal(login)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedLogin), "qr-secret")
+	require.Contains(t, string(encodedLogin), "qr-image")
 	var secret model.AssistantChannelSecret
 	require.NoError(t, db.Where("channel_id = ?", login.ChannelID).First(&secret).Error)
 	require.NotContains(t, secret.Ciphertext, "qr-secret")
@@ -98,6 +104,9 @@ func TestChannelListDoesNotRequireSecretCipher(t *testing.T) {
 	require.NoError(t, db.Create(&model.AssistantChannel{
 		Type: model.AssistantChannelTypeWechatILink, AccountID: "bot-1", Status: model.AssistantChannelStatusConnected,
 	}).Error)
+	require.NoError(t, db.Create(&model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: pendingAccountPrefix + "hidden", Status: model.AssistantChannelStatusQRIssued,
+	}).Error)
 
 	service, err := NewService(db, nil, Config{})
 	require.NoError(t, err)
@@ -107,6 +116,124 @@ func TestChannelListDoesNotRequireSecretCipher(t *testing.T) {
 	require.Equal(t, "bot-1", channels[0].AccountID)
 	_, err = service.StartLogin(t.Context(), 1)
 	require.ErrorIs(t, err, ErrChannelSecret)
+}
+
+func TestStartLoginRejectsMissingScanContentWithoutPersisting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"qrcode":"poll-token"}`))
+	}))
+	defer server.Close()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantChannelLease{}))
+	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{6}, 32)}, "v1")
+	require.NoError(t, err)
+	service, err := NewService(db, cipher, Config{BaseURL: server.URL, HTTPClient: server.Client()})
+	require.NoError(t, err)
+
+	_, err = service.StartLogin(t.Context(), 7)
+	require.ErrorContains(t, err, "QR response is incomplete")
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannel{}))
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannelSecret{}))
+}
+
+func TestCancelLoginDeletesOnlyPendingState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"qrcode":"poll-token","qrcode_img_content":"https://weixin.qq.com/x/test"}`))
+	}))
+	defer server.Close()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantChannelLease{}))
+	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{5}, 32)}, "v1")
+	require.NoError(t, err)
+	service, err := NewService(db, cipher, Config{BaseURL: server.URL, HTTPClient: server.Client()})
+	require.NoError(t, err)
+
+	login, err := service.StartLogin(t.Context(), 7)
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.AssistantChannelLease{ChannelID: login.ChannelID, OwnerID: "test"}).Error)
+	require.NoError(t, service.CancelLogin(t.Context(), login.ChannelID))
+	require.NoError(t, service.CancelLogin(t.Context(), login.ChannelID))
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannel{}))
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannelSecret{}))
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannelLease{}))
+
+	connected := model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: "bot-1", Status: model.AssistantChannelStatusConnected, Enabled: true,
+	}
+	require.NoError(t, db.Create(&connected).Error)
+	require.ErrorIs(t, service.CancelLogin(t.Context(), connected.ID), ErrLoginAlreadyComplete)
+	require.Equal(t, int64(1), countRows(t, db, &model.AssistantChannel{}))
+}
+
+func TestStartLoginReplacesPreviousPendingAttemptForActor(t *testing.T) {
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		requestNumber++
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(fmt.Sprintf(
+			`{"qrcode":"poll-%d","qrcode_img_content":"https://weixin.qq.com/x/%d"}`,
+			requestNumber,
+			requestNumber,
+		)))
+	}))
+	defer server.Close()
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantChannelLease{}))
+	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{4}, 32)}, "v1")
+	require.NoError(t, err)
+	service, err := NewService(db, cipher, Config{BaseURL: server.URL, HTTPClient: server.Client()})
+	require.NoError(t, err)
+
+	first, err := service.StartLogin(t.Context(), 7)
+	require.NoError(t, err)
+	second, err := service.StartLogin(t.Context(), 7)
+	require.NoError(t, err)
+	require.NotEqual(t, first.Channel.AccountID, second.Channel.AccountID)
+	require.Equal(t, int64(1), countRows(t, db, &model.AssistantChannel{}))
+	require.Equal(t, int64(1), countRows(t, db, &model.AssistantChannelSecret{}))
+	var remaining model.AssistantChannel
+	require.NoError(t, db.First(&remaining).Error)
+	require.Equal(t, second.ChannelID, remaining.ID)
+}
+
+func TestCleanupExpiredLoginsPreservesCompletedChannels(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantChannelLease{}))
+	service, err := NewService(db, nil, Config{})
+	require.NoError(t, err)
+	now := time.Now().Truncate(time.Second)
+
+	stale := model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: pendingAccountPrefix + "stale",
+		Status: model.AssistantChannelStatusQRIssued, CreatedAt: now.Add(-pendingLoginTTL - time.Minute).Unix(),
+	}
+	fresh := model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: pendingAccountPrefix + "fresh",
+		Status: model.AssistantChannelStatusQRIssued, CreatedAt: now.Unix(),
+	}
+	completed := model.AssistantChannel{
+		Type: model.AssistantChannelTypeWechatILink, AccountID: "bot-complete",
+		Status: model.AssistantChannelStatusUnbound, CreatedAt: now.Add(-24 * time.Hour).Unix(),
+	}
+	require.NoError(t, db.Create(&stale).Error)
+	require.NoError(t, db.Create(&fresh).Error)
+	require.NoError(t, db.Create(&completed).Error)
+	require.NoError(t, service.CleanupExpiredLogins(t.Context(), now))
+
+	var channels []model.AssistantChannel
+	require.NoError(t, db.Order("id").Find(&channels).Error)
+	require.Len(t, channels, 2)
+	require.Equal(t, fresh.ID, channels[0].ID)
+	require.Equal(t, completed.ID, channels[1].ID)
 }
 
 func TestCheckLoginTreatsExpiredSessionAsLoginState(t *testing.T) {
@@ -127,7 +254,7 @@ func TestCheckLoginTreatsExpiredSessionAsLoginState(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}))
+	require.NoError(t, db.AutoMigrate(&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantChannelLease{}))
 	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{7}, 32)}, "v1")
 	require.NoError(t, err)
 	service, err := NewService(db, cipher, Config{BaseURL: server.URL, HTTPClient: server.Client()})
@@ -138,20 +265,12 @@ func TestCheckLoginTreatsExpiredSessionAsLoginState(t *testing.T) {
 	expired, err := service.CheckLogin(t.Context(), login.ChannelID, "")
 	require.NoError(t, err)
 	require.Equal(t, loginStateExpired, expired.State)
-	require.Equal(t, model.AssistantChannelStatusReauthRequired, expired.Channel.Status)
-	require.False(t, expired.Channel.Enabled)
-	require.Equal(t, "login_expired", expired.Channel.ReauthReason)
 
-	again, err := service.CheckLogin(t.Context(), login.ChannelID, "")
-	require.NoError(t, err)
-	require.Equal(t, loginStateExpired, again.State)
+	_, err = service.CheckLogin(t.Context(), login.ChannelID, "")
+	require.ErrorIs(t, err, ErrChannelNotFound)
 	require.Equal(t, 1, statusRequests)
-
-	var secret model.AssistantChannelSecret
-	require.NoError(t, db.Where("channel_id = ?", login.ChannelID).First(&secret).Error)
-	plaintext, err := cipher.Decrypt(channelSecretPurpose, strconv.FormatInt(login.ChannelID, 10), secret.KeyVersion, secret.Ciphertext)
-	require.NoError(t, err)
-	require.NotContains(t, string(plaintext), "expired-qr")
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannel{}))
+	require.Equal(t, int64(0), countRows(t, db, &model.AssistantChannelSecret{}))
 }
 
 func countRows(t *testing.T, db *gorm.DB, value any) int64 {

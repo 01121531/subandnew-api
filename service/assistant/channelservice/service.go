@@ -24,10 +24,16 @@ const channelSecretPurpose = "wechat-ilink-channel"
 
 const inboundPayloadPurpose = "wechat-ilink-inbound"
 
+const (
+	pendingAccountPrefix = "pending-"
+	pendingLoginTTL      = 5 * time.Minute
+)
+
 var (
-	ErrChannelNotFound = errors.New("assistant channel not found")
-	ErrChannelSecret   = errors.New("assistant channel secret is unavailable")
-	ErrLoginExpired    = errors.New("assistant channel login expired")
+	ErrChannelNotFound      = errors.New("assistant channel not found")
+	ErrChannelSecret        = errors.New("assistant channel secret is unavailable")
+	ErrLoginExpired         = errors.New("assistant channel login expired")
+	ErrLoginAlreadyComplete = errors.New("assistant channel login already completed")
 )
 
 type Config struct {
@@ -45,7 +51,6 @@ type Service struct {
 type LoginView struct {
 	ChannelID int64                   `json:"channel_id"`
 	State     modelLoginState         `json:"state"`
-	QRCode    string                  `json:"qr_code,omitempty"`
 	QRImage   string                  `json:"qr_image,omitempty"`
 	ExpiresAt int64                   `json:"expires_at,omitempty"`
 	Channel   *model.AssistantChannel `json:"channel,omitempty"`
@@ -95,15 +100,18 @@ func (s *Service) StartLogin(ctx context.Context, actorID int) (*LoginView, erro
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(response.QRCode) == "" {
+	if strings.TrimSpace(response.QRCode) == "" || strings.TrimSpace(response.QRCodeImageContent) == "" {
 		return nil, errors.New("ilink QR response is incomplete")
 	}
 	channel := model.AssistantChannel{
-		Type: model.AssistantChannelTypeWechatILink, AccountID: "pending-" + uuid.NewString(),
+		Type: model.AssistantChannelTypeWechatILink, AccountID: pendingAccountPrefix + uuid.NewString(),
 		Status: model.AssistantChannelStatusQRIssued, Enabled: false, Config: "{}", CreatedBy: actorID, UpdatedBy: actorID,
 	}
 	secretPayload := storedChannelSecret{QRCode: response.QRCode, BaseURL: normalizedBaseURL(s.baseURL)}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := deletePendingLogins(tx, "created_by = ?", actorID); err != nil {
+			return err
+		}
 		if err := tx.Create(&channel).Error; err != nil {
 			return err
 		}
@@ -117,7 +125,7 @@ func (s *Service) StartLogin(ctx context.Context, actorID int) (*LoginView, erro
 		return nil, err
 	}
 	return &LoginView{
-		ChannelID: channel.ID, State: loginStatePending, QRCode: response.QRCode,
+		ChannelID: channel.ID, State: loginStatePending,
 		QRImage: response.QRCodeImageContent, ExpiresAt: time.Now().Add(5 * time.Minute).Unix(), Channel: &channel,
 	}, nil
 }
@@ -148,6 +156,13 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 	if err == nil {
 		state, status = loginStatus(response.Status)
 	}
+	if state == loginStateExpired {
+		if err := s.CancelLogin(ctx, channel.ID); err != nil && !errors.Is(err, ErrChannelNotFound) {
+			return nil, err
+		}
+		return &LoginView{ChannelID: channel.ID, State: loginStateExpired}, nil
+	}
+
 	channel.Status = status
 	channel.UpdatedBy = channel.CreatedBy
 	if state == loginStateConnected {
@@ -166,17 +181,30 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 		channel.AccountID = response.BotID
 		channel.Enabled = true
 		channel.ReauthReason = ""
-	} else if state == loginStateExpired {
-		stored.QRCode = ""
-		channel.Enabled = false
-		channel.ReauthReason = "login_expired"
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(channel).Error; err != nil {
+		var current model.AssistantChannel
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND enabled = ? AND account_id LIKE ?", channel.ID, false, pendingAccountPrefix+"%").
+			First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrChannelNotFound
+			}
 			return err
 		}
-		if state != loginStateConnected && state != loginStateExpired {
+		current.Status = channel.Status
+		current.UpdatedBy = channel.UpdatedBy
+		if state == loginStateConnected {
+			current.AccountID = channel.AccountID
+			current.Enabled = true
+			current.ReauthReason = ""
+		}
+		if err := tx.Save(&current).Error; err != nil {
+			return err
+		}
+		if state != loginStateConnected {
+			*channel = current
 			return nil
 		}
 		updated, err := s.encryptSecret(channel.ID, *stored)
@@ -185,7 +213,11 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 		}
 		updated.ID = secretRow.ID
 		updated.CreatedAt = secretRow.CreatedAt
-		return tx.Save(updated).Error
+		if err := tx.Save(updated).Error; err != nil {
+			return err
+		}
+		*channel = current
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -195,8 +227,60 @@ func (s *Service) CheckLogin(ctx context.Context, channelID int64, verifyCode st
 
 func (s *Service) List(ctx context.Context) ([]model.AssistantChannel, error) {
 	var channels []model.AssistantChannel
-	err := s.db.WithContext(ctx).Order("id DESC").Find(&channels).Error
+	err := s.db.WithContext(ctx).
+		Where("account_id NOT LIKE ?", pendingAccountPrefix+"%").
+		Order("id DESC").Find(&channels).Error
 	return channels, err
+}
+
+// CancelLogin removes an unfinished QR login and all of its temporary state.
+// Connected channels must use RemoveCredential so their audit record remains.
+func (s *Service) CancelLogin(ctx context.Context, channelID int64) error {
+	if channelID <= 0 {
+		return ErrChannelNotFound
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var channel model.AssistantChannel
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&channel, channelID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if channel.Enabled || !strings.HasPrefix(channel.AccountID, pendingAccountPrefix) {
+			return ErrLoginAlreadyComplete
+		}
+		return deletePendingLogins(tx, "id = ?", channelID)
+	})
+}
+
+// CleanupExpiredLogins removes abandoned QR attempts. The operation is
+// idempotent and deliberately excludes every channel that completed login.
+func (s *Service) CleanupExpiredLogins(ctx context.Context, now time.Time) error {
+	cutoff := now.Add(-pendingLoginTTL).Unix()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return deletePendingLogins(tx, "created_at <= ?", cutoff)
+	})
+}
+
+func deletePendingLogins(tx *gorm.DB, condition string, args ...any) error {
+	var ids []int64
+	query := tx.Model(&model.AssistantChannel{}).
+		Where("enabled = ? AND account_id LIKE ?", false, pendingAccountPrefix+"%")
+	if strings.TrimSpace(condition) != "" {
+		query = query.Where(condition, args...)
+	}
+	if err := query.Pluck("id", &ids).Error; err != nil || len(ids) == 0 {
+		return err
+	}
+	if err := tx.Where("channel_id IN ?", ids).Delete(&model.AssistantChannelLease{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("channel_id IN ?", ids).Delete(&model.AssistantChannelSecret{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("id IN ?", ids).Delete(&model.AssistantChannel{}).Error
 }
 
 // RemoveCredential revokes a channel locally while retaining its non-secret

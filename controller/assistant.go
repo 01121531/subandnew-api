@@ -229,6 +229,22 @@ func CheckAssistantChannelLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": login})
 }
 
+func CancelAssistantChannelLogin(c *gin.Context) {
+	id, ok := assistantID(c, "channel_id")
+	if !ok {
+		return
+	}
+	service, err := assistantChannelService(false)
+	if err == nil {
+		err = service.CancelLogin(c.Request.Context(), id)
+	}
+	if err != nil {
+		assistantError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type assistantRunListView struct {
 	Items    []model.AssistantRun `json:"items"`
 	Total    int64                `json:"total"`
@@ -458,6 +474,8 @@ func assistantError(c *gin.Context, err error) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "message": "assistant_secret_encryption_not_configured"})
 	case errors.Is(err, channelservice.ErrLoginExpired):
 		c.JSON(http.StatusGone, gin.H{"success": false, "message": "assistant_channel_login_expired"})
+	case errors.Is(err, channelservice.ErrLoginAlreadyComplete):
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "assistant_channel_login_already_completed"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "assistant_operation_failed"})
 	}
