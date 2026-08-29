@@ -32,7 +32,8 @@ func TestSystemPromptIsStableAndUsesRuntimeContextTool(t *testing.T) {
 	require.Contains(t, prompt, "禁止再次增加或扣减 8 小时")
 	require.Contains(t, prompt, "get_runtime_context")
 	require.Contains(t, prompt, "get_metric_history")
-	require.Contains(t, prompt, "query_usage_records")
+	require.Contains(t, prompt, "仅使用本轮提供的工具")
+	require.Contains(t, prompt, "get_tool_guide")
 	require.NotContains(t, prompt, "当前中国标准时间：")
 	require.Equal(t, prompt, systemPrompt())
 }
@@ -159,6 +160,8 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	require.EqualValues(t, 220, run.CacheObservedInputTokens)
 	require.Len(t, modelClient.requests, 2)
 	require.Len(t, modelClient.requests[0].Messages, 2)
+	require.Len(t, modelClient.requests[0].Tools, 1)
+	require.Equal(t, builtin.ToolListInstances, modelClient.requests[0].Tools[0].Name)
 	require.Equal(t, provider.RoleUser, modelClient.requests[0].Messages[1].Role)
 	var messages []model.AssistantMessage
 	require.NoError(t, db.Order("id ASC").Find(&messages).Error)

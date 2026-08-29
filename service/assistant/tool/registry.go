@@ -122,6 +122,40 @@ func (registry *Registry) List() []ToolSpec {
 	return result
 }
 
+// ListNamed returns specifications for the requested tools in stable name
+// order. A nil name list keeps the legacy behavior of returning every tool;
+// an empty non-nil list intentionally returns no tools.
+func (registry *Registry) ListNamed(names []string) ([]ToolSpec, error) {
+	if registry == nil {
+		return nil, ErrToolNotFound
+	}
+	if names == nil {
+		return registry.List(), nil
+	}
+	requested := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("%w: empty name", ErrToolNotFound)
+		}
+		requested[name] = struct{}{}
+	}
+
+	registry.mu.RLock()
+	result := make([]ToolSpec, 0, len(requested))
+	for name := range requested {
+		entry, exists := registry.tools[name]
+		if !exists {
+			registry.mu.RUnlock()
+			return nil, fmt.Errorf("%w: %s", ErrToolNotFound, name)
+		}
+		result = append(result, cloneSpec(entry.spec))
+	}
+	registry.mu.RUnlock()
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
 func normalizeSpec(spec ToolSpec) (ToolSpec, error) {
 	spec.Name = strings.TrimSpace(spec.Name)
 	spec.Version = strings.TrimSpace(spec.Version)

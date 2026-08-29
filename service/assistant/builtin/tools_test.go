@@ -93,6 +93,20 @@ func TestRuntimeContextReturnsShanghaiTimeAndEffectiveDefault(t *testing.T) {
 	require.Equal(t, 8*60*60, offset)
 }
 
+func TestToolGuideReturnsOnlyRequestedEmbeddedTopic(t *testing.T) {
+	db, execution, _, _ := newBuiltinTestContext(t)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, ToolGuide, json.RawMessage(`{"topic":"accounts"}`))
+	require.NoError(t, err)
+	var output toolGuideOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, "accounts", output.Topic)
+	require.Contains(t, output.Content, "query_managed_accounts")
+	require.NotContains(t, output.Content, "get_usage_record_summary")
+	require.Equal(t, assistantTimezone, result.Freshness.Timezone)
+}
+
 func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)

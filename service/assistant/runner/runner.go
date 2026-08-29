@@ -19,6 +19,7 @@ var (
 	ErrInvalidConfiguration = errors.New("invalid assistant runner configuration")
 	ErrStepLimit            = errors.New("assistant runner step limit reached")
 	ErrToolCallLimit        = errors.New("assistant runner tool call limit reached")
+	ErrToolNotAllowed       = errors.New("assistant tool is not available for this request")
 	ErrInvalidModelResponse = errors.New("invalid assistant model response")
 )
 
@@ -59,12 +60,15 @@ type Config struct {
 	MaxToolCalls    int
 	MaxOutputTokens int
 	Timeout         time.Duration
+	ToolNames       []string
 }
 
 type Runner struct {
 	client   provider.Client
 	registry *tool.Registry
 	config   Config
+	specs    []tool.ToolSpec
+	allowed  map[string]struct{}
 }
 
 type ToolTrace struct {
@@ -110,7 +114,15 @@ func New(client provider.Client, registry *tool.Registry, config Config) (*Runne
 	if config.MaxSteps < 1 || config.MaxSteps > 6 || config.MaxToolCalls < 1 || config.MaxToolCalls > 8 || config.MaxOutputTokens < 1 || config.Timeout < time.Second || config.Timeout > 2*time.Minute {
 		return nil, ErrInvalidConfiguration
 	}
-	return &Runner{client: client, registry: registry, config: config}, nil
+	specs, err := registry.ListNamed(config.ToolNames)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConfiguration, err)
+	}
+	allowed := make(map[string]struct{}, len(specs))
+	for _, spec := range specs {
+		allowed[spec.Name] = struct{}{}
+	}
+	return &Runner{client: client, registry: registry, config: config, specs: specs, allowed: allowed}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conversation []provider.Message) (Outcome, error) {
@@ -126,7 +138,7 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 	messages := make([]provider.Message, 0, len(conversation)+r.config.MaxSteps*2+1)
 	messages = append(messages, provider.Message{Role: provider.RoleSystem, Content: r.config.SystemPrompt})
 	messages = append(messages, conversation...)
-	definitions := toolDefinitions(r.registry.List())
+	definitions := toolDefinitions(r.specs)
 	outcome := Outcome{}
 	seenCallIDs := make(map[string]struct{})
 
@@ -167,6 +179,9 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 			}
 			if _, exists := seenCallIDs[call.ID]; exists {
 				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: duplicate tool call id", ErrInvalidModelResponse)}
+			}
+			if _, allowed := r.allowed[call.Name]; !allowed {
+				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Tool: call.Name, Cause: fmt.Errorf("%w: %s", ErrToolNotAllowed, call.Name)}
 			}
 			seenCallIDs[call.ID] = struct{}{}
 			started := time.Now()

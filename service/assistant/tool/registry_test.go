@@ -96,6 +96,32 @@ func TestNewRegistryRequiresAuthorization(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidSpec)
 }
 
+func TestRegistryListNamedDistinguishesAllNoneAndSubset(t *testing.T) {
+	registry, err := NewRegistry(func(context.Context, AuthorizationRequest) error { return nil })
+	require.NoError(t, err)
+	for _, name := range []string{"beta", "alpha"} {
+		require.NoError(t, Register(registry, ToolSpec{
+			Name: name, Version: "v1", Description: name,
+			Permission: Permission{Resource: "managed_instance", Action: "view"}, Risk: RiskLow,
+			ReadOnly: true, Idempotent: true, InputSchema: json.RawMessage(`{"type":"object"}`),
+		}, func(context.Context, ExecutionContext, struct{}) (Output[struct{}], error) {
+			return Output[struct{}]{}, nil
+		}))
+	}
+
+	all, err := registry.ListNamed(nil)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	none, err := registry.ListNamed([]string{})
+	require.NoError(t, err)
+	require.Empty(t, none)
+	subset, err := registry.ListNamed([]string{"beta"})
+	require.NoError(t, err)
+	require.Equal(t, []string{"beta"}, []string{subset[0].Name})
+	_, err = registry.ListNamed([]string{"missing"})
+	require.ErrorIs(t, err, ErrToolNotFound)
+}
+
 func TestRegisterRejectsInvalidSpecification(t *testing.T) {
 	handler := func(context.Context, ExecutionContext, fakeInput) (Output[fakeData], error) {
 		return validOutput(time.Now()), nil
