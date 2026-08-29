@@ -59,7 +59,9 @@ describe('account filtering', () => {
       true
     )
     assert.equal(matchesQuickAccountFilter(account, ['yahoo'], []), false)
-    assert.equal(matchesQuickAccountFilter(account, [], ['default']), false)
+    assert.equal(matchesQuickAccountFilter(account, [], ['gmail']), false)
+    assert.equal(matchesQuickAccountFilter(account, ['shanghai'], []), false)
+    assert.equal(matchesQuickAccountFilter(account, [], ['default']), true)
   })
 
   test('supports all and any rule groups with per-rule value modes', () => {

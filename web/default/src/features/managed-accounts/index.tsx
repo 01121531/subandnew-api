@@ -475,7 +475,7 @@ function accountSelection(
   instance: ManagedInstance,
   item: ManagedInstanceInventoryItem
 ): AccountExportSelection {
-  const accountId = inventoryAccountID(item)
+  const accountId = String(item.id)
   return {
     key: `${instance.id}:${accountId}`,
     instanceId: instance.id,

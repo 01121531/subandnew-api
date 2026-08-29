@@ -63,8 +63,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { AccountFilterPanel } from '@/features/managed-accounts/account-filter-panel'
 import {
-  accountFilterSnapshot,
-  createAccountFilterRule,
+  isAccountFilterRuleComplete,
   type AccountAdvancedFilter,
 } from '@/features/managed-accounts/account-filtering'
 import {
@@ -758,9 +757,9 @@ function AuthorizationEditor(props: {
   const filter: AccountAdvancedFilter = useMemo(
     () => ({
       match_mode: input.match_mode,
-      rules: input.rules.map((rule) => ({
+      rules: input.rules.map((rule, index) => ({
         ...rule,
-        id: createAccountFilterRule(rule.field).id,
+        id: `account-data-api-rule-${index}`,
       })),
     }),
     [input.match_mode, input.rules]
@@ -819,6 +818,7 @@ function AuthorizationEditor(props: {
     input.name.trim() &&
     input.instance_ids.length > 0 &&
     input.fields.length > 0 &&
+    filter.rules.every(isAccountFilterRuleComplete) &&
     (!input.portal_enabled ||
       input.portal_password.length >= 8 ||
       props.item?.portal_configured)
@@ -999,11 +999,13 @@ function AuthorizationEditor(props: {
               <AccountFilterPanel
                 value={filter}
                 onChange={(value) => {
-                  const snapshot = accountFilterSnapshot(value)
                   setInput({
                     ...input,
-                    match_mode: snapshot.match_mode,
-                    rules: snapshot.rules,
+                    match_mode: value.match_mode,
+                    rules: value.rules.map(({ id: _id, ...rule }) => ({
+                      ...rule,
+                      values: [...rule.values],
+                    })),
                   })
                 }}
                 options={filterOptions}
@@ -1299,7 +1301,12 @@ function AuthorizationEditor(props: {
             {step === 0 ? t('Cancel') : t('上一步')}
           </Button>
           {step < 3 ? (
-            <Button onClick={() => setStep((value) => value + 1)}>
+            <Button
+              disabled={
+                step === 1 && !filter.rules.every(isAccountFilterRuleComplete)
+              }
+              onClick={() => setStep((value) => value + 1)}
+            >
               {t('下一步')}
               <ChevronRight />
             </Button>

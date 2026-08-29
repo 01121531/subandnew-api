@@ -82,6 +82,7 @@ func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	require.Len(t, page.Items, 1)
 	item := page.Items[0]
 	require.Positive(t, item.ID)
+	require.Equal(t, "8faa3804-86ab-4f4c-a090-e5111a406c74", item.IDText)
 	require.Equal(t, "primary", item.Name)
 	require.Equal(t, "max", item.Type)
 	require.Equal(t, "anthropic", item.Platform)

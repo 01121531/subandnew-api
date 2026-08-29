@@ -459,7 +459,7 @@ func restrictDocument(doc map[string][]string, fields []string) map[string][]str
 }
 
 func matchesFilter(doc map[string][]string, include, exclude []string, matchMode string, rules []managedinstance.AccountFilterRule) bool {
-	searchable := strings.ToLower(strings.Join(flatten(doc), " "))
+	searchable := strings.ToLower(strings.Join(quickFilterValues(doc), " "))
 	if len(include) > 0 && !anyContained(searchable, include) {
 		return false
 	}
@@ -479,6 +479,15 @@ func matchesFilter(doc map[string][]string, include, exclude []string, matchMode
 		return matched > 0
 	}
 	return matched == len(rules)
+}
+
+func quickFilterValues(doc map[string][]string) []string {
+	fields := []string{"name", "email", "account_id", "note", "ownership"}
+	result := make([]string, 0, len(fields))
+	for _, field := range fields {
+		result = append(result, doc[field]...)
+	}
+	return result
 }
 
 func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {

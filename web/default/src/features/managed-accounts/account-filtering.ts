@@ -88,6 +88,14 @@ export const TEXT_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'ownership',
 ])
 
+const QUICK_ACCOUNT_FILTER_FIELDS: AccountFilterField[] = [
+  'name',
+  'email',
+  'account_id',
+  'note',
+  'ownership',
+]
+
 export function createAccountFilterRule(
   field: AccountFilterField = 'name'
 ): AccountFilterRule {
@@ -151,8 +159,9 @@ export function matchesQuickAccountFilter(
   included: string[],
   excluded: string[]
 ) {
-  const searchable = Object.values(document)
-    .flat()
+  const searchable = QUICK_ACCOUNT_FILTER_FIELDS.flatMap(
+    (field) => document[field]
+  )
     .join(' ')
     .toLocaleLowerCase()
   return (

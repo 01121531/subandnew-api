@@ -109,14 +109,19 @@ function selectionKey(item: PortalSelection) {
 function formatValue(field: string, value: unknown) {
   if (value == null || value === '') return '--'
   if (field === 'available') return value ? '可用' : '不可用'
-  if (field === 'created_at' || field === 'last_activity_at') {
-    const timestamp = Number(value)
-    return timestamp > 0
+  if (
+    field === 'created_at' ||
+    field === 'last_activity_at' ||
+    field === 'disabled_at' ||
+    field === 'expires_at'
+  ) {
+    const date = portalDate(value)
+    return date
       ? new Intl.DateTimeFormat('zh-CN', {
           timeZone: 'Asia/Shanghai',
           dateStyle: 'medium',
           timeStyle: 'short',
-        }).format(timestamp * 1000)
+        }).format(date)
       : '--'
   }
   if (field === 'amount') return `US$${Number(value).toFixed(8)}`
@@ -124,6 +129,19 @@ function formatValue(field: string, value: unknown) {
     return new Intl.NumberFormat('zh-CN').format(Number(value))
   }
   return String(value)
+}
+
+function portalDate(value: unknown) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  const text = String(value).trim()
+  if (!text) return null
+  const numeric = Number(text)
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric > 100_000_000_000 ? numeric : numeric * 1000)
+    : new Date(text)
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function observedLabel(value: string | number) {
@@ -151,6 +169,10 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   const [result, setResult] = useState<PortalResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Map<string, PortalSelection>>(
+    new Map()
+  )
+  const [allFilteredSelected, setAllFilteredSelected] = useState(false)
+  const [excluded, setExcluded] = useState<Map<string, PortalSelection>>(
     new Map()
   )
   const [exporting, setExporting] = useState(false)
@@ -195,10 +217,13 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   const filterSignature = JSON.stringify([
     query.include_terms,
     query.exclude_terms,
+    query.search,
     filter,
   ])
   useEffect(() => {
     setSelected(new Map())
+    setExcluded(new Map())
+    setAllFilteredSelected(false)
   }, [filterSignature])
 
   const login = async () => {
@@ -260,23 +285,45 @@ export function AccountDataPortal({ slug }: { slug: string }) {
       }
     }
   }
-  const pageSelections = (result?.items ?? []).map((item) => ({
-    instance_id: Number(item.instance_id),
-    account_id: String(item.account_id),
-  }))
-  const allPageSelected =
-    pageSelections.length > 0 &&
-    pageSelections.every((item) => selected.has(selectionKey(item)))
+  const selectedCount = allFilteredSelected
+    ? Math.max(0, (result?.pagination.total ?? 0) - excluded.size)
+    : selected.size
+
+  const selectionChecked = (item: PortalSelection) => {
+    const key = selectionKey(item)
+    return allFilteredSelected ? !excluded.has(key) : selected.has(key)
+  }
+
+  const toggleSelection = (item: PortalSelection, checked: boolean) => {
+    const key = selectionKey(item)
+    if (allFilteredSelected) {
+      setExcluded((old) => {
+        const next = new Map(old)
+        if (checked) next.delete(key)
+        else next.set(key, item)
+        return next
+      })
+      return
+    }
+    setSelected((old) => {
+      const next = new Map(old)
+      if (checked) next.set(key, item)
+      else next.delete(key)
+      return next
+    })
+  }
 
   const runExport = async (mode: 'filtered' | 'selected') => {
     setExporting(true)
     try {
+      const exportAllFiltered = mode === 'selected' && allFilteredSelected
       const file = await exportPortal(
         slug,
         session.csrf_token,
         requestQuery,
-        mode,
-        mode === 'selected' ? [...selected.values()] : []
+        exportAllFiltered ? 'filtered' : mode,
+        mode === 'selected' && !exportAllFiltered ? [...selected.values()] : [],
+        exportAllFiltered ? [...excluded.values()] : []
       )
       const url = URL.createObjectURL(file.blob)
       const link = document.createElement('a')
@@ -439,7 +486,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         <section className='overflow-hidden rounded-md border'>
           <div className='flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center'>
             <span className='text-muted-foreground flex-1 text-sm'>
-              已选择 {selected.size} / 当前筛选 {result?.pagination.total ?? 0}
+              已选择 {selectedCount} / 当前筛选 {result?.pagination.total ?? 0}
             </span>
             <Button
               variant='outline'
@@ -450,7 +497,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               导出筛选结果
             </Button>
             <Button
-              disabled={exporting || selected.size === 0}
+              disabled={exporting || selectedCount === 0}
               onClick={() => void runExport('selected')}
             >
               <FileSpreadsheet />
@@ -476,18 +523,15 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                     <TableRow>
                       <TableHead className='w-12'>
                         <Checkbox
-                          checked={allPageSelected}
-                          onCheckedChange={(checked) =>
-                            setSelected((old) => {
-                              const next = new Map(old)
-                              pageSelections.forEach((item) =>
-                                checked
-                                  ? next.set(selectionKey(item), item)
-                                  : next.delete(selectionKey(item))
-                              )
-                              return next
-                            })
+                          checked={allFilteredSelected && excluded.size === 0}
+                          indeterminate={
+                            allFilteredSelected && excluded.size > 0
                           }
+                          onCheckedChange={() => {
+                            setSelected(new Map())
+                            setExcluded(new Map())
+                            setAllFilteredSelected(!allFilteredSelected)
+                          }}
                         />
                       </TableHead>
                       {columns.map((field) => (
@@ -508,14 +552,9 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                         <TableRow key={key}>
                           <TableCell>
                             <Checkbox
-                              checked={selected.has(key)}
+                              checked={selectionChecked(identity)}
                               onCheckedChange={(checked) =>
-                                setSelected((old) => {
-                                  const next = new Map(old)
-                                  if (checked) next.set(key, identity)
-                                  else next.delete(key)
-                                  return next
-                                })
+                                toggleSelection(identity, checked)
                               }
                             />
                           </TableCell>
@@ -544,14 +583,9 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                     <article key={key} className='rounded-md border p-3'>
                       <div className='flex items-start gap-3'>
                         <Checkbox
-                          checked={selected.has(key)}
+                          checked={selectionChecked(identity)}
                           onCheckedChange={(checked) =>
-                            setSelected((old) => {
-                              const next = new Map(old)
-                              if (checked) next.set(key, identity)
-                              else next.delete(key)
-                              return next
-                            })
+                            toggleSelection(identity, checked)
                           }
                         />
                         <div className='min-w-0 flex-1'>

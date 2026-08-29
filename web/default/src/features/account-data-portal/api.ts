@@ -88,14 +88,15 @@ export async function exportPortal(
   csrf: string,
   query: PortalQuery,
   mode: 'filtered' | 'selected',
-  selections: PortalSelection[]
+  selections: PortalSelection[],
+  exclusions: PortalSelection[] = []
 ) {
   const response = (await request<never>(
     `${base(slug)}/export`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Portal-CSRF': csrf },
-      body: JSON.stringify({ query, mode, selections }),
+      body: JSON.stringify({ query, mode, selections, exclusions }),
     },
     'blob'
   )) as Response

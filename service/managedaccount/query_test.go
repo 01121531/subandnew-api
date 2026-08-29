@@ -52,6 +52,11 @@ func TestExecuteMatchesQuickAndAdvancedFilters(t *testing.T) {
 	require.Contains(t, result.Items[0].Note, "[已隐藏]")
 	require.NotContains(t, result.Items[0].Note, "secret-value")
 	require.False(t, result.NoData)
+
+	result, err = Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		IncludeTerms: []string{"gateway-a"}, Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Zero(t, result.Total, "instance names must not make every account match a quick filter")
 }
 
 func TestExecuteReturnsPartialWithoutInventingRows(t *testing.T) {

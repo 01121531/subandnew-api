@@ -438,8 +438,12 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 		recoveryError = ""
 	}
 	stableID := claudeGatewayStableID(account.ID)
+	displayID := strings.TrimSpace(account.ID)
+	if displayID == "" {
+		displayID = strconv.FormatInt(stableID, 10)
+	}
 	return InventoryItem{
-		ID: stableID, IDText: strconv.FormatInt(stableID, 10), Name: name, Email: strings.TrimSpace(account.Email), Note: strings.TrimSpace(account.Name), Ownership: strings.TrimSpace(account.GroupName),
+		ID: stableID, IDText: displayID, Name: name, Email: strings.TrimSpace(account.Email), Note: strings.TrimSpace(account.Name), Ownership: strings.TrimSpace(account.GroupName),
 		Type:     firstNonEmpty(account.AccountType, account.AuthKind),
 		Platform: firstNonEmpty(account.Provider, account.InferenceBackend), Group: account.GroupName,
 		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),

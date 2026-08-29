@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,7 @@ type PortalExportInput struct {
 	Query      PortalQueryInput  `json:"query"`
 	Mode       string            `json:"mode"`
 	Selections []PortalSelection `json:"selections"`
+	Exclusions []PortalSelection `json:"exclusions"`
 }
 
 type PortalExport struct {
@@ -229,6 +231,13 @@ func ExportPortal(ctx context.Context, auth *PortalAuthenticated, input PortalEx
 	if input.Mode == "selected" && (len(input.Selections) == 0 || len(input.Selections) > PortalExportLimit) {
 		return nil, ErrInvalid
 	}
+	if input.Mode != "filtered" && len(input.Exclusions) > 0 {
+		return nil, ErrInvalid
+	}
+	exclusions, err := portalSelectionKeys(input.Exclusions)
+	if err != nil || len(exclusions) > PortalExportLimit {
+		return nil, ErrInvalid
+	}
 	query := input.Query
 	query.Page, query.PageSize = 1, PortalExportLimit
 	if input.Mode == "selected" {
@@ -246,6 +255,15 @@ func ExportPortal(ctx context.Context, auth *PortalAuthenticated, input PortalEx
 		return nil, ErrPortalExportLarge
 	}
 	items := result.Items
+	if len(exclusions) > 0 {
+		filtered := make([]managedaccount.Item, 0, len(items))
+		for _, item := range items {
+			if _, excluded := exclusions[portalSelectionKey(item.InstanceID, item.AccountID)]; !excluded {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
 	if len(items) == 0 {
 		return nil, ErrInvalid
 	}
@@ -255,6 +273,22 @@ func ExportPortal(ctx context.Context, auth *PortalAuthenticated, input PortalEx
 	}
 	MarkPortalUsed(auth, result)
 	return &PortalExport{FileName: "accounts-" + time.Now().Format("20060102-150405") + ".xlsx", Data: data, Count: len(items)}, nil
+}
+
+func portalSelectionKeys(items []PortalSelection) (map[string]struct{}, error) {
+	result := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item.AccountID = strings.TrimSpace(item.AccountID)
+		if item.InstanceID <= 0 || item.AccountID == "" {
+			return nil, ErrInvalid
+		}
+		result[portalSelectionKey(item.InstanceID, item.AccountID)] = struct{}{}
+	}
+	return result, nil
+}
+
+func portalSelectionKey(instanceID int64, accountID string) string {
+	return strconv.FormatInt(instanceID, 10) + "\x00" + strings.TrimSpace(accountID)
 }
 
 func queryPortalLarge(ctx context.Context, auth *PortalAuthenticated, input PortalQueryInput) (*managedaccount.Result, error) {
@@ -464,6 +498,10 @@ func writePortalWorkbook(fields []string, items []managedaccount.Item) ([]byte, 
 			if !ok {
 				continue
 			}
+			value, ok = portalScalarValue(value)
+			if !ok {
+				continue
+			}
 			if field == "instance_id" || field == "account_id" {
 				_ = workbook.SetCellStr(sheet, cell, fmt.Sprint(value))
 			} else if isPortalTimeField(field) {
@@ -512,13 +550,67 @@ func isPortalTimeField(field string) bool {
 func portalTimestamp(value any) (int64, bool) {
 	switch typed := value.(type) {
 	case int64:
-		return typed, true
+		return normalizePortalTimestamp(typed), true
 	case int:
-		return int64(typed), true
+		return normalizePortalTimestamp(int64(typed)), true
 	case float64:
-		return int64(typed), true
+		return normalizePortalTimestamp(int64(typed)), true
+	case string:
+		value := strings.TrimSpace(typed)
+		if value == "" {
+			return 0, false
+		}
+		if numeric, err := strconv.ParseFloat(value, 64); err == nil {
+			return normalizePortalTimestamp(int64(numeric)), true
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return 0, false
+		}
+		return parsed.Unix(), true
+	case time.Time:
+		return typed.Unix(), true
 	default:
 		return 0, false
+	}
+}
+
+func normalizePortalTimestamp(value int64) int64 {
+	for value > 100_000_000_000 {
+		value /= 1000
+	}
+	return value
+}
+
+func portalScalarValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case *float64:
+		if typed == nil {
+			return nil, false
+		}
+		return *typed, true
+	case *int:
+		if typed == nil {
+			return nil, false
+		}
+		return *typed, true
+	case *int64:
+		if typed == nil {
+			return nil, false
+		}
+		return *typed, true
+	case *bool:
+		if typed == nil {
+			return nil, false
+		}
+		return *typed, true
+	case *string:
+		if typed == nil {
+			return nil, false
+		}
+		return *typed, true
+	default:
+		return value, value != nil
 	}
 }
 

@@ -3,8 +3,10 @@ package accountdataapi
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
@@ -115,9 +117,71 @@ func TestPortalSelectedExportUsesCompositeIdentityAndTextIDs(t *testing.T) {
 	require.Equal(t, "hidden", mustPortalCell(t, workbook, "C2"))
 }
 
+func TestPortalFilteredExportAppliesExcludedAccounts(t *testing.T) {
+	_, instance := setupAPIServiceTest(t)
+	input := apiInput(instance.Id)
+	input.IncludeTerms = nil
+	input.Fields = []string{"name"}
+	input.PortalEnabled = true
+	input.PortalPassword = "portal-password"
+	created, err := Create(t.Context(), input, 7)
+	require.NoError(t, err)
+	slug := created.API.PortalURL[len("/account-data/"):]
+	login, err := LoginPortal(slug, input.PortalPassword, "203.0.113.9")
+	require.NoError(t, err)
+	auth, err := AuthenticatePortal(slug, login.Token, login.CSRFToken, "203.0.113.9", true)
+	require.NoError(t, err)
+
+	export, err := ExportPortal(t.Context(), auth, PortalExportInput{Mode: "filtered", Query: PortalQueryInput{MatchMode: "all"},
+		Exclusions: []PortalSelection{{InstanceID: instance.Id, AccountID: "acct-2"}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, export.Count)
+	workbook, err := excelize.OpenReader(bytes.NewReader(export.Data))
+	require.NoError(t, err)
+	defer workbook.Close()
+	require.Equal(t, "acct-1", mustPortalCell(t, workbook, "B2"))
+}
+
+func TestPortalWorkbookWritesScalarValuesAndShanghaiTimes(t *testing.T) {
+	requests, tokens, amount, available := 1476.0, 66759000.0, 294.8689, true
+	createdAt := time.Date(2026, time.August, 26, 5, 12, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)).Unix()
+	lastActivityAt := createdAt + 31*60
+	data, err := writePortalWorkbook([]string{"requests", "tokens", "amount", "available", "created_at", "last_activity_at"}, []managedaccount.Item{{
+		InstanceID: 1, AccountID: "8faa3804-86ab-4f4c-a090-e5111a406c74", Requests: &requests, Tokens: &tokens,
+		Amount: &amount, Available: &available, CreatedAt: createdAt, LastActivityAt: lastActivityAt,
+	}})
+	require.NoError(t, err)
+	workbook, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer workbook.Close()
+
+	require.Equal(t, "1476", mustPortalRawCell(t, workbook, "C2"))
+	require.Equal(t, "66759000", mustPortalRawCell(t, workbook, "D2"))
+	require.Equal(t, "294.8689", mustPortalRawCell(t, workbook, "E2"))
+	require.Equal(t, "TRUE", mustPortalCell(t, workbook, "F2"))
+	require.Equal(t, "2026-08-26 05:12:00", mustPortalCell(t, workbook, "G2"))
+	require.Equal(t, "2026-08-26 05:43:00", mustPortalCell(t, workbook, "H2"))
+}
+
+func TestPortalTimestampAcceptsSecondsMillisecondsAndRFC3339(t *testing.T) {
+	want := int64(1787644320)
+	for _, value := range []any{want, want * 1000, "1787644320000", "2026-08-25T15:52:00+08:00"} {
+		actual, ok := portalTimestamp(value)
+		require.True(t, ok)
+		require.Equal(t, want, actual)
+	}
+}
+
 func mustPortalCell(t *testing.T, workbook *excelize.File, cell string) string {
 	t.Helper()
 	value, err := workbook.GetCellValue("账号数据", cell)
+	require.NoError(t, err)
+	return value
+}
+
+func mustPortalRawCell(t *testing.T, workbook *excelize.File, cell string) string {
+	t.Helper()
+	value, err := workbook.GetCellValue("账号数据", cell, excelize.Options{RawCellValue: true})
 	require.NoError(t, err)
 	return value
 }
