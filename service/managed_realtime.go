@@ -11,8 +11,18 @@ import (
 )
 
 type ManagedRealtimeEvent struct {
-	Type  string                               `json:"type"`
-	State managedinstance.ManagedRealtimeState `json:"data"`
+	Type            string                               `json:"type"`
+	State           managedinstance.ManagedRealtimeState `json:"data"`
+	AccountSnapshot *ManagedAccountSnapshotEvent         `json:"account_snapshot,omitempty"`
+}
+
+type ManagedAccountSnapshotEvent struct {
+	InstanceID        int64    `json:"instance_id"`
+	ObservedAt        int64    `json:"observed_at"`
+	LastAttemptAt     int64    `json:"last_attempt_at"`
+	LastAttemptStatus string   `json:"last_attempt_status"`
+	LastErrorCode     string   `json:"last_error_code,omitempty"`
+	RangeKeys         []string `json:"range_keys"`
 }
 
 type ManagedRealtimeRefreshView struct {
@@ -68,6 +78,11 @@ func SubscribeManagedRealtime(instanceID int64, topics map[string]struct{}) (<-c
 			if _, requested := topics[topic]; requested {
 				subscriber.events <- ManagedRealtimeEvent{Type: topic, State: state}
 			}
+		}
+	}
+	if _, requested := topics["account_snapshot"]; requested {
+		if snapshot, snapshotErr := currentManagedAccountSnapshotEvent(instanceID); snapshotErr == nil && snapshot != nil {
+			subscriber.events <- ManagedRealtimeEvent{Type: "account_snapshot", AccountSnapshot: snapshot}
 		}
 	}
 	var once sync.Once
@@ -141,11 +156,18 @@ func publishManagedRealtimeAccounts(state managedinstance.ManagedRealtimeState, 
 }
 
 func broadcastManagedRealtimeState(eventType string, state managedinstance.ManagedRealtimeState) {
-	event := ManagedRealtimeEvent{Type: eventType, State: state}
+	broadcastManagedRealtimeEvent(ManagedRealtimeEvent{Type: eventType, State: state})
+}
+
+func broadcastManagedRealtimeEvent(event ManagedRealtimeEvent) {
+	instanceID := event.State.InstanceID
+	if event.AccountSnapshot != nil {
+		instanceID = event.AccountSnapshot.InstanceID
+	}
 	managedRealtimeSubscribers.RLock()
 	defer managedRealtimeSubscribers.RUnlock()
 	for subscriber := range managedRealtimeSubscribers.items {
-		if subscriber.instanceID != state.InstanceID {
+		if subscriber.instanceID != instanceID {
 			continue
 		}
 		select {
@@ -164,6 +186,12 @@ func broadcastManagedRealtimeState(eventType string, state managedinstance.Manag
 }
 
 func ManagedRealtimeEventPayload(event ManagedRealtimeEvent) map[string]any {
+	if event.Type == "account_snapshot" && event.AccountSnapshot != nil {
+		return map[string]any{
+			"instance_id":      event.AccountSnapshot.InstanceID,
+			"account_snapshot": event.AccountSnapshot,
+		}
+	}
 	state := event.State
 	payload := map[string]any{
 		"instance_id":     state.InstanceID,

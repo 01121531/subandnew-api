@@ -291,7 +291,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		}
 		status.Status = section.Observation.CollectionStatus
 		status.ObservedAt = section.Observation.ObservedAt
-		status.Stale = section.LastAttemptStatus == model.ManagedInstanceCollectionFailed || time.Now().Unix()-status.ObservedAt > int64(65*time.Minute/time.Second)
+		status.Stale = section.LastAttemptStatus == model.ManagedInstanceCollectionFailed || time.Now().Unix()-status.ObservedAt > int64(20*time.Minute/time.Second)
 		statuses = append(statuses, status)
 		stale = stale || status.Stale
 		observedAt = conservativeTimestamp(observedAt, status.ObservedAt)

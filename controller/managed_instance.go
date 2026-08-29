@@ -421,7 +421,7 @@ func managedInstanceRealtimeIDs(raw string) ([]int64, error) {
 }
 
 func managedInstanceRealtimeTopics(raw string) (map[string]struct{}, error) {
-	allowed := map[string]struct{}{"rpm": {}, "accounts": {}, "sources": {}, "status": {}}
+	allowed := map[string]struct{}{"rpm": {}, "accounts": {}, "sources": {}, "status": {}, "account_snapshot": {}}
 	if strings.TrimSpace(raw) == "" {
 		return allowed, nil
 	}
@@ -491,6 +491,12 @@ func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
 	if err != nil {
 		managedInstanceError(c, err)
 		return
+	}
+	if accountRange.PresetDays == 0 && result.RefreshRecommended && result.Task == nil {
+		refresh, refreshErr := service.EnqueueManagedAccountRefresh(id, c.GetInt("id"), accountRange, false)
+		if refreshErr == nil && refresh.Task != nil {
+			result.Task = refresh.Task
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }

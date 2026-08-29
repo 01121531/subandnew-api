@@ -47,11 +47,12 @@ func TestManagedInstanceRealtimeIDs(t *testing.T) {
 }
 
 func TestManagedInstanceRealtimeTopics(t *testing.T) {
-	topics, err := managedInstanceRealtimeTopics("rpm,accounts,rpm")
+	topics, err := managedInstanceRealtimeTopics("rpm,accounts,account_snapshot,rpm")
 	require.NoError(t, err)
-	require.Len(t, topics, 2)
+	require.Len(t, topics, 3)
 	require.Contains(t, topics, "rpm")
 	require.Contains(t, topics, "accounts")
+	require.Contains(t, topics, "account_snapshot")
 
 	_, err = managedInstanceRealtimeTopics("rpm,secrets")
 	require.Error(t, err)

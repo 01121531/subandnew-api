@@ -667,7 +667,7 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 		MatchedCount: entry.MatchedCount, LastObservedAt: entry.LastObservedAt, LastAccessedAt: entry.LastAccessedAt,
 		RequestCount: entry.RequestCount, CreatedBy: entry.CreatedBy, UpdatedBy: entry.UpdatedBy,
 		CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
-		Stale:    entry.LastObservedAt == 0 || common.GetTimestamp()-entry.LastObservedAt > int64((65*time.Minute)/time.Second),
+		Stale:    entry.LastObservedAt == 0 || common.GetTimestamp()-entry.LastObservedAt > int64((20*time.Minute)/time.Second),
 		Endpoint: ExternalPath, Keys: keyViews}, nil
 }
 

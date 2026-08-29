@@ -111,6 +111,28 @@ func TestManagedAccountRefreshCooldownAndDeduplication(t *testing.T) {
 	require.Equal(t, forced.Task.TaskID, duplicate.Task.TaskID)
 }
 
+func TestManagedAccountCustomRangeOnlyRecommendsInitialCollection(t *testing.T) {
+	truncate(t)
+	instance := &model.ManagedInstance{Name: "custom-range", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://custom.example.com"}
+	require.NoError(t, model.DB.Create(instance).Error)
+	accountRange, err := NormalizeManagedAccountRange(0, 1_786_032_000, 1_786_118_399, managedAccountDefaultTimezone)
+	require.NoError(t, err)
+
+	missing, err := GetManagedAccountSnapshot(instance.Id, accountRange)
+	require.NoError(t, err)
+	require.True(t, missing.RefreshRecommended)
+
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindOutput, RangeKey: accountRange.RangeKey,
+		WindowStart: accountRange.Start, WindowEnd: accountRange.End, Timezone: managedAccountDefaultTimezone,
+		ObservedAt: 100, Payload: `{}`, LastAttemptAt: 100,
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	collected, err := GetManagedAccountSnapshot(instance.Id, accountRange)
+	require.NoError(t, err)
+	require.False(t, collected.RefreshRecommended)
+}
+
 func TestManagedAccountInventoryBackfillsLegacySnapshot(t *testing.T) {
 	truncate(t)
 	instance := &model.ManagedInstance{Name: "legacy-account-cache", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://legacy.example.com"}
@@ -216,25 +238,41 @@ func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	instance := &model.ManagedInstance{Id: 9, Kind: model.ManagedInstanceKindSub2API}
 	now := int64(10_000)
-	latest := map[string]int64{
-		managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): now,
+	latest := map[string]managedAccountScheduleState{
+		managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): {
+			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
+		},
 	}
-	require.True(t, managedAccountStandardSyncDue(instance, latest, now, 3_600))
+	require.True(t, managedAccountStandardSyncDue(instance, latest, now))
 	for _, days := range managedAccountPresetDays {
-		latest[managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days))] = now
+		latest[managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days))] = managedAccountScheduleState{
+			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
+		}
 	}
-	require.False(t, managedAccountStandardSyncDue(instance, latest, now, 3_600))
-	require.True(t, managedAccountStandardSyncDue(instance, latest, now+3_600, 3_600))
+	require.False(t, managedAccountStandardSyncDue(instance, latest, now))
+	require.False(t, managedAccountStandardSyncDue(instance, latest, now+int64(managedAccountSyncInterval/time.Second)-1))
+	require.True(t, managedAccountStandardSyncDue(instance, latest, now+int64(managedAccountSyncInterval/time.Second)))
 
 	conductor := &model.ManagedInstance{Id: 10, Kind: model.ManagedInstanceKindConductor}
-	conductorLatest := map[string]int64{
-		managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): now,
+	conductorLatest := map[string]managedAccountScheduleState{
+		managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): {
+			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
+		},
 	}
-	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now, 3_600))
+	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now))
 	for _, days := range managedAccountPresetDays {
-		conductorLatest[managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days))] = now
+		conductorLatest[managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days))] = managedAccountScheduleState{
+			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
+		}
 	}
-	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now, 3_600))
+	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now))
+
+	failedKey := managedAccountScheduleKey(conductor.Id, model.ManagedAccountSnapshotKindOutput, "preset-1")
+	conductorLatest[failedKey] = managedAccountScheduleState{
+		AttemptedAt: now, Status: model.ManagedInstanceCollectionFailed,
+	}
+	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)-1))
+	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)))
 }
 
 func TestManagedAccountRunningTaskCanBeRequeued(t *testing.T) {

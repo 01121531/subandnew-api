@@ -53,7 +53,13 @@ function parseEvent(
   data: string,
   onState: (eventType: string, state: ManagedInstanceRealtimePatch) => void
 ) {
-  if (!['rpm', 'accounts', 'sources', 'status'].includes(eventType)) return
+  if (
+    !['rpm', 'accounts', 'sources', 'status', 'account_snapshot'].includes(
+      eventType
+    )
+  ) {
+    return
+  }
   try {
     onState(eventType, JSON.parse(data) as ManagedInstanceRealtimePatch)
   } catch {

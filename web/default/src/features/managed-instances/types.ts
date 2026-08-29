@@ -320,6 +320,16 @@ export interface ManagedInstanceRealtimeState {
   active_sessions?: number
   accounts?: ManagedInstanceInventoryItem[]
   sources?: ManagedInstanceInventorySource[]
+  account_snapshot?: ManagedAccountSnapshotEvent
+}
+
+export interface ManagedAccountSnapshotEvent {
+  instance_id: number
+  observed_at: number
+  last_attempt_at: number
+  last_attempt_status: ManagedInstanceCollectionStatus | ''
+  last_error_code?: string
+  range_keys: string[]
 }
 
 export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour'

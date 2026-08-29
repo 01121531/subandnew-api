@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,8 +23,8 @@ import (
 )
 
 const (
-	managedAccountSyncInterval      = time.Hour
-	managedAccountRefreshCooldown   = 5 * time.Minute
+	managedAccountSyncInterval      = 15 * time.Minute
+	managedAccountRefreshCooldown   = managedAccountSyncInterval
 	managedAccountFailureCooldown   = time.Minute
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
@@ -158,8 +159,12 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 		response := task.ToResponse()
 		view.Task = &response
 	}
-	view.RefreshRecommended = managedAccountSectionNeedsRefresh(inventory, now)
-	view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
+	if accountRange.PresetDays == 0 {
+		view.RefreshRecommended = output == nil || output.ObservedAt <= 0
+	} else {
+		view.RefreshRecommended = managedAccountSectionNeedsRefresh(inventory, now)
+		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
+	}
 	return view, nil
 }
 
@@ -487,6 +492,7 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		return
 	}
 	defer release()
+	defer publishManagedAccountSnapshotEvent(payload.InstanceID)
 
 	results := map[string]any{}
 	failed := false
@@ -632,7 +638,6 @@ func getManagedAccountSlots() chan struct{} {
 }
 
 func scheduleDueManagedAccountSyncs(now int64) {
-	interval := int64(managedAccountSyncInterval / time.Second)
 	forEachManagedInstanceBatch(func(instances []*model.ManagedInstance) bool {
 		ids := make([]int64, 0, len(instances))
 		for _, instance := range instances {
@@ -648,7 +653,7 @@ func scheduleDueManagedAccountSyncs(now int64) {
 			presetKeys = append(presetKeys, "preset-"+strconv.Itoa(days))
 		}
 		var snapshots []model.ManagedAccountSnapshot
-		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key", "last_attempt_at").Where(
+		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key", "last_attempt_at", "last_attempt_status").Where(
 			"instance_id IN ? AND ((snapshot_kind = ? AND range_key = ?) OR (snapshot_kind = ? AND range_key IN ?))",
 			ids, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey,
 			model.ManagedAccountSnapshotKindOutput, presetKeys,
@@ -656,16 +661,18 @@ func scheduleDueManagedAccountSyncs(now int64) {
 			logger.LogWarn(context.Background(), fmt.Sprintf("managed account scheduler snapshot query failed: %v", err))
 			return false
 		}
-		latest := make(map[string]int64, len(snapshots))
+		latest := make(map[string]managedAccountScheduleState, len(snapshots))
 		for _, snapshot := range snapshots {
-			latest[managedAccountScheduleKey(snapshot.InstanceID, snapshot.SnapshotKind, snapshot.RangeKey)] = snapshot.LastAttemptAt
+			latest[managedAccountScheduleKey(snapshot.InstanceID, snapshot.SnapshotKind, snapshot.RangeKey)] = managedAccountScheduleState{
+				AttemptedAt: snapshot.LastAttemptAt,
+				Status:      snapshot.LastAttemptStatus,
+			}
 		}
 		for _, instance := range instances {
 			if !managedAccountKindSupported(instance.Kind) {
 				continue
 			}
-			jitter := instance.Id % 300
-			if !managedAccountStandardSyncDue(instance, latest, now, interval+jitter) {
+			if !managedAccountStandardSyncDue(instance, latest, now) {
 				continue
 			}
 			accountRange, _ := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
@@ -678,7 +685,12 @@ func scheduleDueManagedAccountSyncs(now int64) {
 	})
 }
 
-func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[string]int64, now int64, interval int64) bool {
+type managedAccountScheduleState struct {
+	AttemptedAt int64
+	Status      string
+}
+
+func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[string]managedAccountScheduleState, now int64) bool {
 	if instance == nil {
 		return false
 	}
@@ -687,12 +699,74 @@ func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[s
 		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
 	}
 	for _, key := range required {
-		attemptedAt := latest[key]
-		if attemptedAt == 0 || now >= attemptedAt+interval {
+		state := latest[key]
+		if state.AttemptedAt == 0 {
+			return true
+		}
+		cooldown := managedAccountSyncInterval
+		if state.Status == model.ManagedInstanceCollectionFailed {
+			cooldown = managedAccountFailureCooldown
+		}
+		if now >= state.AttemptedAt+int64(cooldown/time.Second) {
 			return true
 		}
 	}
 	return false
+}
+
+func currentManagedAccountSnapshotEvent(instanceID int64) (*ManagedAccountSnapshotEvent, error) {
+	if instanceID <= 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	presetKeys := make([]string, 0, len(managedAccountPresetDays))
+	for _, days := range managedAccountPresetDays {
+		presetKeys = append(presetKeys, "preset-"+strconv.Itoa(days))
+	}
+	var snapshots []model.ManagedAccountSnapshot
+	if err := model.DB.Select(
+		"instance_id", "snapshot_kind", "range_key", "observed_at", "last_attempt_at", "last_attempt_status", "last_error_code",
+	).Where(
+		"instance_id = ? AND ((snapshot_kind = ? AND range_key = ?) OR (snapshot_kind = ? AND range_key IN ?))",
+		instanceID, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey,
+		model.ManagedAccountSnapshotKindOutput, presetKeys,
+	).Find(&snapshots).Error; err != nil {
+		return nil, err
+	}
+	if len(snapshots) == 0 {
+		return nil, nil
+	}
+	event := &ManagedAccountSnapshotEvent{InstanceID: instanceID, RangeKeys: make([]string, 0, len(snapshots))}
+	failedAt := int64(0)
+	failedErrorCode := ""
+	for _, snapshot := range snapshots {
+		event.RangeKeys = append(event.RangeKeys, snapshot.RangeKey)
+		if snapshot.ObservedAt > event.ObservedAt {
+			event.ObservedAt = snapshot.ObservedAt
+		}
+		if snapshot.LastAttemptAt > event.LastAttemptAt {
+			event.LastAttemptAt = snapshot.LastAttemptAt
+			event.LastAttemptStatus = snapshot.LastAttemptStatus
+			event.LastErrorCode = snapshot.LastErrorCode
+		}
+		if snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed && snapshot.LastAttemptAt >= failedAt {
+			failedAt = snapshot.LastAttemptAt
+			failedErrorCode = snapshot.LastErrorCode
+		}
+	}
+	if failedAt > 0 {
+		event.LastAttemptStatus = model.ManagedInstanceCollectionFailed
+		event.LastErrorCode = failedErrorCode
+	}
+	sort.Strings(event.RangeKeys)
+	return event, nil
+}
+
+func publishManagedAccountSnapshotEvent(instanceID int64) {
+	event, err := currentManagedAccountSnapshotEvent(instanceID)
+	if err != nil || event == nil {
+		return
+	}
+	broadcastManagedRealtimeEvent(ManagedRealtimeEvent{Type: "account_snapshot", AccountSnapshot: event})
 }
 
 func managedAccountScheduleKey(instanceID int64, kind string, rangeKey string) string {

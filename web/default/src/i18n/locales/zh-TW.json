@@ -1340,6 +1340,7 @@
     "Account data collection failed": "帳號資料採集失敗",
     "Updating account data in the background": "正在背景更新帳號資料",
     "Collected at {{time}}": "採集於 {{time}}",
+    "Next automatic update at {{time}}": "下次自動更新於 {{time}}",
     "Last successful collection at {{time}}": "最後成功採集於 {{time}}",
     "Total resources": "資源總數",
     "{{count}} unknown status": "{{count}} 個狀態未知",

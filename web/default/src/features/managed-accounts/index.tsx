@@ -189,8 +189,9 @@ const ACCOUNT_FAMILIES: readonly AccountFamily[] = [
   'claude_gateway',
 ]
 const ALL_SITES_VALUE = 'all'
-const INVENTORY_REFRESH_MS = 120_000
 const FAILED_REFRESH_RETRY_MS = 60_000
+const INSTANCE_LIST_REFRESH_MS = 120_000
+const ACCOUNT_AUTO_REFRESH_SECONDS = 15 * 60
 const ACCOUNT_PREFERENCES_KEY = 'managed-account-preferences-v1'
 const DEFAULT_PAGE_SIZE = 50
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50, 100] as const
@@ -718,7 +719,7 @@ export function ManagedAccounts() {
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
     createFleetPresetRange(7)
   )
-  const automaticRefreshes = useRef(new Map<string, number>())
+  const handledSnapshotEvents = useRef(new Map<number, number>())
   const [submittingRefreshes, setSubmittingRefreshes] = useState<Set<number>>(
     () => new Set()
   )
@@ -728,7 +729,7 @@ export function ManagedAccounts() {
     queryFn: () => getManagedInstances({ search: '', kind: '', status: '' }),
     retry: 1,
     retryDelay: FAILED_REFRESH_RETRY_MS,
-    refetchInterval: INVENTORY_REFRESH_MS,
+    refetchInterval: INSTANCE_LIST_REFRESH_MS,
     refetchIntervalInBackground: true,
   })
   const allInstances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
@@ -759,7 +760,11 @@ export function ManagedAccounts() {
   )
   const conductorRealtime = useManagedInstanceRealtimeEvents(
     realtimeAccountInstanceIDs,
-    ['accounts', 'sources', 'status']
+    ['status']
+  )
+  const accountSnapshotEvents = useManagedInstanceRealtimeEvents(
+    instances.map((instance) => instance.id),
+    ['account_snapshot']
   )
   const familyCounts = useMemo(
     () => ({
@@ -813,25 +818,8 @@ export function ManagedAccounts() {
         }),
       retry: 1,
       retryDelay: FAILED_REFRESH_RETRY_MS,
-      staleTime: INVENTORY_REFRESH_MS / 2,
-      refetchInterval: (query: { state: { data?: unknown } }) => {
-        const response = query.state.data as
-          | {
-              data?: {
-                task?: { status: string }
-                inventory?: { last_attempt_status?: string }
-                account_output?: { last_attempt_status?: string }
-              }
-            }
-          | undefined
-        const task = response?.data?.task
-        if (task && ['pending', 'running'].includes(task.status)) return 3_000
-        const failed =
-          response?.data?.inventory?.last_attempt_status === 'failed' ||
-          response?.data?.account_output?.last_attempt_status === 'failed'
-        return failed ? FAILED_REFRESH_RETRY_MS : INVENTORY_REFRESH_MS
-      },
-      refetchIntervalInBackground: true,
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchOnWindowFocus: false,
     })),
   })
   const exportRangeKey =
@@ -843,19 +831,8 @@ export function ManagedAccounts() {
       instances.flatMap((instance, index) => {
         const snapshotPage =
           snapshotQueries[index]?.data?.data.inventory.observation?.data
-        const realtime = conductorRealtime.states[instance.id]
-        const useRealtime =
-          (instance.kind === 'conductor' ||
-            instance.kind === 'claude_gateway') &&
-          realtime != null &&
-          realtime.observed_at > 0 &&
-          realtime.accounts != null
-        const items = useRealtime
-          ? (realtime.accounts ?? [])
-          : snapshotPage?.items
-        const sources = useRealtime
-          ? (realtime.sources ?? snapshotPage?.sources ?? [])
-          : (snapshotPage?.sources ?? [])
+        const items = snapshotPage?.items
+        const sources = snapshotPage?.sources ?? []
         if (!items) return []
         const sourceByID = new Map(sources.map((source) => [source.id, source]))
         return items.map((item) => ({
@@ -864,25 +841,23 @@ export function ManagedAccounts() {
           source: item.source_id ? sourceByID.get(item.source_id) : undefined,
         }))
       }),
-    [conductorRealtime.states, instances, snapshotQueries]
+    [instances, snapshotQueries]
   )
   const conductorSources = useMemo<SourceRow[]>(() => {
     const seen = new Set<string>()
     return instances.flatMap((instance, index) => {
       if (instance.kind !== 'conductor') return []
-      const realtime = conductorRealtime.states[instance.id]
       const snapshotSources =
         snapshotQueries[index]?.data?.data.inventory.observation?.data
           ?.sources ?? []
-      const sources = realtime?.sources ?? snapshotSources
-      return sources.flatMap((source) => {
+      return snapshotSources.flatMap((source) => {
         const key = `${instance.id}:${source.id}`
         if (seen.has(key)) return []
         seen.add(key)
         return [{ instance, source }]
       })
     })
-  }, [conductorRealtime.states, instances, snapshotQueries])
+  }, [instances, snapshotQueries])
   const conductorStats = useMemo(() => {
     const validRPMRows = rows.filter(
       ({ item }) => item.rpm != null && item.rpm >= 0
@@ -1171,11 +1146,7 @@ export function ManagedAccounts() {
         !query.data.data.account_output.observation)
   )
   const cacheObservedAt = instances
-    .map((instance, index) => {
-      const realtime = conductorRealtime.states[instance.id]
-      if (instance.kind === 'conductor' && realtime?.observed_at) {
-        return realtime.observed_at
-      }
+    .map((_, index) => {
       return (
         snapshotQueries[index]?.data?.data.inventory.observation?.observed_at ??
         0
@@ -1183,6 +1154,23 @@ export function ManagedAccounts() {
     })
     .filter((value) => value > 0)
     .sort((left, right) => left - right)[0]
+  const nextAutomaticRefreshAt = timeRange.presetDays
+    ? snapshotQueries
+        .flatMap((query) => {
+          const snapshot = query.data?.data
+          if (!snapshot) return []
+          const lastAttemptAt = Math.max(
+            snapshot.inventory.last_attempt_at,
+            snapshot.account_output.last_attempt_at
+          )
+          if (lastAttemptAt <= 0) return []
+          const failed =
+            snapshot.inventory.last_attempt_status === 'failed' ||
+            snapshot.account_output.last_attempt_status === 'failed'
+          return [lastAttemptAt + (failed ? 60 : ACCOUNT_AUTO_REFRESH_SECONDS)]
+        })
+        .sort((left, right) => left - right)[0]
+    : undefined
   const cacheRefreshFailed = snapshotQueries.some(
     (query) =>
       query.data?.data.inventory.last_attempt_status === 'failed' ||
@@ -1223,39 +1211,33 @@ export function ManagedAccounts() {
 
   useEffect(() => {
     instances.forEach((instance, index) => {
-      const snapshot = snapshotQueries[index]?.data?.data
-      const key = `${instance.id}:${rangeQueryKey}`
-      const attemptMarker = Math.max(
-        snapshot?.inventory.last_attempt_at ?? 0,
-        snapshot?.account_output.last_attempt_at ?? 0
-      )
+      const event = accountSnapshotEvents.states[instance.id]?.account_snapshot
+      if (!event?.last_attempt_at) return
       if (
-        !snapshot?.refresh_recommended ||
-        snapshot.task ||
-        automaticRefreshes.current.get(key) === attemptMarker
+        (handledSnapshotEvents.current.get(instance.id) ?? 0) >=
+        event.last_attempt_at
       ) {
         return
       }
-      automaticRefreshes.current.set(key, attemptMarker)
-      setSubmittingRefreshes((current) => new Set(current).add(instance.id))
-      void refreshManagedAccountSnapshot(
-        instance.id,
-        { ...accountRangeInput, force: false },
-        { silent: true }
+      handledSnapshotEvents.current.set(instance.id, event.last_attempt_at)
+      const snapshot = snapshotQueries[index]?.data?.data
+      const currentAttempt = Math.max(
+        snapshot?.inventory.last_attempt_at ?? 0,
+        snapshot?.account_output.last_attempt_at ?? 0
       )
-        .then(() => snapshotQueries[index]?.refetch())
-        .finally(() => {
-          setSubmittingRefreshes((current) => {
-            const next = new Set(current)
-            next.delete(instance.id)
-            return next
-          })
+      if (event.last_attempt_at > currentAttempt) {
+        void snapshotQueries[index]?.refetch().then((result) => {
+          if (result.isError) {
+            handledSnapshotEvents.current.delete(instance.id)
+          }
         })
+      }
     })
-  }, [accountRangeInput, instances, rangeQueryKey, snapshotQueries])
+  }, [accountSnapshotEvents.states, instances, snapshotQueries])
 
   const refresh = () => {
     conductorRealtime.reconnect()
+    accountSnapshotEvents.reconnect()
     void instancesQuery.refetch()
     if (realtimeAccountInstanceIDs.length > 0) {
       void refreshManagedRealtime(realtimeAccountInstanceIDs).catch(() => {})
@@ -1313,6 +1295,7 @@ export function ManagedAccounts() {
         )}
         <AccountCacheStatus
           observedAt={cacheObservedAt}
+          nextRefreshAt={nextAutomaticRefreshAt}
           refreshing={isCollecting}
           failed={cacheRefreshFailed}
           hasData={collectedInstances > 0}
@@ -1528,6 +1511,7 @@ export function ManagedAccounts() {
 
 function AccountCacheStatus(props: {
   observedAt?: number
+  nextRefreshAt?: number
   refreshing: boolean
   failed: boolean
   hasData: boolean
@@ -1569,11 +1553,20 @@ function AccountCacheStatus(props: {
         <span className='truncate'>{label}</span>
       </span>
       {props.observedAt ? (
-        <Badge variant='outline' className='bg-background/70 tabular-nums'>
-          {t('Collected at {{time}}', {
-            time: formatTimestamp(props.observedAt),
-          })}
-        </Badge>
+        <div className='flex flex-wrap items-center justify-end gap-2'>
+          <Badge variant='outline' className='bg-background/70 tabular-nums'>
+            {t('Collected at {{time}}', {
+              time: formatTimestamp(props.observedAt),
+            })}
+          </Badge>
+          {props.nextRefreshAt && !props.refreshing ? (
+            <Badge variant='outline' className='bg-background/70 tabular-nums'>
+              {t('Next automatic update at {{time}}', {
+                time: formatTimestamp(props.nextRefreshAt),
+              })}
+            </Badge>
+          ) : null}
+        </div>
       ) : null}
     </div>
   )
@@ -1596,11 +1589,11 @@ function ConductorRealtimeStatus(props: {
   const reconnecting = ['connecting', 'reconnecting', 'error'].includes(
     props.status
   )
-  let statusLabel = 'Conductor 实时账号数据连接中'
+  let statusLabel = 'Conductor 实时状态连接中'
   if (connected) {
-    statusLabel = 'Conductor 实时账号流已连接'
+    statusLabel = 'Conductor 实时状态流已连接'
   } else if (states.length) {
-    statusLabel = '实时流正在重连，当前展示最后一次实时数据'
+    statusLabel = '实时状态流正在重连'
   }
   return (
     <div
@@ -1653,7 +1646,7 @@ function ConductorNodeSummary(props: {
       tone: 'bg-success/10 text-success',
     },
     {
-      label: '实时总 RPM',
+      label: '账号快照 RPM',
       value: exactNumber.format(props.stats.rpm),
       hint: `${props.stats.reportingAccounts} 个账号参与统计`,
       icon: Gauge,
@@ -1662,7 +1655,7 @@ function ConductorNodeSummary(props: {
     {
       label: '活跃会话',
       value: exactNumber.format(props.stats.activeSessions),
-      hint: '所有实时账号汇总',
+      hint: '所有账号快照汇总',
       icon: DatabaseZap,
       tone: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
     },

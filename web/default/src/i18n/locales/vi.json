@@ -1340,6 +1340,7 @@
     "Account data collection failed": "Account data collection failed",
     "Updating account data in the background": "Updating account data in the background",
     "Collected at {{time}}": "Collected at {{time}}",
+    "Next automatic update at {{time}}": "Next automatic update at {{time}}",
     "Last successful collection at {{time}}": "Last successful collection at {{time}}",
     "Total resources": "Total resources",
     "{{count}} unknown status": "{{count}} unknown status",

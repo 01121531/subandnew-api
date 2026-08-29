@@ -81,6 +81,37 @@ func TestManagedRealtimeEventPayloadIsScopedByTopic(t *testing.T) {
 	sourcesPayload := ManagedRealtimeEventPayload(ManagedRealtimeEvent{Type: "sources", State: state})
 	require.Contains(t, sourcesPayload, "sources")
 	require.NotContains(t, sourcesPayload, "accounts")
+
+	snapshot := &ManagedAccountSnapshotEvent{
+		InstanceID: 7, ObservedAt: 100, LastAttemptAt: 101,
+		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+		RangeKeys:         []string{"inventory", "preset-1"},
+	}
+	snapshotPayload := ManagedRealtimeEventPayload(ManagedRealtimeEvent{Type: "account_snapshot", AccountSnapshot: snapshot})
+	require.Equal(t, int64(7), snapshotPayload["instance_id"])
+	require.Equal(t, snapshot, snapshotPayload["account_snapshot"])
+	require.NotContains(t, snapshotPayload, "accounts")
+}
+
+func TestManagedRealtimeSubscriptionSendsAccountSnapshotImmediately(t *testing.T) {
+	truncate(t)
+	resetManagedRealtimeSubscribersForTest()
+	t.Cleanup(resetManagedRealtimeSubscribersForTest)
+	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, model.DB.Create(&instance).Error)
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory, RangeKey: managedAccountInventoryRangeKey,
+		ObservedAt: 100, LastAttemptAt: 101, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+
+	events, unsubscribe, err := SubscribeManagedRealtime(instance.Id, map[string]struct{}{"account_snapshot": {}})
+	require.NoError(t, err)
+	defer unsubscribe()
+	event := <-events
+	require.Equal(t, "account_snapshot", event.Type)
+	require.NotNil(t, event.AccountSnapshot)
+	require.Equal(t, instance.Id, event.AccountSnapshot.InstanceID)
+	require.Equal(t, []string{"inventory"}, event.AccountSnapshot.RangeKeys)
 }
 
 func TestManagedRealtimeAccountsAreCoalesced(t *testing.T) {
