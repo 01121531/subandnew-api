@@ -254,6 +254,7 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		logger.LogWarn(context.Background(), fmt.Sprintf("system task runner query failed: %v", err))
 		return
 	}
+	attemptedUnscopedTypes := make(map[string]struct{}, len(taskTypes))
 	for _, task := range pendingTasks {
 		if ctx.Err() != nil {
 			return
@@ -265,6 +266,13 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		var claimedTask *model.SystemTask
 		var claimed bool
 		if task.ScopeKey == "" {
+			// Unscoped tasks share one lease per type. Only attempt the earliest
+			// pending row during this pass, even if it completes before the query
+			// result has finished being traversed.
+			if _, attempted := attemptedUnscopedTypes[task.Type]; attempted {
+				continue
+			}
+			attemptedUnscopedTypes[task.Type] = struct{}{}
 			claimedTask, claimed, err = model.ClaimSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
 		} else {
 			claimedTask, claimed, err = model.ClaimScopedSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
