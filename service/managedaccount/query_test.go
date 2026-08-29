@@ -130,3 +130,31 @@ func TestExecuteSummarizesFilteredRowsBeforePagination(t *testing.T) {
 	require.Equal(t, 1, filtered.Total)
 	require.Equal(t, map[string]float64{"USD": 7.25}, filtered.Summary.Amounts)
 }
+
+func TestExecuteMatchesTextPrefixSuffixAndContainsRules(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "allen-main", Email: "allen@example.com", Enabled: &available},
+		{ID: 2, Name: "main-allen", Email: "allen@other.test", Enabled: &available},
+		{ID: 3, Name: "main-allen-copy", Email: "copy@example.com", Enabled: &available},
+	})
+
+	tests := []struct {
+		operator string
+		value    string
+		total    int
+	}{
+		{operator: "starts_with", value: "allen", total: 1},
+		{operator: "ends_with", value: "allen", total: 1},
+		{operator: "contains", value: "allen", total: 3},
+	}
+	for _, test := range tests {
+		result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+			MatchMode: managedinstance.AccountFilterMatchAll, Rules: []managedinstance.AccountFilterRule{{
+				Field: "name", Operator: test.operator, Values: []string{test.value}, ValueMode: managedinstance.AccountFilterValueAny,
+			}}, Page: 1, PageSize: 50})
+		require.NoError(t, err, test.operator)
+		require.Equal(t, test.total, result.Total, test.operator)
+	}
+}

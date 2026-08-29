@@ -71,12 +71,14 @@ func TestAccountFilterTemplateRejectsInvalidRules(t *testing.T) {
 
 func TestNormalizeAccountFilterAcceptsMetricAndChinaTimeRules(t *testing.T) {
 	_, rules, err := NormalizeAccountFilter(AccountFilterMatchAll, []AccountFilterRule{
+		{Field: "name", Operator: "starts_with", Values: []string{"allen"}, ValueMode: AccountFilterValueAny},
+		{Field: "email", Operator: "ends_with", Values: []string{"@example.com"}, ValueMode: AccountFilterValueAny},
 		{Field: "requests", Operator: "gte", Values: []string{"100"}, ValueMode: AccountFilterValueAny},
 		{Field: "amount", Operator: "between", Values: []string{"1.25", "9.50"}, ValueMode: AccountFilterValueAny},
 		{Field: "created_at", Operator: "lt", Values: []string{"2026-08-30 00:00"}, ValueMode: AccountFilterValueAny},
 	}, true)
 	require.NoError(t, err)
-	require.Len(t, rules, 3)
+	require.Len(t, rules, 5)
 
 	chinaTime, err := ParseAccountFilterMetricValue("created_at", "2026-08-29 09:30")
 	require.NoError(t, err)

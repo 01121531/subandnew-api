@@ -45,6 +45,8 @@ export type AccountFilterMatchMode = 'all' | 'any'
 export type AccountFilterValueMode = 'all' | 'any'
 export type AccountTextFilterOperator =
   | 'contains'
+  | 'starts_with'
+  | 'ends_with'
   | 'not_contains'
   | 'is_empty'
   | 'is_not_empty'
@@ -267,11 +269,14 @@ export function matchesAccountFilterRule(
   const expected = parseAccountFilterTerms(rule.values.join('\n'))
   if (expected.length === 0) return true
   const valueMatches = expected.map((term) =>
-    fieldValues.some((value) =>
-      rule.operator === 'contains' || rule.operator === 'not_contains'
-        ? value.includes(term)
-        : value === term
-    )
+    fieldValues.some((value) => {
+      if (rule.operator === 'starts_with') return value.startsWith(term)
+      if (rule.operator === 'ends_with') return value.endsWith(term)
+      if (rule.operator === 'contains' || rule.operator === 'not_contains') {
+        return value.includes(term)
+      }
+      return value === term
+    })
   )
   const positive =
     rule.value_mode === 'all'

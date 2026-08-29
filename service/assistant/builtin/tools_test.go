@@ -315,7 +315,7 @@ func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
 	require.NoError(t, err)
 	result, err := registry.Execute(t.Context(), execution, "query_managed_accounts", json.RawMessage(`{
 		"instance_ids":[`+jsonNumber(visible.Id)+`],"dataset":"inventory","match_mode":"all",
-		"rules":[{"field":"email","operator":"contains","values":["example.com"],"value_mode":"any"}]
+		"rules":[{"field":"email","operator":"ends_with","values":["@example.com"],"value_mode":"any"}]
 	}`))
 	require.NoError(t, err)
 	var output managedAccountsOutput

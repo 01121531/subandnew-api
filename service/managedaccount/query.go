@@ -548,9 +548,14 @@ func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
 		target := strings.ToLower(strings.TrimSpace(raw))
 		valueMatched := false
 		for _, field := range normalized {
-			if rule.Operator == "contains" || rule.Operator == "not_contains" {
+			switch rule.Operator {
+			case "starts_with":
+				valueMatched = valueMatched || strings.HasPrefix(field, target)
+			case "ends_with":
+				valueMatched = valueMatched || strings.HasSuffix(field, target)
+			case "contains", "not_contains":
 				valueMatched = valueMatched || strings.Contains(field, target)
-			} else {
+			default:
 				valueMatched = valueMatched || field == target
 			}
 		}

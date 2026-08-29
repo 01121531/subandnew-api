@@ -108,7 +108,9 @@ const fieldLabels: Record<AccountFilterField, string> = {
 }
 
 const operatorLabels: Record<AccountFilterOperator, string> = {
-  contains: 'Contains',
+  contains: 'Contains anywhere',
+  starts_with: 'Starts with',
+  ends_with: 'Ends with',
   not_contains: 'Does not contain',
   is: 'Is one of',
   is_not: 'Is not one of',
@@ -136,7 +138,14 @@ function operatorsFor(field: AccountFilterField): AccountFilterOperator[] {
     ]
   }
   return TEXT_ACCOUNT_FILTER_FIELDS.has(field)
-    ? ['contains', 'not_contains', 'is_empty', 'is_not_empty']
+    ? [
+        'contains',
+        'starts_with',
+        'ends_with',
+        'not_contains',
+        'is_empty',
+        'is_not_empty',
+      ]
     : ['is', 'is_not', 'is_empty', 'is_not_empty']
 }
 

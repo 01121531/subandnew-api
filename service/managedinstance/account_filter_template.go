@@ -59,7 +59,8 @@ var accountFilterFieldType = map[string]string{
 }
 
 var accountTextFilterOperators = map[string]bool{
-	"contains": true, "not_contains": true, "is_empty": true, "is_not_empty": true,
+	"contains": true, "starts_with": true, "ends_with": true, "not_contains": true,
+	"is_empty": true, "is_not_empty": true,
 }
 
 var accountCategoryFilterOperators = map[string]bool{
