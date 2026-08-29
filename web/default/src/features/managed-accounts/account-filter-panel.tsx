@@ -290,8 +290,8 @@ export function AccountFilterPanel(props: {
   return (
     <>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className='border-border/70 bg-muted/15 max-w-full min-w-0 rounded-md border'>
-          <div className='flex flex-col gap-2 p-2.5 sm:flex-row sm:flex-wrap sm:items-center'>
+        <div className='border-border/70 bg-muted/15 @container/account-filter max-w-full min-w-0 rounded-md border'>
+          <div className='flex flex-col gap-2 p-2.5 @xl/account-filter:flex-row @xl/account-filter:flex-wrap @xl/account-filter:items-center'>
             <CollapsibleTrigger
               render={
                 <Button
@@ -323,7 +323,7 @@ export function AccountFilterPanel(props: {
                 }
                 onValueChange={applyTemplate}
               >
-                <SelectTrigger className='min-h-11 w-full sm:min-h-9 sm:w-56'>
+                <SelectTrigger className='min-h-11 w-full @xl/account-filter:min-h-9 @xl/account-filter:w-56'>
                   <SelectValue placeholder={t('Filter templates')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -339,11 +339,11 @@ export function AccountFilterPanel(props: {
               </Select>
             )}
             {props.templatesEnabled !== false && (
-              <div className='flex flex-wrap gap-2 sm:ms-auto'>
+              <div className='flex flex-wrap gap-2 @xl/account-filter:ms-auto'>
                 <Button
                   variant='outline'
                   size='sm'
-                  className='min-h-11 flex-1 sm:min-h-9 sm:flex-none'
+                  className='min-h-11 flex-1 @xl/account-filter:min-h-9 @xl/account-filter:flex-none'
                   disabled={!rulesValid}
                   onClick={() => setSaveOpen(true)}
                 >
@@ -355,7 +355,7 @@ export function AccountFilterPanel(props: {
                     <Button
                       variant='outline'
                       size='sm'
-                      className='min-h-11 sm:min-h-9'
+                      className='min-h-11 @xl/account-filter:min-h-9'
                       disabled={!rulesValid || updateMutation.isPending}
                       onClick={() => updateMutation.mutate()}
                     >
@@ -364,7 +364,7 @@ export function AccountFilterPanel(props: {
                     <Button
                       variant='ghost'
                       size='icon-sm'
-                      className='text-destructive min-h-11 min-w-11 sm:min-h-9 sm:min-w-9'
+                      className='text-destructive min-h-11 min-w-11 @xl/account-filter:min-h-9 @xl/account-filter:min-w-9'
                       aria-label={t('Delete template')}
                       title={t('Delete template')}
                       onClick={() => setDeleteOpen(true)}
@@ -378,7 +378,7 @@ export function AccountFilterPanel(props: {
           </div>
           <CollapsibleContent>
             <div className='border-border/70 space-y-3 border-t p-3'>
-              <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex flex-col gap-2 @lg/account-filter:flex-row @lg/account-filter:items-center @lg/account-filter:justify-between'>
                 <div>
                   <p className='text-sm font-medium'>{t('Rule combination')}</p>
                   <p className='text-muted-foreground text-xs'>
@@ -430,13 +430,13 @@ export function AccountFilterPanel(props: {
                   return (
                     <div
                       key={rule.id}
-                      className='bg-background grid min-w-0 gap-2 rounded-md border p-2.5 md:grid-cols-2 2xl:grid-cols-[2.2rem_10rem_11rem_minmax(13rem,1fr)_9rem_2.75rem] 2xl:items-start'
+                      className='bg-background grid w-full min-w-0 gap-2 rounded-md border p-2.5 @lg/account-filter:grid-cols-2 @5xl/account-filter:grid-cols-[2.2rem_10rem_11rem_minmax(13rem,1fr)_9rem_2.75rem] @5xl/account-filter:items-start'
                     >
-                      <span className='text-muted-foreground hidden pt-2 text-center text-sm tabular-nums 2xl:block'>
+                      <span className='text-muted-foreground hidden pt-2 text-center text-sm tabular-nums @5xl/account-filter:block'>
                         {index + 1}
                       </span>
                       <div className='min-w-0 space-y-1'>
-                        <Label className='text-xs 2xl:sr-only'>
+                        <Label className='text-xs @5xl/account-filter:sr-only'>
                           {t('Field')}
                         </Label>
                         <Select
@@ -451,8 +451,10 @@ export function AccountFilterPanel(props: {
                             })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
-                            <SelectValue />
+                          <SelectTrigger className='min-h-11 w-full min-w-0 @5xl/account-filter:min-h-9'>
+                            <SelectValue>
+                              {t(fieldLabels[rule.field])}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {allowedFields.map((field) => (
@@ -464,7 +466,7 @@ export function AccountFilterPanel(props: {
                         </Select>
                       </div>
                       <div className='min-w-0 space-y-1'>
-                        <Label className='text-xs 2xl:sr-only'>
+                        <Label className='text-xs @5xl/account-filter:sr-only'>
                           {t('Operator')}
                         </Label>
                         <Select
@@ -481,8 +483,10 @@ export function AccountFilterPanel(props: {
                             })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
-                            <SelectValue />
+                          <SelectTrigger className='min-h-11 w-full min-w-0 @5xl/account-filter:min-h-9'>
+                            <SelectValue>
+                              {t(operatorLabels[rule.operator])}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             {operatorsFor(rule.field).map((operator) => (
@@ -493,12 +497,12 @@ export function AccountFilterPanel(props: {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className='min-w-0 space-y-1 md:col-span-2 2xl:col-span-1'>
-                        <Label className='text-xs 2xl:sr-only'>
+                      <div className='min-w-0 space-y-1 @lg/account-filter:col-span-2 @5xl/account-filter:col-span-1'>
+                        <Label className='text-xs @5xl/account-filter:sr-only'>
                           {t('Values')}
                         </Label>
                         {emptyOperator ? (
-                          <div className='text-muted-foreground flex min-h-11 items-center rounded-md border px-3 text-sm 2xl:min-h-9'>
+                          <div className='text-muted-foreground flex min-h-11 items-center rounded-md border px-3 text-sm @5xl/account-filter:min-h-9'>
                             {t('No value required')}
                           </div>
                         ) : (
@@ -519,7 +523,7 @@ export function AccountFilterPanel(props: {
                                 toast.error(t(limitMessage))
                               }
                               placeholder={t(valuePlaceholder)}
-                              className='min-h-11 min-w-0 2xl:min-h-9'
+                              className='min-h-11 min-w-0 @5xl/account-filter:min-h-9'
                             />
                             {TEXT_ACCOUNT_FILTER_FIELDS.has(rule.field) && (
                               <Button
@@ -545,7 +549,7 @@ export function AccountFilterPanel(props: {
                         )}
                       </div>
                       <div className='min-w-0 space-y-1'>
-                        <Label className='text-xs 2xl:sr-only'>
+                        <Label className='text-xs @5xl/account-filter:sr-only'>
                           {t('Value matching')}
                         </Label>
                         <Select
@@ -556,8 +560,14 @@ export function AccountFilterPanel(props: {
                             updateRule(rule.id, { value_mode: value })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
-                            <SelectValue />
+                          <SelectTrigger className='min-h-11 w-full min-w-0 @5xl/account-filter:min-h-9'>
+                            <SelectValue>
+                              {t(
+                                rule.value_mode === 'all'
+                                  ? 'All values'
+                                  : 'Any value'
+                              )}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value='any'>
@@ -572,7 +582,7 @@ export function AccountFilterPanel(props: {
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='text-destructive min-h-11 min-w-11 justify-self-end 2xl:min-h-9 2xl:min-w-9'
+                        className='text-destructive min-h-11 min-w-11 justify-self-end @5xl/account-filter:min-h-9 @5xl/account-filter:min-w-9'
                         aria-label={t('Remove filter rule')}
                         title={t('Remove filter rule')}
                         onClick={() => removeRule(rule.id)}
@@ -584,7 +594,7 @@ export function AccountFilterPanel(props: {
                 })}
               </div>
 
-              <div className='flex flex-col-reverse gap-2 sm:flex-row sm:justify-between'>
+              <div className='flex flex-col-reverse gap-2 @md/account-filter:flex-row @md/account-filter:justify-between'>
                 <Button
                   variant='ghost'
                   className='min-h-11'
