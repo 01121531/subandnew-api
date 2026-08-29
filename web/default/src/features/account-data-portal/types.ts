@@ -12,6 +12,7 @@ import type {
 } from '@/features/managed-accounts/account-filtering'
 
 export type PortalSession = {
+  authenticated: true
   name: string
   description: string
   dataset: 'inventory' | 'account_output'
@@ -25,6 +26,8 @@ export type PortalSession = {
   last_observed_at: number
   stale: boolean
 }
+
+export type PortalSessionProbe = PortalSession | { authenticated: false }
 
 export type PortalQuery = {
   include_terms: string[]

@@ -11,6 +11,7 @@ import type {
   PortalResult,
   PortalSelection,
   PortalSession,
+  PortalSessionProbe,
 } from './types'
 
 type Envelope<T> = {
@@ -63,9 +64,9 @@ export async function loginPortal(slug: string, password: string) {
 }
 
 export async function getPortalSession(slug: string) {
-  const response = (await request<PortalSession>(
+  const response = (await request<PortalSessionProbe>(
     `${base(slug)}/session`
-  )) as Envelope<PortalSession>
+  )) as Envelope<PortalSessionProbe>
   return response.data
 }
 

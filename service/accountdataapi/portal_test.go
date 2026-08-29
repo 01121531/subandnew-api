@@ -25,6 +25,7 @@ func TestPortalLoginQueryAndSessionRevocation(t *testing.T) {
 	require.ErrorIs(t, err, ErrPortalUnauthorized)
 	login, err := LoginPortal(created.API.PortalURL[len("/account-data/"):], input.PortalPassword, "203.0.113.5")
 	require.NoError(t, err)
+	require.True(t, login.Session.Authenticated)
 	require.NotEmpty(t, login.Token)
 	require.NotEmpty(t, login.CSRFToken)
 

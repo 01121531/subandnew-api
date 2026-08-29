@@ -43,8 +43,18 @@ func LoginAccountDataPortal(c *gin.Context) {
 
 func GetAccountDataPortalSession(c *gin.Context) {
 	requestID := uuid.NewString()
-	auth, err := authenticatePortalRequest(c, false)
+	cookie, err := c.Cookie(portalCookieName)
+	if err != nil || strings.TrimSpace(cookie) == "" {
+		portalUnauthenticatedSession(c)
+		return
+	}
+	auth, err := accountdataapi.AuthenticatePortal(c.Param("slug"), cookie, "", c.ClientIP(), false)
 	if err != nil {
+		if errors.Is(err, accountdataapi.ErrPortalUnauthorized) {
+			clearPortalCookie(c, c.Param("slug"))
+			portalUnauthenticatedSession(c)
+			return
+		}
 		portalError(c, requestID, err)
 		return
 	}
@@ -54,6 +64,10 @@ func GetAccountDataPortalSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": accountdataapi.PortalSessionView(auth, csrf)})
+}
+
+func portalUnauthenticatedSession(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"authenticated": false}})
 }
 
 func QueryAccountDataPortal(c *gin.Context) {

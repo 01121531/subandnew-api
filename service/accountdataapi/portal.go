@@ -39,6 +39,7 @@ type PortalLoginResult struct {
 }
 
 type PortalView struct {
+	Authenticated  bool     `json:"authenticated"`
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
 	Dataset        string   `json:"dataset"`
@@ -349,7 +350,7 @@ func loadPortal(slug, clientIP string) (*model.ManagedAccountAPI, *View, error) 
 }
 
 func portalView(view *View, expiresAt int64, csrf string) *PortalView {
-	return &PortalView{Name: view.Name, Description: view.Description, Dataset: view.Dataset, PresetDays: view.PresetDays,
+	return &PortalView{Authenticated: true, Name: view.Name, Description: view.Description, Dataset: view.Dataset, PresetDays: view.PresetDays,
 		Timezone: managedaccount.TimezoneShanghai, Fields: append([]string{"instance_id", "account_id"}, view.Fields...),
 		FilterFields: PortalFilterFields(view.Fields), PageSize: view.PageSize, ExpiresAt: expiresAt, CSRFToken: csrf,
 		LastObservedAt: view.LastObservedAt, Stale: view.Stale}

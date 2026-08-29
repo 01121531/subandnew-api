@@ -158,6 +158,10 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   useEffect(() => {
     void getPortalSession(slug)
       .then((value) => {
+        if (!value.authenticated) {
+          setSession(null)
+          return
+        }
         setSession(value)
         setQuery(emptyQuery(Math.min(value.page_size || 50, 50)))
       })
