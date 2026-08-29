@@ -59,9 +59,26 @@ func TestAccountFilterTemplateRejectsInvalidRules(t *testing.T) {
 		{Name: "bad field", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "secret", Operator: "contains", Values: []string{"a"}, ValueMode: AccountFilterValueAny}}},
 		{Name: "missing value", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "email", Operator: "contains", ValueMode: AccountFilterValueAny}}},
 		{Name: "bad category operator", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "available", Operator: "contains", Values: []string{"available"}, ValueMode: AccountFilterValueAny}}},
+		{Name: "bad metric operator", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "requests", Operator: "contains", Values: []string{"10"}, ValueMode: AccountFilterValueAny}}},
+		{Name: "bad metric value", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "amount", Operator: "gte", Values: []string{"many"}, ValueMode: AccountFilterValueAny}}},
+		{Name: "bad range", MatchMode: AccountFilterMatchAll, Rules: []AccountFilterRule{{Field: "tokens", Operator: "between", Values: []string{"10"}, ValueMode: AccountFilterValueAny}}},
 	}
 	for _, input := range tests {
 		_, err := CreateAccountFilterTemplate(11, input)
 		require.ErrorIs(t, err, ErrInvalidAccountFilterTemplate, input.Name)
 	}
+}
+
+func TestNormalizeAccountFilterAcceptsMetricAndChinaTimeRules(t *testing.T) {
+	_, rules, err := NormalizeAccountFilter(AccountFilterMatchAll, []AccountFilterRule{
+		{Field: "requests", Operator: "gte", Values: []string{"100"}, ValueMode: AccountFilterValueAny},
+		{Field: "amount", Operator: "between", Values: []string{"1.25", "9.50"}, ValueMode: AccountFilterValueAny},
+		{Field: "created_at", Operator: "lt", Values: []string{"2026-08-30 00:00"}, ValueMode: AccountFilterValueAny},
+	}, true)
+	require.NoError(t, err)
+	require.Len(t, rules, 3)
+
+	chinaTime, err := ParseAccountFilterMetricValue("created_at", "2026-08-29 09:30")
+	require.NoError(t, err)
+	require.Equal(t, float64(1787967000), chinaTime)
 }

@@ -411,12 +411,36 @@ func document(item Item) map[string][]string {
 			available = "unavailable"
 		}
 	}
-	return map[string][]string{
+	doc := map[string][]string{
 		"name": {item.Name}, "email": {item.Email}, "account_id": {item.AccountID}, "note": {item.Note},
 		"ownership": {item.Ownership}, "instance": {item.InstanceName, strconv.FormatInt(item.InstanceID, 10)},
 		"platform": {item.Platform}, "type": {item.Type}, "group": {item.Group}, "status": {item.Status},
 		"source": {item.SourceID, item.SourceName}, "available": {available},
 	}
+	putFloat := func(field string, value *float64, scale float64) {
+		if value != nil {
+			doc[field] = []string{strconv.FormatFloat(*value*scale, 'f', -1, 64)}
+		}
+	}
+	putInt := func(field string, value *int) {
+		if value != nil {
+			doc[field] = []string{strconv.Itoa(*value)}
+		}
+	}
+	putFloat("requests", item.Requests, 1)
+	putFloat("tokens", item.Tokens, 1)
+	putFloat("amount", item.Amount, 1)
+	putInt("rpm", item.RPM)
+	putInt("active_sessions", item.ActiveSessions)
+	putFloat("utilization_5h", item.Utilization5H, 100)
+	putFloat("utilization_7d", item.Utilization7D, 100)
+	if item.CreatedAt > 0 {
+		doc["created_at"] = []string{strconv.FormatInt(item.CreatedAt, 10)}
+	}
+	if item.LastActivityAt > 0 {
+		doc["last_activity_at"] = []string{strconv.FormatInt(item.LastActivityAt, 10)}
+	}
+	return doc
 }
 
 func matches(doc map[string][]string, input Query) bool {
@@ -459,11 +483,10 @@ func restrictDocument(doc map[string][]string, fields []string) map[string][]str
 }
 
 func matchesFilter(doc map[string][]string, include, exclude []string, matchMode string, rules []managedinstance.AccountFilterRule) bool {
-	searchable := strings.ToLower(strings.Join(quickFilterValues(doc), " "))
-	if len(include) > 0 && !anyContained(searchable, include) {
+	if len(include) > 0 && !anyQuickContained(doc, include) {
 		return false
 	}
-	if anyContained(searchable, exclude) {
+	if anyQuickContained(doc, exclude) {
 		return false
 	}
 	if len(rules) == 0 {
@@ -481,16 +504,31 @@ func matchesFilter(doc map[string][]string, include, exclude []string, matchMode
 	return matched == len(rules)
 }
 
-func quickFilterValues(doc map[string][]string) []string {
-	fields := []string{"name", "email", "account_id", "note", "ownership"}
-	result := make([]string, 0, len(fields))
-	for _, field := range fields {
-		result = append(result, doc[field]...)
+func anyQuickContained(doc map[string][]string, terms []string) bool {
+	for _, term := range terms {
+		for _, field := range []string{"name", "account_id", "note", "ownership"} {
+			if anyContained(strings.ToLower(strings.Join(doc[field], " ")), []string{term}) {
+				return true
+			}
+		}
+		for _, email := range doc["email"] {
+			email = strings.ToLower(email)
+			candidate := email
+			if !strings.ContainsAny(term, "@.") {
+				candidate, _, _ = strings.Cut(email, "@")
+			}
+			if strings.Contains(candidate, term) {
+				return true
+			}
+		}
 	}
-	return result
+	return false
 }
 
 func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
+	if isMetricFilterOperator(rule.Operator) {
+		return metricRuleMatches(fields, rule)
+	}
 	normalized := make([]string, 0, len(fields))
 	for _, field := range fields {
 		normalized = append(normalized, strings.ToLower(strings.TrimSpace(field)))
@@ -528,6 +566,78 @@ func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
 		return !positive
 	}
 	return positive
+}
+
+func isMetricFilterOperator(operator string) bool {
+	switch operator {
+	case "eq", "gt", "gte", "lt", "lte", "between":
+		return true
+	default:
+		return false
+	}
+}
+
+func metricRuleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
+	actual := make([]float64, 0, len(fields))
+	for _, raw := range fields {
+		if value, err := managedinstance.ParseAccountFilterMetricValue(rule.Field, raw); err == nil {
+			actual = append(actual, value)
+		}
+	}
+	if len(actual) == 0 {
+		return false
+	}
+	expected := make([]float64, 0, len(rule.Values))
+	for _, raw := range rule.Values {
+		value, err := managedinstance.ParseAccountFilterMetricValue(rule.Field, raw)
+		if err != nil {
+			return false
+		}
+		expected = append(expected, value)
+	}
+	if rule.Operator == "between" {
+		if len(expected) != 2 {
+			return false
+		}
+		minimum, maximum := expected[0], expected[1]
+		if minimum > maximum {
+			minimum, maximum = maximum, minimum
+		}
+		for _, value := range actual {
+			if value >= minimum && value <= maximum {
+				return true
+			}
+		}
+		return false
+	}
+	if len(expected) != 1 {
+		return false
+	}
+	for _, value := range actual {
+		switch rule.Operator {
+		case "eq":
+			if value == expected[0] {
+				return true
+			}
+		case "gt":
+			if value > expected[0] {
+				return true
+			}
+		case "gte":
+			if value >= expected[0] {
+				return true
+			}
+		case "lt":
+			if value < expected[0] {
+				return true
+			}
+		case "lte":
+			if value <= expected[0] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sortRows(rows []row, field, order string) {

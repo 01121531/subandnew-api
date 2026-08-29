@@ -1724,6 +1724,17 @@
     "Message persistence": "消息持久化",
     "Message delivery": "消息投递",
     "Configuration": "配置",
-    "Unknown stage": "未知阶段"
+    "Unknown stage": "未知阶段",
+    "Amount": "消费金额",
+    "Active sessions": "活跃会话",
+    "5-hour utilization (%)": "5 小时利用率（%）",
+    "7-day utilization (%)": "7 天利用率（%）",
+    "Created at": "录入时间",
+    "Equals": "等于",
+    "Greater than": "大于",
+    "Greater than or equal to": "大于或等于",
+    "Less than": "小于",
+    "Less than or equal to": "小于或等于",
+    "Between (inclusive)": "介于（含边界）"
   }
 }

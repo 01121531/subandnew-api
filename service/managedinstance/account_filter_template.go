@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/model"
@@ -50,6 +53,9 @@ var accountFilterFieldType = map[string]string{
 	"name": "text", "email": "text", "account_id": "text", "note": "text", "ownership": "text",
 	"instance": "category", "platform": "category", "type": "category", "group": "category",
 	"status": "category", "source": "category", "available": "category",
+	"requests": "number", "tokens": "number", "amount": "number", "rpm": "number",
+	"active_sessions": "number", "utilization_5h": "number", "utilization_7d": "number",
+	"created_at": "time", "last_activity_at": "time",
 }
 
 var accountTextFilterOperators = map[string]bool{
@@ -58,6 +64,11 @@ var accountTextFilterOperators = map[string]bool{
 
 var accountCategoryFilterOperators = map[string]bool{
 	"is": true, "is_not": true, "is_empty": true, "is_not_empty": true,
+}
+
+var accountMetricFilterOperators = map[string]bool{
+	"eq": true, "gt": true, "gte": true, "lt": true, "lte": true, "between": true,
+	"is_empty": true, "is_not_empty": true,
 }
 
 func CreateAccountFilterTemplate(actorID int, input AccountFilterTemplateInput) (*AccountFilterTemplateView, error) {
@@ -181,6 +192,8 @@ func NormalizeAccountFilter(matchMode string, rules []AccountFilterRule, require
 		operators := accountTextFilterOperators
 		if fieldType == "category" {
 			operators = accountCategoryFilterOperators
+		} else if fieldType == "number" || fieldType == "time" {
+			operators = accountMetricFilterOperators
 		}
 		if !ok || !operators[rule.Operator] || (rule.ValueMode != AccountFilterValueAny && rule.ValueMode != AccountFilterValueAll) {
 			return "", nil, fmt.Errorf("%w: rule %d", ErrInvalidAccountFilterTemplate, index+1)
@@ -210,15 +223,72 @@ func NormalizeAccountFilter(matchMode string, rules []AccountFilterRule, require
 		if len(normalized) == 0 {
 			return "", nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
 		}
+		if fieldType == "number" || fieldType == "time" {
+			expectedValues := 1
+			if rule.Operator == "between" {
+				expectedValues = 2
+			}
+			if len(normalized) != expectedValues {
+				return "", nil, fmt.Errorf("%w: rule %d metric values", ErrInvalidAccountFilterTemplate, index+1)
+			}
+			for _, value := range normalized {
+				if _, err := ParseAccountFilterMetricValue(rule.Field, value); err != nil {
+					return "", nil, fmt.Errorf("%w: rule %d metric value", ErrInvalidAccountFilterTemplate, index+1)
+				}
+			}
+		}
 		rule.Values = normalized
 	}
 	return matchMode, normalizedRules, nil
+}
+
+// ParseAccountFilterMetricValue converts filter input to the numeric value used
+// by account snapshots. Times without an explicit offset use China Standard Time.
+func ParseAccountFilterMetricValue(field, raw string) (float64, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, ErrInvalidAccountFilterTemplate
+	}
+	if accountFilterFieldType[field] != "time" {
+		result, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(result) || math.IsInf(result, 0) {
+			if err == nil {
+				err = ErrInvalidAccountFilterTemplate
+			}
+			return 0, err
+		}
+		return result, nil
+	}
+	if result, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(result) && !math.IsInf(result, 0) {
+		if result > 100_000_000_000 {
+			result /= 1000
+		}
+		return result, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return float64(parsed.UnixNano()) / float64(time.Second), nil
+	}
+	location, _ := time.LoadLocation("Asia/Shanghai")
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
+			return float64(parsed.Unix()), nil
+		}
+	}
+	return 0, ErrInvalidAccountFilterTemplate
 }
 
 func accountFilterTemplateView(template *model.ManagedAccountFilterTemplate) (*AccountFilterTemplateView, error) {
 	var rules []AccountFilterRule
 	if err := json.Unmarshal([]byte(template.Rules), &rules); err != nil {
 		return nil, err
+	}
+	if rules == nil {
+		rules = []AccountFilterRule{}
+	}
+	for index := range rules {
+		if rules[index].Values == nil {
+			rules[index].Values = []string{}
+		}
 	}
 	return &AccountFilterTemplateView{
 		Id: template.Id, Name: template.Name, MatchMode: template.MatchMode, Rules: rules,

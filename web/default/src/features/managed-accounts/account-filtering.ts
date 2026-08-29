@@ -29,6 +29,15 @@ export const ACCOUNT_FILTER_FIELDS = [
   'status',
   'source',
   'available',
+  'requests',
+  'tokens',
+  'amount',
+  'rpm',
+  'active_sessions',
+  'utilization_5h',
+  'utilization_7d',
+  'created_at',
+  'last_activity_at',
 ] as const
 
 export type AccountFilterField = (typeof ACCOUNT_FILTER_FIELDS)[number]
@@ -44,9 +53,19 @@ export type AccountCategoryFilterOperator =
   | 'is_not'
   | 'is_empty'
   | 'is_not_empty'
+export type AccountMetricFilterOperator =
+  | 'eq'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'between'
+  | 'is_empty'
+  | 'is_not_empty'
 export type AccountFilterOperator =
   | AccountTextFilterOperator
   | AccountCategoryFilterOperator
+  | AccountMetricFilterOperator
 
 export type AccountFilterRule = {
   id: string
@@ -88,9 +107,30 @@ export const TEXT_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'ownership',
 ])
 
+export const NUMBER_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
+  'requests',
+  'tokens',
+  'amount',
+  'rpm',
+  'active_sessions',
+  'utilization_5h',
+  'utilization_7d',
+])
+
+export const TIME_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
+  'created_at',
+  'last_activity_at',
+])
+
+export function isMetricAccountFilterField(field: AccountFilterField) {
+  return (
+    NUMBER_ACCOUNT_FILTER_FIELDS.has(field) ||
+    TIME_ACCOUNT_FILTER_FIELDS.has(field)
+  )
+}
+
 const QUICK_ACCOUNT_FILTER_FIELDS: AccountFilterField[] = [
   'name',
-  'email',
   'account_id',
   'note',
   'ownership',
@@ -99,10 +139,13 @@ const QUICK_ACCOUNT_FILTER_FIELDS: AccountFilterField[] = [
 export function createAccountFilterRule(
   field: AccountFilterField = 'name'
 ): AccountFilterRule {
+  let operator: AccountFilterOperator = 'is'
+  if (TEXT_ACCOUNT_FILTER_FIELDS.has(field)) operator = 'contains'
+  if (isMetricAccountFilterField(field)) operator = 'gte'
   return {
     id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
     field,
-    operator: TEXT_ACCOUNT_FILTER_FIELDS.has(field) ? 'contains' : 'is',
+    operator,
     values: [],
     value_mode: 'any',
   }
@@ -161,13 +204,16 @@ export function matchesQuickAccountFilter(
 ) {
   const searchable = QUICK_ACCOUNT_FILTER_FIELDS.flatMap(
     (field) => document[field]
-  )
-    .join(' ')
-    .toLocaleLowerCase()
+  ).map((value) => value.toLocaleLowerCase())
+  const emails = document.email.map((value) => value.toLocaleLowerCase())
+  const matches = (term: string) =>
+    searchable.some((value) => value.includes(term)) ||
+    emails.some((email) => {
+      const candidate = /[@.]/.test(term) ? email : email.split('@', 1)[0]
+      return candidate.includes(term)
+    })
   return (
-    (included.length === 0 ||
-      included.some((term) => searchable.includes(term))) &&
-    !excluded.some((term) => searchable.includes(term))
+    (included.length === 0 || included.some(matches)) && !excluded.some(matches)
   )
 }
 
@@ -175,7 +221,20 @@ export function isAccountFilterRuleComplete(rule: AccountFilterRule) {
   if (rule.operator === 'is_empty' || rule.operator === 'is_not_empty') {
     return true
   }
-  return rule.values.some((value) => value.trim() !== '')
+  const values = rule.values.filter((value) => value.trim() !== '')
+  if (rule.operator === 'between') {
+    return (
+      values.length === 2 &&
+      values.every((value) => parseMetricFilterValue(rule.field, value) != null)
+    )
+  }
+  if (isMetricAccountFilterField(rule.field)) {
+    return (
+      values.length === 1 &&
+      parseMetricFilterValue(rule.field, values[0]) != null
+    )
+  }
+  return values.length > 0
 }
 
 export function matchesAdvancedAccountFilter(
@@ -196,6 +255,9 @@ export function matchesAccountFilterRule(
   document: AccountFilterDocument,
   rule: AccountFilterRule
 ) {
+  if (isMetricAccountFilterField(rule.field)) {
+    return matchesMetricAccountFilterRule(document, rule)
+  }
   const fieldValues = document[rule.field]
     .map((value) => value.trim().toLocaleLowerCase())
     .filter(Boolean)
@@ -220,6 +282,69 @@ export function matchesAccountFilterRule(
     : positive
 }
 
+function matchesMetricAccountFilterRule(
+  document: AccountFilterDocument,
+  rule: AccountFilterRule
+) {
+  const values = document[rule.field]
+    .map((value) => parseMetricFilterValue(rule.field, value))
+    .filter((value): value is number => value != null)
+  if (rule.operator === 'is_empty') return values.length === 0
+  if (rule.operator === 'is_not_empty') return values.length > 0
+  if (values.length === 0) return false
+
+  const expected = rule.values
+    .map((value) => parseMetricFilterValue(rule.field, value))
+    .filter((value): value is number => value != null)
+  if (rule.operator === 'between') {
+    if (expected.length !== 2) return false
+    const minimum = Math.min(expected[0], expected[1])
+    const maximum = Math.max(expected[0], expected[1])
+    return values.some((value) => value >= minimum && value <= maximum)
+  }
+  if (expected.length !== 1) return false
+  const target = expected[0]
+  return values.some((value) => {
+    switch (rule.operator) {
+      case 'eq':
+        return value === target
+      case 'gt':
+        return value > target
+      case 'gte':
+        return value >= target
+      case 'lt':
+        return value < target
+      case 'lte':
+        return value <= target
+      default:
+        return false
+    }
+  })
+}
+
+export function parseMetricFilterValue(field: AccountFilterField, raw: string) {
+  const value = raw.trim()
+  if (!value) return null
+  if (!TIME_ACCOUNT_FILTER_FIELDS.has(field)) {
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : null
+  }
+
+  const numeric = Number(value)
+  if (Number.isFinite(numeric)) {
+    return numeric > 100_000_000_000 ? numeric / 1000 : numeric
+  }
+  const localMatch = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  )
+  const timestamp = localMatch
+    ? Date.parse(
+        `${localMatch[1]}-${localMatch[2]}-${localMatch[3]}T${localMatch[4] ?? '00'}:${localMatch[5] ?? '00'}:${localMatch[6] ?? '00'}+08:00`
+      )
+    : Date.parse(value)
+  return Number.isNaN(timestamp) ? null : timestamp / 1000
+}
+
 export function accountFilterTemplateInput(
   name: string,
   filter: AccountAdvancedFilter
@@ -242,10 +367,10 @@ export function accountFilterFromTemplate(
 ): AccountAdvancedFilter {
   return {
     match_mode: template.match_mode,
-    rules: template.rules.map((rule) => ({
+    rules: (template.rules ?? []).map((rule) => ({
       ...rule,
       id: createAccountFilterRule(rule.field).id,
-      values: [...rule.values],
+      values: [...(rule.values ?? [])],
     })),
   }
 }

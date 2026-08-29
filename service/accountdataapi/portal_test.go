@@ -74,6 +74,11 @@ func TestPortalFilterCannotUseHiddenFieldsOrExpandFixedScope(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalid)
 }
 
+func TestPortalFilterFieldsIncludeOpenedMetrics(t *testing.T) {
+	fields := PortalFilterFields([]string{"name", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"})
+	require.ElementsMatch(t, []string{"account_id", "name", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"}, fields)
+}
+
 func TestPortalRequiresPasswordAndHonorsCIDR(t *testing.T) {
 	_, instance := setupAPIServiceTest(t)
 	input := apiInput(instance.Id)

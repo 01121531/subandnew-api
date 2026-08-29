@@ -39,11 +39,11 @@ func TestExecuteMatchesQuickAndAdvancedFilters(t *testing.T) {
 	db, instance := setupQueryTest(t)
 	available := true
 	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
-		{ID: 1, IDText: "90071992547409931", Name: "alpha", Email: "alpha@example.com", Note: "password=secret-value", Enabled: &available, Status: "active", CreatedAt: 10},
+		{ID: 1, IDText: "90071992547409931", Name: "alpha", Email: "alpha@gmail.com", Note: "password=secret-value", Enabled: &available, Status: "active", CreatedAt: 10},
 		{ID: 2, Name: "beta", Email: "beta@blocked.test", Enabled: &available, Status: "active", CreatedAt: 20},
 	})
 	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
-		IncludeTerms: []string{"alpha,beta"}, ExcludeTerms: []string{"blocked.test"}, MatchMode: managedinstance.AccountFilterMatchAll,
+		IncludeTerms: []string{"alpha,beta"}, ExcludeTerms: []string{"beta@blocked.test"}, MatchMode: managedinstance.AccountFilterMatchAll,
 		Rules: []managedinstance.AccountFilterRule{{Field: "status", Operator: "is", Values: []string{"active"}, ValueMode: managedinstance.AccountFilterValueAny}},
 		Page:  1, PageSize: 50})
 	require.NoError(t, err)
@@ -57,6 +57,11 @@ func TestExecuteMatchesQuickAndAdvancedFilters(t *testing.T) {
 		IncludeTerms: []string{"gateway-a"}, Page: 1, PageSize: 50})
 	require.NoError(t, err)
 	require.Zero(t, result.Total, "instance names must not make every account match a quick filter")
+
+	result, err = Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		IncludeTerms: []string{"ma"}, Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Zero(t, result.Total, "short terms must not match every gmail.com domain")
 }
 
 func TestExecuteReturnsPartialWithoutInventingRows(t *testing.T) {
@@ -70,4 +75,30 @@ func TestExecuteReturnsPartialWithoutInventingRows(t *testing.T) {
 	require.True(t, result.Stale)
 	require.Equal(t, 1, result.Total)
 	require.Len(t, result.Sources, 2)
+}
+
+func TestExecuteMatchesMetricAndChinaTimeFilters(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	requestsHigh, requestsLow := 125.0, 12.0
+	utilizationHigh, utilizationLow := 0.82, 0.25
+	shanghai, err := time.LoadLocation(TimezoneShanghai)
+	require.NoError(t, err)
+	firstCreated := time.Date(2026, 8, 29, 9, 30, 0, 0, shanghai).Unix()
+	secondCreated := time.Date(2026, 8, 28, 9, 30, 0, 0, shanghai).Unix()
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "high", Enabled: &available, Requests: &requestsHigh, Utilization5H: &utilizationHigh, CreatedAt: firstCreated},
+		{ID: 2, Name: "low", Enabled: &available, Requests: &requestsLow, Utilization5H: &utilizationLow, CreatedAt: secondCreated},
+	})
+
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		MatchMode: managedinstance.AccountFilterMatchAll,
+		Rules: []managedinstance.AccountFilterRule{
+			{Field: "requests", Operator: "gte", Values: []string{"100"}, ValueMode: managedinstance.AccountFilterValueAny},
+			{Field: "utilization_5h", Operator: "between", Values: []string{"80", "90"}, ValueMode: managedinstance.AccountFilterValueAny},
+			{Field: "created_at", Operator: "gte", Values: []string{"2026-08-29 00:00"}, ValueMode: managedinstance.AccountFilterValueAny},
+		}, Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, "high", result.Items[0].Name)
 }

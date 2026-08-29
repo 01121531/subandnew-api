@@ -76,6 +76,10 @@ const fieldLabels: Record<string, string> = {
   requests: '请求数',
   tokens: '总 Token',
   amount: '消费金额',
+  rpm: 'RPM',
+  active_sessions: '活跃会话',
+  utilization_5h: '5 小时利用率',
+  utilization_7d: '7 天利用率',
 }
 
 const sortableFields = new Set([
@@ -125,7 +129,15 @@ function formatValue(field: string, value: unknown) {
       : '--'
   }
   if (field === 'amount') return `US$${Number(value).toFixed(8)}`
-  if (field === 'requests' || field === 'tokens') {
+  if (field === 'utilization_5h' || field === 'utilization_7d') {
+    return `${(Number(value) * 100).toFixed(2)}%`
+  }
+  if (
+    field === 'requests' ||
+    field === 'tokens' ||
+    field === 'rpm' ||
+    field === 'active_sessions'
+  ) {
     return new Intl.NumberFormat('zh-CN').format(Number(value))
   }
   return String(value)
@@ -269,6 +281,15 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         'status',
         'source',
         'available',
+        'requests',
+        'tokens',
+        'amount',
+        'rpm',
+        'active_sessions',
+        'utilization_5h',
+        'utilization_7d',
+        'created_at',
+        'last_activity_at',
       ].includes(field)
   )
   const options = Object.fromEntries(allowedFields.map((field) => [field, []]))

@@ -446,6 +446,17 @@ function resourceFilterDocument(row: ResourceRow): AccountFilterDocument {
     status: item.status,
     source: source?.name || item.source_id,
     available: filterAvailability(item.enabled),
+    requests: item.requests,
+    tokens: item.tokens,
+    amount: item.cost,
+    rpm: item.rpm,
+    active_sessions: item.active_sessions,
+    utilization_5h:
+      item.utilization_5h == null ? undefined : item.utilization_5h * 100,
+    utilization_7d:
+      item.utilization_7d == null ? undefined : item.utilization_7d * 100,
+    created_at: item.created_at,
+    last_activity_at: item.last_activity_at,
   })
 }
 
@@ -468,6 +479,24 @@ function outputFilterDocument(
     status: account.status,
     source: sourceName || account.source_id,
     available: filterAvailability(account.enabled),
+    requests:
+      output.collection_status === 'succeeded'
+        ? output.total_requests
+        : undefined,
+    tokens:
+      output.collection_status === 'succeeded'
+        ? output.total_tokens
+        : undefined,
+    amount:
+      output.collection_status === 'succeeded' ? output.amount : undefined,
+    rpm: account.rpm,
+    active_sessions: account.active_sessions,
+    utilization_5h:
+      account.utilization_5h == null ? undefined : account.utilization_5h * 100,
+    utilization_7d:
+      account.utilization_7d == null ? undefined : account.utilization_7d * 100,
+    created_at: account.created_at,
+    last_activity_at: account.last_activity_at,
   })
 }
 

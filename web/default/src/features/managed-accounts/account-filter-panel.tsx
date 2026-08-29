@@ -66,6 +66,7 @@ import {
   accountFilterFromTemplate,
   accountFilterTemplateInput,
   createAccountFilterRule,
+  isMetricAccountFilterField,
   isAccountFilterRuleComplete,
   parseAccountFilterDisplayValues,
   type AccountAdvancedFilter,
@@ -95,6 +96,15 @@ const fieldLabels: Record<AccountFilterField, string> = {
   status: 'Status',
   source: 'Work node',
   available: 'Availability',
+  requests: 'Requests',
+  tokens: 'Tokens',
+  amount: 'Amount',
+  rpm: 'RPM',
+  active_sessions: 'Active sessions',
+  utilization_5h: '5-hour utilization (%)',
+  utilization_7d: '7-day utilization (%)',
+  created_at: 'Created at',
+  last_activity_at: 'Last activity',
 }
 
 const operatorLabels: Record<AccountFilterOperator, string> = {
@@ -104,12 +114,47 @@ const operatorLabels: Record<AccountFilterOperator, string> = {
   is_not: 'Is not one of',
   is_empty: 'Is empty',
   is_not_empty: 'Is not empty',
+  eq: 'Equals',
+  gt: 'Greater than',
+  gte: 'Greater than or equal to',
+  lt: 'Less than',
+  lte: 'Less than or equal to',
+  between: 'Between (inclusive)',
 }
 
 function operatorsFor(field: AccountFilterField): AccountFilterOperator[] {
+  if (isMetricAccountFilterField(field)) {
+    return [
+      'eq',
+      'gt',
+      'gte',
+      'lt',
+      'lte',
+      'between',
+      'is_empty',
+      'is_not_empty',
+    ]
+  }
   return TEXT_ACCOUNT_FILTER_FIELDS.has(field)
     ? ['contains', 'not_contains', 'is_empty', 'is_not_empty']
     : ['is', 'is_not', 'is_empty', 'is_not_empty']
+}
+
+function defaultOperatorFor(field: AccountFilterField): AccountFilterOperator {
+  if (TEXT_ACCOUNT_FILTER_FIELDS.has(field)) return 'contains'
+  if (isMetricAccountFilterField(field)) return 'gte'
+  return 'is'
+}
+
+function valuesForOperator(
+  operator: AccountFilterOperator,
+  values: string[],
+  metricField: boolean
+) {
+  if (operator === 'is_empty' || operator === 'is_not_empty') return []
+  if (operator === 'between') return values.slice(0, 2)
+  if (metricField) return values.slice(0, 1)
+  return values
 }
 
 export function AccountFilterPanel(props: {
@@ -356,6 +401,23 @@ export function AccountFilterPanel(props: {
                   const emptyOperator =
                     rule.operator === 'is_empty' ||
                     rule.operator === 'is_not_empty'
+                  const metricField = isMetricAccountFilterField(rule.field)
+                  let maxValues = 50
+                  let limitMessage = '每条筛选规则最多包含 50 个值'
+                  let valuePlaceholder = 'Enter one or more values'
+                  let invalidMessage = 'Add at least one filter value'
+                  if (metricField) {
+                    maxValues = 1
+                    limitMessage = '该指标只需要一个比较值'
+                    valuePlaceholder = '输入指标值'
+                    invalidMessage = '请输入一个有效的数值或时间'
+                  }
+                  if (rule.operator === 'between') {
+                    maxValues = 2
+                    limitMessage = '区间筛选需要两个值'
+                    valuePlaceholder = '输入起始值和结束值'
+                    invalidMessage = '请输入两个有效的区间值'
+                  }
                   return (
                     <div
                       key={rule.id}
@@ -374,10 +436,9 @@ export function AccountFilterPanel(props: {
                             if (!value) return
                             updateRule(rule.id, {
                               field: value,
-                              operator: TEXT_ACCOUNT_FILTER_FIELDS.has(value)
-                                ? 'contains'
-                                : 'is',
+                              operator: defaultOperatorFor(value),
                               values: [],
+                              value_mode: 'any',
                             })
                           }}
                         >
@@ -403,11 +464,11 @@ export function AccountFilterPanel(props: {
                             if (!operator) return
                             updateRule(rule.id, {
                               operator,
-                              values:
-                                operator === 'is_empty' ||
-                                operator === 'is_not_empty'
-                                  ? []
-                                  : rule.values,
+                              values: valuesForOperator(
+                                operator,
+                                rule.values,
+                                metricField
+                              ),
                             })
                           }}
                         >
@@ -439,15 +500,16 @@ export function AccountFilterPanel(props: {
                               onChange={(values) =>
                                 updateRule(rule.id, { values })
                               }
-                              allowCreate={TEXT_ACCOUNT_FILTER_FIELDS.has(
-                                rule.field
-                              )}
-                              maxVisibleChips={3}
-                              maxValues={50}
-                              onLimitExceeded={() =>
-                                toast.error(t('每条筛选规则最多包含 50 个值'))
+                              allowCreate={
+                                TEXT_ACCOUNT_FILTER_FIELDS.has(rule.field) ||
+                                metricField
                               }
-                              placeholder={t('Enter one or more values')}
+                              maxVisibleChips={3}
+                              maxValues={maxValues}
+                              onLimitExceeded={() =>
+                                toast.error(t(limitMessage))
+                              }
+                              placeholder={t(valuePlaceholder)}
                               className='min-h-11 lg:min-h-9'
                             />
                             {TEXT_ACCOUNT_FILTER_FIELDS.has(rule.field) && (
@@ -467,7 +529,7 @@ export function AccountFilterPanel(props: {
                             )}
                             {!isAccountFilterRuleComplete(rule) && (
                               <p className='text-destructive text-xs'>
-                                {t('Add at least one filter value')}
+                                {t(invalidMessage)}
                               </p>
                             )}
                           </>
@@ -479,7 +541,7 @@ export function AccountFilterPanel(props: {
                         </Label>
                         <Select
                           value={rule.value_mode}
-                          disabled={emptyOperator}
+                          disabled={emptyOperator || metricField}
                           onValueChange={(value) => {
                             if (!value) return
                             updateRule(rule.id, { value_mode: value })

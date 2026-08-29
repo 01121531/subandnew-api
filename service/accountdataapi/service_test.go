@@ -30,15 +30,31 @@ func setupAPIServiceTest(t *testing.T) (*gorm.DB, model.ManagedInstance) {
 	require.NoError(t, db.Create(&instance).Error)
 	now := time.Now().Unix()
 	available := true
+	requestsHigh, requestsLow := 125.0, 12.0
 	payload, err := json.Marshal(managedinstance.InventoryPage{ResourceKind: "account", Items: []managedinstance.InventoryItem{
-		{ID: 1, IDText: "acct-1", Name: "allowed", Email: "allowed@example.com", Enabled: &available, CreatedAt: now},
-		{ID: 2, IDText: "acct-2", Name: "hidden", Email: "hidden@other.test", Enabled: &available, CreatedAt: now - 10},
+		{ID: 1, IDText: "acct-1", Name: "allowed", Email: "allowed@example.com", Enabled: &available, CreatedAt: now, Requests: &requestsHigh},
+		{ID: 2, IDText: "acct-2", Name: "hidden", Email: "hidden@other.test", Enabled: &available, CreatedAt: now - 10, Requests: &requestsLow},
 	}, Total: 2})
 	require.NoError(t, err)
 	require.NoError(t, db.Create(&model.ManagedAccountSnapshot{InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
 		RangeKey: "inventory", Timezone: managedaccount.TimezoneShanghai, SchemaVersion: 2, ObservedAt: now, Payload: string(payload),
 		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded}).Error)
 	return db, instance
+}
+
+func TestCreateAppliesFrozenMetricFilter(t *testing.T) {
+	_, instance := setupAPIServiceTest(t)
+	input := apiInput(instance.Id)
+	input.IncludeTerms = nil
+	input.Rules = []managedinstance.AccountFilterRule{{Field: "requests", Operator: "gte", Values: []string{"100"}, ValueMode: managedinstance.AccountFilterValueAny}}
+	created, err := Create(t.Context(), input, 7)
+	require.NoError(t, err)
+	auth, err := Authenticate(created.Secret, "203.0.113.1")
+	require.NoError(t, err)
+	result, err := QueryExternal(t.Context(), auth, 1, 50, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, "acct-1", result.Items[0].AccountID)
 }
 
 func apiInput(instanceID int64) ConfigInput {
@@ -65,6 +81,29 @@ func TestCreateStoresOnlyHashAndQueriesFrozenFilter(t *testing.T) {
 	projected := Project(result.Items[0], append([]string{"instance_id", "account_id"}, auth.View.Fields...))
 	require.Equal(t, "acct-1", projected["account_id"])
 	require.NotContains(t, projected, "note")
+}
+
+func TestViewForNormalizesLegacyNullCollections(t *testing.T) {
+	db, instance := setupAPIServiceTest(t)
+	entry := model.ManagedAccountAPI{Name: "legacy", Status: model.ManagedAccountAPIEnabled, Dataset: managedaccount.DatasetInventory,
+		PresetDays: 7, Timezone: managedaccount.TimezoneShanghai, IncludeTerms: "null", ExcludeTerms: "null", MatchMode: managedinstance.AccountFilterMatchAll,
+		Rules: `[{"field":"email","operator":"is_empty","values":null,"value_mode":"any"}]`, Fields: "null", AllowedCIDRs: "null",
+		SortBy: "created_at", SortOrder: "desc", PageSize: 50, RateLimitPerMinute: 60}
+	require.NoError(t, db.Create(&entry).Error)
+	require.NoError(t, db.Create(&model.ManagedAccountAPIInstance{APIID: entry.ID, InstanceID: instance.Id}).Error)
+
+	view, err := viewFor(&entry)
+	require.NoError(t, err)
+	require.NotNil(t, view.IncludeTerms)
+	require.NotNil(t, view.ExcludeTerms)
+	require.NotNil(t, view.Fields)
+	require.NotNil(t, view.AllowedCIDRs)
+	require.Len(t, view.Rules, 1)
+	require.NotNil(t, view.Rules[0].Values)
+
+	encoded, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"include_terms":[]`)
 }
 
 func TestKeysCanOverlapThenBeRevoked(t *testing.T) {

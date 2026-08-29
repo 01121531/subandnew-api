@@ -340,10 +340,12 @@ func PortalFilterFields(fields []string) []string {
 			allowed["instance"] = true
 		case "source_name":
 			allowed["source"] = true
+		case "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at":
+			allowed[field] = true
 		}
 	}
 	result := make([]string, 0, len(allowed))
-	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "instance", "platform", "type", "group", "status", "source", "available"} {
+	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "instance", "platform", "type", "group", "status", "source", "available", "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at"} {
 		if allowed[field] {
 			result = append(result, field)
 		}

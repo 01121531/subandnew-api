@@ -30,11 +30,15 @@ import {
 } from './account-filtering'
 
 const account = accountFilterDocument({
-  name: 'Alice Primary',
+  name: 'Alice Standard',
   email: 'Alice@Gmail.com',
   instance: 'Shanghai Gateway',
   group: 'default',
   available: 'available',
+  requests: 125,
+  amount: 9.875,
+  utilization_5h: 82,
+  created_at: 1787967000,
 })
 
 describe('account filtering', () => {
@@ -55,11 +59,17 @@ describe('account filtering', () => {
 
   test('quick include matches any value and exclusion rejects any value', () => {
     assert.equal(
-      matchesQuickAccountFilter(account, ['yahoo', 'gmail'], []),
+      matchesQuickAccountFilter(account, ['yahoo', 'alice'], []),
       true
     )
     assert.equal(matchesQuickAccountFilter(account, ['yahoo'], []), false)
-    assert.equal(matchesQuickAccountFilter(account, [], ['gmail']), false)
+    assert.equal(
+      matchesQuickAccountFilter(account, [], ['alice@gmail.com']),
+      false
+    )
+    assert.equal(matchesQuickAccountFilter(account, ['ma'], []), false)
+    assert.equal(matchesQuickAccountFilter(account, ['gmail'], []), false)
+    assert.equal(matchesQuickAccountFilter(account, ['gmail.com'], []), true)
     assert.equal(matchesQuickAccountFilter(account, ['shanghai'], []), false)
     assert.equal(matchesQuickAccountFilter(account, [], ['default']), true)
   })
@@ -72,7 +82,7 @@ describe('account filtering', () => {
     }
     const name = {
       ...createAccountFilterRule('name'),
-      values: ['alice', 'primary'],
+      values: ['alice', 'standard'],
       value_mode: 'all' as const,
     }
     assert.equal(
@@ -109,6 +119,32 @@ describe('account filtering', () => {
         rules: [{ ...createAccountFilterRule('note'), operator: 'is_empty' }],
       }),
       true
+    )
+  })
+
+  test('supports numeric ranges and China local time comparisons', () => {
+    const requests = createAccountFilterRule('requests')
+    requests.operator = 'gte'
+    requests.values = ['100']
+    const utilization = createAccountFilterRule('utilization_5h')
+    utilization.operator = 'between'
+    utilization.values = ['80', '90']
+    const created = createAccountFilterRule('created_at')
+    created.operator = 'gte'
+    created.values = ['2026-08-29 09:00']
+    assert.equal(
+      matchesAdvancedAccountFilter(account, {
+        match_mode: 'all',
+        rules: [requests, utilization, created],
+      }),
+      true
+    )
+    assert.equal(
+      matchesAdvancedAccountFilter(account, {
+        match_mode: 'all',
+        rules: [{ ...requests, operator: 'lt' }],
+      }),
+      false
     )
   })
 

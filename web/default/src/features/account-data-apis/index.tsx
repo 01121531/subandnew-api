@@ -120,6 +120,10 @@ const FIELD_OPTIONS = [
   ['requests', '请求数'],
   ['tokens', '总 Token'],
   ['amount', '消费金额'],
+  ['rpm', 'RPM'],
+  ['active_sessions', '活跃会话'],
+  ['utilization_5h', '5 小时利用率'],
+  ['utilization_7d', '7 天利用率'],
 ] as const
 
 const SORT_OPTIONS = [
@@ -158,28 +162,45 @@ function defaultInput(): AccountDataAPIInput {
   }
 }
 
-function toInput(item: AccountDataAPI): AccountDataAPIInput {
+function normalizeInputCollections(
+  input: AccountDataAPIInput
+): AccountDataAPIInput {
   return {
+    ...input,
+    instance_ids: input.instance_ids ?? [],
+    include_terms: input.include_terms ?? [],
+    exclude_terms: input.exclude_terms ?? [],
+    rules: (input.rules ?? []).map((rule) => ({
+      ...rule,
+      values: rule.values ?? [],
+    })),
+    fields: input.fields ?? [],
+    allowed_cidrs: input.allowed_cidrs ?? [],
+  }
+}
+
+function toInput(item: AccountDataAPI): AccountDataAPIInput {
+  return normalizeInputCollections({
     name: item.name,
     description: item.description,
     status: item.status,
     dataset: item.dataset,
     preset_days: item.preset_days,
-    instance_ids: [...item.instance_ids],
-    include_terms: [...item.include_terms],
-    exclude_terms: [...item.exclude_terms],
+    instance_ids: item.instance_ids,
+    include_terms: item.include_terms,
+    exclude_terms: item.exclude_terms,
     match_mode: item.match_mode,
-    rules: item.rules.map((rule) => ({ ...rule, values: [...rule.values] })),
-    fields: [...item.fields],
+    rules: item.rules,
+    fields: item.fields,
     sort_by: item.sort_by,
     sort_order: item.sort_order,
     page_size: item.page_size,
     rate_limit_per_minute: item.rate_limit_per_minute,
-    allowed_cidrs: [...item.allowed_cidrs],
+    allowed_cidrs: item.allowed_cidrs,
     portal_enabled: item.portal_enabled,
     portal_password: '',
     reset_portal_slug: false,
-  }
+  })
 }
 
 function previewInputSignature(input: AccountDataAPIInput) {
@@ -744,11 +765,13 @@ function AuthorizationEditor(props: {
   useEffect(() => {
     if (!props.open) return
     const base = props.item ? toInput(props.item) : defaultInput()
-    setInput({
-      ...base,
-      ...props.prefill,
-      name: props.prefill?.name ?? base.name,
-    })
+    setInput(
+      normalizeInputCollections({
+        ...base,
+        ...props.prefill,
+        name: props.prefill?.name ?? base.name,
+      })
+    )
     setStep(0)
     setPreview(null)
     setPreviewSignature('')

@@ -595,6 +595,7 @@ func prepareInput(input ConfigInput) (ConfigInput, managedaccount.Query, error) 
 	input.InstanceIDs, input.Dataset, input.PresetDays = query.InstanceIDs, query.Dataset, query.PresetDays
 	input.IncludeTerms, input.ExcludeTerms, input.MatchMode, input.Rules = query.IncludeTerms, query.ExcludeTerms, query.MatchMode, query.Rules
 	input.SortBy, input.SortOrder = query.SortBy, query.SortOrder
+	input = normalizeConfigCollections(input)
 	var instanceCount int64
 	if err := model.DB.Model(&model.ManagedInstance{}).Where("id IN ?", input.InstanceIDs).Count(&instanceCount).Error; err != nil {
 		return input, managedaccount.Query{}, err
@@ -606,6 +607,7 @@ func prepareInput(input ConfigInput) (ConfigInput, managedaccount.Query, error) 
 }
 
 func modelFromInput(input ConfigInput, actorID int) (*model.ManagedAccountAPI, error) {
+	input = normalizeConfigCollections(input)
 	include, _ := json.Marshal(input.IncludeTerms)
 	exclude, _ := json.Marshal(input.ExcludeTerms)
 	rules, _ := json.Marshal(input.Rules)
@@ -644,6 +646,11 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 	if err := json.Unmarshal([]byte(entry.Rules), &rules); err != nil {
 		return nil, err
 	}
+	include = nonNilSlice(include)
+	exclude = nonNilSlice(exclude)
+	fields = nonNilSlice(fields)
+	cidrs = nonNilSlice(cidrs)
+	rules = normalizeFilterRuleCollections(rules)
 	var keys []model.ManagedAccountAPIKey
 	if err := model.DB.Where("api_id = ?", entry.ID).Order("created_at DESC, id DESC").Find(&keys).Error; err != nil {
 		return nil, err
@@ -662,6 +669,31 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 		CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
 		Stale:    entry.LastObservedAt == 0 || common.GetTimestamp()-entry.LastObservedAt > int64((65*time.Minute)/time.Second),
 		Endpoint: ExternalPath, Keys: keyViews}, nil
+}
+
+func normalizeConfigCollections(input ConfigInput) ConfigInput {
+	input.InstanceIDs = nonNilSlice(input.InstanceIDs)
+	input.IncludeTerms = nonNilSlice(input.IncludeTerms)
+	input.ExcludeTerms = nonNilSlice(input.ExcludeTerms)
+	input.Rules = normalizeFilterRuleCollections(input.Rules)
+	input.Fields = nonNilSlice(input.Fields)
+	input.AllowedCIDRs = nonNilSlice(input.AllowedCIDRs)
+	return input
+}
+
+func normalizeFilterRuleCollections(rules []managedinstance.AccountFilterRule) []managedinstance.AccountFilterRule {
+	rules = nonNilSlice(rules)
+	for index := range rules {
+		rules[index].Values = nonNilSlice(rules[index].Values)
+	}
+	return rules
+}
+
+func nonNilSlice[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
 }
 
 func applyPortalInput(entry *model.ManagedAccountAPI, input ConfigInput, creating bool) (bool, error) {
