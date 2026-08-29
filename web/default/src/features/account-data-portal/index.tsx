@@ -694,6 +694,7 @@ function PortalLogin(props: {
           />
         </div>
         <Button
+          type='submit'
           className='min-h-11'
           disabled={props.pending || !props.password}
         >
