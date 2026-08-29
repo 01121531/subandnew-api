@@ -128,3 +128,29 @@ func TestManagedAccountFilterTemplateRoutesAreRegistered(t *testing.T) {
 		assert.Truef(t, routes[route], "%s must be registered", route)
 	}
 }
+
+func TestAccountDataAPIRoutesAreRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetApiRouter(engine)
+	routes := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, route := range []string{
+		"GET /api/account-data-apis",
+		"GET /api/account-data-apis/instances",
+		"GET /api/account-data-apis/:id",
+		"POST /api/account-data-apis",
+		"PUT /api/account-data-apis/:id",
+		"DELETE /api/account-data-apis/:id",
+		"POST /api/account-data-apis/preview",
+		"POST /api/account-data-apis/:id/preview",
+		"POST /api/account-data-apis/:id/keys",
+		"DELETE /api/account-data-apis/:id/keys/:key_id",
+		"GET /api/account-data-apis/:id/access-logs",
+		"GET /open-api/v1/accounts",
+	} {
+		assert.Truef(t, routes[route], "%s must be registered", route)
+	}
+}

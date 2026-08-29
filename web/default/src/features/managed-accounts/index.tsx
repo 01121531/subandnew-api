@@ -17,12 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Braces,
   Calculator,
   AlertTriangle,
   CheckCircle2,
@@ -117,7 +118,13 @@ import type {
 import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
 import { createManagedAccountExport } from '@/features/usage-records/api'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { AccountFilterPanel } from './account-filter-panel'
 import {
@@ -658,6 +665,13 @@ function AccountExportBar(props: {
 
 export function ManagedAccounts() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const user = useAuthStore((state) => state.auth.user)
+  const canManageAccountDataAPIs = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_ACCOUNT_API,
+    ADMIN_PERMISSION_ACTIONS.MANAGE
+  )
   const initialPreferences = useMemo(readPreferences, [])
   const [family, setFamily] = useState<AccountFamily>(initialPreferences.family)
   const [selectedInstances, setSelectedInstances] = useState(
@@ -1235,6 +1249,26 @@ export function ManagedAccounts() {
     })
   }
 
+  const createAccountDataAuthorization = () => {
+    const presetDays = [1, 7, 14, 30].includes(timeRange.presetDays ?? 0)
+      ? timeRange.presetDays
+      : 7
+    window.sessionStorage.setItem(
+      'managed-account-api-draft',
+      JSON.stringify({
+        name: `${t(familyLabel(family))} ${t('账号数据授权')}`,
+        dataset: 'inventory',
+        preset_days: presetDays,
+        instance_ids: instances.map((instance) => instance.id),
+        include_terms: searchValues,
+        exclude_terms: excludeSearchValues,
+        match_mode: filterSnapshot.match_mode,
+        rules: filterSnapshot.rules,
+      })
+    )
+    void navigate({ to: '/interface-management' })
+  }
+
   let content: ReactNode
   if (instancesQuery.isLoading) {
     content = <AccountPageSkeleton />
@@ -1331,6 +1365,12 @@ export function ManagedAccounts() {
         {t('Account management')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
+        {canManageAccountDataAPIs && (
+          <Button variant='outline' onClick={createAccountDataAuthorization}>
+            <Braces />
+            <span className='hidden sm:inline'>{t('创建接口授权')}</span>
+          </Button>
+        )}
         <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
         <Button
           variant='outline'

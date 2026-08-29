@@ -28,6 +28,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
   MANAGED_TEMPLATE: 'managed_template',
   BILLING_ALERT: 'billing_alert',
   ASSISTANT: 'assistant',
+  MANAGED_ACCOUNT_API: 'managed_account_api',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {

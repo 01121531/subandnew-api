@@ -46,6 +46,10 @@ func TestMain(m *testing.M) {
 		&ManagedInstanceAlert{},
 		&ManagedUsageExport{},
 		&ManagedExportItem{},
+		&ManagedAccountAPI{},
+		&ManagedAccountAPIInstance{},
+		&ManagedAccountAPIKey{},
+		&ManagedAccountAPIAccessLog{},
 		&ManagedAccountFilterTemplate{},
 		&ManagedConfigTemplate{},
 		&ManagedInstanceConfigBinding{},
@@ -92,6 +96,7 @@ func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
+			"managed_account_api_access_logs", "managed_account_api_keys", "managed_account_api_instances", "managed_account_apis",
 			"assistant_tool_calls", "assistant_outbox", "assistant_runs", "assistant_messages", "assistant_inbox",
 			"assistant_conversations", "assistant_identity_instance_scopes", "assistant_identities",
 			"assistant_binding_codes", "assistant_channel_leases", "assistant_channel_secrets", "assistant_channels", "assistant_model_profiles",

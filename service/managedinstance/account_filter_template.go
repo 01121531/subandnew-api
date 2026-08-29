@@ -145,11 +145,35 @@ func DeleteAccountFilterTemplate(id int64, actorID int) error {
 
 func prepareAccountFilterTemplate(actorID int, input AccountFilterTemplateInput) (AccountFilterTemplateInput, []byte, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if actorID <= 0 || input.Name == "" || utf8.RuneCountInString(input.Name) > 64 || (input.MatchMode != AccountFilterMatchAll && input.MatchMode != AccountFilterMatchAny) || len(input.Rules) == 0 || len(input.Rules) > 20 {
+	if actorID <= 0 || input.Name == "" || utf8.RuneCountInString(input.Name) > 64 {
 		return input, nil, ErrInvalidAccountFilterTemplate
 	}
-	for index := range input.Rules {
-		rule := &input.Rules[index]
+	matchMode, rules, err := NormalizeAccountFilter(input.MatchMode, input.Rules, true)
+	if err != nil {
+		return input, nil, err
+	}
+	input.MatchMode = matchMode
+	input.Rules = rules
+	encoded, err := json.Marshal(input.Rules)
+	if err != nil {
+		return input, nil, err
+	}
+	return input, encoded, nil
+}
+
+// NormalizeAccountFilter validates and normalizes the shared account filter
+// representation used by templates, assistant queries, and external feeds.
+func NormalizeAccountFilter(matchMode string, rules []AccountFilterRule, requireRules bool) (string, []AccountFilterRule, error) {
+	matchMode = strings.TrimSpace(matchMode)
+	if matchMode == "" {
+		matchMode = AccountFilterMatchAll
+	}
+	if (matchMode != AccountFilterMatchAll && matchMode != AccountFilterMatchAny) || len(rules) > 20 || (requireRules && len(rules) == 0) {
+		return "", nil, ErrInvalidAccountFilterTemplate
+	}
+	normalizedRules := append([]AccountFilterRule(nil), rules...)
+	for index := range normalizedRules {
+		rule := &normalizedRules[index]
 		rule.Field = strings.TrimSpace(rule.Field)
 		rule.Operator = strings.TrimSpace(rule.Operator)
 		rule.ValueMode = strings.TrimSpace(rule.ValueMode)
@@ -159,7 +183,7 @@ func prepareAccountFilterTemplate(actorID int, input AccountFilterTemplateInput)
 			operators = accountCategoryFilterOperators
 		}
 		if !ok || !operators[rule.Operator] || (rule.ValueMode != AccountFilterValueAny && rule.ValueMode != AccountFilterValueAll) {
-			return input, nil, fmt.Errorf("%w: rule %d", ErrInvalidAccountFilterTemplate, index+1)
+			return "", nil, fmt.Errorf("%w: rule %d", ErrInvalidAccountFilterTemplate, index+1)
 		}
 		emptyOperator := rule.Operator == "is_empty" || rule.Operator == "is_not_empty"
 		if emptyOperator {
@@ -167,7 +191,7 @@ func prepareAccountFilterTemplate(actorID int, input AccountFilterTemplateInput)
 			continue
 		}
 		if len(rule.Values) == 0 || len(rule.Values) > 50 {
-			return input, nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
+			return "", nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
 		}
 		seen := make(map[string]struct{}, len(rule.Values))
 		normalized := make([]string, 0, len(rule.Values))
@@ -175,7 +199,7 @@ func prepareAccountFilterTemplate(actorID int, input AccountFilterTemplateInput)
 			value := strings.TrimSpace(raw)
 			key := strings.ToLower(value)
 			if value == "" || utf8.RuneCountInString(value) > 200 {
-				return input, nil, fmt.Errorf("%w: rule %d value", ErrInvalidAccountFilterTemplate, index+1)
+				return "", nil, fmt.Errorf("%w: rule %d value", ErrInvalidAccountFilterTemplate, index+1)
 			}
 			if _, duplicate := seen[key]; duplicate {
 				continue
@@ -184,15 +208,11 @@ func prepareAccountFilterTemplate(actorID int, input AccountFilterTemplateInput)
 			normalized = append(normalized, value)
 		}
 		if len(normalized) == 0 {
-			return input, nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
+			return "", nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
 		}
 		rule.Values = normalized
 	}
-	encoded, err := json.Marshal(input.Rules)
-	if err != nil {
-		return input, nil, err
-	}
-	return input, encoded, nil
+	return matchMode, normalizedRules, nil
 }
 
 func accountFilterTemplateView(template *model.ManagedAccountFilterTemplate) (*AccountFilterTemplateView, error) {

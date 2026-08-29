@@ -11,16 +11,21 @@ import (
 )
 
 var auditContentTemplates = map[string]string{
-	"user.create":           "Created user ${username} (role ${role})",
-	"user.update":           "Updated user ${username} (ID: ${id})",
-	"user.delete":           "Deleted user ${username} (ID: ${id})",
-	"user.manage":           "Performed ${action} on user ${username} (ID: ${id})",
-	"user.2fa_disable":      "Force-disabled two-factor authentication for the user",
-	"user.passkey_register": "Registered a passkey",
-	"user.passkey_delete":   "Deleted a passkey",
-	"user.reset_passkey":    "Reset the user passkey",
-	"option.update":         "Updated system setting ${key}",
-	"system_update.start":   "Started system update ${task_id} from ${from_version} to ${target_version}",
+	"user.create":                 "Created user ${username} (role ${role})",
+	"user.update":                 "Updated user ${username} (ID: ${id})",
+	"user.delete":                 "Deleted user ${username} (ID: ${id})",
+	"user.manage":                 "Performed ${action} on user ${username} (ID: ${id})",
+	"user.2fa_disable":            "Force-disabled two-factor authentication for the user",
+	"user.passkey_register":       "Registered a passkey",
+	"user.passkey_delete":         "Deleted a passkey",
+	"user.reset_passkey":          "Reset the user passkey",
+	"option.update":               "Updated system setting ${key}",
+	"system_update.start":         "Started system update ${task_id} from ${from_version} to ${target_version}",
+	"account_data_api.create":     "Created account data API authorization ${name} (ID: ${id})",
+	"account_data_api.update":     "Updated account data API authorization ${name} (ID: ${id})",
+	"account_data_api.delete":     "Deleted account data API authorization (ID: ${id})",
+	"account_data_api.key_create": "Created a key for account data API authorization (ID: ${id})",
+	"account_data_api.key_revoke": "Revoked key ${key_id} for account data API authorization (ID: ${id})",
 }
 
 func auditContentEN(action string, params map[string]interface{}) string {

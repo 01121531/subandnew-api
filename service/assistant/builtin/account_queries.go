@@ -8,13 +8,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/01121531/subandnew-api/model"
-	controlplaneservice "github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/assistant/access"
 	"github.com/01121531/subandnew-api/service/assistant/tool"
 	"github.com/01121531/subandnew-api/service/authz"
+	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"gorm.io/gorm"
 )
@@ -146,128 +145,54 @@ func registerManagedAccountQuery(registry *tool.Registry, db *gorm.DB) error {
 		if err != nil {
 			return tool.Output[managedAccountsOutput]{}, err
 		}
-		return executeManagedAccountQuery(resolution.IDs, input)
+		return executeManagedAccountQuery(ctx, resolution.IDs, input)
 	})
 }
 
-func executeManagedAccountQuery(instanceIDs []int64, input managedAccountsInput) (tool.Output[managedAccountsOutput], error) {
-	dataset := input.Dataset
-	if dataset == "" {
-		dataset = managedAccountDatasetInventory
-	}
-	presetDays := input.PresetDays
-	if presetDays == 0 {
-		presetDays = 7
-	}
-	matchMode := input.MatchMode
-	if matchMode == "" {
-		matchMode = managedinstance.AccountFilterMatchAll
-	}
-	page, pageSize := input.Page, input.PageSize
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-	rows := make([]managedAccountRow, 0)
-	statuses := make([]managedAccountSourceStatus, 0, len(instanceIDs))
-	provenance := make([]tool.Provenance, 0, len(instanceIDs))
-	observedAt := int64(0)
-	stale := false
-
-	accountRange, err := controlplaneservice.NormalizeManagedAccountRange(presetDays, 0, 0, assistantTimezone)
+func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input managedAccountsInput) (tool.Output[managedAccountsOutput], error) {
+	result, err := managedaccount.Execute(ctx, managedaccount.Query{
+		InstanceIDs: instanceIDs, Dataset: input.Dataset, PresetDays: input.PresetDays,
+		MatchMode: input.MatchMode, Rules: input.Rules, SortBy: input.SortBy,
+		SortOrder: input.SortOrder, Page: input.Page, PageSize: input.PageSize,
+	})
 	if err != nil {
 		return tool.Output[managedAccountsOutput]{}, err
 	}
-	for _, instanceID := range instanceIDs {
-		view, getErr := managedinstance.Get(instanceID)
-		if getErr != nil {
-			return tool.Output[managedAccountsOutput]{}, getErr
+	items := make([]managedAccountItem, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, managedAccountItem{
+			InstanceID: item.InstanceID, InstanceName: item.InstanceName, Platform: item.Platform,
+			AccountID: item.AccountID, Name: item.Name, Email: item.Email, Note: item.Note,
+			Ownership: item.Ownership, Type: item.Type, Group: item.Group, Status: item.Status,
+			Available: item.Available, RateLimited: item.RateLimited, SourceID: item.SourceID,
+			SourceName: item.SourceName, CreatedAt: assistantTime(item.CreatedAt), LastActivityAt: assistantTime(item.LastActivityAt),
+			DisabledAt: assistantTime(item.DisabledAt), ExpiresAt: assistantTime(item.ExpiresAt),
+			Requests: item.Requests, Tokens: item.Tokens, Amount: item.Amount, Currency: item.Currency,
+			RPM: item.RPM, ActiveSessions: item.ActiveSessions, Utilization5H: item.Utilization5H,
+			Utilization7D: item.Utilization7D, CollectionStatus: item.CollectionStatus, ErrorCode: item.ErrorCode,
+		})
+	}
+	statuses := make([]managedAccountSourceStatus, 0, len(result.Sources))
+	provenance := make([]tool.Provenance, 0, len(result.Sources))
+	for _, source := range result.Sources {
+		statuses = append(statuses, managedAccountSourceStatus{
+			InstanceID: source.InstanceID, InstanceName: source.InstanceName, Platform: source.Platform,
+			Status: source.Status, ObservedAt: assistantTime(source.ObservedAt), LastAttemptAt: assistantTime(source.LastAttemptAt),
+			LastAttemptStatus: source.LastAttemptStatus, ErrorCode: source.ErrorCode, Stale: source.Stale,
+		})
+		if source.ObservedAt > 0 {
+			provenance = append(provenance, tool.Provenance{Source: "managed_account_snapshots", Resource: "instance:" + strconv.FormatInt(source.InstanceID, 10) + ":" + result.Dataset, ObservedAt: unixTime(source.ObservedAt)})
 		}
-		snapshot, snapshotErr := controlplaneservice.GetManagedAccountSnapshot(instanceID, accountRange)
-		status := managedAccountSourceStatus{InstanceID: instanceID, InstanceName: safeBusinessText(view.Name), Platform: view.Kind, Status: "no_data", Stale: true}
-		if snapshotErr != nil {
-			status.ErrorCode = assistantErrorCode(snapshotErr)
-			statuses = append(statuses, status)
-			stale = true
-			continue
-		}
-		section := snapshot.Inventory
-		if dataset == managedAccountDatasetOutput {
-			section = snapshot.AccountOutput
-		}
-		status.LastAttemptAt = assistantTime(section.LastAttemptAt)
-		status.LastAttemptStatus = section.LastAttemptStatus
-		status.ErrorCode = section.LastErrorCode
-		status.Stale = section.LastAttemptStatus == model.ManagedInstanceCollectionFailed || section.Observation == nil
-		if section.Observation == nil {
-			statuses = append(statuses, status)
-			stale = true
-			continue
-		}
-		status.Status = section.Observation.CollectionStatus
-		status.ObservedAt = assistantTime(section.Observation.ObservedAt)
-		status.Stale = status.Stale || time.Now().Unix()-section.Observation.ObservedAt > int64(65*time.Minute/time.Second)
-		observedAt = conservativeTimestamp(observedAt, section.Observation.ObservedAt)
-		stale = stale || status.Stale
-		provenance = append(provenance, tool.Provenance{Source: "managed_account_snapshots", Resource: "instance:" + strconv.FormatInt(instanceID, 10) + ":" + dataset, ObservedAt: unixTime(section.Observation.ObservedAt)})
-
-		var inventory *managedinstance.InventoryPage
-		var output *managedinstance.AccountOutputResult
-		if dataset == managedAccountDatasetInventory {
-			inventory, getErr = controlplaneservice.GetManagedAccountInventorySnapshot(instanceID)
-		} else {
-			output, getErr = controlplaneservice.GetManagedAccountOutputSnapshot(instanceID, accountRange.RangeKey)
-		}
-		if getErr != nil {
-			status.Status = model.ManagedInstanceCollectionFailed
-			status.ErrorCode = assistantErrorCode(getErr)
-			status.Stale = true
-			statuses = append(statuses, status)
-			stale = true
-			continue
-		}
-		if inventory != nil {
-			sourceNames := inventorySourceNames(inventory.Sources)
-			for _, account := range inventory.Items {
-				row := accountInventoryRow(view, account, sourceNames)
-				if managedAccountMatches(row.doc, matchMode, input.Rules) {
-					rows = append(rows, row)
-				}
-			}
-		}
-		if output != nil {
-			sourceNames := map[string]string{}
-			if inventorySnapshot, inventoryErr := controlplaneservice.GetManagedAccountInventorySnapshot(instanceID); inventoryErr == nil && inventorySnapshot != nil {
-				sourceNames = inventorySourceNames(inventorySnapshot.Sources)
-			}
-			for _, accountOutput := range output.Items {
-				row := accountOutputRow(view, accountOutput, sourceNames)
-				if managedAccountMatches(row.doc, matchMode, input.Rules) {
-					rows = append(rows, row)
-				}
-			}
-		}
-		statuses = append(statuses, status)
 	}
 	if len(provenance) == 0 {
 		provenance = []tool.Provenance{{Source: "managed_account_snapshots"}}
 	}
-	sortManagedAccountRows(rows, input.SortBy, input.SortOrder)
-	summary := summarizeManagedAccountRows(rows)
-	start := (page - 1) * pageSize
-	if start > len(rows) {
-		start = len(rows)
-	}
-	end := min(start+pageSize, len(rows))
-	items := make([]managedAccountItem, 0, end-start)
-	for _, row := range rows[start:end] {
-		items = append(items, row.item)
-	}
 	return tool.Output[managedAccountsOutput]{
-		Data:       managedAccountsOutput{Dataset: dataset, PresetDays: presetDays, Items: items, Total: len(rows), Page: page, PageSize: pageSize, Summary: summary, Sources: statuses},
-		Provenance: provenance, Freshness: freshnessForSnapshot(observedAt, stale),
+		Data: managedAccountsOutput{Dataset: result.Dataset, PresetDays: result.PresetDays, Items: items, Total: result.Total,
+			Page: result.Page, PageSize: result.PageSize, Summary: managedAccountSummary{Total: result.Summary.Total,
+				Available: result.Summary.Available, Unavailable: result.Summary.Unavailable, Unknown: result.Summary.Unknown,
+				Requests: result.Summary.Requests, Tokens: result.Summary.Tokens, Amounts: result.Summary.Amounts}, Sources: statuses},
+		Provenance: provenance, Freshness: freshnessForSnapshot(result.ObservedAt, result.Stale),
 	}, nil
 }
 

@@ -114,6 +114,7 @@ export function AccountFilterPanel(props: {
   value: AccountAdvancedFilter
   onChange: (value: AccountAdvancedFilter) => void
   options: Partial<Record<AccountFilterField, MultiSelectOption[]>>
+  templatesEnabled?: boolean
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -127,6 +128,7 @@ export function AccountFilterPanel(props: {
   const templatesQuery = useQuery({
     queryKey: TEMPLATE_QUERY_KEY,
     queryFn: listAccountFilterTemplates,
+    enabled: props.templatesEnabled !== false,
   })
   const templates = templatesQuery.data?.data ?? []
   const selectedTemplate = templates.find(
@@ -232,61 +234,67 @@ export function AccountFilterPanel(props: {
                 )}
               />
             </CollapsibleTrigger>
-            <Select
-              value={
-                selectedTemplateID == null ? 'none' : String(selectedTemplateID)
-              }
-              onValueChange={applyTemplate}
-            >
-              <SelectTrigger className='min-h-11 w-full sm:min-h-9 sm:w-56'>
-                <SelectValue placeholder={t('Filter templates')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='none'>
-                  {t('No template selected')}
-                </SelectItem>
-                {templates.map((template) => (
-                  <SelectItem key={template.id} value={String(template.id)}>
-                    {template.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className='flex flex-wrap gap-2 sm:ms-auto'>
-              <Button
-                variant='outline'
-                size='sm'
-                className='min-h-11 flex-1 sm:min-h-9 sm:flex-none'
-                disabled={!rulesValid}
-                onClick={() => setSaveOpen(true)}
+            {props.templatesEnabled !== false && (
+              <Select
+                value={
+                  selectedTemplateID == null
+                    ? 'none'
+                    : String(selectedTemplateID)
+                }
+                onValueChange={applyTemplate}
               >
-                <Save />
-                {t('Save as template')}
-              </Button>
-              {selectedTemplate && (
-                <>
-                  <Button
-                    variant='outline'
-                    size='sm'
-                    className='min-h-11 sm:min-h-9'
-                    disabled={!rulesValid || updateMutation.isPending}
-                    onClick={() => updateMutation.mutate()}
-                  >
-                    {t('Update template')}
-                  </Button>
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    className='text-destructive min-h-11 min-w-11 sm:min-h-9 sm:min-w-9'
-                    aria-label={t('Delete template')}
-                    title={t('Delete template')}
-                    onClick={() => setDeleteOpen(true)}
-                  >
-                    <Trash2 />
-                  </Button>
-                </>
-              )}
-            </div>
+                <SelectTrigger className='min-h-11 w-full sm:min-h-9 sm:w-56'>
+                  <SelectValue placeholder={t('Filter templates')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='none'>
+                    {t('No template selected')}
+                  </SelectItem>
+                  {templates.map((template) => (
+                    <SelectItem key={template.id} value={String(template.id)}>
+                      {template.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {props.templatesEnabled !== false && (
+              <div className='flex flex-wrap gap-2 sm:ms-auto'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='min-h-11 flex-1 sm:min-h-9 sm:flex-none'
+                  disabled={!rulesValid}
+                  onClick={() => setSaveOpen(true)}
+                >
+                  <Save />
+                  {t('Save as template')}
+                </Button>
+                {selectedTemplate && (
+                  <>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='min-h-11 sm:min-h-9'
+                      disabled={!rulesValid || updateMutation.isPending}
+                      onClick={() => updateMutation.mutate()}
+                    >
+                      {t('Update template')}
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      className='text-destructive min-h-11 min-w-11 sm:min-h-9 sm:min-w-9'
+                      aria-label={t('Delete template')}
+                      title={t('Delete template')}
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <CollapsibleContent>
             <div className='border-border/70 space-y-3 border-t p-3'>

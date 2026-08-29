@@ -42,6 +42,10 @@ func TestMain(m *testing.M) {
 		&model.ManagedInstanceAlert{},
 		&model.ManagedUsageExport{},
 		&model.ManagedExportItem{},
+		&model.ManagedAccountAPI{},
+		&model.ManagedAccountAPIInstance{},
+		&model.ManagedAccountAPIKey{},
+		&model.ManagedAccountAPIAccessLog{},
 		&model.ManagedAccountFilterTemplate{},
 		&model.BillingFilterTemplate{},
 		&model.BillingFilterTemplateVersion{},
@@ -67,6 +71,7 @@ func truncate(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		for _, table := range []string{
+			"managed_account_api_access_logs", "managed_account_api_keys", "managed_account_api_instances", "managed_account_apis",
 			"billing_email_deliveries", "billing_alert_events", "billing_evaluation_snapshots",
 			"billing_cycle_snapshots", "billing_alert_thresholds", "billing_alert_rule_instances",
 			"billing_alert_rules", "billing_filter_template_versions", "billing_filter_templates",

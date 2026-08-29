@@ -28,6 +28,7 @@ import { Route as AuthenticatedUsageRecordsIndexRouteImport } from './routes/_au
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
+import { Route as AuthenticatedInterfaceManagementIndexRouteImport } from './routes/_authenticated/interface-management/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
 import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_authenticated/export-records/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -141,6 +142,12 @@ const AuthenticatedProfileIndexRoute =
     path: '/profile/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedInterfaceManagementIndexRoute =
+  AuthenticatedInterfaceManagementIndexRouteImport.update({
+    id: '/interface-management/',
+    path: '/interface-management/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedInstancesIndexRoute =
   AuthenticatedInstancesIndexRouteImport.update({
     id: '/instances/',
@@ -249,6 +256,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
+  '/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -281,6 +289,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/export-records': typeof AuthenticatedExportRecordsIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
+  '/interface-management': typeof AuthenticatedInterfaceManagementIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
@@ -317,6 +326,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
+  '/_authenticated/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -352,6 +362,7 @@ export interface FileRouteTypes {
     | '/dashboard/'
     | '/export-records/'
     | '/instances/'
+    | '/interface-management/'
     | '/profile/'
     | '/system-info/'
     | '/system-settings/'
@@ -384,6 +395,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/export-records'
     | '/instances'
+    | '/interface-management'
     | '/profile'
     | '/system-info'
     | '/system-settings'
@@ -419,6 +431,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/'
     | '/_authenticated/export-records/'
     | '/_authenticated/instances/'
+    | '/_authenticated/interface-management/'
     | '/_authenticated/profile/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
@@ -576,6 +589,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile/'
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/interface-management/': {
+      id: '/_authenticated/interface-management/'
+      path: '/interface-management'
+      fullPath: '/interface-management/'
+      preLoaderRoute: typeof AuthenticatedInterfaceManagementIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/instances/': {
@@ -736,6 +756,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedExportRecordsIndexRoute: typeof AuthenticatedExportRecordsIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
+  AuthenticatedInterfaceManagementIndexRoute: typeof AuthenticatedInterfaceManagementIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
   AuthenticatedUsageRecordsIndexRoute: typeof AuthenticatedUsageRecordsIndexRoute
@@ -756,6 +777,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedExportRecordsIndexRoute: AuthenticatedExportRecordsIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
+  AuthenticatedInterfaceManagementIndexRoute:
+    AuthenticatedInterfaceManagementIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
   AuthenticatedUsageRecordsIndexRoute: AuthenticatedUsageRecordsIndexRoute,

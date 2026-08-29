@@ -9,6 +9,7 @@ License, or (at your option) any later version.
 import {
   BellRing,
   Bot,
+  Braces,
   LayoutDashboard,
   FileClock,
   ScrollText,
@@ -44,6 +45,11 @@ export function useSidebarData(): SidebarData {
   const canViewBillingAlerts = hasPermission(
     user,
     ADMIN_PERMISSION_RESOURCES.BILLING_ALERT,
+    ADMIN_PERMISSION_ACTIONS.VIEW
+  )
+  const canViewAccountDataAPIs = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_ACCOUNT_API,
     ADMIN_PERMISSION_ACTIONS.VIEW
   )
   const canAccessAssistant = [
@@ -100,6 +106,15 @@ export function useSidebarData(): SidebarData {
                   url: '/billing-alerts',
                   activeUrls: ['/billing-alerts', '/billing-alert-records'],
                   icon: BellRing,
+                },
+              ]
+            : []),
+          ...(canViewAccountDataAPIs
+            ? [
+                {
+                  title: t('接口管理'),
+                  url: '/interface-management',
+                  icon: Braces,
                 },
               ]
             : []),
