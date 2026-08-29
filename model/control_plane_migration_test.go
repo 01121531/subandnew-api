@@ -159,6 +159,28 @@ func TestMigrateDBPreservesExistingLegacyTablesAndRows(t *testing.T) {
 	}
 }
 
+func TestMigrateDBAddsPortalSlugToExistingSQLiteTable(t *testing.T) {
+	db := useControlPlaneMigrationTestDB(t)
+	require.NoError(t, db.AutoMigrate(&ManagedAccountAPI{}))
+	require.NoError(t, db.Create(&ManagedAccountAPI{
+		Name: "existing authorization", Status: ManagedAccountAPIEnabled,
+		Dataset: "inventory", PresetDays: 7, Timezone: "Asia/Shanghai",
+		IncludeTerms: "[]", ExcludeTerms: "[]", MatchMode: "all", Rules: "[]", Fields: "[]",
+		SortBy: "created_at", SortOrder: "desc", PageSize: 50, RateLimitPerMinute: 60,
+		AllowedCIDRs: "[]", CreatedBy: 1, UpdatedBy: 1,
+	}).Error)
+	require.NoError(t, db.Migrator().DropIndex(&ManagedAccountAPI{}, "idx_managed_account_apis_portal_slug"))
+	require.NoError(t, db.Migrator().DropColumn(&ManagedAccountAPI{}, "portal_slug"))
+	require.False(t, db.Migrator().HasColumn(&ManagedAccountAPI{}, "portal_slug"))
+
+	require.NoError(t, migrateDB())
+	require.True(t, db.Migrator().HasColumn(&ManagedAccountAPI{}, "portal_slug"))
+	require.True(t, db.Migrator().HasIndex(&ManagedAccountAPI{}, "idx_managed_account_apis_portal_slug"))
+	var count int64
+	require.NoError(t, db.Model(&ManagedAccountAPI{}).Where("name = ?", "existing authorization").Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
 func TestMigrateDBPreservesLegacyUserColumnsAndValues(t *testing.T) {
 	db := useControlPlaneMigrationTestDB(t)
 	require.NoError(t, migrateDB())

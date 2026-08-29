@@ -169,7 +169,28 @@ func configureConnectionPool(sqlDB *sql.DB, databaseType common.DatabaseType) er
 }
 
 func migrateDB() error {
+	if err := prepareSQLiteControlPlaneMigrations(); err != nil {
+		return err
+	}
 	return DB.AutoMigrate(controlPlaneModels()...)
+}
+
+// SQLite cannot add a UNIQUE column to an existing table. Add the nullable
+// column first so GORM can create the unique index as a separate migration.
+func prepareSQLiteControlPlaneMigrations() error {
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) ||
+		!DB.Migrator().HasTable(&ManagedAccountAPI{}) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&ManagedAccountAPI{}, "portal_slug") {
+		if err := DB.Exec(`ALTER TABLE managed_account_apis ADD COLUMN portal_slug varchar(48)`).Error; err != nil {
+			return err
+		}
+	}
+	if !DB.Migrator().HasIndex(&ManagedAccountAPI{}, "idx_managed_account_apis_portal_slug") {
+		return DB.Exec(`CREATE UNIQUE INDEX idx_managed_account_apis_portal_slug ON managed_account_apis(portal_slug)`).Error
+	}
+	return nil
 }
 
 // controlPlaneModels is the only ordinary-startup migration allowlist.
