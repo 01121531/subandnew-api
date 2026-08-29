@@ -275,6 +275,12 @@ func ListAssistantRuns(c *gin.Context) {
 		assistantError(c, err)
 		return
 	}
+	for index := range runs {
+		runs[index].ErrorDetail = ""
+		runs[index].ErrorDetailTruncated = false
+		runs[index].ProviderStatusCode = 0
+		runs[index].ProviderErrorCode = ""
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": assistantRunListView{Items: runs, Total: total, Page: page, PageSize: pageSize}})
 }
 

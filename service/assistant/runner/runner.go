@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/service/assistant/provider"
 	"github.com/01121531/subandnew-api/service/assistant/tool"
@@ -20,6 +21,37 @@ var (
 	ErrToolCallLimit        = errors.New("assistant runner tool call limit reached")
 	ErrInvalidModelResponse = errors.New("invalid assistant model response")
 )
+
+const maxAuditErrorDetailBytes = 64 << 10
+
+const (
+	ErrorStageModelRequest  = "model_request"
+	ErrorStageModelStream   = "model_stream"
+	ErrorStageModelResponse = "model_response"
+	ErrorStageToolExecution = "tool_execution"
+	ErrorStageRunner        = "runner"
+)
+
+type RunError struct {
+	Stage string
+	Step  int
+	Tool  string
+	Cause error
+}
+
+func (e *RunError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "assistant run failed"
+	}
+	return e.Cause.Error()
+}
+
+func (e *RunError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
 
 type Config struct {
 	SystemPrompt    string
@@ -36,12 +68,14 @@ type Runner struct {
 }
 
 type ToolTrace struct {
-	CallID        string        `json:"call_id"`
-	Name          string        `json:"name"`
-	ArgumentsHash string        `json:"arguments_hash"`
-	ResultHash    string        `json:"result_hash,omitempty"`
-	Duration      time.Duration `json:"duration"`
-	Error         string        `json:"error,omitempty"`
+	CallID               string        `json:"call_id"`
+	Name                 string        `json:"name"`
+	ArgumentsHash        string        `json:"arguments_hash"`
+	ResultHash           string        `json:"result_hash,omitempty"`
+	Duration             time.Duration `json:"duration"`
+	Error                string        `json:"error,omitempty"`
+	ErrorDetail          string        `json:"error_detail,omitempty"`
+	ErrorDetailTruncated bool          `json:"error_detail_truncated,omitempty"`
 }
 
 type Outcome struct {
@@ -102,33 +136,37 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 		}
 		response, err := generate(runContext, r.client, request)
 		if err != nil {
-			return outcome, err
+			stage := ErrorStageModelRequest
+			if strings.Contains(strings.ToLower(err.Error()), "stream") {
+				stage = ErrorStageModelStream
+			}
+			return outcome, &RunError{Stage: stage, Step: step, Cause: err}
 		}
 		outcome.ProviderSteps = step
 		addUsage(&outcome.Usage, response.Usage)
 		if response.Message.Role != provider.RoleAssistant {
-			return outcome, fmt.Errorf("%w: expected assistant role", ErrInvalidModelResponse)
+			return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: expected assistant role", ErrInvalidModelResponse)}
 		}
 		messages = append(messages, response.Message)
 		if len(response.Message.ToolCalls) == 0 {
 			answer := strings.TrimSpace(response.Message.Content)
 			if answer == "" {
-				return outcome, fmt.Errorf("%w: response has no answer or tool call", ErrInvalidModelResponse)
+				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: response has no answer or tool call", ErrInvalidModelResponse)}
 			}
 			outcome.Answer = answer
 			outcome.Messages = append([]provider.Message(nil), messages...)
 			return outcome, nil
 		}
 		if outcome.ToolCalls+len(response.Message.ToolCalls) > r.config.MaxToolCalls {
-			return outcome, ErrToolCallLimit
+			return outcome, &RunError{Stage: ErrorStageRunner, Step: step, Cause: ErrToolCallLimit}
 		}
 
 		for _, call := range response.Message.ToolCalls {
 			if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.Name) == "" {
-				return outcome, fmt.Errorf("%w: tool call id and name are required", ErrInvalidModelResponse)
+				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: tool call id and name are required", ErrInvalidModelResponse)}
 			}
 			if _, exists := seenCallIDs[call.ID]; exists {
-				return outcome, fmt.Errorf("%w: duplicate tool call id", ErrInvalidModelResponse)
+				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: duplicate tool call id", ErrInvalidModelResponse)}
 			}
 			seenCallIDs[call.ID] = struct{}{}
 			started := time.Now()
@@ -139,13 +177,14 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 			outcome.ToolCalls++
 			if err != nil {
 				trace.Error = safeToolError(err)
+				trace.ErrorDetail, trace.ErrorDetailTruncated = boundedAuditErrorDetail(err.Error())
 				outcome.ToolTraces = append(outcome.ToolTraces, trace)
-				return outcome, err
+				return outcome, &RunError{Stage: ErrorStageToolExecution, Step: step, Tool: call.Name, Cause: err}
 			}
 			outcome.ToolTraces = append(outcome.ToolTraces, trace)
 			content, err := json.Marshal(result)
 			if err != nil {
-				return outcome, fmt.Errorf("encode assistant tool result: %w", err)
+				return outcome, &RunError{Stage: ErrorStageToolExecution, Step: step, Tool: call.Name, Cause: fmt.Errorf("encode assistant tool result: %w", err)}
 			}
 			outcome.ToolTraces[len(outcome.ToolTraces)-1].ResultHash = hashBytes(content)
 			messages = append(messages, provider.Message{
@@ -153,7 +192,19 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 			})
 		}
 	}
-	return outcome, ErrStepLimit
+	return outcome, &RunError{Stage: ErrorStageRunner, Step: r.config.MaxSteps, Cause: ErrStepLimit}
+}
+
+func boundedAuditErrorDetail(value string) (string, bool) {
+	value = strings.ToValidUTF8(strings.TrimSpace(value), "�")
+	if len(value) <= maxAuditErrorDetailBytes {
+		return value, false
+	}
+	limit := maxAuditErrorDetailBytes
+	for limit > 0 && !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit], true
 }
 
 func toolDefinitions(specs []tool.ToolSpec) []provider.ToolDefinition {

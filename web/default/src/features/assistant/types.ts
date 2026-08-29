@@ -111,6 +111,12 @@ export type AssistantRun = {
   cache_observed_input_tokens: number
   cost: string
   error_code?: string
+  error_stage?: string
+  error_reason_code?: string
+  error_detail?: string
+  error_detail_truncated?: boolean
+  provider_status_code?: number
+  provider_error_code?: string
   trace_id: string
   started_at: number
   finished_at: number
@@ -139,6 +145,8 @@ export type AssistantToolCall = {
   risk: AssistantToolRisk
   latency_ms: number
   error_code?: string
+  error_detail?: string
+  error_detail_truncated?: boolean
   started_at: number
   finished_at: number
   created_at: number

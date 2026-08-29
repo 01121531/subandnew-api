@@ -10,12 +10,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/builtin"
 	"github.com/01121531/subandnew-api/service/assistant/channelservice"
 	"github.com/01121531/subandnew-api/service/assistant/provider"
+	"github.com/01121531/subandnew-api/service/assistant/runner"
 	"github.com/01121531/subandnew-api/service/assistant/secrets"
 	"github.com/01121531/subandnew-api/service/assistant/tool"
 	"github.com/glebarez/sqlite"
@@ -203,4 +205,90 @@ func TestSafeAssistantAnswerBlocksSensitiveOutputAndBoundsLength(t *testing.T) {
 func TestAssistantRunFailureCodeDistinguishesTimeout(t *testing.T) {
 	require.Equal(t, "agent_run_timeout", assistantRunFailureCode(context.DeadlineExceeded))
 	require.Equal(t, "agent_run_failed", assistantRunFailureCode(errors.New("provider unavailable")))
+}
+
+func TestDescribeAssistantFailureClassifiesProviderAndTimeout(t *testing.T) {
+	providerFailure := describeAssistantFailure(assistantRunFailure{
+		Code: "agent_run_failed",
+		Cause: &runner.RunError{Stage: runner.ErrorStageModelRequest, Cause: &provider.HTTPError{
+			StatusCode: http.StatusBadGateway, Code: "origin_bad_gateway", Message: "origin returned an incomplete response",
+		}},
+	})
+	require.Equal(t, runner.ErrorStageModelRequest, providerFailure.Stage)
+	require.Equal(t, "provider_unavailable", providerFailure.ReasonCode)
+	require.Equal(t, http.StatusBadGateway, providerFailure.ProviderStatusCode)
+	require.Equal(t, "origin_bad_gateway", providerFailure.ProviderErrorCode)
+	require.Contains(t, providerFailure.Detail, "origin returned an incomplete response")
+
+	timeoutFailure := describeAssistantFailure(assistantRunFailure{
+		Code: "agent_run_timeout", Cause: &runner.RunError{Stage: runner.ErrorStageModelStream, Cause: context.DeadlineExceeded},
+	})
+	require.Equal(t, runner.ErrorStageModelStream, timeoutFailure.Stage)
+	require.Equal(t, "run_timeout", timeoutFailure.ReasonCode)
+
+	for _, test := range []struct {
+		status int
+		reason string
+	}{
+		{status: http.StatusUnauthorized, reason: "provider_authentication_failed"},
+		{status: http.StatusTooManyRequests, reason: "provider_rate_limited"},
+		{status: http.StatusBadRequest, reason: "provider_rejected_request"},
+	} {
+		details := describeAssistantFailure(assistantRunFailure{Cause: &provider.HTTPError{StatusCode: test.status}})
+		require.Equal(t, test.reason, details.ReasonCode)
+	}
+
+	streamFailure := describeAssistantFailure(assistantRunFailure{Cause: &runner.RunError{
+		Stage: runner.ErrorStageModelStream, Cause: errors.New("assistant model stream ended before completion"),
+	}})
+	require.Equal(t, "provider_stream_error", streamFailure.ReasonCode)
+	invalidResponse := describeAssistantFailure(assistantRunFailure{Cause: &runner.RunError{
+		Stage: runner.ErrorStageModelResponse, Cause: errors.New("assistant model returned an invalid tool call"),
+	}})
+	require.Equal(t, "invalid_model_response", invalidResponse.ReasonCode)
+
+	oversizedFailure := describeAssistantFailure(assistantRunFailure{Cause: errors.New(strings.Repeat("错", maxAuditErrorDetailBytes))})
+	require.True(t, oversizedFailure.DetailTruncated)
+	require.LessOrEqual(t, len(oversizedFailure.Detail), maxAuditErrorDetailBytes)
+}
+
+func TestFailRunPersistsPartialUsageAndToolTrace(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantRun{}, &model.AssistantToolCall{}, &model.AssistantInboundEvent{}))
+	now := time.Date(2026, 8, 29, 11, 0, 0, 0, time.Local)
+	processor := &Processor{db: db, now: func() time.Time { return now }}
+	event := model.AssistantInboundEvent{ChannelID: 1, ExternalMessageID: "message", Status: model.AssistantInboundStatusProcessing}
+	require.NoError(t, db.Create(&event).Error)
+	run := model.AssistantRun{RunID: "failed-run", Model: "model", PromptVersion: "v1", Status: model.AssistantRunStatusRunning, TraceID: "trace", StartedAt: now.Add(-time.Minute).Unix()}
+	require.NoError(t, db.Create(&run).Error)
+	outcome := runner.Outcome{
+		Usage:      provider.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, CachedInputTokens: 80, CacheObservedInputTokens: 100},
+		ToolTraces: []runner.ToolTrace{{Name: "query", ArgumentsHash: strings.Repeat("a", 64), Error: "tool_execution_failed", ErrorDetail: "upstream tool failure"}},
+	}
+	cause := &runner.RunError{Stage: runner.ErrorStageToolExecution, Tool: "query", Cause: errors.New("upstream tool failure")}
+	err = processor.failRunAndEvent(t.Context(), &event, &run, assistantRunFailure{
+		Code: "agent_run_failed", Cause: cause, Outcome: &outcome,
+		Specs:   []tool.ToolSpec{{Name: "query", Permission: tool.Permission{Resource: "managed_instance", Action: "usage_view"}, Risk: tool.RiskMedium}},
+		Started: now.Add(-time.Minute),
+	})
+	require.ErrorIs(t, err, cause)
+	require.NoError(t, db.First(&run, run.ID).Error)
+	require.Equal(t, model.AssistantRunStatusFailed, run.Status)
+	require.EqualValues(t, 120, run.TotalTokens)
+	require.Equal(t, "tool_execution_failed", run.ErrorReasonCode)
+	require.Equal(t, "upstream tool failure", run.ErrorDetail)
+	var call model.AssistantToolCall
+	require.NoError(t, db.Where("run_id = ?", run.ID).First(&call).Error)
+	require.Equal(t, "upstream tool failure", call.ErrorDetail)
+
+	err = processor.failRunAndEvent(t.Context(), &event, &run, assistantRunFailure{
+		Code: "agent_run_failed", Cause: cause, Outcome: &outcome,
+		Specs:   []tool.ToolSpec{{Name: "query", Permission: tool.Permission{Resource: "managed_instance", Action: "usage_view"}, Risk: tool.RiskMedium}},
+		Started: now.Add(-time.Minute),
+	})
+	require.ErrorIs(t, err, cause)
+	var callCount int64
+	require.NoError(t, db.Model(&model.AssistantToolCall{}).Where("run_id = ?", run.ID).Count(&callCount).Error)
+	require.EqualValues(t, 1, callCount)
 }

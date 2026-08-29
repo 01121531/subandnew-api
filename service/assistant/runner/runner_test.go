@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/service/assistant/provider"
 	"github.com/01121531/subandnew-api/service/assistant/tool"
@@ -121,10 +123,23 @@ func TestRunnerFailsClosedOnAuthorization(t *testing.T) {
 	}}}}
 	runner, err := New(client, newRunnerRegistry(t), Config{SystemPrompt: "safe", MaxSteps: 2})
 	require.NoError(t, err)
-	_, err = runner.Run(t.Context(), tool.ExecutionContext{
+	outcome, err := runner.Run(t.Context(), tool.ExecutionContext{
 		RunID: "run-1", ConversationID: "conversation-1", Channel: "wechat", IdentityID: 1, UserID: 8,
 	}, []provider.Message{{Role: provider.RoleUser, Content: "list"}})
 	require.ErrorIs(t, err, tool.ErrAuthorizationDenied)
+	var runErr *RunError
+	require.ErrorAs(t, err, &runErr)
+	require.Equal(t, ErrorStageToolExecution, runErr.Stage)
+	require.Len(t, outcome.ToolTraces, 1)
+	require.Equal(t, "authorization_denied", outcome.ToolTraces[0].Error)
+	require.Contains(t, outcome.ToolTraces[0].ErrorDetail, "authorization")
+}
+
+func TestBoundedAuditErrorDetailPreservesUTF8AndMarksTruncation(t *testing.T) {
+	detail, truncated := boundedAuditErrorDetail(strings.Repeat("错", maxAuditErrorDetailBytes))
+	require.True(t, truncated)
+	require.True(t, utf8.ValidString(detail))
+	require.LessOrEqual(t, len(detail), maxAuditErrorDetailBytes)
 }
 
 func TestRunnerRejectsDuplicateToolCallAndStepLimit(t *testing.T) {

@@ -21,6 +21,7 @@ import {
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { ErrorState } from '@/components/error-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -100,6 +101,141 @@ function formatDuration(run: AssistantRun, t: TFunction) {
     return t('{{count}} ms', { count: milliseconds })
   }
   return t('{{count}} s', { count: (milliseconds / 1000).toFixed(1) })
+}
+
+function configuredTimeoutSeconds(run: AssistantRun) {
+  if (run.deadline_at <= 0 || run.started_at <= 0) return 0
+  return Math.max(0, run.deadline_at - run.started_at)
+}
+
+function failureReason(run: AssistantRun, t: TFunction) {
+  const timeout = configuredTimeoutSeconds(run)
+  const reasons: Record<string, string> = {
+    provider_authentication_failed: t(
+      'The model provider rejected authentication.'
+    ),
+    provider_timeout: t('The model provider request timed out.'),
+    provider_rate_limited: t('The model provider rate limit was reached.'),
+    provider_unavailable: t('The model provider is temporarily unavailable.'),
+    provider_rejected_request: t('The model provider rejected the request.'),
+    provider_http_error: t('The model provider returned an HTTP error.'),
+    provider_connection_failed: t('Could not connect to the model provider.'),
+    provider_stream_error: t('The model response stream ended unexpectedly.'),
+    invalid_model_response: t('The model returned an invalid response.'),
+    step_limit_reached: t('The assistant reached the maximum reasoning steps.'),
+    tool_call_limit_reached: t('The assistant reached the maximum tool calls.'),
+    tool_authorization_denied: t('A tool call was denied by permissions.'),
+    tool_invalid_arguments: t('A tool call used invalid arguments.'),
+    tool_not_found: t('The requested assistant tool was not found.'),
+    tool_execution_failed: t('An assistant tool failed to execute.'),
+    message_persistence_failed: t('The assistant result could not be saved.'),
+    message_delivery_failed: t('The assistant reply could not be delivered.'),
+    configuration_failed: t('The assistant configuration is invalid.'),
+    runner_configuration_invalid: t(
+      'The assistant runner configuration is invalid.'
+    ),
+    run_cancelled: t('The assistant run was cancelled.'),
+    unknown_failure: t('The assistant run failed for an unknown reason.'),
+  }
+  if (
+    run.error_reason_code === 'run_timeout' ||
+    run.error_code === 'agent_run_timeout'
+  ) {
+    return timeout > 0
+      ? t('The assistant did not finish within {{seconds}} seconds.', {
+          seconds: timeout,
+        })
+      : t('The assistant run timed out.')
+  }
+  return (
+    reasons[run.error_reason_code ?? ''] ??
+    t('This historical run did not save a detailed reason.')
+  )
+}
+
+function failureStageLabel(stage: string | undefined, t: TFunction) {
+  const stages: Record<string, string> = {
+    model_request: t('Model request'),
+    model_stream: t('Model response stream'),
+    model_response: t('Model response validation'),
+    tool_execution: t('Tool execution'),
+    runner: t('Assistant runner'),
+    message_persistence: t('Message persistence'),
+    message_delivery: t('Message delivery'),
+    configuration: t('Configuration'),
+    unknown: t('Unknown stage'),
+  }
+  return stages[stage ?? ''] ?? t('Unknown stage')
+}
+
+function FailureDiagnosis(props: { run: AssistantRun }) {
+  const { t } = useTranslation()
+  if (props.run.status !== 'failed') return null
+
+  return (
+    <section className='border-destructive/30 bg-destructive/5 mt-3 rounded-lg border p-3'>
+      <div className='flex flex-wrap items-start justify-between gap-2'>
+        <div>
+          <p className='text-destructive text-sm font-medium'>
+            {t('Failure diagnosis')}
+          </p>
+          <p className='text-muted-foreground mt-1 text-sm'>
+            {failureReason(props.run, t)}
+          </p>
+        </div>
+        {props.run.error_detail && (
+          <CopyButton
+            value={props.run.error_detail}
+            variant='outline'
+            size='sm'
+            className='min-h-11 px-3'
+            tooltip={t('Copy error details')}
+            aria-label={t('Copy error details')}
+          >
+            {t('Copy details')}
+          </CopyButton>
+        )}
+      </div>
+      <dl className='mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4'>
+        <div>
+          <dt className='text-muted-foreground'>{t('Failure stage')}</dt>
+          <dd className='mt-0.5'>
+            {failureStageLabel(props.run.error_stage, t)}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>{t('Reason code')}</dt>
+          <dd className='mt-0.5 font-mono break-all'>
+            {props.run.error_reason_code || t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>{t('Provider HTTP status')}</dt>
+          <dd className='mt-0.5 font-mono'>
+            {props.run.provider_status_code || t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>{t('Provider error code')}</dt>
+          <dd className='mt-0.5 font-mono break-all'>
+            {props.run.provider_error_code || t('Unavailable')}
+          </dd>
+        </div>
+      </dl>
+      <div className='mt-3'>
+        <p className='text-muted-foreground text-xs'>{t('Error details')}</p>
+        <pre className='bg-background mt-1 max-h-72 overflow-auto rounded-md border p-3 font-mono text-xs break-all whitespace-pre-wrap'>
+          {props.run.error_detail ||
+            t('This historical run did not save a detailed reason.')}
+        </pre>
+        {props.run.error_detail_truncated && (
+          <p className='text-warning mt-1 text-xs'>
+            {t('The error details were truncated at 64 KiB.')}
+          </p>
+        )}
+      </div>
+    </section>
+  )
 }
 
 function CacheUsage(props: { run: AssistantRun }) {
@@ -211,6 +347,28 @@ function ToolTrace(props: { call: AssistantToolCall }) {
           </dd>
         </div>
       </dl>
+      {props.call.error_detail && (
+        <div className='mt-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-muted-foreground text-xs'>
+              {t('Error details')}
+            </p>
+            <CopyButton
+              value={props.call.error_detail}
+              tooltip={t('Copy error details')}
+              aria-label={t('Copy error details')}
+            />
+          </div>
+          <pre className='bg-background mt-1 max-h-56 overflow-auto rounded-md border p-3 font-mono text-xs break-all whitespace-pre-wrap'>
+            {props.call.error_detail}
+          </pre>
+          {props.call.error_detail_truncated && (
+            <p className='text-warning mt-1 text-xs'>
+              {t('The error details were truncated at 64 KiB.')}
+            </p>
+          )}
+        </div>
+      )}
     </li>
   )
 }
@@ -235,20 +393,29 @@ function RunTrace(props: { runId: string }) {
       />
     )
   }
-  if (!detailQuery.data || detailQuery.data.tool_calls.length === 0) {
+  if (!detailQuery.data) {
+    return null
+  }
+  if (detailQuery.data.tool_calls.length === 0) {
     return (
-      <p className='text-muted-foreground mt-3 rounded-lg border border-dashed p-4 text-center text-sm'>
-        {t('This run did not call any tools.')}
-      </p>
+      <div>
+        <FailureDiagnosis run={detailQuery.data.run} />
+        <p className='text-muted-foreground mt-3 rounded-lg border border-dashed p-4 text-center text-sm'>
+          {t('This run did not call any tools.')}
+        </p>
+      </div>
     )
   }
 
   return (
-    <ul className='mt-3 space-y-2'>
-      {detailQuery.data.tool_calls.map((call) => (
-        <ToolTrace key={call.id} call={call} />
-      ))}
-    </ul>
+    <div>
+      <FailureDiagnosis run={detailQuery.data.run} />
+      <ul className='mt-3 space-y-2'>
+        {detailQuery.data.tool_calls.map((call) => (
+          <ToolTrace key={call.id} call={call} />
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -329,6 +496,17 @@ function RunRow(props: {
           </dd>
         </div>
       </dl>
+
+      {props.run.status === 'failed' && (
+        <div className='border-destructive/25 bg-destructive/5 mt-3 rounded-lg border px-3 py-2'>
+          <p className='text-destructive text-xs font-medium'>
+            {t('Failure reason')}
+          </p>
+          <p className='mt-1 text-sm break-words'>
+            {failureReason(props.run, t)}
+          </p>
+        </div>
+      )}
 
       {props.expanded && (
         <div id={`assistant-run-trace-${props.run.id}`}>

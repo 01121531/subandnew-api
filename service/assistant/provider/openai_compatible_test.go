@@ -191,6 +191,21 @@ func TestOpenAICompatibleHTTPErrorIsSanitized(t *testing.T) {
 	require.Equal(t, "rate_limit", httpError.Code)
 }
 
+func TestDecodeHTTPErrorSupportsProblemDetails(t *testing.T) {
+	err := decodeHTTPError(http.StatusBadGateway, []byte(`{
+		"title":"Error 502: Bad gateway",
+		"detail":"The origin web server returned an invalid response.",
+		"error_code":502,
+		"error_name":"origin_bad_gateway"
+	}`))
+	var httpError *HTTPError
+	require.ErrorAs(t, err, &httpError)
+	require.Equal(t, http.StatusBadGateway, httpError.StatusCode)
+	require.Equal(t, "origin_bad_gateway", httpError.Code)
+	require.Equal(t, "The origin web server returned an invalid response.", httpError.Message)
+	require.NotContains(t, err.Error(), httpError.Message)
+}
+
 func TestOpenAICompatibleValidatesConfigurationAndInput(t *testing.T) {
 	_, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: "file:///tmp/model", Model: "model"})
 	require.ErrorContains(t, err, "http or https")

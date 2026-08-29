@@ -111,7 +111,12 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&AssistantRun{}, "uidx_assistant_run_public_id"))
 	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cached_input_tokens"))
 	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cache_observed_input_tokens"))
+	for _, column := range []string{"error_stage", "error_reason_code", "error_detail", "error_detail_truncated", "provider_status_code", "provider_error_code"} {
+		require.Truef(t, db.Migrator().HasColumn(&AssistantRun{}, column), "assistant_runs.%s must exist", column)
+	}
 	require.True(t, db.Migrator().HasIndex(&AssistantToolCall{}, "uidx_assistant_tool_call_order"))
+	require.True(t, db.Migrator().HasColumn(&AssistantToolCall{}, "error_detail"))
+	require.True(t, db.Migrator().HasColumn(&AssistantToolCall{}, "error_detail_truncated"))
 	require.True(t, db.Migrator().HasIndex(&AssistantOutbox{}, "uidx_assistant_outbox_reply_key"))
 	for _, column := range []string{
 		"accounts_available_last", "accounts_total_last", "account_sample_count",

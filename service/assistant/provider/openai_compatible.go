@@ -504,14 +504,44 @@ func decodeHTTPError(statusCode int, body []byte) error {
 			Code    any    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
+		Code      any    `json:"code"`
+		ErrorCode any    `json:"error_code"`
+		ErrorName string `json:"error_name"`
+		Message   string `json:"message"`
+		Detail    string `json:"detail"`
+		Title     string `json:"title"`
 	}
 	_ = json.Unmarshal(body, &payload)
-	code := ""
-	switch value := payload.Error.Code.(type) {
-	case string:
-		code = value
-	case float64:
-		code = strconv.FormatInt(int64(value), 10)
+	code := providerErrorCode(payload.Error.Code)
+	if code == "" {
+		code = strings.TrimSpace(payload.ErrorName)
 	}
-	return &HTTPError{StatusCode: statusCode, Code: code, Message: payload.Error.Message}
+	if code == "" {
+		code = providerErrorCode(payload.ErrorCode)
+	}
+	if code == "" {
+		code = providerErrorCode(payload.Code)
+	}
+	message := strings.TrimSpace(payload.Error.Message)
+	if message == "" {
+		message = strings.TrimSpace(payload.Message)
+	}
+	if message == "" {
+		message = strings.TrimSpace(payload.Detail)
+	}
+	if message == "" {
+		message = strings.TrimSpace(payload.Title)
+	}
+	return &HTTPError{StatusCode: statusCode, Code: code, Message: message}
+}
+
+func providerErrorCode(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return strings.TrimSpace(value)
+	case float64:
+		return strconv.FormatInt(int64(value), 10)
+	default:
+		return ""
+	}
 }

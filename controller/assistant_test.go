@@ -89,3 +89,45 @@ func TestAssistantListResponsesUseEmptyArrays(t *testing.T) {
 	require.Equal(t, http.StatusOK, identityRecorder.Code)
 	require.Contains(t, identityRecorder.Body.String(), `"instance_ids":[]`)
 }
+
+func TestAssistantRunListOmitsRawErrorButDetailReturnsIt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantRun{}, &model.AssistantToolCall{}))
+	previousDB := model.DB
+	model.DB = db
+	t.Cleanup(func() { model.DB = previousDB })
+
+	run := model.AssistantRun{
+		RunID: "run-with-detail", Model: "model", PromptVersion: "v1", Status: model.AssistantRunStatusFailed,
+		ErrorCode: "agent_run_failed", ErrorStage: "model_request", ErrorReasonCode: "provider_unavailable",
+		ErrorDetail: "raw upstream detail", ErrorDetailTruncated: true,
+		ProviderStatusCode: http.StatusBadGateway, ProviderErrorCode: "origin_bad_gateway", TraceID: "trace",
+	}
+	require.NoError(t, db.Create(&run).Error)
+	require.NoError(t, db.Create(&model.AssistantToolCall{
+		RunID: run.ID, Sequence: 1, Tool: "query", Status: model.AssistantToolCallStatusFailed,
+		Permission: "managed_instance.usage_view", Risk: model.AssistantToolRiskLow,
+		ErrorCode: "tool_execution_failed", ErrorDetail: "raw tool detail",
+	}).Error)
+
+	listRecorder := httptest.NewRecorder()
+	listContext, _ := gin.CreateTestContext(listRecorder)
+	listContext.Request = httptest.NewRequest(http.MethodGet, "/api/assistant/runs", nil)
+	ListAssistantRuns(listContext)
+	require.Equal(t, http.StatusOK, listRecorder.Code)
+	require.Contains(t, listRecorder.Body.String(), "provider_unavailable")
+	require.NotContains(t, listRecorder.Body.String(), "raw upstream detail")
+	require.NotContains(t, listRecorder.Body.String(), "origin_bad_gateway")
+
+	detailRecorder := httptest.NewRecorder()
+	detailContext, _ := gin.CreateTestContext(detailRecorder)
+	detailContext.Params = gin.Params{{Key: "run_id", Value: run.RunID}}
+	detailContext.Request = httptest.NewRequest(http.MethodGet, "/api/assistant/runs/"+run.RunID, nil)
+	GetAssistantRun(detailContext)
+	require.Equal(t, http.StatusOK, detailRecorder.Code)
+	require.Contains(t, detailRecorder.Body.String(), "raw upstream detail")
+	require.Contains(t, detailRecorder.Body.String(), "origin_bad_gateway")
+	require.Contains(t, detailRecorder.Body.String(), "raw tool detail")
+}

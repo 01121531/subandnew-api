@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
@@ -35,6 +38,14 @@ const (
 	conversationHistoryLimit = 12
 	maxInboundAttempts       = 3
 	maxOutboxAttempts        = 5
+	maxAuditErrorDetailBytes = 64 << 10
+)
+
+const (
+	assistantErrorStageMessagePersistence = "message_persistence"
+	assistantErrorStageMessageDelivery    = "message_delivery"
+	assistantErrorStageConfiguration      = "configuration"
+	assistantErrorStageUnknown            = "unknown"
 )
 
 var (
@@ -46,6 +57,24 @@ var (
 type ModelResolver func(context.Context) (provider.Client, *model.AssistantModelProfile, error)
 
 type RegistryFactory func() (*tool.Registry, error)
+
+type assistantRunFailure struct {
+	Code    string
+	Stage   string
+	Cause   error
+	Outcome *runner.Outcome
+	Specs   []tool.ToolSpec
+	Started time.Time
+}
+
+type assistantFailureDetails struct {
+	Stage              string
+	ReasonCode         string
+	Detail             string
+	DetailTruncated    bool
+	ProviderStatusCode int
+	ProviderErrorCode  string
+}
 
 type Processor struct {
 	db              *gorm.DB
@@ -174,18 +203,19 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		return p.failEvent(ctx, event, "run_create_failed", err)
 	}
 	if err := p.storeMessage(ctx, conversation.ID, event.ID, 0, model.AssistantMessageRoleUser, payload.Text); err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "message_store_failed", err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_store_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Started: time.Unix(runRow.StartedAt, 0)})
 	}
 	history, err := p.loadConversationHistory(ctx, conversation.ID)
 	if err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "message_load_failed", err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_load_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Started: time.Unix(runRow.StartedAt, 0)})
 	}
+	specs := registry.List()
 	agent, err := runner.New(client, registry, runner.Config{
 		SystemPrompt: systemPrompt(), MaxSteps: 6, MaxToolCalls: 8,
 		MaxOutputTokens: modelProfile.MaxOutputTokens, Timeout: runTimeout,
 	})
 	if err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "runner_configuration_failed", err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "runner_configuration_failed", Stage: assistantErrorStageConfiguration, Cause: err, Specs: specs, Started: time.Unix(runRow.StartedAt, 0)})
 	}
 	started := p.now()
 	outcome, err := agent.Run(ctx, tool.ExecutionContext{
@@ -199,17 +229,17 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 			reply = "模型响应超时，请稍后重试或联系管理员调高模型超时时间。系统已记录本次运行编号：" + runRow.RunID
 		}
 		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, reply)
-		return p.failRunAndEvent(ctx, event, &runRow, failureCode, err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: failureCode, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
 	outcome.Answer = safeAssistantAnswer(outcome.Answer)
-	if err := p.persistSuccessfulRun(ctx, &runRow, registry.List(), outcome, started); err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "run_persist_failed", err)
+	if err := p.persistSuccessfulRun(ctx, &runRow, specs, outcome, started); err != nil {
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "run_persist_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
 	if err := p.storeMessage(ctx, conversation.ID, event.ID, runRow.ID, model.AssistantMessageRoleAssistant, outcome.Answer); err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "message_store_failed", err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_store_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
 	if err := p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, outcome.Answer); err != nil {
-		return p.failRunAndEvent(ctx, event, &runRow, "outbox_failed", err)
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "outbox_failed", Stage: assistantErrorStageMessageDelivery, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
 	return p.finishEvent(ctx, event.ID)
 }
@@ -430,37 +460,59 @@ func (p *Processor) enqueueReply(ctx context.Context, event *model.AssistantInbo
 }
 
 func (p *Processor) persistSuccessfulRun(ctx context.Context, runRow *model.AssistantRun, specs []tool.ToolSpec, outcome runner.Outcome, started time.Time) error {
-	specByName := make(map[string]tool.ToolSpec, len(specs))
-	for _, spec := range specs {
-		specByName[spec.Name] = spec
-	}
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for index, trace := range outcome.ToolTraces {
-			spec := specByName[trace.Name]
-			status := model.AssistantToolCallStatusSucceeded
-			if trace.Error != "" {
-				status = model.AssistantToolCallStatusFailed
-			}
-			call := model.AssistantToolCall{
-				RunID: runRow.ID, Sequence: index + 1, Tool: trace.Name,
-				ArgumentsRedacted: `{"sha256":"` + trace.ArgumentsHash + `"}`, Status: status,
-				Permission: spec.Permission.Resource + "." + spec.Permission.Action, Risk: string(spec.Risk),
-				LatencyMs: trace.Duration.Milliseconds(), ErrorCode: trace.Error,
-				ResultDigest: trace.ResultHash,
-				StartedAt:    started.Unix(), FinishedAt: p.now().Unix(),
-			}
-			if err := tx.Create(&call).Error; err != nil {
-				return err
-			}
+		if err := p.upsertRunToolTraces(tx, runRow.ID, specs, outcome.ToolTraces, started); err != nil {
+			return err
 		}
 		return tx.Model(runRow).Updates(map[string]any{
 			"status": model.AssistantRunStatusSucceeded, "input_tokens": outcome.Usage.InputTokens,
 			"output_tokens": outcome.Usage.OutputTokens, "total_tokens": outcome.Usage.TotalTokens,
 			"cached_input_tokens":         outcome.Usage.CachedInputTokens,
 			"cache_observed_input_tokens": outcome.Usage.CacheObservedInputTokens,
-			"finished_at":                 p.now().Unix(), "error_code": "",
+			"finished_at":                 p.now().Unix(), "error_code": "", "error_stage": "",
+			"error_reason_code": "", "error_detail": "", "error_detail_truncated": false,
+			"provider_status_code": 0, "provider_error_code": "",
 		}).Error
 	})
+}
+
+func (p *Processor) upsertRunToolTraces(tx *gorm.DB, runID int64, specs []tool.ToolSpec, traces []runner.ToolTrace, started time.Time) error {
+	specByName := make(map[string]tool.ToolSpec, len(specs))
+	for _, spec := range specs {
+		specByName[spec.Name] = spec
+	}
+	for index, trace := range traces {
+		spec := specByName[trace.Name]
+		status := model.AssistantToolCallStatusSucceeded
+		if trace.Error != "" {
+			status = model.AssistantToolCallStatusFailed
+		}
+		permission := "unknown"
+		risk := model.AssistantToolRiskLow
+		if spec.Name != "" {
+			permission = spec.Permission.Resource + "." + spec.Permission.Action
+			risk = string(spec.Risk)
+		}
+		call := model.AssistantToolCall{
+			RunID: runID, Sequence: index + 1, Tool: trace.Name,
+			ArgumentsRedacted: `{"sha256":"` + trace.ArgumentsHash + `"}`, Status: status,
+			Permission: permission, Risk: risk,
+			LatencyMs: trace.Duration.Milliseconds(), ErrorCode: trace.Error,
+			ErrorDetail: trace.ErrorDetail, ErrorDetailTruncated: trace.ErrorDetailTruncated,
+			ResultDigest: trace.ResultHash,
+			StartedAt:    started.Unix(), FinishedAt: p.now().Unix(),
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "run_id"}, {Name: "sequence"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"tool", "arguments_redacted", "result_digest", "status", "permission", "risk",
+				"latency_ms", "error_code", "error_detail", "error_detail_truncated", "started_at", "finished_at", "updated_at",
+			}),
+		}).Create(&call).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Processor) finishEvent(ctx context.Context, eventID int64) error {
@@ -476,11 +528,135 @@ func (p *Processor) failEvent(ctx context.Context, event *model.AssistantInbound
 	return cause
 }
 
-func (p *Processor) failRunAndEvent(ctx context.Context, event *model.AssistantInboundEvent, runRow *model.AssistantRun, code string, cause error) error {
-	_ = p.db.WithContext(ctx).Model(runRow).Updates(map[string]any{
-		"status": model.AssistantRunStatusFailed, "error_code": code, "finished_at": p.now().Unix(),
-	}).Error
-	return p.failEvent(ctx, event, code, cause)
+func (p *Processor) failRunAndEvent(ctx context.Context, event *model.AssistantInboundEvent, runRow *model.AssistantRun, failure assistantRunFailure) error {
+	details := describeAssistantFailure(failure)
+	persistContext := context.WithoutCancel(ctx)
+	_ = p.db.WithContext(persistContext).Transaction(func(tx *gorm.DB) error {
+		if failure.Outcome != nil {
+			if err := p.upsertRunToolTraces(tx, runRow.ID, failure.Specs, failure.Outcome.ToolTraces, failure.Started); err != nil {
+				return err
+			}
+		}
+		updates := map[string]any{
+			"status": model.AssistantRunStatusFailed, "error_code": failure.Code,
+			"error_stage": details.Stage, "error_reason_code": details.ReasonCode,
+			"error_detail": details.Detail, "error_detail_truncated": details.DetailTruncated,
+			"provider_status_code": details.ProviderStatusCode, "provider_error_code": details.ProviderErrorCode,
+			"finished_at": p.now().Unix(),
+		}
+		if failure.Outcome != nil {
+			updates["input_tokens"] = failure.Outcome.Usage.InputTokens
+			updates["output_tokens"] = failure.Outcome.Usage.OutputTokens
+			updates["total_tokens"] = failure.Outcome.Usage.TotalTokens
+			updates["cached_input_tokens"] = failure.Outcome.Usage.CachedInputTokens
+			updates["cache_observed_input_tokens"] = failure.Outcome.Usage.CacheObservedInputTokens
+		}
+		return tx.Model(runRow).Updates(updates).Error
+	})
+	return p.failEvent(persistContext, event, failure.Code, failure.Cause)
+}
+
+func describeAssistantFailure(failure assistantRunFailure) assistantFailureDetails {
+	detail, truncated := boundedAssistantErrorDetail(errorString(failure.Cause))
+	result := assistantFailureDetails{
+		Stage: failure.Stage, ReasonCode: "unknown_failure", Detail: detail, DetailTruncated: truncated,
+	}
+	var runErr *runner.RunError
+	if errors.As(failure.Cause, &runErr) && runErr.Stage != "" {
+		result.Stage = runErr.Stage
+	}
+	if result.Stage == "" {
+		result.Stage = assistantErrorStageUnknown
+	}
+	var httpErr *provider.HTTPError
+	if errors.As(failure.Cause, &httpErr) {
+		rawDetail := errorString(failure.Cause)
+		if message := strings.TrimSpace(httpErr.Message); message != "" {
+			rawDetail += ": " + message
+		}
+		result.Detail, result.DetailTruncated = boundedAssistantErrorDetail(rawDetail)
+		result.ProviderStatusCode = httpErr.StatusCode
+		result.ProviderErrorCode = httpErr.Code
+		switch {
+		case httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden:
+			result.ReasonCode = "provider_authentication_failed"
+		case httpErr.StatusCode == http.StatusRequestTimeout:
+			result.ReasonCode = "provider_timeout"
+		case httpErr.StatusCode == http.StatusTooManyRequests:
+			result.ReasonCode = "provider_rate_limited"
+		case httpErr.StatusCode >= 500:
+			result.ReasonCode = "provider_unavailable"
+		case httpErr.StatusCode == http.StatusBadRequest || httpErr.StatusCode == http.StatusUnprocessableEntity:
+			result.ReasonCode = "provider_rejected_request"
+		default:
+			result.ReasonCode = "provider_http_error"
+		}
+		return result
+	}
+	switch {
+	case errors.Is(failure.Cause, context.DeadlineExceeded):
+		result.ReasonCode = "run_timeout"
+	case errors.Is(failure.Cause, context.Canceled):
+		result.ReasonCode = "run_cancelled"
+	case errors.Is(failure.Cause, runner.ErrStepLimit):
+		result.ReasonCode = "step_limit_reached"
+	case errors.Is(failure.Cause, runner.ErrToolCallLimit):
+		result.ReasonCode = "tool_call_limit_reached"
+	case errors.Is(failure.Cause, runner.ErrInvalidModelResponse):
+		result.ReasonCode = "invalid_model_response"
+	case errors.Is(failure.Cause, runner.ErrInvalidConfiguration):
+		result.ReasonCode = "runner_configuration_invalid"
+	case errors.Is(failure.Cause, tool.ErrAuthorizationDenied):
+		result.ReasonCode = "tool_authorization_denied"
+	case errors.Is(failure.Cause, tool.ErrInvalidArguments):
+		result.ReasonCode = "tool_invalid_arguments"
+	case errors.Is(failure.Cause, tool.ErrToolNotFound):
+		result.ReasonCode = "tool_not_found"
+	case result.Stage == runner.ErrorStageToolExecution:
+		result.ReasonCode = "tool_execution_failed"
+	case result.Stage == assistantErrorStageMessagePersistence:
+		result.ReasonCode = "message_persistence_failed"
+	case result.Stage == assistantErrorStageMessageDelivery:
+		result.ReasonCode = "message_delivery_failed"
+	case result.Stage == assistantErrorStageConfiguration:
+		result.ReasonCode = "configuration_failed"
+	default:
+		var networkErr net.Error
+		lower := strings.ToLower(errorString(failure.Cause))
+		switch {
+		case errors.As(failure.Cause, &networkErr):
+			result.ReasonCode = "provider_connection_failed"
+		case strings.Contains(lower, "stream"):
+			result.ReasonCode = "provider_stream_error"
+		case strings.Contains(lower, "decode assistant model") ||
+			strings.Contains(lower, "invalid tool call") ||
+			strings.Contains(lower, "response has no") ||
+			strings.Contains(lower, "response exceeds size limit"):
+			result.ReasonCode = "invalid_model_response"
+		case strings.Contains(lower, "send assistant model request"):
+			result.ReasonCode = "provider_connection_failed"
+		}
+	}
+	return result
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func boundedAssistantErrorDetail(value string) (string, bool) {
+	value = strings.ToValidUTF8(strings.TrimSpace(value), "�")
+	if len(value) <= maxAuditErrorDetailBytes {
+		return value, false
+	}
+	limit := maxAuditErrorDetailBytes
+	for limit > 0 && !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit], true
 }
 
 func (p *Processor) failOutbox(ctx context.Context, outbox *model.AssistantOutbox, code string, cause error) error {
