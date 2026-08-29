@@ -700,9 +700,6 @@ function PortalLogin(props: {
         >
           {props.pending && <LoaderCircle className='animate-spin' />}登录
         </Button>
-        <p className='text-muted-foreground text-center text-xs'>
-          该门户仅提供授权范围内的只读账号数据
-        </p>
       </form>
     </main>
   )
