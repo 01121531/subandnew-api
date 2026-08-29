@@ -15,7 +15,7 @@ func init() {
 }
 
 func AllowRequest(ctx context.Context, keyID int64, maximum int) (bool, int) {
-	if keyID <= 0 || maximum <= 0 {
+	if keyID == 0 || maximum <= 0 {
 		return false, 60
 	}
 	now := time.Now()

@@ -152,3 +152,16 @@ func TestLocalRateLimitIsPerKey(t *testing.T) {
 	allowed, _ = AllowRequest(context.Background(), keyID+1, 2)
 	require.True(t, allowed)
 }
+
+func TestLocalRateLimitAcceptsPortalSessionIDs(t *testing.T) {
+	const sessionID = int64(-876543219)
+	allowed, _ := AllowRequest(context.Background(), sessionID, 2)
+	require.True(t, allowed)
+	allowed, _ = AllowRequest(context.Background(), sessionID, 2)
+	require.True(t, allowed)
+	allowed, _ = AllowRequest(context.Background(), sessionID, 2)
+	require.False(t, allowed)
+
+	allowed, _ = AllowRequest(context.Background(), -sessionID, 2)
+	require.True(t, allowed, "portal sessions and API keys must use separate rate-limit buckets")
+}
