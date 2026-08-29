@@ -139,7 +139,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	}}
 	processor, err := New(db, cipher, channels,
 		func(context.Context) (provider.Client, *model.AssistantModelProfile, error) {
-			return modelClient, &model.AssistantModelProfile{Id: 1, Model: "test-model", TimeoutSeconds: 75, MaxOutputTokens: 1024}, nil
+			return modelClient, &model.AssistantModelProfile{Id: 1, Model: "test-model", TimeoutSeconds: 75, RunTimeoutSeconds: 300, MaxOutputTokens: 1024}, nil
 		},
 		func() (*tool.Registry, error) { return builtin.NewRegistry(db) },
 	)
@@ -154,7 +154,9 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	var run model.AssistantRun
 	require.NoError(t, db.First(&run).Error)
 	require.Equal(t, model.AssistantRunStatusSucceeded, run.Status)
-	require.EqualValues(t, 75, run.DeadlineAt-run.StartedAt)
+	require.EqualValues(t, 300, run.DeadlineAt-run.StartedAt)
+	require.Equal(t, 75, run.RequestTimeoutSeconds)
+	require.Equal(t, 2, run.ModelRequestCount)
 	require.EqualValues(t, 170, run.CachedInputTokens)
 	require.EqualValues(t, 220, run.CacheObservedInputTokens)
 	require.Len(t, modelClient.requests, 2)
@@ -202,8 +204,54 @@ func TestSafeAssistantAnswerBlocksSensitiveOutputAndBoundsLength(t *testing.T) {
 	require.Contains(t, bounded, "已截断")
 }
 
+func TestProgressReporterDelaysMessagesAndReportsToolStage(t *testing.T) {
+	messages := make(chan string, 4)
+	reporter := newProgressReporter(progressReporterConfig{
+		initialDelay: 10 * time.Millisecond,
+		heartbeat:    time.Second,
+		maxMessages:  8,
+		now:          time.Now,
+		send: func(_ int, message string) {
+			messages <- message
+		},
+	})
+	defer reporter.Stop()
+
+	select {
+	case message := <-messages:
+		require.Equal(t, "已收到，正在分析问题。", message)
+	case <-time.After(time.Second):
+		t.Fatal("initial progress message was not sent")
+	}
+	reporter.Report(runner.ProgressEvent{Type: runner.ProgressToolStarted, Tool: "get_metric_history"})
+	select {
+	case message := <-messages:
+		require.Equal(t, "正在查询历史指标。", message)
+	case <-time.After(time.Second):
+		t.Fatal("tool progress message was not sent")
+	}
+}
+
+func TestProgressReporterStopsBeforeInitialDelay(t *testing.T) {
+	messages := make(chan string, 1)
+	reporter := newProgressReporter(progressReporterConfig{
+		initialDelay: time.Second,
+		heartbeat:    time.Second,
+		maxMessages:  8,
+		now:          time.Now,
+		send:         func(_ int, message string) { messages <- message },
+	})
+	reporter.Stop()
+	select {
+	case message := <-messages:
+		t.Fatalf("unexpected progress message: %s", message)
+	default:
+	}
+}
+
 func TestAssistantRunFailureCodeDistinguishesTimeout(t *testing.T) {
 	require.Equal(t, "agent_run_timeout", assistantRunFailureCode(context.DeadlineExceeded))
+	require.Equal(t, "agent_run_timeout", assistantRunFailureCode(runner.ErrModelRequestTimeout))
 	require.Equal(t, "agent_run_failed", assistantRunFailureCode(errors.New("provider unavailable")))
 }
 
@@ -225,6 +273,10 @@ func TestDescribeAssistantFailureClassifiesProviderAndTimeout(t *testing.T) {
 	})
 	require.Equal(t, runner.ErrorStageModelStream, timeoutFailure.Stage)
 	require.Equal(t, "run_timeout", timeoutFailure.ReasonCode)
+	requestTimeoutFailure := describeAssistantFailure(assistantRunFailure{
+		Code: "agent_run_timeout", Cause: &runner.RunError{Stage: runner.ErrorStageModelRequest, Cause: runner.ErrModelRequestTimeout},
+	})
+	require.Equal(t, "provider_timeout", requestTimeoutFailure.ReasonCode)
 
 	for _, test := range []struct {
 		status int
@@ -263,8 +315,9 @@ func TestFailRunPersistsPartialUsageAndToolTrace(t *testing.T) {
 	run := model.AssistantRun{RunID: "failed-run", Model: "model", PromptVersion: "v1", Status: model.AssistantRunStatusRunning, TraceID: "trace", StartedAt: now.Add(-time.Minute).Unix()}
 	require.NoError(t, db.Create(&run).Error)
 	outcome := runner.Outcome{
-		Usage:      provider.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, CachedInputTokens: 80, CacheObservedInputTokens: 100},
-		ToolTraces: []runner.ToolTrace{{Name: "query", ArgumentsHash: strings.Repeat("a", 64), Error: "tool_execution_failed", ErrorDetail: "upstream tool failure"}},
+		Usage:         provider.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, CachedInputTokens: 80, CacheObservedInputTokens: 100},
+		ToolTraces:    []runner.ToolTrace{{Name: "query", ArgumentsHash: strings.Repeat("a", 64), Error: "tool_execution_failed", ErrorDetail: "upstream tool failure"}},
+		ModelRequests: 2, ProviderRetries: 1, RetriedBeforeFirstByte: true,
 	}
 	cause := &runner.RunError{Stage: runner.ErrorStageToolExecution, Tool: "query", Cause: errors.New("upstream tool failure")}
 	err = processor.failRunAndEvent(t.Context(), &event, &run, assistantRunFailure{
@@ -272,22 +325,27 @@ func TestFailRunPersistsPartialUsageAndToolTrace(t *testing.T) {
 		Specs:   []tool.ToolSpec{{Name: "query", Permission: tool.Permission{Resource: "managed_instance", Action: "usage_view"}, Risk: tool.RiskMedium}},
 		Started: now.Add(-time.Minute),
 	})
-	require.ErrorIs(t, err, cause)
+	require.NoError(t, err)
 	require.NoError(t, db.First(&run, run.ID).Error)
 	require.Equal(t, model.AssistantRunStatusFailed, run.Status)
 	require.EqualValues(t, 120, run.TotalTokens)
+	require.Equal(t, 2, run.ModelRequestCount)
+	require.Equal(t, 1, run.ProviderRetryCount)
+	require.True(t, run.RetriedBeforeFirstByte)
 	require.Equal(t, "tool_execution_failed", run.ErrorReasonCode)
 	require.Equal(t, "upstream tool failure", run.ErrorDetail)
 	var call model.AssistantToolCall
 	require.NoError(t, db.Where("run_id = ?", run.ID).First(&call).Error)
 	require.Equal(t, "upstream tool failure", call.ErrorDetail)
+	require.NoError(t, db.First(&event, event.ID).Error)
+	require.Equal(t, model.AssistantInboundStatusSucceeded, event.Status)
 
 	err = processor.failRunAndEvent(t.Context(), &event, &run, assistantRunFailure{
 		Code: "agent_run_failed", Cause: cause, Outcome: &outcome,
 		Specs:   []tool.ToolSpec{{Name: "query", Permission: tool.Permission{Resource: "managed_instance", Action: "usage_view"}, Risk: tool.RiskMedium}},
 		Started: now.Add(-time.Minute),
 	})
-	require.ErrorIs(t, err, cause)
+	require.NoError(t, err)
 	var callCount int64
 	require.NoError(t, db.Model(&model.AssistantToolCall{}).Where("run_id = ?", run.ID).Count(&callCount).Error)
 	require.EqualValues(t, 1, callCount)

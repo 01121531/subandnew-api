@@ -27,26 +27,28 @@ type Service struct {
 }
 
 type CreateInput struct {
-	Name            string
-	Provider        string
-	BaseURL         string
-	Model           string
-	APIKey          string
-	TimeoutSeconds  int
-	MaxOutputTokens int
-	Enabled         bool
-	IsPrimary       bool
+	Name              string
+	Provider          string
+	BaseURL           string
+	Model             string
+	APIKey            string
+	TimeoutSeconds    int
+	RunTimeoutSeconds int
+	MaxOutputTokens   int
+	Enabled           bool
+	IsPrimary         bool
 }
 
 type UpdateInput struct {
-	Name            *string
-	BaseURL         *string
-	Model           *string
-	APIKey          *string
-	TimeoutSeconds  *int
-	MaxOutputTokens *int
-	Enabled         *bool
-	IsPrimary       *bool
+	Name              *string
+	BaseURL           *string
+	Model             *string
+	APIKey            *string
+	TimeoutSeconds    *int
+	RunTimeoutSeconds *int
+	MaxOutputTokens   *int
+	Enabled           *bool
+	IsPrimary         *bool
 }
 
 func NewService(db *gorm.DB, cipher *secrets.Cipher) (*Service, error) {
@@ -58,14 +60,15 @@ func NewService(db *gorm.DB, cipher *secrets.Cipher) (*Service, error) {
 
 func (s *Service) Create(input CreateInput) (*model.AssistantModelProfile, error) {
 	profile := model.AssistantModelProfile{
-		Name:            strings.TrimSpace(input.Name),
-		Provider:        strings.TrimSpace(input.Provider),
-		BaseURL:         strings.TrimSpace(input.BaseURL),
-		Model:           strings.TrimSpace(input.Model),
-		TimeoutSeconds:  input.TimeoutSeconds,
-		MaxOutputTokens: input.MaxOutputTokens,
-		Enabled:         input.Enabled,
-		IsPrimary:       input.IsPrimary,
+		Name:              strings.TrimSpace(input.Name),
+		Provider:          strings.TrimSpace(input.Provider),
+		BaseURL:           strings.TrimSpace(input.BaseURL),
+		Model:             strings.TrimSpace(input.Model),
+		TimeoutSeconds:    input.TimeoutSeconds,
+		RunTimeoutSeconds: input.RunTimeoutSeconds,
+		MaxOutputTokens:   input.MaxOutputTokens,
+		Enabled:           input.Enabled,
+		IsPrimary:         input.IsPrimary,
 	}
 	applyDefaults(&profile)
 	if err := validate(&profile); err != nil {
@@ -142,6 +145,9 @@ func (s *Service) Update(id int64, input UpdateInput) (*model.AssistantModelProf
 	}
 	if input.TimeoutSeconds != nil {
 		profile.TimeoutSeconds = *input.TimeoutSeconds
+	}
+	if input.RunTimeoutSeconds != nil {
+		profile.RunTimeoutSeconds = *input.RunTimeoutSeconds
 	}
 	if input.MaxOutputTokens != nil {
 		profile.MaxOutputTokens = *input.MaxOutputTokens
@@ -261,6 +267,9 @@ func applyDefaults(profile *model.AssistantModelProfile) {
 	if profile.TimeoutSeconds == 0 {
 		profile.TimeoutSeconds = 120
 	}
+	if profile.RunTimeoutSeconds == 0 {
+		profile.RunTimeoutSeconds = 300
+	}
 	if profile.MaxOutputTokens == 0 {
 		profile.MaxOutputTokens = 2048
 	}
@@ -273,7 +282,7 @@ func validate(profile *model.AssistantModelProfile) error {
 	if profile.Provider != model.AssistantModelProviderOpenAICompatible {
 		return fmt.Errorf("%w: unsupported provider", ErrInvalidInput)
 	}
-	if profile.TimeoutSeconds < 1 || profile.TimeoutSeconds > 120 || profile.MaxOutputTokens < 1 || profile.MaxOutputTokens > 32768 {
+	if profile.TimeoutSeconds < 1 || profile.TimeoutSeconds > 120 || profile.RunTimeoutSeconds < 30 || profile.RunTimeoutSeconds > 600 || profile.MaxOutputTokens < 1 || profile.MaxOutputTokens > 32768 {
 		return ErrInvalidInput
 	}
 	_, err := provider.NewOpenAICompatibleClient(provider.OpenAICompatibleConfig{BaseURL: profile.BaseURL, Model: profile.Model})

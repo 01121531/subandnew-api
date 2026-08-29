@@ -76,11 +76,14 @@ func newRunnerRegistry(t *testing.T) *tool.Registry {
 }
 
 func TestRunnerExecutesToolAndReturnsGroundedAnswer(t *testing.T) {
+	progressEvents := make([]ProgressEvent, 0)
 	client := &fakeClient{responses: []provider.Response{
 		{Message: provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "list_instances", Arguments: json.RawMessage(`{"limit":5}`)}}}, Usage: provider.Usage{TotalTokens: 10}},
 		{Message: provider.Message{Role: provider.RoleAssistant, Content: "共有 5 个实例，数据截至 1970-01-01。"}, Usage: provider.Usage{TotalTokens: 8}},
 	}}
-	runner, err := New(client, newRunnerRegistry(t), Config{SystemPrompt: "Only use tool data."})
+	runner, err := New(client, newRunnerRegistry(t), Config{
+		SystemPrompt: "Only use tool data.", Progress: func(event ProgressEvent) { progressEvents = append(progressEvents, event) },
+	})
 	require.NoError(t, err)
 	outcome, err := runner.Run(t.Context(), tool.ExecutionContext{
 		RunID: "run-1", ConversationID: "conversation-1", Channel: "wechat", IdentityID: 1, UserID: 7, UserRole: 10,
@@ -98,6 +101,10 @@ func TestRunnerExecutesToolAndReturnsGroundedAnswer(t *testing.T) {
 	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"freshness"`)
 	require.Contains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `"observed_at":"2026-08-29T01:05:58+08:00"`)
 	require.NotContains(t, client.requests[1].Messages[len(client.requests[1].Messages)-1].Content, `1787936758`)
+	require.Len(t, progressEvents, 4)
+	require.Equal(t, []string{ProgressModelRequestStarted, ProgressToolStarted, ProgressModelRequestStarted, ProgressCompleted}, []string{
+		progressEvents[0].Type, progressEvents[1].Type, progressEvents[2].Type, progressEvents[3].Type,
+	})
 }
 
 func TestRunnerPrefersStreamingAndAccumulatesCacheUsage(t *testing.T) {
@@ -163,10 +170,40 @@ func TestRunnerRejectsDuplicateToolCallAndStepLimit(t *testing.T) {
 	require.ErrorIs(t, err, ErrStepLimit)
 }
 
-func TestRunnerAcceptsConfiguredTimeoutUpToTwoMinutes(t *testing.T) {
-	_, err := New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", Timeout: 120 * time.Second})
+func TestRunnerValidatesSeparateRequestAndRunTimeouts(t *testing.T) {
+	_, err := New(&fakeClient{}, newRunnerRegistry(t), Config{
+		SystemPrompt: "safe", RequestTimeout: 120 * time.Second, RunTimeout: 600 * time.Second,
+	})
 	require.NoError(t, err)
 
-	_, err = New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", Timeout: 121 * time.Second})
+	_, err = New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", RequestTimeout: 121 * time.Second})
 	require.ErrorIs(t, err, ErrInvalidConfiguration)
+
+	_, err = New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", RunTimeout: 601 * time.Second})
+	require.ErrorIs(t, err, ErrInvalidConfiguration)
+}
+
+type deadlineClient struct{}
+
+func (deadlineClient) Generate(context.Context, provider.Request) (provider.Response, error) {
+	return provider.Response{}, context.DeadlineExceeded
+}
+
+func TestRunnerDistinguishesModelRequestTimeoutAndTracksRetries(t *testing.T) {
+	runner, err := New(deadlineClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe"})
+	require.NoError(t, err)
+	outcome, err := runner.Run(t.Context(), tool.ExecutionContext{UserID: 7}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
+	require.ErrorIs(t, err, ErrModelRequestTimeout)
+	require.Equal(t, 1, outcome.ModelRequests)
+
+	client := &fakeClient{responses: []provider.Response{{
+		Message: provider.Message{Role: provider.RoleAssistant, Content: "done"}, Attempts: 2, RetriedBeforeFirstByte: true,
+	}}}
+	runner, err = New(client, newRunnerRegistry(t), Config{SystemPrompt: "safe"})
+	require.NoError(t, err)
+	outcome, err = runner.Run(t.Context(), tool.ExecutionContext{UserID: 7}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
+	require.NoError(t, err)
+	require.Equal(t, 1, outcome.ModelRequests)
+	require.Equal(t, 1, outcome.ProviderRetries)
+	require.True(t, outcome.RetriedBeforeFirstByte)
 }

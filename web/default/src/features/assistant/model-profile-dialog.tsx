@@ -43,6 +43,7 @@ const defaultValues: AssistantModelProfileInput = {
   model: '',
   api_key: '',
   timeout_seconds: 120,
+  run_timeout_seconds: 300,
   max_output_tokens: 2048,
   enabled: true,
   is_primary: false,
@@ -59,6 +60,7 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
         model: z.string().trim().min(1, t('Model name is required')).max(160),
         api_key: z.string(),
         timeout_seconds: z.number().int().min(1).max(120),
+        run_timeout_seconds: z.number().int().min(30).max(600),
         max_output_tokens: z.number().int().min(1).max(32768),
         enabled: z.boolean(),
         is_primary: z.boolean(),
@@ -83,6 +85,7 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
       model: props.profile.model,
       api_key: '',
       timeout_seconds: props.profile.timeout_seconds,
+      run_timeout_seconds: props.profile.run_timeout_seconds || 300,
       max_output_tokens: props.profile.max_output_tokens,
       enabled: props.profile.enabled,
       is_primary: props.profile.is_primary,
@@ -206,13 +209,13 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
             )}
           />
 
-          <div className='grid gap-4 sm:grid-cols-2'>
+          <div className='grid gap-4 sm:grid-cols-3'>
             <FormField
               control={form.control}
               name='timeout_seconds'
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>{t('Timeout (seconds)')}</FormLabel>
+                  <FormLabel>{t('Model request timeout (seconds)')}</FormLabel>
                   <FormControl>
                     <Input
                       className='min-h-11'
@@ -227,6 +230,31 @@ export function ModelProfileDialog(props: ModelProfileDialogProps) {
                   </FormControl>
                   <FormDescription>
                     {t('Reasoning models may need 60 to 120 seconds.')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='run_timeout_seconds'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Total run timeout (seconds)')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      className='min-h-11'
+                      type='number'
+                      min={30}
+                      max={600}
+                      value={field.value}
+                      onChange={(event) =>
+                        field.onChange(event.target.valueAsNumber)
+                      }
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('Includes all model requests and tool calls.')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

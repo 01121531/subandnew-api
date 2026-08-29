@@ -106,6 +106,34 @@ func TestOpenAICompatibleGenerateStreamFallsBackOnlyBeforeData(t *testing.T) {
 	_, err = client.GenerateStream(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
 	require.Error(t, err)
 	require.Equal(t, 1, attempts)
+	requestAttempts, retried := RequestAttempts(err)
+	require.Equal(t, 1, requestAttempts)
+	require.False(t, retried)
+}
+
+func TestOpenAICompatibleRetriesTransientFailureOnlyBeforeFirstData(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			response.WriteHeader(http.StatusBadGateway)
+			_, _ = response.Write([]byte(`{"error":{"code":"origin_bad_gateway"}}`))
+			return
+		}
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"recovered\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(response, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, Model: "model", HTTPClient: server.Client()})
+	require.NoError(t, err)
+	result, err := client.GenerateStream(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
+	require.NoError(t, err)
+	require.Equal(t, "recovered", result.Message.Content)
+	require.Equal(t, 2, result.Attempts)
+	require.True(t, result.RetriedBeforeFirstByte)
+	require.Equal(t, 2, attempts)
 }
 
 func TestOpenAICompatibleGenerateWithTools(t *testing.T) {
@@ -189,6 +217,9 @@ func TestOpenAICompatibleHTTPErrorIsSanitized(t *testing.T) {
 	require.ErrorAs(t, err, &httpError)
 	require.True(t, httpError.Retriable())
 	require.Equal(t, "rate_limit", httpError.Code)
+	attempts, retried := RequestAttempts(err)
+	require.Equal(t, 2, attempts)
+	require.True(t, retried)
 }
 
 func TestDecodeHTTPErrorSupportsProblemDetails(t *testing.T) {

@@ -185,36 +185,55 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 
 	client, modelProfile, err := p.resolveModel(ctx)
 	if err != nil {
-		_ = p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "智能助手模型暂不可用，请稍后重试或联系管理员检查模型配置。")
-		return p.failEvent(ctx, event, "model_unavailable", err)
+		if replyErr := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "智能助手模型暂不可用，请稍后重试或联系管理员检查模型配置。"); replyErr != nil {
+			return p.failEvent(ctx, event, "model_unavailable", err)
+		}
+		return p.finishEventWithError(ctx, event.ID, "model_unavailable")
 	}
 	registry, err := p.registryFactory()
 	if err != nil {
-		return p.failEvent(ctx, event, "tool_registry_failed", err)
+		if replyErr := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "助手工具暂时不可用，请稍后重试。"); replyErr != nil {
+			return p.failEvent(ctx, event, "tool_registry_failed", err)
+		}
+		return p.finishEventWithError(ctx, event.ID, "tool_registry_failed")
 	}
-	runTimeout := time.Duration(modelProfile.TimeoutSeconds) * time.Second
+	requestTimeout := time.Duration(modelProfile.TimeoutSeconds) * time.Second
+	runTimeout := time.Duration(modelProfile.RunTimeoutSeconds) * time.Second
+	if runTimeout <= 0 {
+		runTimeout = 300 * time.Second
+	}
 	runRow := model.AssistantRun{
 		RunID: uuid.NewString(), ConversationID: conversation.ID, TriggerMessageID: event.ID,
 		ModelProfileID: modelProfile.Id, Model: modelProfile.Model, PromptVersion: promptVersion,
 		Status: model.AssistantRunStatusRunning, DeadlineAt: p.now().Add(runTimeout).Unix(),
-		TraceID: uuid.NewString(), StartedAt: p.now().Unix(),
+		RequestTimeoutSeconds: modelProfile.TimeoutSeconds,
+		TraceID:               uuid.NewString(), StartedAt: p.now().Unix(),
 	}
 	if err := p.db.WithContext(ctx).Create(&runRow).Error; err != nil {
 		return p.failEvent(ctx, event, "run_create_failed", err)
 	}
+	progress := p.startProgressReporter(ctx, event, payload.ContextToken, runRow.RunID)
+	defer progress.Stop()
 	if err := p.storeMessage(ctx, conversation.ID, event.ID, 0, model.AssistantMessageRoleUser, payload.Text); err != nil {
+		progress.Stop()
+		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "助手无法保存本次消息，请联系管理员检查服务状态。运行编号："+runRow.RunID)
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_store_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Started: time.Unix(runRow.StartedAt, 0)})
 	}
 	history, err := p.loadConversationHistory(ctx, conversation.ID)
 	if err != nil {
+		progress.Stop()
+		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "助手无法读取对话上下文，请稍后重新提问。运行编号："+runRow.RunID)
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_load_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Started: time.Unix(runRow.StartedAt, 0)})
 	}
 	specs := registry.List()
 	agent, err := runner.New(client, registry, runner.Config{
 		SystemPrompt: systemPrompt(), MaxSteps: 6, MaxToolCalls: 8,
-		MaxOutputTokens: modelProfile.MaxOutputTokens, Timeout: runTimeout,
+		MaxOutputTokens: modelProfile.MaxOutputTokens, RequestTimeout: requestTimeout,
+		RunTimeout: runTimeout, Progress: progress.Report,
 	})
 	if err != nil {
+		progress.Stop()
+		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "助手运行配置无效，请联系管理员检查模型配置。运行编号："+runRow.RunID)
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "runner_configuration_failed", Stage: assistantErrorStageConfiguration, Cause: err, Specs: specs, Started: time.Unix(runRow.StartedAt, 0)})
 	}
 	started := p.now()
@@ -223,14 +242,14 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		Channel: model.AssistantChannelTypeWechatILink, IdentityID: identity.ID, UserID: identity.UserID,
 	}, history)
 	if err != nil {
+		progress.Stop()
 		failureCode := assistantRunFailureCode(err)
-		reply := "查询未能完成，请稍后重试。系统已记录本次运行编号：" + runRow.RunID
-		if failureCode == "agent_run_timeout" {
-			reply = "模型响应超时，请稍后重试或联系管理员调高模型超时时间。系统已记录本次运行编号：" + runRow.RunID
-		}
+		details := describeAssistantFailure(assistantRunFailure{Code: failureCode, Cause: err})
+		reply := assistantFailureReply(details, requestTimeout, runTimeout, runRow.RunID)
 		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, reply)
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: failureCode, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
+	progress.Stop()
 	outcome.Answer = safeAssistantAnswer(outcome.Answer)
 	if err := p.persistSuccessfulRun(ctx, &runRow, specs, outcome, started); err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "run_persist_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
@@ -245,10 +264,34 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 }
 
 func assistantRunFailureCode(err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, runner.ErrModelRequestTimeout) {
 		return "agent_run_timeout"
 	}
 	return "agent_run_failed"
+}
+
+func assistantFailureReply(details assistantFailureDetails, requestTimeout time.Duration, runTimeout time.Duration, runID string) string {
+	stage := "处理查询"
+	switch details.Stage {
+	case runner.ErrorStageModelRequest, runner.ErrorStageModelStream, runner.ErrorStageModelResponse:
+		stage = "模型响应"
+	case runner.ErrorStageToolExecution:
+		stage = "数据查询"
+	}
+	message := "查询在“" + stage + "”阶段未能完成"
+	switch details.ReasonCode {
+	case "run_timeout":
+		message = fmt.Sprintf("查询在“%s”阶段超过整轮 %d 秒时限", stage, int(runTimeout.Seconds()))
+	case "provider_timeout":
+		message = fmt.Sprintf("模型请求在 %d 秒内没有完成", int(requestTimeout.Seconds()))
+	case "provider_rate_limited":
+		message = "模型服务当前请求过多，首包前自动重试仍未成功"
+	case "provider_unavailable", "provider_connection_failed":
+		message = "模型服务暂时不可用，首包前自动重试仍未成功"
+	case "tool_execution_failed":
+		message = "数据查询工具执行失败"
+	}
+	return message + "。请稍后重新提问；系统已记录运行编号：" + runID
 }
 
 func (p *Processor) turnLock(ctx context.Context, eventID int64) (*sync.Mutex, error) {
@@ -469,7 +512,9 @@ func (p *Processor) persistSuccessfulRun(ctx context.Context, runRow *model.Assi
 			"output_tokens": outcome.Usage.OutputTokens, "total_tokens": outcome.Usage.TotalTokens,
 			"cached_input_tokens":         outcome.Usage.CachedInputTokens,
 			"cache_observed_input_tokens": outcome.Usage.CacheObservedInputTokens,
-			"finished_at":                 p.now().Unix(), "error_code": "", "error_stage": "",
+			"model_request_count":         outcome.ModelRequests, "provider_retry_count": outcome.ProviderRetries,
+			"retried_before_first_byte": outcome.RetriedBeforeFirstByte,
+			"finished_at":               p.now().Unix(), "error_code": "", "error_stage": "",
 			"error_reason_code": "", "error_detail": "", "error_detail_truncated": false,
 			"provider_status_code": 0, "provider_error_code": "",
 		}).Error
@@ -521,6 +566,12 @@ func (p *Processor) finishEvent(ctx context.Context, eventID int64) error {
 	}).Error
 }
 
+func (p *Processor) finishEventWithError(ctx context.Context, eventID int64, code string) error {
+	return p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).Where("id = ?", eventID).Updates(map[string]any{
+		"status": model.AssistantInboundStatusSucceeded, "processed_at": p.now().Unix(), "error_code": code,
+	}).Error
+}
+
 func (p *Processor) failEvent(ctx context.Context, event *model.AssistantInboundEvent, code string, cause error) error {
 	_ = p.db.WithContext(ctx).Model(event).Updates(map[string]any{
 		"status": model.AssistantInboundStatusFailed, "next_attempt_at": p.now().Add(time.Minute).Unix(), "error_code": code,
@@ -550,10 +601,13 @@ func (p *Processor) failRunAndEvent(ctx context.Context, event *model.AssistantI
 			updates["total_tokens"] = failure.Outcome.Usage.TotalTokens
 			updates["cached_input_tokens"] = failure.Outcome.Usage.CachedInputTokens
 			updates["cache_observed_input_tokens"] = failure.Outcome.Usage.CacheObservedInputTokens
+			updates["model_request_count"] = failure.Outcome.ModelRequests
+			updates["provider_retry_count"] = failure.Outcome.ProviderRetries
+			updates["retried_before_first_byte"] = failure.Outcome.RetriedBeforeFirstByte
 		}
 		return tx.Model(runRow).Updates(updates).Error
 	})
-	return p.failEvent(persistContext, event, failure.Code, failure.Cause)
+	return p.finishEventWithError(persistContext, event.ID, failure.Code)
 }
 
 func describeAssistantFailure(failure assistantRunFailure) assistantFailureDetails {
@@ -594,6 +648,8 @@ func describeAssistantFailure(failure assistantRunFailure) assistantFailureDetai
 		return result
 	}
 	switch {
+	case errors.Is(failure.Cause, runner.ErrModelRequestTimeout):
+		result.ReasonCode = "provider_timeout"
 	case errors.Is(failure.Cause, context.DeadlineExceeded):
 		result.ReasonCode = "run_timeout"
 	case errors.Is(failure.Cause, context.Canceled):

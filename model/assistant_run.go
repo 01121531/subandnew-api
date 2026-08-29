@@ -36,6 +36,10 @@ type AssistantRun struct {
 	PromptVersion            string `json:"prompt_version" gorm:"type:varchar(64);not null"`
 	Status                   string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
 	DeadlineAt               int64  `json:"deadline_at" gorm:"bigint;not null;default:0;index"`
+	RequestTimeoutSeconds    int    `json:"request_timeout_seconds" gorm:"not null;default:0"`
+	ModelRequestCount        int    `json:"model_request_count" gorm:"not null;default:0"`
+	ProviderRetryCount       int    `json:"provider_retry_count" gorm:"not null;default:0"`
+	RetriedBeforeFirstByte   bool   `json:"retried_before_first_byte" gorm:"not null;default:false"`
 	InputTokens              int64  `json:"input_tokens" gorm:"bigint;not null;default:0"`
 	OutputTokens             int64  `json:"output_tokens" gorm:"bigint;not null;default:0"`
 	TotalTokens              int64  `json:"total_tokens" gorm:"bigint;not null;default:0"`

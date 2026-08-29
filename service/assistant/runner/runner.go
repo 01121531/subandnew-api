@@ -20,6 +20,7 @@ var (
 	ErrStepLimit            = errors.New("assistant runner step limit reached")
 	ErrToolCallLimit        = errors.New("assistant runner tool call limit reached")
 	ErrInvalidModelResponse = errors.New("invalid assistant model response")
+	ErrModelRequestTimeout  = errors.New("assistant model request timed out")
 )
 
 const maxAuditErrorDetailBytes = 64 << 10
@@ -58,7 +59,22 @@ type Config struct {
 	MaxSteps        int
 	MaxToolCalls    int
 	MaxOutputTokens int
-	Timeout         time.Duration
+	RequestTimeout  time.Duration
+	RunTimeout      time.Duration
+	Progress        func(ProgressEvent)
+}
+
+const (
+	ProgressModelRequestStarted = "model_request_started"
+	ProgressToolStarted         = "tool_started"
+	ProgressCompleted           = "completed"
+	ProgressFailed              = "failed"
+)
+
+type ProgressEvent struct {
+	Type string
+	Step int
+	Tool string
 }
 
 type Runner struct {
@@ -79,12 +95,15 @@ type ToolTrace struct {
 }
 
 type Outcome struct {
-	Answer        string             `json:"answer"`
-	Messages      []provider.Message `json:"messages"`
-	ToolTraces    []ToolTrace        `json:"tool_traces"`
-	Usage         provider.Usage     `json:"usage"`
-	ProviderSteps int                `json:"provider_steps"`
-	ToolCalls     int                `json:"tool_calls"`
+	Answer                 string             `json:"answer"`
+	Messages               []provider.Message `json:"messages"`
+	ToolTraces             []ToolTrace        `json:"tool_traces"`
+	Usage                  provider.Usage     `json:"usage"`
+	ProviderSteps          int                `json:"provider_steps"`
+	ToolCalls              int                `json:"tool_calls"`
+	ModelRequests          int                `json:"model_requests"`
+	ProviderRetries        int                `json:"provider_retries"`
+	RetriedBeforeFirstByte bool               `json:"retried_before_first_byte"`
 }
 
 func New(client provider.Client, registry *tool.Registry, config Config) (*Runner, error) {
@@ -104,44 +123,68 @@ func New(client provider.Client, registry *tool.Registry, config Config) (*Runne
 	if config.MaxOutputTokens == 0 {
 		config.MaxOutputTokens = 2048
 	}
-	if config.Timeout == 0 {
-		config.Timeout = 30 * time.Second
+	if config.RequestTimeout == 0 {
+		config.RequestTimeout = 120 * time.Second
 	}
-	if config.MaxSteps < 1 || config.MaxSteps > 6 || config.MaxToolCalls < 1 || config.MaxToolCalls > 8 || config.MaxOutputTokens < 1 || config.Timeout < time.Second || config.Timeout > 2*time.Minute {
+	if config.RunTimeout == 0 {
+		config.RunTimeout = 300 * time.Second
+	}
+	if config.MaxSteps < 1 || config.MaxSteps > 6 || config.MaxToolCalls < 1 || config.MaxToolCalls > 8 || config.MaxOutputTokens < 1 || config.RequestTimeout < time.Second || config.RequestTimeout > 2*time.Minute || config.RunTimeout < 30*time.Second || config.RunTimeout > 10*time.Minute {
 		return nil, ErrInvalidConfiguration
 	}
 	return &Runner{client: client, registry: registry, config: config}, nil
 }
 
-func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conversation []provider.Message) (Outcome, error) {
+func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conversation []provider.Message) (outcome Outcome, runErr error) {
+	defer func() {
+		if runErr != nil {
+			r.progress(ProgressEvent{Type: ProgressFailed})
+		} else if outcome.Answer != "" {
+			r.progress(ProgressEvent{Type: ProgressCompleted})
+		}
+	}()
 	if r == nil || r.client == nil || r.registry == nil {
 		return Outcome{}, ErrInvalidConfiguration
 	}
 	if len(conversation) == 0 {
 		return Outcome{}, fmt.Errorf("%w: conversation is empty", ErrInvalidConfiguration)
 	}
-	runContext, cancel := context.WithTimeout(ctx, r.config.Timeout)
+	runContext, cancel := context.WithTimeout(ctx, r.config.RunTimeout)
 	defer cancel()
 
 	messages := make([]provider.Message, 0, len(conversation)+r.config.MaxSteps*2+1)
 	messages = append(messages, provider.Message{Role: provider.RoleSystem, Content: r.config.SystemPrompt})
 	messages = append(messages, conversation...)
 	definitions := toolDefinitions(r.registry.List())
-	outcome := Outcome{}
 	seenCallIDs := make(map[string]struct{})
 
 	for step := 1; step <= r.config.MaxSteps; step++ {
 		request := provider.Request{
 			Messages: messages, Tools: definitions, MaxOutputTokens: r.config.MaxOutputTokens,
 		}
-		response, err := generate(runContext, r.client, request)
+		r.progress(ProgressEvent{Type: ProgressModelRequestStarted, Step: step})
+		outcome.ModelRequests++
+		requestContext, requestCancel := context.WithTimeout(runContext, r.config.RequestTimeout)
+		response, err := generate(requestContext, r.client, request)
+		requestCancel()
 		if err != nil {
+			attempts, retried := provider.RequestAttempts(err)
+			outcome.ProviderRetries += max(0, attempts-1)
+			outcome.RetriedBeforeFirstByte = outcome.RetriedBeforeFirstByte || retried
 			stage := ErrorStageModelRequest
 			if strings.Contains(strings.ToLower(err.Error()), "stream") {
 				stage = ErrorStageModelStream
 			}
+			if errors.Is(runContext.Err(), context.DeadlineExceeded) {
+				err = context.DeadlineExceeded
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				err = fmt.Errorf("%w: %v", ErrModelRequestTimeout, err)
+			}
 			return outcome, &RunError{Stage: stage, Step: step, Cause: err}
 		}
+		attempts := max(1, response.Attempts)
+		outcome.ProviderRetries += max(0, attempts-1)
+		outcome.RetriedBeforeFirstByte = outcome.RetriedBeforeFirstByte || response.RetriedBeforeFirstByte
 		outcome.ProviderSteps = step
 		addUsage(&outcome.Usage, response.Usage)
 		if response.Message.Role != provider.RoleAssistant {
@@ -169,6 +212,7 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 				return outcome, &RunError{Stage: ErrorStageModelResponse, Step: step, Cause: fmt.Errorf("%w: duplicate tool call id", ErrInvalidModelResponse)}
 			}
 			seenCallIDs[call.ID] = struct{}{}
+			r.progress(ProgressEvent{Type: ProgressToolStarted, Step: step, Tool: call.Name})
 			started := time.Now()
 			result, err := r.registry.Execute(runContext, execution, call.Name, call.Arguments)
 			trace := ToolTrace{
@@ -193,6 +237,13 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 		}
 	}
 	return outcome, &RunError{Stage: ErrorStageRunner, Step: r.config.MaxSteps, Cause: ErrStepLimit}
+}
+
+func (r *Runner) progress(event ProgressEvent) {
+	if r == nil || r.config.Progress == nil {
+		return
+	}
+	r.config.Progress(event)
 }
 
 func boundedAuditErrorDetail(value string) (string, bool) {

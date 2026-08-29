@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const maxProviderResponseBytes = 4 << 20
@@ -36,6 +38,7 @@ type HTTPError struct {
 	StatusCode int
 	Code       string
 	Message    string
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
@@ -92,45 +95,106 @@ func chatCompletionsPath(basePath string) string {
 }
 
 func (c *OpenAICompatibleClient) Generate(ctx context.Context, request Request) (Response, error) {
-	return c.generateJSON(ctx, request)
+	if err := c.validateRequest(request); err != nil {
+		return Response{}, err
+	}
+	return c.generateWithRetry(ctx, func() (Response, bool, error) {
+		return c.generateJSON(ctx, request)
+	})
 }
 
 func (c *OpenAICompatibleClient) GenerateStream(ctx context.Context, request Request) (Response, error) {
 	if err := c.validateRequest(request); err != nil {
 		return Response{}, err
 	}
+	return c.generateWithRetry(ctx, func() (Response, bool, error) {
+		return c.generateStreamAttempt(ctx, request)
+	})
+}
+
+func (c *OpenAICompatibleClient) generateStreamAttempt(ctx context.Context, request Request) (Response, bool, error) {
 	response, received, err := c.generateSSE(ctx, request, true)
 	if err == nil || received || !streamCompatibilityError(err) {
-		return response, err
+		return response, received, err
 	}
 	response, received, err = c.generateSSE(ctx, request, false)
 	if err == nil || received || !streamCompatibilityError(err) {
-		return response, err
+		return response, received, err
 	}
 	return c.generateJSON(ctx, request)
 }
 
-func (c *OpenAICompatibleClient) generateJSON(ctx context.Context, request Request) (Response, error) {
-	if err := c.validateRequest(request); err != nil {
-		return Response{}, err
-	}
+func (c *OpenAICompatibleClient) generateJSON(ctx context.Context, request Request) (Response, bool, error) {
 	payload, err := c.requestPayload(request)
 	if err != nil {
-		return Response{}, err
+		return Response{}, false, err
 	}
 	response, err := c.doRequest(ctx, payload)
 	if err != nil {
-		return Response{}, err
+		return Response{}, false, err
 	}
 	defer response.Body.Close()
 	responseBody, err := readLimitedBody(response.Body)
 	if err != nil {
-		return Response{}, err
+		return Response{}, response.StatusCode >= 200 && response.StatusCode < 300, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return Response{}, decodeHTTPError(response.StatusCode, responseBody)
+		return Response{}, false, decodeHTTPErrorWithHeader(response.StatusCode, responseBody, response.Header)
 	}
-	return decodeOpenAIResponse(responseBody)
+	decoded, err := decodeOpenAIResponse(responseBody)
+	return decoded, true, err
+}
+
+func (c *OpenAICompatibleClient) generateWithRetry(ctx context.Context, attempt func() (Response, bool, error)) (Response, error) {
+	response, received, err := attempt()
+	if err == nil {
+		response.Attempts = 1
+		return response, nil
+	}
+	if received || !retriableBeforeFirstByte(ctx, err) {
+		return Response{}, &RequestError{Cause: err, Attempts: 1}
+	}
+	if err := waitForRetry(ctx, retryDelay(err)); err != nil {
+		return Response{}, &RequestError{Cause: err, Attempts: 1}
+	}
+	response, _, err = attempt()
+	if err != nil {
+		return Response{}, &RequestError{Cause: err, Attempts: 2, RetriedBeforeFirstByte: true}
+	}
+	response.Attempts = 2
+	response.RetriedBeforeFirstByte = true
+	return response, nil
+}
+
+func retriableBeforeFirstByte(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var httpError *HTTPError
+	if errors.As(err, &httpError) {
+		return httpError.Retriable()
+	}
+	var networkError net.Error
+	return errors.As(err, &networkError)
+}
+
+func retryDelay(err error) time.Duration {
+	var httpError *HTTPError
+	if errors.As(err, &httpError) && httpError.RetryAfter > 0 {
+		return min(httpError.RetryAfter, 15*time.Second)
+	}
+	return time.Second
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *OpenAICompatibleClient) validateRequest(request Request) error {
@@ -237,7 +301,7 @@ func (c *OpenAICompatibleClient) generateSSE(ctx context.Context, request Reques
 		if readErr != nil {
 			return Response{}, false, readErr
 		}
-		return Response{}, false, decodeHTTPError(response.StatusCode, body)
+		return Response{}, false, decodeHTTPErrorWithHeader(response.StatusCode, body, response.Header)
 	}
 	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "application/json") {
 		body, readErr := readLimitedBody(response.Body)
@@ -499,6 +563,10 @@ func fromOpenAIMessage(message openAIMessage) (Message, error) {
 }
 
 func decodeHTTPError(statusCode int, body []byte) error {
+	return decodeHTTPErrorWithHeader(statusCode, body, nil)
+}
+
+func decodeHTTPErrorWithHeader(statusCode int, body []byte, header http.Header) error {
 	var payload struct {
 		Error struct {
 			Code    any    `json:"code"`
@@ -532,7 +600,24 @@ func decodeHTTPError(statusCode int, body []byte) error {
 	if message == "" {
 		message = strings.TrimSpace(payload.Title)
 	}
-	return &HTTPError{StatusCode: statusCode, Code: code, Message: message}
+	return &HTTPError{StatusCode: statusCode, Code: code, Message: message, RetryAfter: parseRetryAfter(header)}
+}
+
+func parseRetryAfter(header http.Header) time.Duration {
+	if header == nil {
+		return 0
+	}
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		return max(0, time.Until(retryAt))
+	}
+	return 0
 }
 
 func providerErrorCode(raw any) string {

@@ -21,26 +21,28 @@ import (
 )
 
 type assistantModelProfileCreateRequest struct {
-	Name            string `json:"name"`
-	Provider        string `json:"provider"`
-	BaseURL         string `json:"base_url"`
-	Model           string `json:"model"`
-	APIKey          string `json:"api_key"`
-	TimeoutSeconds  int    `json:"timeout_seconds"`
-	MaxOutputTokens int    `json:"max_output_tokens"`
-	Enabled         bool   `json:"enabled"`
-	IsPrimary       bool   `json:"is_primary"`
+	Name              string `json:"name"`
+	Provider          string `json:"provider"`
+	BaseURL           string `json:"base_url"`
+	Model             string `json:"model"`
+	APIKey            string `json:"api_key"`
+	TimeoutSeconds    int    `json:"timeout_seconds"`
+	RunTimeoutSeconds int    `json:"run_timeout_seconds"`
+	MaxOutputTokens   int    `json:"max_output_tokens"`
+	Enabled           bool   `json:"enabled"`
+	IsPrimary         bool   `json:"is_primary"`
 }
 
 type assistantModelProfileUpdateRequest struct {
-	Name            *string `json:"name"`
-	BaseURL         *string `json:"base_url"`
-	Model           *string `json:"model"`
-	APIKey          *string `json:"api_key"`
-	TimeoutSeconds  *int    `json:"timeout_seconds"`
-	MaxOutputTokens *int    `json:"max_output_tokens"`
-	Enabled         *bool   `json:"enabled"`
-	IsPrimary       *bool   `json:"is_primary"`
+	Name              *string `json:"name"`
+	BaseURL           *string `json:"base_url"`
+	Model             *string `json:"model"`
+	APIKey            *string `json:"api_key"`
+	TimeoutSeconds    *int    `json:"timeout_seconds"`
+	RunTimeoutSeconds *int    `json:"run_timeout_seconds"`
+	MaxOutputTokens   *int    `json:"max_output_tokens"`
+	Enabled           *bool   `json:"enabled"`
+	IsPrimary         *bool   `json:"is_primary"`
 }
 
 type assistantChannelLoginStatusRequest struct {
@@ -96,7 +98,7 @@ func CreateAssistantModelProfile(c *gin.Context) {
 	}
 	created, err := service.Create(profile.CreateInput{
 		Name: request.Name, Provider: request.Provider, BaseURL: request.BaseURL, Model: request.Model, APIKey: request.APIKey,
-		TimeoutSeconds: request.TimeoutSeconds, MaxOutputTokens: request.MaxOutputTokens, Enabled: request.Enabled, IsPrimary: request.IsPrimary,
+		TimeoutSeconds: request.TimeoutSeconds, RunTimeoutSeconds: request.RunTimeoutSeconds, MaxOutputTokens: request.MaxOutputTokens, Enabled: request.Enabled, IsPrimary: request.IsPrimary,
 	})
 	if err != nil {
 		assistantError(c, err)
@@ -123,7 +125,7 @@ func UpdateAssistantModelProfile(c *gin.Context) {
 	}
 	updated, err := service.Update(id, profile.UpdateInput{
 		Name: request.Name, BaseURL: request.BaseURL, Model: request.Model, APIKey: request.APIKey,
-		TimeoutSeconds: request.TimeoutSeconds, MaxOutputTokens: request.MaxOutputTokens,
+		TimeoutSeconds: request.TimeoutSeconds, RunTimeoutSeconds: request.RunTimeoutSeconds, MaxOutputTokens: request.MaxOutputTokens,
 		Enabled: request.Enabled, IsPrimary: request.IsPrimary,
 	})
 	if err != nil {

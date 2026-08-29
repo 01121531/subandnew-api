@@ -108,6 +108,14 @@ function configuredTimeoutSeconds(run: AssistantRun) {
   return Math.max(0, run.deadline_at - run.started_at)
 }
 
+function providerRetrySummary(run: AssistantRun, t: TFunction) {
+  if (run.request_timeout_seconds <= 0) return t('Retry metrics unavailable')
+  if (!run.retried_before_first_byte) return t('No provider retry')
+  return t('{{count}} retries before first response', {
+    count: run.provider_retry_count,
+  })
+}
+
 function failureReason(run: AssistantRun, t: TFunction) {
   const timeout = configuredTimeoutSeconds(run)
   const reasons: Record<string, string> = {
@@ -219,6 +227,46 @@ function FailureDiagnosis(props: { run: AssistantRun }) {
           <dt className='text-muted-foreground'>{t('Provider error code')}</dt>
           <dd className='mt-0.5 font-mono break-all'>
             {props.run.provider_error_code || t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>
+            {t('Model request timeout')}
+          </dt>
+          <dd className='mt-0.5'>
+            {props.run.request_timeout_seconds > 0
+              ? t('{{count}} seconds', {
+                  count: props.run.request_timeout_seconds,
+                })
+              : t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>{t('Total run timeout')}</dt>
+          <dd className='mt-0.5'>
+            {configuredTimeoutSeconds(props.run) > 0
+              ? t('{{count}} seconds', {
+                  count: configuredTimeoutSeconds(props.run),
+                })
+              : t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>{t('Model requests')}</dt>
+          <dd className='mt-0.5'>
+            {props.run.request_timeout_seconds > 0
+              ? props.run.model_request_count
+              : t('Unavailable')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>
+            {t('Retries before first response')}
+          </dt>
+          <dd className='mt-0.5'>
+            {props.run.request_timeout_seconds > 0
+              ? props.run.provider_retry_count
+              : t('Unavailable')}
           </dd>
         </div>
       </dl>
@@ -454,7 +502,7 @@ function RunRow(props: {
         </Button>
       </div>
 
-      <dl className='mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4'>
+      <dl className='mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-6'>
         <div>
           <dt className='text-muted-foreground flex items-center gap-1.5 text-xs'>
             <Clock3 className='size-3.5' aria-hidden='true' />
@@ -484,6 +532,19 @@ function RunRow(props: {
             {props.run.started_at > 0
               ? new Date(props.run.started_at * 1000).toLocaleString()
               : t('Not started')}
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground text-xs'>
+            {t('Model requests')}
+          </dt>
+          <dd className='mt-1 font-medium'>
+            {props.run.request_timeout_seconds > 0
+              ? props.run.model_request_count
+              : t('Unavailable')}
+          </dd>
+          <dd className='text-muted-foreground text-xs'>
+            {providerRetrySummary(props.run, t)}
           </dd>
         </div>
         <div>

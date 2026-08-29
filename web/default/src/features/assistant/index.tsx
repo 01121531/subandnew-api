@@ -276,10 +276,22 @@ function ModelProfilesSection() {
                     </dd>
                   </div>
                   <div>
-                    <dt className='text-muted-foreground'>{t('Timeout')}</dt>
+                    <dt className='text-muted-foreground'>
+                      {t('Model request timeout')}
+                    </dt>
                     <dd>
                       {t('{{count}} seconds', {
                         count: profile.timeout_seconds,
+                      })}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className='text-muted-foreground'>
+                      {t('Total run timeout')}
+                    </dt>
+                    <dd>
+                      {t('{{count}} seconds', {
+                        count: profile.run_timeout_seconds || 300,
                       })}
                     </dd>
                   </div>

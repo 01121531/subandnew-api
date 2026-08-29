@@ -48,9 +48,39 @@ type Usage struct {
 }
 
 type Response struct {
-	Message      Message `json:"message"`
-	FinishReason string  `json:"finish_reason"`
-	Usage        Usage   `json:"usage"`
+	Message                Message `json:"message"`
+	FinishReason           string  `json:"finish_reason"`
+	Usage                  Usage   `json:"usage"`
+	Attempts               int     `json:"attempts"`
+	RetriedBeforeFirstByte bool    `json:"retried_before_first_byte"`
+}
+
+type RequestError struct {
+	Cause                  error
+	Attempts               int
+	RetriedBeforeFirstByte bool
+}
+
+func (e *RequestError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "assistant model request failed"
+	}
+	return e.Cause.Error()
+}
+
+func (e *RequestError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func RequestAttempts(err error) (int, bool) {
+	var requestError *RequestError
+	if !errors.As(err, &requestError) {
+		return 1, false
+	}
+	return max(1, requestError.Attempts), requestError.RetriedBeforeFirstByte
 }
 
 type Client interface {

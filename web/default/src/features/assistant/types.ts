@@ -20,6 +20,7 @@ export type AssistantModelProfile = {
   model: string
   api_key_fingerprint?: string
   timeout_seconds: number
+  run_timeout_seconds: number
   max_output_tokens: number
   enabled: boolean
   is_primary: boolean
@@ -34,6 +35,7 @@ export type AssistantModelProfileInput = {
   model: string
   api_key: string
   timeout_seconds: number
+  run_timeout_seconds: number
   max_output_tokens: number
   enabled: boolean
   is_primary: boolean
@@ -104,6 +106,10 @@ export type AssistantRun = {
   prompt_version: string
   status: AssistantRunStatus
   deadline_at: number
+  request_timeout_seconds: number
+  model_request_count: number
+  provider_retry_count: number
+  retried_before_first_byte: boolean
   input_tokens: number
   output_tokens: number
   total_tokens: number
