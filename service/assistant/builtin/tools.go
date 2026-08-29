@@ -206,9 +206,6 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err := registerOpenAlerts(registry, db); err != nil {
 		return nil, err
 	}
-	if err := registerToolGuide(registry); err != nil {
-		return nil, err
-	}
 	return registry, nil
 }
 

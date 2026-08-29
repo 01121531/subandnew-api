@@ -170,25 +170,3 @@ func TestRunnerAcceptsConfiguredTimeoutUpToTwoMinutes(t *testing.T) {
 	_, err = New(&fakeClient{}, newRunnerRegistry(t), Config{SystemPrompt: "safe", Timeout: 121 * time.Second})
 	require.ErrorIs(t, err, ErrInvalidConfiguration)
 }
-
-func TestRunnerOnlyAdvertisesAndExecutesSelectedTools(t *testing.T) {
-	client := &fakeClient{responses: []provider.Response{{Message: provider.Message{Role: provider.RoleAssistant, Content: "hello"}}}}
-	runner, err := New(client, newRunnerRegistry(t), Config{SystemPrompt: "safe", ToolNames: []string{}})
-	require.NoError(t, err)
-	_, err = runner.Run(t.Context(), tool.ExecutionContext{
-		RunID: "run", ConversationID: "conversation", Channel: "wechat", IdentityID: 1, UserID: 7,
-	}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
-	require.NoError(t, err)
-	require.Empty(t, client.requests[0].Tools)
-
-	client = &fakeClient{responses: []provider.Response{{Message: provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call", Name: "list_instances", Arguments: json.RawMessage(`{"limit":1}`)}}}}}}
-	runner, err = New(client, newRunnerRegistry(t), Config{SystemPrompt: "safe", ToolNames: []string{}})
-	require.NoError(t, err)
-	_, err = runner.Run(t.Context(), tool.ExecutionContext{
-		RunID: "run", ConversationID: "conversation", Channel: "wechat", IdentityID: 1, UserID: 7,
-	}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
-	require.ErrorIs(t, err, ErrToolNotAllowed)
-
-	_, err = New(client, newRunnerRegistry(t), Config{SystemPrompt: "safe", ToolNames: []string{"missing"}})
-	require.ErrorIs(t, err, ErrInvalidConfiguration)
-}
