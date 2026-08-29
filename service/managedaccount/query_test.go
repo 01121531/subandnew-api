@@ -102,3 +102,31 @@ func TestExecuteMatchesMetricAndChinaTimeFilters(t *testing.T) {
 	require.Equal(t, 1, result.Total)
 	require.Equal(t, "high", result.Items[0].Name)
 }
+
+func TestExecuteSummarizesFilteredRowsBeforePagination(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	alphaCost, betaCost, gammaCost := 7.25, 5.25, 20.0
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "alpha", Enabled: &available, Cost: &alphaCost, CostUnit: "USD"},
+		{ID: 2, Name: "beta", Enabled: &available, Cost: &betaCost, CostUnit: "USD"},
+		{ID: 3, Name: "gamma", Enabled: &available, Cost: &gammaCost, CostUnit: "quota"},
+	})
+
+	firstPage, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 3, firstPage.Total)
+	require.Equal(t, map[string]float64{"USD": 12.5, "quota": 20}, firstPage.Summary.Amounts)
+
+	secondPage, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		Page: 2, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, firstPage.Summary.Amounts, secondPage.Summary.Amounts)
+
+	filtered, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		NarrowIncludeTerms: []string{"alpha"}, Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 1, filtered.Total)
+	require.Equal(t, map[string]float64{"USD": 7.25}, filtered.Summary.Amounts)
+}

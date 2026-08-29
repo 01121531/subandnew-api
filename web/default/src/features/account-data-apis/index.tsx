@@ -66,6 +66,7 @@ import {
   isAccountFilterRuleComplete,
   type AccountAdvancedFilter,
 } from '@/features/managed-accounts/account-filtering'
+import { accountAmountSummaries } from '@/lib/account-amounts'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -883,6 +884,9 @@ function AuthorizationEditor(props: {
   let previewStatus = t('完整')
   if (preview?.partial) previewStatus = t('部分可用')
   else if (preview?.stale) previewStatus = t('旧数据')
+  const previewAmounts = preview
+    ? accountAmountSummaries(preview.summary.amounts)
+    : []
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -1305,7 +1309,7 @@ function AuthorizationEditor(props: {
                 )}
                 {preview && (
                   <div className='mt-3 border-t pt-3'>
-                    <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+                    <div className='grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-4'>
                       <Detail
                         label={t('命中账号')}
                         value={String(preview.total)}
@@ -1319,6 +1323,17 @@ function AuthorizationEditor(props: {
                         value={formatTime(preview.observed_at)}
                       />
                       <Detail label={t('数据状态')} value={previewStatus} />
+                      {previewAmounts.length > 0 ? (
+                        previewAmounts.map((amount) => (
+                          <Detail
+                            key={amount.key}
+                            label={t(amount.label)}
+                            value={amount.value}
+                          />
+                        ))
+                      ) : (
+                        <Detail label={t('总金额')} value={t('未提供')} />
+                      )}
                     </div>
                     {preview.sample.length > 0 && (
                       <div className='mt-3 grid gap-1.5'>

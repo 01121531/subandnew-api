@@ -41,6 +41,7 @@ import {
   type AccountAdvancedFilter,
   type AccountFilterField,
 } from '@/features/managed-accounts/account-filtering'
+import { accountAmountSummaries } from '@/lib/account-amounts'
 
 import {
   exportPortal,
@@ -309,6 +310,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   const selectedCount = allFilteredSelected
     ? Math.max(0, (result?.pagination.total ?? 0) - excluded.size)
     : selected.size
+  const portalAmounts = accountAmountSummaries(result?.summary.amounts)
 
   const selectionChecked = (item: PortalSelection) => {
     const key = selectionKey(item)
@@ -395,7 +397,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               : '当前展示最后一次成功采集的数据。'}
           </div>
         )}
-        <section className='grid grid-cols-2 gap-2 md:grid-cols-4'>
+        <section className='grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5'>
           <Metric title='匹配账号' value={result?.pagination.total ?? '--'} />
           {session.fields.includes('available') && (
             <>
@@ -416,6 +418,19 @@ export function AccountDataPortal({ slug }: { slug: string }) {
             )}
             compact
           />
+          {session.fields.includes('amount') &&
+            (portalAmounts.length > 0 ? (
+              portalAmounts.map((amount) => (
+                <Metric
+                  key={amount.key}
+                  title={amount.label}
+                  value={amount.value}
+                  compact
+                />
+              ))
+            ) : (
+              <Metric title='总金额' value={result ? '未提供' : '--'} compact />
+            ))}
         </section>
         <section className='grid gap-3 rounded-md border p-3 sm:p-4'>
           <div className='grid gap-2 md:grid-cols-2'>
