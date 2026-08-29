@@ -186,7 +186,8 @@ func GetOpenAccountData(c *gin.Context) {
 		if auth != nil {
 			status, code := openAccountDataStatus(err)
 			accountdataapi.RecordAccess(&model.ManagedAccountAPIAccessLog{APIID: auth.API.ID, KeyID: auth.Key.ID, KeyPrefix: auth.Key.Prefix,
-				RequestID: requestID, IPAddress: c.ClientIP(), StatusCode: status, DurationMS: time.Since(started).Milliseconds(), ErrorCode: code})
+				AuthType: "api_key", Action: "query", RequestID: requestID, IPAddress: c.ClientIP(), StatusCode: status,
+				DurationMS: time.Since(started).Milliseconds(), ErrorCode: code})
 		}
 		openAccountDataError(c, requestID, err)
 		return
@@ -194,7 +195,8 @@ func GetOpenAccountData(c *gin.Context) {
 	statusCode, resultCount, errorCode := http.StatusOK, 0, ""
 	defer func() {
 		accountdataapi.RecordAccess(&model.ManagedAccountAPIAccessLog{APIID: auth.API.ID, KeyID: auth.Key.ID, KeyPrefix: auth.Key.Prefix,
-			RequestID: requestID, IPAddress: c.ClientIP(), StatusCode: statusCode, DurationMS: time.Since(started).Milliseconds(), ResultCount: resultCount, ErrorCode: errorCode})
+			AuthType: "api_key", Action: "query", RequestID: requestID, IPAddress: c.ClientIP(), StatusCode: statusCode,
+			DurationMS: time.Since(started).Milliseconds(), ResultCount: resultCount, ErrorCode: errorCode})
 	}()
 	allowed, retryAfter := accountdataapi.AllowRequest(c.Request.Context(), auth.Key.ID, auth.API.RateLimitPerMinute)
 	if !allowed {

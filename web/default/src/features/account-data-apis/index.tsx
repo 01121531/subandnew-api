@@ -14,7 +14,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  ExternalLink,
   KeyRound,
+  LockKeyhole,
   Pencil,
   Plus,
   RefreshCw,
@@ -151,6 +153,9 @@ function defaultInput(): AccountDataAPIInput {
     page_size: 50,
     rate_limit_per_minute: 60,
     allowed_cidrs: [],
+    portal_enabled: false,
+    portal_password: '',
+    reset_portal_slug: false,
   }
 }
 
@@ -172,7 +177,30 @@ function toInput(item: AccountDataAPI): AccountDataAPIInput {
     page_size: item.page_size,
     rate_limit_per_minute: item.rate_limit_per_minute,
     allowed_cidrs: [...item.allowed_cidrs],
+    portal_enabled: item.portal_enabled,
+    portal_password: '',
+    reset_portal_slug: false,
   }
+}
+
+function previewInputSignature(input: AccountDataAPIInput) {
+  const {
+    portal_enabled: _portalEnabled,
+    portal_password: _portalPassword,
+    reset_portal_slug: _resetPortalSlug,
+    ...dataInput
+  } = input
+  return JSON.stringify(dataInput)
+}
+
+function generatedPortalPassword() {
+  const alphabet =
+    'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%'
+  const bytes = new Uint8Array(18)
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, (value) =>
+    alphabet.charAt(value % alphabet.length)
+  ).join('')
 }
 
 function errorMessage(error: unknown) {
@@ -194,6 +222,11 @@ function formatTime(timestamp: number) {
     second: '2-digit',
     hour12: false,
   }).format(timestamp * 1000)
+}
+
+function absolutePortalURL(value: string) {
+  if (!value || typeof window === 'undefined') return value
+  return new URL(value, window.location.origin).toString()
 }
 
 function activeKeyLabel(item: AccountDataAPI) {
@@ -223,9 +256,12 @@ export function AccountDataAPIs() {
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<AccountDataAPI | null | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<AccountDataAPI | null>(null)
-  const [secret, setSecret] = useState<{ name: string; value: string } | null>(
-    null
-  )
+  const [secret, setSecret] = useState<{
+    name: string
+    value: string
+    portalPassword?: string
+    portalURL?: string
+  } | null>(null)
   const [logsTarget, setLogsTarget] = useState<AccountDataAPI | null>(null)
   const [prefill, setPrefill] = useState<DraftHandoff | null>(null)
 
@@ -400,6 +436,12 @@ export function AccountDataAPIs() {
                             <div className='text-muted-foreground text-xs'>
                               {activeKeyLabel(item)}
                             </div>
+                            {item.portal_enabled && (
+                              <div className='text-success mt-1 flex items-center gap-1 text-xs'>
+                                <LockKeyhole className='size-3' />
+                                {t('可视化门户已启用')}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className='tabular-nums'>
                             {item.matched_count}
@@ -475,6 +517,12 @@ export function AccountDataAPIs() {
                             label={t('活动密钥')}
                             value={activeKeyLabel(item)}
                           />
+                          <Detail
+                            label={t('可视化门户')}
+                            value={
+                              item.portal_enabled ? t('已启用') : t('未启用')
+                            }
+                          />
                         </div>
                         <RowActions
                           item={item}
@@ -530,7 +578,9 @@ export function AccountDataAPIs() {
                 setPrefill(null)
               }
             }}
-            onCreated={(name, value) => setSecret({ name, value })}
+            onCreated={(name, value, portalPassword, portalURL) =>
+              setSecret({ name, value, portalPassword, portalURL })
+            }
           />
           <SecretDialog
             secret={secret}
@@ -611,6 +661,22 @@ function RowActions(props: {
           访问日志
         </Button>
       )}
+      {props.item.portal_enabled && props.item.portal_url && (
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() =>
+            window.open(
+              absolutePortalURL(props.item.portal_url),
+              '_blank',
+              'noopener'
+            )
+          }
+        >
+          <ExternalLink />
+          门户
+        </Button>
+      )}
       {props.canManage && (
         <Button variant='outline' size='sm' onClick={props.onEdit}>
           <Pencil />
@@ -653,7 +719,12 @@ function AuthorizationEditor(props: {
   item: AccountDataAPI | null
   prefill: DraftHandoff | null
   onOpenChange: (open: boolean) => void
-  onCreated: (name: string, secret: string) => void
+  onCreated: (
+    name: string,
+    secret: string,
+    portalPassword?: string,
+    portalURL?: string
+  ) => void
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -716,7 +787,7 @@ function AuthorizationEditor(props: {
     mutationFn: previewAccountDataAPI,
     onSuccess: (response) => {
       setPreview(response.data)
-      setPreviewSignature(JSON.stringify(input))
+      setPreviewSignature(previewInputSignature(input))
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -732,7 +803,14 @@ function AuthorizationEditor(props: {
     onSuccess: async (response) => {
       await queryClient.invalidateQueries({ queryKey: QUERY_KEY })
       props.onOpenChange(false)
-      if (response.secret) props.onCreated(input.name, response.secret)
+      if (response.secret || input.portal_password) {
+        props.onCreated(
+          input.name,
+          response.secret,
+          input.portal_password || undefined,
+          response.api.portal_url || undefined
+        )
+      }
       toast.success(props.item ? t('接口授权已更新') : t('接口授权已创建'))
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -740,7 +818,10 @@ function AuthorizationEditor(props: {
   const valid =
     input.name.trim() &&
     input.instance_ids.length > 0 &&
-    input.fields.length > 0
+    input.fields.length > 0 &&
+    (!input.portal_enabled ||
+      input.portal_password.length >= 8 ||
+      props.item?.portal_configured)
   const endpoint =
     typeof window === 'undefined'
       ? '/open-api/v1/accounts'
@@ -876,8 +957,12 @@ function AuthorizationEditor(props: {
                   onChange={(values) =>
                     setInput({
                       ...input,
-                      instance_ids: values.slice(0, 100).map(Number),
+                      instance_ids: values.map(Number),
                     })
+                  }
+                  maxValues={100}
+                  onLimitExceeded={() =>
+                    toast.error(t('每个授权最多选择 100 个实例'))
                   }
                   placeholder={t('选择实例')}
                   className='min-h-11'
@@ -891,6 +976,8 @@ function AuthorizationEditor(props: {
                     setInput({ ...input, include_terms: values })
                   }
                   allowCreate
+                  maxValues={50}
+                  onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                   placeholder={t('输入后按回车，可添加多个值')}
                   className='min-h-11'
                 />
@@ -903,6 +990,8 @@ function AuthorizationEditor(props: {
                     setInput({ ...input, exclude_terms: values })
                   }
                   allowCreate
+                  maxValues={50}
+                  onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                   placeholder={t('命中任一值即排除')}
                   className='min-h-11'
                 />
@@ -1033,6 +1122,104 @@ function AuthorizationEditor(props: {
                   placeholder='203.0.113.10&#10;203.0.113.0/24'
                 />
               </Field>
+              <div className='border-border/70 rounded-lg border p-3'>
+                <label className='flex min-h-11 cursor-pointer items-center justify-between gap-3'>
+                  <span>
+                    <span className='flex items-center gap-2 font-medium'>
+                      <LockKeyhole className='size-4' />
+                      {t('启用可视化门户')}
+                    </span>
+                    <span className='text-muted-foreground mt-1 block text-xs'>
+                      {t('乙方使用独立密码登录，只能查看此授权内的数据。')}
+                    </span>
+                  </span>
+                  <Checkbox
+                    checked={input.portal_enabled}
+                    onCheckedChange={(checked) =>
+                      setInput({ ...input, portal_enabled: checked === true })
+                    }
+                  />
+                </label>
+                {input.portal_enabled && (
+                  <div className='mt-3 grid gap-3 border-t pt-3'>
+                    <Field
+                      label={
+                        props.item?.portal_configured
+                          ? t('重置门户密码（留空保持不变）')
+                          : t('门户登录密码')
+                      }
+                    >
+                      <div className='flex flex-col gap-2 sm:flex-row'>
+                        <Input
+                          type='text'
+                          minLength={8}
+                          maxLength={128}
+                          autoComplete='new-password'
+                          value={input.portal_password}
+                          onChange={(event) =>
+                            setInput({
+                              ...input,
+                              portal_password: event.target.value,
+                            })
+                          }
+                          placeholder={t('至少 8 位')}
+                        />
+                        <Button
+                          type='button'
+                          variant='outline'
+                          onClick={() =>
+                            setInput({
+                              ...input,
+                              portal_password: generatedPortalPassword(),
+                            })
+                          }
+                        >
+                          <RefreshCw />
+                          {t('生成强密码')}
+                        </Button>
+                        {input.portal_password && (
+                          <CopyButton
+                            value={input.portal_password}
+                            tooltip={t('复制门户密码')}
+                          />
+                        )}
+                      </div>
+                    </Field>
+                    {props.item?.portal_url && (
+                      <div className='flex min-w-0 items-center gap-2 rounded-md border px-3 py-2'>
+                        <code className='min-w-0 flex-1 truncate text-xs'>
+                          {absolutePortalURL(props.item.portal_url)}
+                        </code>
+                        <CopyButton
+                          value={absolutePortalURL(props.item.portal_url)}
+                          tooltip={t('复制门户地址')}
+                        />
+                      </div>
+                    )}
+                    {props.item && (
+                      <label className='flex min-h-11 cursor-pointer items-center gap-3 rounded-md border px-3 py-2'>
+                        <Checkbox
+                          checked={input.reset_portal_slug}
+                          onCheckedChange={(checked) =>
+                            setInput({
+                              ...input,
+                              reset_portal_slug: checked === true,
+                            })
+                          }
+                        />
+                        <span>
+                          <span className='block text-sm font-medium'>
+                            {t('重置随机访问地址')}
+                          </span>
+                          <span className='text-muted-foreground block text-xs'>
+                            {t('旧地址和现有门户会话将立即失效。')}
+                          </span>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className='border-border/70 bg-muted/20 rounded-lg border p-3'>
                 <div className='flex flex-wrap items-center justify-between gap-2'>
                   <div>
@@ -1120,7 +1307,8 @@ function AuthorizationEditor(props: {
             <Button
               disabled={
                 (input.status !== 'disabled' &&
-                  (!preview || previewSignature !== JSON.stringify(input))) ||
+                  (!preview ||
+                    previewSignature !== previewInputSignature(input))) ||
                 saveMutation.isPending
               }
               onClick={() => saveMutation.mutate()}
@@ -1145,7 +1333,12 @@ function Field(props: { label: string; children: ReactNode }) {
 }
 
 function SecretDialog(props: {
-  secret: { name: string; value: string } | null
+  secret: {
+    name: string
+    value: string
+    portalPassword?: string
+    portalURL?: string
+  } | null
   onOpenChange: (open: boolean) => void
 }) {
   const endpoint =
@@ -1166,21 +1359,50 @@ function SecretDialog(props: {
         </DialogHeader>
         {props.secret && (
           <div className='grid gap-3'>
-            <div className='flex items-center gap-2 rounded-md border p-3'>
-              <code className='min-w-0 flex-1 text-xs break-all'>
-                {props.secret.value}
-              </code>
-              <CopyButton value={props.secret.value} tooltip='复制密钥' />
-            </div>
-            <div>
-              <Label>cURL 示例</Label>
-              <div className='bg-muted mt-1 flex items-start gap-2 rounded-md p-3'>
-                <pre className='min-w-0 flex-1 overflow-x-auto text-xs break-all whitespace-pre-wrap'>
-                  {curl}
-                </pre>
-                <CopyButton value={curl} tooltip='复制 cURL' />
+            {props.secret.value && (
+              <>
+                <div className='flex items-center gap-2 rounded-md border p-3'>
+                  <code className='min-w-0 flex-1 text-xs break-all'>
+                    {props.secret.value}
+                  </code>
+                  <CopyButton value={props.secret.value} tooltip='复制密钥' />
+                </div>
+                <div>
+                  <Label>cURL 示例</Label>
+                  <div className='bg-muted mt-1 flex items-start gap-2 rounded-md p-3'>
+                    <pre className='min-w-0 flex-1 overflow-x-auto text-xs break-all whitespace-pre-wrap'>
+                      {curl}
+                    </pre>
+                    <CopyButton value={curl} tooltip='复制 cURL' />
+                  </div>
+                </div>
+              </>
+            )}
+            {props.secret.portalPassword && (
+              <div className='grid gap-2 rounded-md border p-3'>
+                <Label>可视化门户密码（仅显示这一次）</Label>
+                <div className='flex items-center gap-2'>
+                  <code className='min-w-0 flex-1 text-sm break-all'>
+                    {props.secret.portalPassword}
+                  </code>
+                  <CopyButton
+                    value={props.secret.portalPassword}
+                    tooltip='复制门户密码'
+                  />
+                </div>
+                {props.secret.portalURL && (
+                  <div className='flex items-center gap-2 border-t pt-2'>
+                    <code className='min-w-0 flex-1 truncate text-xs'>
+                      {absolutePortalURL(props.secret.portalURL)}
+                    </code>
+                    <CopyButton
+                      value={absolutePortalURL(props.secret.portalURL)}
+                      tooltip='复制门户地址'
+                    />
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         )}
         <DialogFooter>
@@ -1236,14 +1458,28 @@ function AccessLogDialog(props: {
 
 function AccessLogRow({ log }: { log: AccountDataAPIAccessLog }) {
   return (
-    <div className='grid gap-2 rounded-md border p-3 text-sm sm:grid-cols-5'>
+    <div className='grid gap-2 rounded-md border p-3 text-sm sm:grid-cols-4'>
       <Detail label='时间' value={formatTime(log.created_at)} />
       <Detail label='IP' value={log.ip_address} />
       <Detail label='状态' value={String(log.status_code)} />
       <Detail label='返回条数' value={String(log.result_count)} />
       <Detail label='耗时' value={`${log.duration_ms} ms`} />
+      <Detail
+        label='访问方式'
+        value={log.auth_type === 'portal' ? '可视化门户' : 'API Key'}
+      />
+      <Detail
+        label='操作'
+        value={
+          ({ login: '登录', query: '查询', export: '导出', logout: '退出' }[
+            log.action
+          ] ??
+            log.action) ||
+          '查询'
+        }
+      />
       {log.error_code && (
-        <div className='sm:col-span-5'>
+        <div className='sm:col-span-4'>
           <Detail label='错误码' value={log.error_code} />
         </div>
       )}

@@ -26,6 +26,7 @@ import {
   matchesAdvancedAccountFilter,
   matchesQuickAccountFilter,
   parseAccountFilterTerms,
+  parseAccountFilterDisplayValues,
 } from './account-filtering'
 
 const account = accountFilterDocument({
@@ -42,6 +43,14 @@ describe('account filtering', () => {
       'gmail',
       'outlook',
     ])
+  })
+
+  test('preserves the first display form when parsing pasted values', () => {
+    assert.deepEqual(
+      parseAccountFilterDisplayValues('allen\nhh，Jack,ALLEN\ncc'),
+      ['allen', 'hh', 'Jack', 'cc']
+    )
+    assert.deepEqual(parseAccountFilterDisplayValues('hero'), ['hero'])
   })
 
   test('quick include matches any value and exclusion rejects any value', () => {

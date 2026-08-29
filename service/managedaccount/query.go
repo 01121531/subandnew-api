@@ -35,18 +35,31 @@ var secretPatterns = []*regexp.Regexp{
 var quickTermSeparator = regexp.MustCompile(`[,，\n]+`)
 
 type Query struct {
-	InstanceIDs  []int64                             `json:"instance_ids"`
-	Dataset      string                              `json:"dataset"`
-	PresetDays   int                                 `json:"preset_days,omitempty"`
-	IncludeTerms []string                            `json:"include_terms,omitempty"`
-	ExcludeTerms []string                            `json:"exclude_terms,omitempty"`
-	MatchMode    string                              `json:"match_mode"`
-	Rules        []managedinstance.AccountFilterRule `json:"rules,omitempty"`
-	Search       string                              `json:"search,omitempty"`
-	SortBy       string                              `json:"sort_by,omitempty"`
-	SortOrder    string                              `json:"sort_order,omitempty"`
-	Page         int                                 `json:"page,omitempty"`
-	PageSize     int                                 `json:"page_size,omitempty"`
+	InstanceIDs        []int64                             `json:"instance_ids"`
+	Dataset            string                              `json:"dataset"`
+	PresetDays         int                                 `json:"preset_days,omitempty"`
+	IncludeTerms       []string                            `json:"include_terms,omitempty"`
+	ExcludeTerms       []string                            `json:"exclude_terms,omitempty"`
+	MatchMode          string                              `json:"match_mode"`
+	Rules              []managedinstance.AccountFilterRule `json:"rules,omitempty"`
+	NarrowIncludeTerms []string                            `json:"-"`
+	NarrowExcludeTerms []string                            `json:"-"`
+	NarrowMatchMode    string                              `json:"-"`
+	NarrowRules        []managedinstance.AccountFilterRule `json:"-"`
+	NarrowFields       []string                            `json:"-"`
+	NarrowSearch       string                              `json:"-"`
+	Search             string                              `json:"search,omitempty"`
+	SortBy             string                              `json:"sort_by,omitempty"`
+	SortOrder          string                              `json:"sort_order,omitempty"`
+	Page               int                                 `json:"page,omitempty"`
+	PageSize           int                                 `json:"page_size,omitempty"`
+	AllowLargePage     bool                                `json:"-"`
+	SelectedAccounts   []AccountIdentity                   `json:"-"`
+}
+
+type AccountIdentity struct {
+	InstanceID int64
+	AccountID  string
 }
 
 type Item struct {
@@ -166,6 +179,23 @@ func NormalizeQuery(input Query) (Query, error) {
 	if err != nil {
 		return input, err
 	}
+	narrowMatchMode, narrowRules, err := managedinstance.NormalizeAccountFilter(input.NarrowMatchMode, input.NarrowRules, false)
+	if err != nil {
+		return input, err
+	}
+	input.NarrowMatchMode, input.NarrowRules = narrowMatchMode, narrowRules
+	input.NarrowIncludeTerms, err = normalizeTerms(input.NarrowIncludeTerms)
+	if err != nil {
+		return input, err
+	}
+	input.NarrowExcludeTerms, err = normalizeTerms(input.NarrowExcludeTerms)
+	if err != nil {
+		return input, err
+	}
+	input.NarrowSearch = strings.TrimSpace(input.NarrowSearch)
+	if utf8.RuneCountInString(input.NarrowSearch) > 200 {
+		return input, errors.New("narrow search is too long")
+	}
 	input.Search = strings.TrimSpace(input.Search)
 	if utf8.RuneCountInString(input.Search) > 200 {
 		return input, errors.New("search is too long")
@@ -186,9 +216,31 @@ func NormalizeQuery(input Query) (Query, error) {
 	if input.PageSize <= 0 {
 		input.PageSize = 20
 	}
-	if input.PageSize > maxPageSize {
-		return input, errors.New("page_size cannot exceed 100")
+	pageLimit := maxPageSize
+	if input.AllowLargePage {
+		pageLimit = 10000
 	}
+	if input.PageSize > pageLimit {
+		return input, fmt.Errorf("page_size cannot exceed %d", pageLimit)
+	}
+	if len(input.SelectedAccounts) > 10000 {
+		return input, errors.New("selected account count cannot exceed 10000")
+	}
+	selected := make([]AccountIdentity, 0, len(input.SelectedAccounts))
+	selectedSeen := make(map[string]struct{}, len(input.SelectedAccounts))
+	for _, identity := range input.SelectedAccounts {
+		identity.AccountID = strings.TrimSpace(identity.AccountID)
+		if identity.InstanceID <= 0 || identity.AccountID == "" {
+			return input, errors.New("selected accounts require a valid instance id and account id")
+		}
+		key := strconv.FormatInt(identity.InstanceID, 10) + "\x00" + identity.AccountID
+		if _, ok := selectedSeen[key]; ok {
+			continue
+		}
+		selectedSeen[key] = struct{}{}
+		selected = append(selected, identity)
+	}
+	input.SelectedAccounts = selected
 	return input, nil
 }
 
@@ -257,7 +309,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 				sourceNames := sourceNameMap(inventory)
 				for _, account := range inventory.Items {
 					candidate := inventoryRow(instance, account, sourceNames)
-					if matches(candidate.doc, input) {
+					if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
 						rows = append(rows, candidate)
 					}
 				}
@@ -278,7 +330,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		if output != nil {
 			for _, account := range output.Items {
 				candidate := outputRow(instance, account, sourceNames)
-				if matches(candidate.doc, input) {
+				if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
 					rows = append(rows, candidate)
 				}
 			}
@@ -368,29 +420,65 @@ func document(item Item) map[string][]string {
 }
 
 func matches(doc map[string][]string, input Query) bool {
+	if !matchesFilter(doc, input.IncludeTerms, input.ExcludeTerms, input.MatchMode, input.Rules) {
+		return false
+	}
 	searchable := strings.ToLower(strings.Join(flatten(doc), " "))
-	if len(input.IncludeTerms) > 0 && !anyContained(searchable, input.IncludeTerms) {
-		return false
-	}
-	if anyContained(searchable, input.ExcludeTerms) {
-		return false
-	}
 	if input.Search != "" && !strings.Contains(searchable, strings.ToLower(input.Search)) {
 		return false
 	}
-	if len(input.Rules) == 0 {
+	narrowDocument := restrictDocument(doc, input.NarrowFields)
+	narrowSearchable := strings.ToLower(strings.Join(flatten(narrowDocument), " "))
+	if input.NarrowSearch != "" && !strings.Contains(narrowSearchable, strings.ToLower(input.NarrowSearch)) {
+		return false
+	}
+	return matchesFilter(narrowDocument, input.NarrowIncludeTerms, input.NarrowExcludeTerms, input.NarrowMatchMode, input.NarrowRules)
+}
+
+func selectedAccountMatches(item Item, selected []AccountIdentity) bool {
+	if len(selected) == 0 {
+		return true
+	}
+	for _, identity := range selected {
+		if identity.InstanceID == item.InstanceID && identity.AccountID == item.AccountID {
+			return true
+		}
+	}
+	return false
+}
+
+func restrictDocument(doc map[string][]string, fields []string) map[string][]string {
+	if len(fields) == 0 {
+		return doc
+	}
+	result := make(map[string][]string, len(fields))
+	for _, field := range fields {
+		result[field] = doc[field]
+	}
+	return result
+}
+
+func matchesFilter(doc map[string][]string, include, exclude []string, matchMode string, rules []managedinstance.AccountFilterRule) bool {
+	searchable := strings.ToLower(strings.Join(flatten(doc), " "))
+	if len(include) > 0 && !anyContained(searchable, include) {
+		return false
+	}
+	if anyContained(searchable, exclude) {
+		return false
+	}
+	if len(rules) == 0 {
 		return true
 	}
 	matched := 0
-	for _, rule := range input.Rules {
+	for _, rule := range rules {
 		if ruleMatches(doc[rule.Field], rule) {
 			matched++
 		}
 	}
-	if input.MatchMode == managedinstance.AccountFilterMatchAny {
+	if matchMode == managedinstance.AccountFilterMatchAny {
 		return matched > 0
 	}
-	return matched == len(input.Rules)
+	return matched == len(rules)
 }
 
 func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {

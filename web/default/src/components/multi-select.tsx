@@ -50,9 +50,24 @@ type MultiSelectProps = {
   id?: string
   disabled?: boolean
   maxVisibleChips?: number
+  maxValues?: number
+  onLimitExceeded?: (maximum: number) => void
 }
 
 const VALUE_SEPARATOR = /[,，\n]/
+
+function splitAllValues(value: string) {
+  const seen = new Set<string>()
+  return value
+    .split(/[,，\n]+/)
+    .map((part) => part.trim())
+    .filter((part) => {
+      const key = part.toLocaleLowerCase()
+      if (!part || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
 
 function splitDraft(value: string) {
   if (!VALUE_SEPARATOR.test(value)) return { completed: [], draft: value }
@@ -76,6 +91,8 @@ export function MultiSelect({
   id,
   disabled,
   maxVisibleChips = 2,
+  maxValues,
+  onLimitExceeded,
 }: MultiSelectProps) {
   const anchorRef = useComboboxAnchor()
   const [inputValue, setInputValue] = React.useState('')
@@ -105,17 +122,22 @@ export function MultiSelect({
   const addValues = React.useCallback(
     (values: string[]) => {
       const next = [...selected]
-      const seen = new Set(selected)
+      const seen = new Set(selected.map((value) => value.toLocaleLowerCase()))
       values.forEach((raw) => {
         const value = raw.trim()
-        if (value && !seen.has(value)) {
-          seen.add(value)
+        const key = value.toLocaleLowerCase()
+        if (value && !seen.has(key)) {
+          seen.add(key)
           next.push(value)
         }
       })
+      if (maxValues != null && next.length > maxValues) {
+        onLimitExceeded?.(maxValues)
+        return
+      }
       if (next.length !== selected.length) onChange(next)
     },
-    [onChange, selected]
+    [maxValues, onChange, onLimitExceeded, selected]
   )
 
   return (
@@ -125,6 +147,10 @@ export function MultiSelect({
       items={items}
       value={selected}
       onValueChange={(values) => {
+        if (maxValues != null && values.length > maxValues) {
+          onLimitExceeded?.(maxValues)
+          return
+        }
         onChange(values)
         if (values.length > selected.length) setInputValue('')
       }}
@@ -176,6 +202,14 @@ export function MultiSelect({
                 setInputValue('')
               }
             }
+          }}
+          onPaste={(event) => {
+            if (!allowCreate) return
+            const pasted = event.clipboardData.getData('text')
+            if (!VALUE_SEPARATOR.test(pasted)) return
+            event.preventDefault()
+            addValues(splitAllValues(pasted))
+            setInputValue('')
           }}
         />
       </ComboboxChips>

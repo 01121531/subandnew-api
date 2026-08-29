@@ -31,6 +31,9 @@ export type AccountDataAPIInput = {
   page_size: number
   rate_limit_per_minute: number
   allowed_cidrs: string[]
+  portal_enabled: boolean
+  portal_password: string
+  reset_portal_slug: boolean
 }
 
 export type AccountDataAPIKey = {
@@ -56,6 +59,9 @@ export type AccountDataAPI = AccountDataAPIInput & {
   created_at: number
   updated_at: number
   endpoint: string
+  portal_configured: boolean
+  portal_url: string
+  portal_password_at: number
   keys: AccountDataAPIKey[]
 }
 
@@ -108,6 +114,9 @@ export type AccountDataAPIAccessLog = {
   duration_ms: number
   result_count: number
   error_code: string
+  auth_type: string
+  action: string
+  session_id: number
   created_at: number
 }
 

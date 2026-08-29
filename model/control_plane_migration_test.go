@@ -46,6 +46,7 @@ var expectedControlPlaneTables = []string{
 	"managed_account_api_access_logs",
 	"managed_account_api_instances",
 	"managed_account_api_keys",
+	"managed_account_api_portal_sessions",
 	"managed_account_apis",
 	"managed_account_filter_templates",
 	"managed_account_snapshots",

@@ -1460,6 +1460,8 @@ export function ManagedAccounts() {
                 selected={searchValues}
                 onChange={setSearchValues}
                 allowCreate
+                maxValues={50}
+                onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                 maxVisibleChips={2}
                 placeholder={t('Search accounts or channels')}
                 className='min-h-10 min-w-0 flex-1 sm:min-h-8'
@@ -1475,6 +1477,8 @@ export function ManagedAccounts() {
                 selected={excludeSearchValues}
                 onChange={setExcludeSearchValues}
                 allowCreate
+                maxValues={50}
+                onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                 maxVisibleChips={2}
                 placeholder={t('Exclude accounts or channels')}
                 className='min-h-10 min-w-0 flex-1 sm:min-h-8'

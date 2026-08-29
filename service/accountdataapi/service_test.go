@@ -22,7 +22,8 @@ func setupAPIServiceTest(t *testing.T) (*gorm.DB, model.ManagedInstance) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceSnapshot{},
 		&model.ManagedAccountSnapshot{}, &model.SystemTask{}, &model.SystemTaskScopeLock{}, &model.ManagedAccountAPI{},
-		&model.ManagedAccountAPIInstance{}, &model.ManagedAccountAPIKey{}, &model.ManagedAccountAPIAccessLog{}))
+		&model.ManagedAccountAPIInstance{}, &model.ManagedAccountAPIKey{}, &model.ManagedAccountAPIAccessLog{},
+		&model.ManagedAccountAPIPortalSession{}))
 	model.DB = db
 	t.Cleanup(func() { model.DB = previous })
 	instance := model.ManagedInstance{Name: "accounts", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://example.invalid"}

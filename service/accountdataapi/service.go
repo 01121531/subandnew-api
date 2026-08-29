@@ -65,6 +65,9 @@ type ConfigInput struct {
 	PageSize           int                                 `json:"page_size"`
 	RateLimitPerMinute int                                 `json:"rate_limit_per_minute"`
 	AllowedCIDRs       []string                            `json:"allowed_cidrs"`
+	PortalEnabled      bool                                `json:"portal_enabled"`
+	PortalPassword     string                              `json:"portal_password"`
+	ResetPortalSlug    bool                                `json:"reset_portal_slug"`
 }
 
 type KeyView struct {
@@ -96,6 +99,10 @@ type View struct {
 	PageSize           int                                 `json:"page_size"`
 	RateLimitPerMinute int                                 `json:"rate_limit_per_minute"`
 	AllowedCIDRs       []string                            `json:"allowed_cidrs"`
+	PortalEnabled      bool                                `json:"portal_enabled"`
+	PortalConfigured   bool                                `json:"portal_configured"`
+	PortalURL          string                              `json:"portal_url"`
+	PortalPasswordAt   int64                               `json:"portal_password_at"`
 	MatchedCount       int                                 `json:"matched_count"`
 	LastObservedAt     int64                               `json:"last_observed_at"`
 	LastAccessedAt     int64                               `json:"last_accessed_at"`
@@ -163,6 +170,9 @@ func Create(ctx context.Context, input ConfigInput, actorID int) (*CreateResult,
 	}
 	entry.MatchedCount = preview.Total
 	entry.LastObservedAt = preview.ObservedAt
+	if _, err := applyPortalInput(entry, prepared, true); err != nil {
+		return nil, err
+	}
 	var secret string
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(entry).Error; err != nil {
@@ -223,6 +233,10 @@ func Update(ctx context.Context, id int64, input ConfigInput, actorID int) (*Vie
 		if err := tx.First(&entry, id).Error; err != nil {
 			return mapNotFound(err)
 		}
+		revokePortalSessions, portalErr := applyPortalInput(&entry, prepared, false)
+		if portalErr != nil {
+			return portalErr
+		}
 		entry.Name, entry.Description, entry.Status = updates.Name, updates.Description, updates.Status
 		entry.Dataset, entry.PresetDays, entry.Timezone = updates.Dataset, updates.PresetDays, updates.Timezone
 		entry.IncludeTerms, entry.ExcludeTerms, entry.MatchMode, entry.Rules = updates.IncludeTerms, updates.ExcludeTerms, updates.MatchMode, updates.Rules
@@ -231,6 +245,11 @@ func Update(ctx context.Context, id int64, input ConfigInput, actorID int) (*Vie
 		entry.MatchedCount, entry.LastObservedAt, entry.UpdatedBy = matchedCount, observedAt, actorID
 		if err := tx.Save(&entry).Error; err != nil {
 			return err
+		}
+		if revokePortalSessions {
+			if err := tx.Where("api_id = ?", id).Delete(&model.ManagedAccountAPIPortalSession{}).Error; err != nil {
+				return err
+			}
 		}
 		return replaceInstances(tx, id, prepared.InstanceIDs)
 	})
@@ -329,6 +348,9 @@ func Delete(id int64) error {
 		}
 		now := common.GetTimestamp()
 		if err := tx.Model(&model.ManagedAccountAPIKey{}).Where("api_id = ? AND revoked_at = 0", id).Update("revoked_at", now).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("api_id = ?", id).Delete(&model.ManagedAccountAPIPortalSession{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&entry).Error
@@ -634,11 +656,60 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 		PresetDays: entry.PresetDays, Timezone: entry.Timezone, InstanceIDs: ids, IncludeTerms: include, ExcludeTerms: exclude,
 		MatchMode: entry.MatchMode, Rules: rules, Fields: fields, SortBy: entry.SortBy, SortOrder: entry.SortOrder,
 		PageSize: entry.PageSize, RateLimitPerMinute: entry.RateLimitPerMinute, AllowedCIDRs: cidrs,
+		PortalEnabled: entry.PortalEnabled, PortalConfigured: entry.PortalPasswordHash != "", PortalURL: portalURL(entry), PortalPasswordAt: entry.PortalPasswordAt,
 		MatchedCount: entry.MatchedCount, LastObservedAt: entry.LastObservedAt, LastAccessedAt: entry.LastAccessedAt,
 		RequestCount: entry.RequestCount, CreatedBy: entry.CreatedBy, UpdatedBy: entry.UpdatedBy,
 		CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
 		Stale:    entry.LastObservedAt == 0 || common.GetTimestamp()-entry.LastObservedAt > int64((65*time.Minute)/time.Second),
 		Endpoint: ExternalPath, Keys: keyViews}, nil
+}
+
+func applyPortalInput(entry *model.ManagedAccountAPI, input ConfigInput, creating bool) (bool, error) {
+	if entry == nil {
+		return false, ErrInvalid
+	}
+	revoke := !creating && entry.PortalEnabled != input.PortalEnabled
+	password := strings.TrimSpace(input.PortalPassword)
+	if password != "" {
+		if utf8.RuneCountInString(password) < 8 || utf8.RuneCountInString(password) > 128 {
+			return false, fmt.Errorf("%w: portal password must contain 8 to 128 characters", ErrInvalid)
+		}
+		hash, err := common.Password2Hash(password)
+		if err != nil {
+			return false, err
+		}
+		entry.PortalPasswordHash = hash
+		entry.PortalPasswordAt = common.GetTimestamp()
+		revoke = !creating
+	}
+	if input.ResetPortalSlug || (input.PortalEnabled && entry.PortalSlug == nil) {
+		slug, err := randomPortalSlug()
+		if err != nil {
+			return false, err
+		}
+		entry.PortalSlug = &slug
+		revoke = !creating
+	}
+	if input.PortalEnabled && entry.PortalPasswordHash == "" {
+		return false, fmt.Errorf("%w: portal password is required", ErrInvalid)
+	}
+	entry.PortalEnabled = input.PortalEnabled
+	return revoke, nil
+}
+
+func randomPortalSlug() (string, error) {
+	buffer := make([]byte, 18)
+	if _, err := rand.Read(buffer); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buffer), nil
+}
+
+func portalURL(entry *model.ManagedAccountAPI) string {
+	if entry == nil || entry.PortalSlug == nil || strings.TrimSpace(*entry.PortalSlug) == "" {
+		return ""
+	}
+	return "/account-data/" + strings.TrimSpace(*entry.PortalSlug)
 }
 
 func containsString(values []string, target string) bool {

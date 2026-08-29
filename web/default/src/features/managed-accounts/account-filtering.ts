@@ -112,6 +112,19 @@ export function parseAccountFilterTerms(value: string) {
     })
 }
 
+export function parseAccountFilterDisplayValues(value: string) {
+  const seen = new Set<string>()
+  return value
+    .split(/[,，\n]+/)
+    .map((term) => term.trim())
+    .filter((term) => {
+      const key = term.toLocaleLowerCase()
+      if (!term || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
 export function normalizeAccountFilterValues(values: unknown[]) {
   return values
     .filter((value) => value != null)

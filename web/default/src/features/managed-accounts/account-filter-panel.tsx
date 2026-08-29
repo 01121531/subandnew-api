@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Filter, Plus, Save, Trash2 } from 'lucide-react'
+import { ChevronDown, Filter, ListPlus, Plus, Save, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -57,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
 import {
@@ -66,6 +67,7 @@ import {
   accountFilterTemplateInput,
   createAccountFilterRule,
   isAccountFilterRuleComplete,
+  parseAccountFilterDisplayValues,
   type AccountAdvancedFilter,
   type AccountFilterField,
   type AccountFilterOperator,
@@ -115,6 +117,7 @@ export function AccountFilterPanel(props: {
   onChange: (value: AccountAdvancedFilter) => void
   options: Partial<Record<AccountFilterField, MultiSelectOption[]>>
   templatesEnabled?: boolean
+  allowedFields?: AccountFilterField[]
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -125,6 +128,8 @@ export function AccountFilterPanel(props: {
   const [saveOpen, setSaveOpen] = useState(false)
   const [templateName, setTemplateName] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [bulkRuleID, setBulkRuleID] = useState<string | null>(null)
+  const [bulkValues, setBulkValues] = useState('')
   const templatesQuery = useQuery({
     queryKey: TEMPLATE_QUERY_KEY,
     queryFn: listAccountFilterTemplates,
@@ -138,6 +143,7 @@ export function AccountFilterPanel(props: {
   const rulesValid =
     props.value.rules.length > 0 &&
     props.value.rules.every(isAccountFilterRuleComplete)
+  const allowedFields = props.allowedFields ?? [...ACCOUNT_FILTER_FIELDS]
 
   const refreshTemplates = async () => {
     await queryClient.invalidateQueries({ queryKey: TEMPLATE_QUERY_KEY })
@@ -205,6 +211,26 @@ export function AccountFilterPanel(props: {
     setSelectedTemplateID(template.id)
     setOpen(true)
     toast.success(t('Filter template applied'))
+  }
+  const applyBulkValues = () => {
+    if (!bulkRuleID) return
+    const incoming = parseAccountFilterDisplayValues(bulkValues)
+    if (incoming.some((value) => value.length > 200)) {
+      toast.error(t('单个筛选值不能超过 200 个字符'))
+      return
+    }
+    const rule = props.value.rules.find((item) => item.id === bulkRuleID)
+    if (!rule) return
+    const merged = parseAccountFilterDisplayValues(
+      [...rule.values, ...incoming].join('\n')
+    )
+    if (merged.length > 50) {
+      toast.error(t('每条筛选规则最多包含 50 个值'))
+      return
+    }
+    updateRule(bulkRuleID, { values: merged })
+    setBulkRuleID(null)
+    setBulkValues('')
   }
 
   return (
@@ -359,7 +385,7 @@ export function AccountFilterPanel(props: {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {ACCOUNT_FILTER_FIELDS.map((field) => (
+                            {allowedFields.map((field) => (
                               <SelectItem key={field} value={field}>
                                 {t(fieldLabels[field])}
                               </SelectItem>
@@ -411,17 +437,34 @@ export function AccountFilterPanel(props: {
                               options={props.options[rule.field] ?? []}
                               selected={rule.values}
                               onChange={(values) =>
-                                updateRule(rule.id, {
-                                  values: values.slice(0, 50),
-                                })
+                                updateRule(rule.id, { values })
                               }
                               allowCreate={TEXT_ACCOUNT_FILTER_FIELDS.has(
                                 rule.field
                               )}
                               maxVisibleChips={3}
+                              maxValues={50}
+                              onLimitExceeded={() =>
+                                toast.error(t('每条筛选规则最多包含 50 个值'))
+                              }
                               placeholder={t('Enter one or more values')}
                               className='min-h-11 lg:min-h-9'
                             />
+                            {TEXT_ACCOUNT_FILTER_FIELDS.has(rule.field) && (
+                              <Button
+                                type='button'
+                                variant='ghost'
+                                size='sm'
+                                className='min-h-10'
+                                onClick={() => {
+                                  setBulkRuleID(rule.id)
+                                  setBulkValues('')
+                                }}
+                              >
+                                <ListPlus />
+                                {t('批量添加')}
+                              </Button>
+                            )}
                             {!isAccountFilterRuleComplete(rule) && (
                               <p className='text-destructive text-xs'>
                                 {t('Add at least one filter value')}
@@ -559,6 +602,49 @@ export function AccountFilterPanel(props: {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={bulkRuleID != null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setBulkRuleID(null)
+            setBulkValues('')
+          }
+        }}
+      >
+        <DialogContent className='sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle>{t('批量添加筛选值')}</DialogTitle>
+            <DialogDescription>
+              {t('每行输入一个值，也支持英文逗号或中文逗号分隔。')}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={bulkValues}
+            onChange={(event) => setBulkValues(event.target.value)}
+            className='min-h-64 resize-y font-mono'
+            placeholder={'allen\nhh\njack\ncc\nchan'}
+            autoFocus
+          />
+          <p className='text-muted-foreground text-xs'>
+            {t('自动去除空值和大小写重复项；每条规则最多 50 个值。')}
+          </p>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => {
+                setBulkRuleID(null)
+                setBulkValues('')
+              }}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button disabled={!bulkValues.trim()} onClick={applyBulkValues}>
+              {t('添加筛选值')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

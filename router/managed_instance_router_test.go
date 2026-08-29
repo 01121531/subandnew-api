@@ -150,6 +150,11 @@ func TestAccountDataAPIRoutesAreRegistered(t *testing.T) {
 		"DELETE /api/account-data-apis/:id/keys/:key_id",
 		"GET /api/account-data-apis/:id/access-logs",
 		"GET /open-api/v1/accounts",
+		"POST /open-portal/v1/account-data/:slug/login",
+		"GET /open-portal/v1/account-data/:slug/session",
+		"POST /open-portal/v1/account-data/:slug/query",
+		"POST /open-portal/v1/account-data/:slug/export",
+		"POST /open-portal/v1/account-data/:slug/logout",
 	} {
 		assert.Truef(t, routes[route], "%s must be registered", route)
 	}

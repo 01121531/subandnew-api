@@ -28,6 +28,10 @@ type ManagedAccountAPI struct {
 	PageSize           int            `json:"page_size" gorm:"not null;default:50"`
 	RateLimitPerMinute int            `json:"rate_limit_per_minute" gorm:"not null;default:60"`
 	AllowedCIDRs       string         `json:"-" gorm:"type:text;not null"`
+	PortalEnabled      bool           `json:"portal_enabled" gorm:"not null;default:false;index"`
+	PortalSlug         *string        `json:"-" gorm:"type:varchar(48);uniqueIndex"`
+	PortalPasswordHash string         `json:"-" gorm:"type:varchar(100)"`
+	PortalPasswordAt   int64          `json:"portal_password_at" gorm:"bigint;not null;default:0"`
 	MatchedCount       int            `json:"matched_count" gorm:"not null;default:0"`
 	LastObservedAt     int64          `json:"last_observed_at" gorm:"bigint;not null;default:0"`
 	LastAccessedAt     int64          `json:"last_accessed_at" gorm:"bigint;not null;default:0;index"`
@@ -90,6 +94,9 @@ type ManagedAccountAPIAccessLog struct {
 	APIID       int64  `json:"api_id" gorm:"not null;index"`
 	KeyID       int64  `json:"key_id" gorm:"not null;index"`
 	KeyPrefix   string `json:"key_prefix" gorm:"type:varchar(24);not null"`
+	AuthType    string `json:"auth_type" gorm:"type:varchar(16);not null;default:'api_key';index"`
+	Action      string `json:"action" gorm:"type:varchar(24);not null;default:'query';index"`
+	SessionID   int64  `json:"session_id" gorm:"not null;default:0;index"`
 	RequestID   string `json:"request_id" gorm:"type:varchar(64);not null;index"`
 	IPAddress   string `json:"ip_address" gorm:"type:varchar(64);not null;index"`
 	StatusCode  int    `json:"status_code" gorm:"not null;index"`
@@ -104,6 +111,32 @@ func (ManagedAccountAPIAccessLog) TableName() string { return "managed_account_a
 func (entry *ManagedAccountAPIAccessLog) BeforeCreate(_ *gorm.DB) error {
 	if entry.CreatedAt == 0 {
 		entry.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
+type ManagedAccountAPIPortalSession struct {
+	ID         int64  `json:"id" gorm:"primaryKey"`
+	APIID      int64  `json:"api_id" gorm:"not null;index"`
+	TokenHash  string `json:"-" gorm:"type:char(64);not null;uniqueIndex"`
+	CSRFHash   string `json:"-" gorm:"type:char(64);not null"`
+	IPAddress  string `json:"ip_address" gorm:"type:varchar(64);not null"`
+	ExpiresAt  int64  `json:"expires_at" gorm:"bigint;not null;index"`
+	LastUsedAt int64  `json:"last_used_at" gorm:"bigint;not null;default:0"`
+	RevokedAt  int64  `json:"revoked_at" gorm:"bigint;not null;default:0;index"`
+	CreatedAt  int64  `json:"created_at" gorm:"bigint;not null;index"`
+}
+
+func (ManagedAccountAPIPortalSession) TableName() string {
+	return "managed_account_api_portal_sessions"
+}
+
+func (session *ManagedAccountAPIPortalSession) BeforeCreate(_ *gorm.DB) error {
+	if session.CreatedAt == 0 {
+		session.CreatedAt = common.GetTimestamp()
+	}
+	if session.LastUsedAt == 0 {
+		session.LastUsedAt = session.CreatedAt
 	}
 	return nil
 }

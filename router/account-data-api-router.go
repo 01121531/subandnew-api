@@ -25,4 +25,12 @@ func registerAccountDataAPIRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	open := engine.Group("/open-api/v1")
 	open.Use(middleware.RouteTag("api"))
 	open.GET("/accounts", controller.GetOpenAccountData)
+
+	portal := engine.Group("/open-portal/v1/account-data/:slug")
+	portal.Use(middleware.RouteTag("api"))
+	portal.POST("/login", controller.LoginAccountDataPortal)
+	portal.GET("/session", controller.GetAccountDataPortalSession)
+	portal.POST("/query", controller.QueryAccountDataPortal)
+	portal.POST("/export", controller.ExportAccountDataPortal)
+	portal.POST("/logout", controller.LogoutAccountDataPortal)
 }

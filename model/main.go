@@ -199,6 +199,7 @@ func controlPlaneModels() []interface{} {
 		&ManagedAccountAPI{},
 		&ManagedAccountAPIInstance{},
 		&ManagedAccountAPIKey{},
+		&ManagedAccountAPIPortalSession{},
 		&ManagedAccountAPIAccessLog{},
 		&ManagedRPMHistory{},
 		&ManagedInstanceAlert{},
