@@ -168,7 +168,10 @@ export function MultiSelect({
       onOpenChange={setOpen}
       disabled={disabled}
     >
-      <ComboboxChips ref={anchorRef} className={cn('w-full', className)}>
+      <ComboboxChips
+        ref={anchorRef}
+        className={cn('w-full min-w-0 max-w-full overflow-hidden', className)}
+      >
         <ComboboxValue>
           {(values: string[]) => (
             <>

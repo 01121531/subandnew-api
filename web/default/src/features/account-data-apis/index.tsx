@@ -837,14 +837,45 @@ function AuthorizationEditor(props: {
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
-  const valid =
-    input.name.trim() &&
-    input.instance_ids.length > 0 &&
-    input.fields.length > 0 &&
-    filter.rules.every(isAccountFilterRuleComplete) &&
-    (!input.portal_enabled ||
-      input.portal_password.length >= 8 ||
-      props.item?.portal_configured)
+  const validationIssues: Array<{ step: number; label: string }> = []
+  if (!input.name.trim()) {
+    validationIssues.push({ step: 0, label: t('授权名称') })
+  }
+  if (input.instance_ids.length === 0) {
+    validationIssues.push({ step: 1, label: t('至少选择一个实例') })
+  }
+  if (!filter.rules.every(isAccountFilterRuleComplete)) {
+    validationIssues.push({ step: 1, label: t('完成高级筛选条件') })
+  }
+  if (input.fields.length === 0) {
+    validationIssues.push({ step: 2, label: t('至少开放一个字段') })
+  }
+  if (input.page_size < 1 || input.page_size > 100) {
+    validationIssues.push({ step: 3, label: t('单页上限应为 1 至 100') })
+  }
+  if (input.rate_limit_per_minute < 1 || input.rate_limit_per_minute > 6000) {
+    validationIssues.push({
+      step: 3,
+      label: t('每分钟请求上限应为 1 至 6000'),
+    })
+  }
+  if (
+    input.portal_enabled &&
+    input.portal_password.length < 8 &&
+    !props.item?.portal_configured
+  ) {
+    validationIssues.push({ step: 3, label: t('至少 8 位的门户密码') })
+  }
+  const valid = validationIssues.length === 0
+  const runPreview = () => {
+    const issue = validationIssues[0]
+    if (issue) {
+      toast.error(t('请先完成：{{item}}', { item: issue.label }))
+      setStep(issue.step)
+      return
+    }
+    previewMutation.mutate(input)
+  }
   const endpoint =
     typeof window === 'undefined'
       ? '/open-api/v1/accounts'
@@ -855,7 +886,7 @@ function AuthorizationEditor(props: {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className='flex max-h-[calc(100dvh-1rem)] w-[min(960px,calc(100%-1rem))] max-w-none flex-col overflow-hidden p-0'>
+      <DialogContent className='flex max-h-[calc(100dvh-1rem)] w-[min(960px,calc(100%-1rem))] max-w-none min-w-0 flex-col overflow-hidden p-0'>
         <DialogHeader className='border-b px-4 pt-4 pb-3 sm:px-6'>
           <DialogTitle>
             {props.item ? t('编辑接口授权') : t('创建接口授权')}
@@ -864,7 +895,7 @@ function AuthorizationEditor(props: {
             {t('授权固定读取后台账号快照，不会直接请求目标平台。')}
           </DialogDescription>
           <div
-            className='grid grid-cols-4 gap-1 pt-2'
+            className='grid grid-cols-2 gap-1 pt-2 sm:grid-cols-4'
             aria-label={t('创建步骤')}
           >
             {['基本信息', '数据范围', '开放字段', '安全与预览'].map(
@@ -886,7 +917,7 @@ function AuthorizationEditor(props: {
             )}
           </div>
         </DialogHeader>
-        <div className='min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6'>
+        <div className='min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6'>
           {step === 0 && (
             <div className='grid gap-4'>
               <Field label={t('授权名称')}>
@@ -1254,14 +1285,24 @@ function AuthorizationEditor(props: {
                     </div>
                   </div>
                   <Button
+                    type='button'
                     variant='outline'
-                    disabled={!valid || previewMutation.isPending}
-                    onClick={() => previewMutation.mutate(input)}
+                    disabled={previewMutation.isPending}
+                    onClick={runPreview}
                   >
                     <Eye />
                     {previewMutation.isPending ? t('正在预览') : t('预览数据')}
                   </Button>
                 </div>
+                {!valid && (
+                  <div className='text-destructive mt-2 text-xs leading-relaxed'>
+                    {t('待完成：{{items}}', {
+                      items: validationIssues
+                        .map((issue) => issue.label)
+                        .join('、'),
+                    })}
+                  </div>
+                )}
                 {preview && (
                   <div className='mt-3 border-t pt-3'>
                     <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
@@ -1312,7 +1353,7 @@ function AuthorizationEditor(props: {
             </div>
           )}
         </div>
-        <DialogFooter className='border-t px-4 py-3 sm:px-6'>
+        <DialogFooter className='flex-row flex-wrap justify-end border-t px-4 py-3 sm:px-6'>
           <Button
             variant='outline'
             onClick={() =>

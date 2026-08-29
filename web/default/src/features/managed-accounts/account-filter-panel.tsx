@@ -281,7 +281,7 @@ export function AccountFilterPanel(props: {
   return (
     <>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className='border-border/70 bg-muted/15 rounded-md border'>
+        <div className='border-border/70 bg-muted/15 max-w-full min-w-0 rounded-md border'>
           <div className='flex flex-col gap-2 p-2.5 sm:flex-row sm:flex-wrap sm:items-center'>
             <CollapsibleTrigger
               render={
@@ -421,13 +421,13 @@ export function AccountFilterPanel(props: {
                   return (
                     <div
                       key={rule.id}
-                      className='bg-background grid gap-2 rounded-md border p-2.5 lg:grid-cols-[2.2rem_10rem_11rem_minmax(13rem,1fr)_9rem_2.75rem] lg:items-start'
+                      className='bg-background grid min-w-0 gap-2 rounded-md border p-2.5 md:grid-cols-2 2xl:grid-cols-[2.2rem_10rem_11rem_minmax(13rem,1fr)_9rem_2.75rem] 2xl:items-start'
                     >
-                      <span className='text-muted-foreground hidden pt-2 text-center text-sm tabular-nums lg:block'>
+                      <span className='text-muted-foreground hidden pt-2 text-center text-sm tabular-nums 2xl:block'>
                         {index + 1}
                       </span>
-                      <div className='space-y-1'>
-                        <Label className='text-xs lg:sr-only'>
+                      <div className='min-w-0 space-y-1'>
+                        <Label className='text-xs 2xl:sr-only'>
                           {t('Field')}
                         </Label>
                         <Select
@@ -442,7 +442,7 @@ export function AccountFilterPanel(props: {
                             })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full lg:min-h-9'>
+                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -454,8 +454,8 @@ export function AccountFilterPanel(props: {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className='space-y-1'>
-                        <Label className='text-xs lg:sr-only'>
+                      <div className='min-w-0 space-y-1'>
+                        <Label className='text-xs 2xl:sr-only'>
                           {t('Operator')}
                         </Label>
                         <Select
@@ -472,7 +472,7 @@ export function AccountFilterPanel(props: {
                             })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full lg:min-h-9'>
+                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -484,12 +484,12 @@ export function AccountFilterPanel(props: {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className='space-y-1'>
-                        <Label className='text-xs lg:sr-only'>
+                      <div className='min-w-0 space-y-1 md:col-span-2 2xl:col-span-1'>
+                        <Label className='text-xs 2xl:sr-only'>
                           {t('Values')}
                         </Label>
                         {emptyOperator ? (
-                          <div className='text-muted-foreground flex min-h-11 items-center rounded-md border px-3 text-sm lg:min-h-9'>
+                          <div className='text-muted-foreground flex min-h-11 items-center rounded-md border px-3 text-sm 2xl:min-h-9'>
                             {t('No value required')}
                           </div>
                         ) : (
@@ -510,7 +510,7 @@ export function AccountFilterPanel(props: {
                                 toast.error(t(limitMessage))
                               }
                               placeholder={t(valuePlaceholder)}
-                              className='min-h-11 lg:min-h-9'
+                              className='min-h-11 min-w-0 2xl:min-h-9'
                             />
                             {TEXT_ACCOUNT_FILTER_FIELDS.has(rule.field) && (
                               <Button
@@ -535,8 +535,8 @@ export function AccountFilterPanel(props: {
                           </>
                         )}
                       </div>
-                      <div className='space-y-1'>
-                        <Label className='text-xs lg:sr-only'>
+                      <div className='min-w-0 space-y-1'>
+                        <Label className='text-xs 2xl:sr-only'>
                           {t('Value matching')}
                         </Label>
                         <Select
@@ -547,7 +547,7 @@ export function AccountFilterPanel(props: {
                             updateRule(rule.id, { value_mode: value })
                           }}
                         >
-                          <SelectTrigger className='min-h-11 w-full lg:min-h-9'>
+                          <SelectTrigger className='min-h-11 w-full min-w-0 2xl:min-h-9'>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -563,7 +563,7 @@ export function AccountFilterPanel(props: {
                       <Button
                         variant='ghost'
                         size='icon'
-                        className='text-destructive min-h-11 min-w-11 lg:min-h-9 lg:min-w-9'
+                        className='text-destructive min-h-11 min-w-11 justify-self-end 2xl:min-h-9 2xl:min-w-9'
                         aria-label={t('Remove filter rule')}
                         title={t('Remove filter rule')}
                         onClick={() => removeRule(rule.id)}
