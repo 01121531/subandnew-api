@@ -30,6 +30,7 @@ func TestSystemPromptIsStableAndUsesRuntimeContextTool(t *testing.T) {
 	require.Contains(t, prompt, "禁止再次增加或扣减 8 小时")
 	require.Contains(t, prompt, "get_runtime_context")
 	require.Contains(t, prompt, "get_metric_history")
+	require.Contains(t, prompt, "query_usage_records")
 	require.NotContains(t, prompt, "当前中国标准时间：")
 	require.Equal(t, prompt, systemPrompt())
 }
@@ -190,8 +191,10 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 
 func TestSafeAssistantAnswerBlocksSensitiveOutputAndBoundsLength(t *testing.T) {
 	require.Contains(t, safeAssistantAnswer("token: Bearer abcdefghijklmnop"), "不适合")
-	require.Contains(t, safeAssistantAnswer("联系 ops@example.com"), "不适合")
+	require.Equal(t, "联系 ops@example.com", safeAssistantAnswer("联系 ops@example.com"))
 	require.Contains(t, safeAssistantAnswer("访问 https://internal.example"), "不适合")
+	require.Contains(t, safeAssistantAnswer("节点 127.0.0.1:8080"), "不适合")
+	require.Contains(t, safeAssistantAnswer("password=top-secret-value"), "不适合")
 	bounded := safeAssistantAnswer(strings.Repeat("数", 5000))
 	require.LessOrEqual(t, len([]rune(bounded)), 4020)
 	require.Contains(t, bounded, "已截断")

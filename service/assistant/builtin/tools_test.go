@@ -23,7 +23,7 @@ func newBuiltinTestContext(t *testing.T) (*gorm.DB, tool.ExecutionContext, model
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{}, &model.AssistantSetting{},
-		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedDashboardSnapshot{}, &model.ManagedInstanceAlert{}, &model.ManagedRPMHistory{},
+		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedDashboardSnapshot{}, &model.ManagedAccountSnapshot{}, &model.ManagedInstanceAlert{}, &model.ManagedRPMHistory{}, &model.SystemTask{},
 	))
 	previousDB := model.DB
 	model.DB = db
@@ -289,6 +289,136 @@ func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {
 	require.Equal(t, assistantTime(now), alerts.Items[0].LastSeenAt)
 	require.NotContains(t, string(alertResult.Data), jsonNumber(now))
 	require.NotContains(t, string(alertResult.Data), "email")
+}
+
+func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	now := time.Now().Unix()
+	available := true
+	unavailable := false
+	payload, err := json.Marshal(managedinstance.InventoryPage{
+		ResourceKind: "channel",
+		Sources:      []managedinstance.InventorySource{{ID: "node-1", Name: "worker-a"}},
+		Items: []managedinstance.InventoryItem{
+			{ID: 101, IDText: "account-101", Name: "Alice", Email: "alice@example.com", Note: "owner https://internal.example password=secret-value", SourceID: "node-1", Enabled: &available, CreatedAt: now - 60},
+			{ID: 102, IDText: "account-102", Name: "Bob", Email: "bob@other.test", Enabled: &unavailable, CreatedAt: now - 120},
+		},
+		Total: 2,
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.ManagedAccountSnapshot{
+		InstanceID: visible.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory, RangeKey: "inventory",
+		Timezone: assistantTimezone, SchemaVersion: 2, ObservedAt: now, Payload: string(payload),
+		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "query_managed_accounts", json.RawMessage(`{
+		"instance_ids":[`+jsonNumber(visible.Id)+`],"dataset":"inventory","match_mode":"all",
+		"rules":[{"field":"email","operator":"contains","values":["example.com"],"value_mode":"any"}]
+	}`))
+	require.NoError(t, err)
+	var output managedAccountsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, 1, output.Total)
+	require.Equal(t, "alice@example.com", output.Items[0].Email)
+	require.Equal(t, "worker-a", output.Items[0].SourceName)
+	require.NotContains(t, output.Items[0].Note, "https://")
+	require.NotContains(t, output.Items[0].Note, "secret-value")
+	require.Contains(t, output.Items[0].Note, "[已隐藏]")
+	require.Equal(t, 1, output.Summary.Available)
+	require.Equal(t, tool.FreshnessSnapshot, result.Freshness.State)
+	require.Equal(t, assistantTime(now), output.Sources[0].ObservedAt)
+}
+
+func TestUsageRecordMapperReturnsBusinessFieldsButDropsRawSensitiveData(t *testing.T) {
+	raw := json.RawMessage(`{
+		"created_at":"2026-08-29T01:05:58+08:00","user_id":7,"user":{"email":"ops@example.com"},
+		"api_key_id":8,"api_key":{"name":"production"},"account_id":6822196335042536377,"account":{"name":"account-a"},
+		"model":"gpt-5","request_id":"request-123","input_tokens":10,"output_tokens":20,
+		"cache_read_tokens":3,"cache_creation_tokens":4,"actual_cost":1.25,"duration_ms":1200,
+		"ip_address":"127.0.0.1","content":"do not expose"
+	}`)
+	item, err := assistantUsageRecordFromRaw(model.ManagedInstanceKindSub2API, raw)
+	require.NoError(t, err)
+	require.Equal(t, "ops@example.com", item.User)
+	require.Equal(t, "6822196335042536377", item.AccountID)
+	require.Equal(t, "request-123", item.RequestID)
+	require.Equal(t, 37.0, *item.TotalTokens)
+	encoded, err := json.Marshal(item)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "127.0.0.1")
+	require.NotContains(t, string(encoded), "do not expose")
+}
+
+func TestFailedAccountOutputDoesNotBecomeZeroUsage(t *testing.T) {
+	instance := &managedinstance.InstanceView{ManagedInstance: &model.ManagedInstance{Id: 1, Name: "test", Kind: model.ManagedInstanceKindSub2API}}
+	row := accountOutputRow(instance, managedinstance.AccountOutputItem{
+		Account:          managedinstance.InventoryItem{ID: 10, Name: "account"},
+		CollectionStatus: model.ManagedInstanceCollectionFailed, ErrorCode: "timeout",
+	}, nil)
+	require.Nil(t, row.item.Requests)
+	require.Nil(t, row.item.Tokens)
+	require.Nil(t, row.item.Amount)
+	require.Equal(t, "timeout", row.item.ErrorCode)
+}
+
+func TestUsageRecordToolsReturnUnsupportedForClaudeGateway(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	require.NoError(t, db.Model(&model.ManagedInstance{}).Where("id = ?", visible.Id).Update("kind", model.ManagedInstanceKindClaudeGateway).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "query_usage_records", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`]}`))
+	require.NoError(t, err)
+	var output usageRecordsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, "unsupported", output.Status)
+	require.Equal(t, "unsupported_capability", output.ErrorCode)
+	require.Empty(t, output.Items)
+}
+
+func TestSafeBusinessTextAllowsEmailAndRedactsConnectionsAndCredentials(t *testing.T) {
+	value := safeBusinessText("ops@example.com https://internal.example 127.0.0.1:8080 password=secret-value")
+	require.Contains(t, value, "ops@example.com")
+	require.NotContains(t, value, "https://")
+	require.NotContains(t, value, "127.0.0.1")
+	require.NotContains(t, value, "secret-value")
+}
+
+func TestAssistantUsageRangeUsesShanghaiTimeOnce(t *testing.T) {
+	utcStart, utcEnd, err := normalizeAssistantUsageRange("2026-08-28T17:05:58Z", "2026-08-28T18:05:58Z", 31)
+	require.NoError(t, err)
+	localStart, localEnd, err := normalizeAssistantUsageRange("2026-08-29 01:05:58", "2026-08-29 02:05:58", 31)
+	require.NoError(t, err)
+	require.Equal(t, localStart.Unix(), utcStart.Unix())
+	require.Equal(t, localEnd.Unix(), utcEnd.Unix())
+	require.Equal(t, "2026-08-29T01:05:58+08:00", localStart.Format(time.RFC3339))
+}
+
+func TestAssistantUsageFiltersMapOnlyToNativePlatformFields(t *testing.T) {
+	start, _, err := parseAssistantHistoryTime("2026-08-29 00:00:00", false)
+	require.NoError(t, err)
+	end, _, err := parseAssistantHistoryTime("2026-08-29 23:59:59", false)
+	require.NoError(t, err)
+	newAPIQuery, err := assistantUsageValues(model.ManagedInstanceKindNewAPI, start, end, usageQueryFilters{
+		Usernames: []string{"alice"}, Models: []string{"gpt-5"}, Channels: []string{"7"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "alice", newAPIQuery.Get("username"))
+	require.Equal(t, "gpt-5", newAPIQuery.Get("model_name"))
+	require.Equal(t, "7", newAPIQuery.Get("channel"))
+	require.NotEmpty(t, newAPIQuery.Get("start_timestamp"))
+
+	sub2Query, err := assistantUsageValues(model.ManagedInstanceKindSub2API, start, end, usageQueryFilters{
+		UserIDs: []string{"11"}, AccountIDs: []string{"12"}, Models: []string{"claude"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "11", sub2Query.Get("user_id"))
+	require.Equal(t, "12", sub2Query.Get("account_id"))
+	require.Equal(t, assistantTimezone, sub2Query.Get("timezone"))
+
+	_, err = assistantUsageValues(model.ManagedInstanceKindConductor, start, end, usageQueryFilters{RequestIDs: []string{"not-supported"}})
+	require.Error(t, err)
 }
 
 func floatPointer(value float64) *float64 { return &value }

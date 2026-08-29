@@ -194,6 +194,12 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err := registerMetricHistory(registry, db); err != nil {
 		return nil, err
 	}
+	if err := registerManagedAccountQuery(registry, db); err != nil {
+		return nil, err
+	}
+	if err := registerUsageQueries(registry, db); err != nil {
+		return nil, err
+	}
 	if err := registerInstanceHealth(registry, db); err != nil {
 		return nil, err
 	}
