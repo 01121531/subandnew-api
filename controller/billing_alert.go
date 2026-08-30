@@ -10,9 +10,79 @@ import (
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/billingalert"
+	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+func ListInstanceAlertRules(c *gin.Context) {
+	data, err := managedinstance.ListAlertRules()
+	instanceAlertRuleJSON(c, data, err)
+}
+
+func GetInstanceAlertRule(c *gin.Context) {
+	id, ok := billingResourceID(c)
+	if !ok {
+		return
+	}
+	data, err := managedinstance.GetAlertRule(id)
+	instanceAlertRuleJSON(c, data, err)
+}
+
+func CreateInstanceAlertRule(c *gin.Context) {
+	var input managedinstance.AlertRuleInput
+	if !billingBind(c, &input) {
+		return
+	}
+	data, err := managedinstance.CreateAlertRule(input, c.GetInt("id"))
+	billingAuditResult(c, "create", "instance_alert_rule", dataID(data), err, input)
+	instanceAlertRuleJSON(c, data, err)
+}
+
+func UpdateInstanceAlertRule(c *gin.Context) {
+	id, ok := billingResourceID(c)
+	if !ok {
+		return
+	}
+	var input managedinstance.AlertRuleInput
+	if !billingBind(c, &input) {
+		return
+	}
+	data, err := managedinstance.UpdateAlertRule(id, input, c.GetInt("id"))
+	billingAuditResult(c, "update", "instance_alert_rule", id, err, input)
+	instanceAlertRuleJSON(c, data, err)
+}
+
+func DeleteInstanceAlertRule(c *gin.Context) {
+	id, ok := billingResourceID(c)
+	if !ok {
+		return
+	}
+	err := managedinstance.DeleteAlertRule(id)
+	billingAuditResult(c, "delete", "instance_alert_rule", id, err, nil)
+	instanceAlertRuleJSON(c, nil, err)
+}
+
+func instanceAlertRuleJSON(c *gin.Context, data any, err error) {
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": data})
+		return
+	}
+	status, message := http.StatusInternalServerError, "instance_alert_rule_operation_failed"
+	response := gin.H{"success": false}
+	var conflict *managedinstance.AlertRuleConflictError
+	switch {
+	case errors.As(err, &conflict):
+		status, message = http.StatusConflict, "instance_alert_rule_conflict"
+		response["data"] = gin.H{"instance_ids": conflict.InstanceIDs}
+	case errors.Is(err, managedinstance.ErrAlertRuleNotFound):
+		status, message = http.StatusNotFound, "instance_alert_rule_not_found"
+	case errors.Is(err, managedinstance.ErrInvalidInstance):
+		status, message = http.StatusUnprocessableEntity, "invalid_instance_alert_rule"
+	}
+	response["message"] = message
+	c.JSON(status, response)
+}
 
 func ListBillingFilterTemplates(c *gin.Context) {
 	data, err := billingalert.ListTemplates()
@@ -377,6 +447,8 @@ func dataID(value any) int64 {
 	case *billingalert.RuleView:
 		return item.ID
 	case *model.BillingAlertExport:
+		return item.ID
+	case *managedinstance.AlertRuleView:
 		return item.ID
 	case interface{ GetID() int64 }:
 		return item.GetID()

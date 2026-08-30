@@ -283,6 +283,34 @@ export interface InstanceAlertPage {
   page_size: number
 }
 
+export interface InstanceAlertRule {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  alert_types: Array<'availability' | 'credential'>
+  check_interval_seconds: number
+  failure_threshold: number
+  effective_failure_threshold: number
+  recipients: string[]
+  effective_recipients: string[]
+  instance_ids: number[]
+  created_at: number
+  updated_at: number
+}
+
+export type InstanceAlertRuleInput = Pick<
+  InstanceAlertRule,
+  | 'name'
+  | 'description'
+  | 'enabled'
+  | 'alert_types'
+  | 'check_interval_seconds'
+  | 'failure_threshold'
+  | 'recipients'
+  | 'instance_ids'
+>
+
 export async function listBillingTemplates() {
   return (
     await api.get<ApiResponse<BillingTemplate[]>>(
@@ -501,6 +529,37 @@ export async function listInstanceAlerts(params: URLSearchParams) {
       `/api/billing/instance-alerts?${params}`
     )
   ).data
+}
+
+export async function listInstanceAlertRules() {
+  return (
+    await api.get<ApiResponse<InstanceAlertRule[]>>('/api/instance-alert-rules')
+  ).data
+}
+
+export async function createInstanceAlertRule(input: InstanceAlertRuleInput) {
+  return (
+    await api.post<ApiResponse<InstanceAlertRule>>(
+      '/api/instance-alert-rules',
+      input
+    )
+  ).data
+}
+
+export async function updateInstanceAlertRule(
+  id: number,
+  input: InstanceAlertRuleInput
+) {
+  return (
+    await api.put<ApiResponse<InstanceAlertRule>>(
+      `/api/instance-alert-rules/${id}`,
+      input
+    )
+  ).data
+}
+
+export async function deleteInstanceAlertRule(id: number) {
+  return (await api.delete(`/api/instance-alert-rules/${id}`)).data
 }
 
 export async function getAlertRecord(id: number) {

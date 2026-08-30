@@ -21,6 +21,8 @@ const (
 type ManagedInstanceAlert struct {
 	Id                       int64  `json:"id" gorm:"primaryKey"`
 	InstanceId               int64  `json:"instance_id" gorm:"not null;index"`
+	RuleID                   int64  `json:"rule_id" gorm:"not null;default:0;index"`
+	RuleName                 string `json:"rule_name" gorm:"type:varchar(128)"`
 	AlertType                string `json:"alert_type" gorm:"type:varchar(32);not null;index"`
 	Status                   string `json:"status" gorm:"type:varchar(16);not null;index"`
 	ErrorCode                string `json:"error_code" gorm:"type:varchar(64);not null"`

@@ -143,6 +143,9 @@ func sendManagedInstanceAlertEmailPhase(ctx context.Context, alertID int64, phas
 	if alert.EmailStatus == model.ManagedInstanceAlertEmailSent {
 		return nil
 	}
+	if alert.EmailStatus == model.ManagedInstanceAlertEmailCancelled {
+		return nil
+	}
 	if alert.Status != model.ManagedInstanceAlertStatusOpen {
 		return updateManagedInstanceAlertProjection(alert.Id, map[string]any{
 			"email_status": model.ManagedInstanceAlertEmailCancelled, "email_next_retry_at": 0,
@@ -152,7 +155,10 @@ func sendManagedInstanceAlertEmailPhase(ctx context.Context, alertID int64, phas
 	if err := model.DB.First(&instance, alert.InstanceId).Error; err != nil {
 		return recordManagedInstanceAlertEmailFailure(&alert, managedInstanceAlertEmailPhaseFailure, err)
 	}
-	recipients, err := billingalert.ManagedInstanceAlertRecipients()
+	recipients, err := billingalert.ParseRecipientList(alert.EmailRecipients)
+	if err == nil && len(recipients) == 0 {
+		err = billingalert.ErrSMTPNotConfigured
+	}
 	if err == nil {
 		subject, textBody, htmlBody := managedInstanceAlertEmailContentPhase(&instance, &alert, false)
 		err = billingalert.SendSMTPMessage(ctx, billingalert.SMTPMessage{
@@ -200,6 +206,9 @@ func sendManagedInstanceRecoveryEmail(ctx context.Context, alert *model.ManagedI
 		return errors.New("managed instance alert is required")
 	}
 	if alert.RecoveryEmailStatus == model.ManagedInstanceAlertEmailSent {
+		return nil
+	}
+	if alert.RecoveryEmailStatus == model.ManagedInstanceAlertEmailCancelled {
 		return nil
 	}
 	if alert.Status != model.ManagedInstanceAlertStatusResolved || alert.EmailStatus != model.ManagedInstanceAlertEmailSent {

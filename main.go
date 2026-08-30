@@ -64,6 +64,14 @@ func main() {
 	}
 	systemupdate.RecoverInterruptedUpdate(common.Version)
 	if common.IsMasterNode {
+		migration, migrationErr := managedinstance.MigrateLegacyAlertRules()
+		if migrationErr != nil {
+			common.FatalLog("failed to migrate managed instance alert rules: " + migrationErr.Error())
+			return
+		}
+		if migration.Instances > 0 {
+			common.SysLog(fmt.Sprintf("managed instance alert rule migration completed: rules=%d instances=%d", migration.Rules, migration.Instances))
+		}
 		repair, repairErr := billingalert.RepairLegacyDiscountRates()
 		if repairErr != nil {
 			common.FatalLog("failed to repair billing alert discount rates: " + repairErr.Error())
@@ -144,13 +152,7 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
-	trustedProxies := make([]string, 0)
-	for _, proxy := range strings.Split(os.Getenv("TRUSTED_PROXIES"), ",") {
-		if proxy = strings.TrimSpace(proxy); proxy != "" {
-			trustedProxies = append(trustedProxies, proxy)
-		}
-	}
-	if err := server.SetTrustedProxies(trustedProxies); err != nil {
+	if err := server.SetTrustedProxies(common.TrustedProxies()); err != nil {
 		common.FatalLog("invalid TRUSTED_PROXIES: " + err.Error())
 	}
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {

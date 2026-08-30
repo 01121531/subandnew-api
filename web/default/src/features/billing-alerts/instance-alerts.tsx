@@ -5,19 +5,26 @@ This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
 published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
-*/
-import { useQuery } from '@tanstack/react-query'
-import { Eye, RefreshCw, Search } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
 
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
+
+import { MultiSelect } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -27,7 +34,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -37,464 +45,381 @@ import {
   TableRow,
 } from '@/components/ui/table'
 
-import { type InstanceAlert, listInstanceAlerts } from './api'
+import {
+  type InstanceAlertRule,
+  type InstanceAlertRuleInput,
+  createInstanceAlertRule,
+  deleteInstanceAlertRule,
+  listInstanceAlertRules,
+  updateInstanceAlertRule,
+} from './api'
 
-const PAGE_SIZE = 20
-const dateTime = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
+type InstanceOption = {
+  id: number
+  name: string
+  kind?: string
+  status?: string
+}
+
+const emptyRule = (): InstanceAlertRuleInput => ({
+  name: '',
+  description: '',
+  enabled: true,
+  alert_types: ['availability', 'credential'],
+  check_interval_seconds: 60,
+  failure_threshold: 0,
+  recipients: [],
+  instance_ids: [],
 })
 
-type AlertInstanceOption = { id: number; name: string }
-
-export function InstanceAlerts({
-  instances,
-}: {
-  instances: AlertInstanceOption[]
-}) {
-  const [page, setPage] = useState(1)
-  const [instanceId, setInstanceId] = useState('')
-  const [status, setStatus] = useState('')
-  const [alertType, setAlertType] = useState('')
-  const [deliveryStatus, setDeliveryStatus] = useState('')
-  const [search, setSearch] = useState('')
-  const [startTime, setStartTime] = useState('')
-  const [endTime, setEndTime] = useState('')
-  const [selected, setSelected] = useState<InstanceAlert | null>(null)
-  const params = useMemo(() => {
-    const value = new URLSearchParams({
-      page: String(page),
-      page_size: String(PAGE_SIZE),
-    })
-    if (instanceId) value.set('instance_id', instanceId)
-    if (status) value.set('status', status)
-    if (alertType) value.set('alert_type', alertType)
-    if (deliveryStatus) value.set('delivery_status', deliveryStatus)
-    if (search.trim()) value.set('search', search.trim())
-    if (startTime) value.set('start_time', String(localDateTimeUnix(startTime)))
-    if (endTime) value.set('end_time', String(localDateTimeUnix(endTime)))
-    return value
-  }, [
-    alertType,
-    deliveryStatus,
-    endTime,
-    instanceId,
-    page,
-    search,
-    startTime,
-    status,
-  ])
+export function InstanceAlerts({ instances }: { instances: InstanceOption[] }) {
+  const client = useQueryClient()
+  const [editing, setEditing] = useState<InstanceAlertRule | null>(null)
+  const [draft, setDraft] = useState<InstanceAlertRuleInput | null>(null)
+  const [saving, setSaving] = useState(false)
   const query = useQuery({
-    queryKey: ['billing-instance-alerts', params.toString()],
-    queryFn: () => listInstanceAlerts(params),
+    queryKey: ['instance-alert-rules'],
+    queryFn: listInstanceAlertRules,
     refetchInterval: 60_000,
   })
-  const data = query.data?.data
-  const pages = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE))
-  const resetPage = () => setPage(1)
+  const instanceMap = useMemo(
+    () => new Map(instances.map((instance) => [instance.id, instance])),
+    [instances]
+  )
+  const options = instances.map((instance) => ({
+    value: String(instance.id),
+    label: `${instance.name} · ${instance.kind ?? 'unknown'}`,
+  }))
+
+  const openEditor = (rule?: InstanceAlertRule) => {
+    setEditing(rule ?? null)
+    setDraft(
+      rule
+        ? {
+            name: rule.name,
+            description: rule.description,
+            enabled: rule.enabled,
+            alert_types: [...rule.alert_types],
+            check_interval_seconds: rule.check_interval_seconds,
+            failure_threshold: rule.failure_threshold,
+            recipients: [...rule.recipients],
+            instance_ids: [...rule.instance_ids],
+          }
+        : emptyRule()
+    )
+  }
+
+  const save = async () => {
+    if (
+      !draft?.name.trim() ||
+      !draft.instance_ids.length ||
+      !draft.alert_types.length
+    ) {
+      toast.error('请填写名称，并至少选择一个实例和一种故障类型')
+      return
+    }
+    setSaving(true)
+    try {
+      if (editing) await updateInstanceAlertRule(editing.id, draft)
+      else await createInstanceAlertRule(draft)
+      toast.success(editing ? '实例预警规则已更新' : '实例预警规则已创建')
+      setDraft(null)
+      await client.invalidateQueries({ queryKey: ['instance-alert-rules'] })
+    } catch (error: unknown) {
+      const conflicts = (
+        error as {
+          response?: { data?: { data?: { instance_ids?: number[] } } }
+        }
+      ).response?.data?.data?.instance_ids
+      if (conflicts?.length) {
+        toast.error(
+          `以下实例已属于其他启用规则：${conflicts.map((id) => instanceMap.get(id)?.name ?? `#${id}`).join('、')}`
+        )
+      } else toast.error('保存实例预警规则失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggle = async (rule: InstanceAlertRule) => {
+    try {
+      await updateInstanceAlertRule(rule.id, {
+        ...rule,
+        enabled: !rule.enabled,
+      })
+      await client.invalidateQueries({ queryKey: ['instance-alert-rules'] })
+    } catch {
+      toast.error('切换规则状态失败，实例可能已被其他规则占用')
+    }
+  }
+
+  const remove = async (rule: InstanceAlertRule) => {
+    if (!window.confirm(`确认删除“${rule.name}”？`)) return
+    try {
+      await deleteInstanceAlertRule(rule.id)
+      toast.success('实例预警规则已删除')
+      await client.invalidateQueries({ queryKey: ['instance-alert-rules'] })
+    } catch {
+      toast.error('删除实例预警规则失败')
+    }
+  }
 
   return (
-    <div className='min-w-0'>
-      <div className='mb-3 flex justify-end'>
+    <div className='min-w-0 space-y-4'>
+      <div className='flex flex-wrap justify-end gap-2'>
         <Button
           variant='outline'
-          size='icon-sm'
-          className='size-11 sm:size-8'
-          aria-label='刷新实例预警'
+          size='icon'
+          aria-label='刷新实例预警规则'
           onClick={() => void query.refetch()}
         >
           <RefreshCw className={query.isFetching ? 'animate-spin' : ''} />
         </Button>
+        <Button onClick={() => openEditor()}>
+          <Plus /> 创建规则
+        </Button>
       </div>
-      <div className='mb-4 grid gap-3 rounded-lg border p-4 sm:grid-cols-2 xl:grid-cols-4'>
-        <NativeSelect
-          value={instanceId}
-          aria-label='筛选实例'
-          onChange={(event) => {
-            setInstanceId(event.target.value)
-            resetPage()
-          }}
-        >
-          <NativeSelectOption value=''>全部实例</NativeSelectOption>
-          {instances.map((instance) => (
-            <NativeSelectOption key={instance.id} value={String(instance.id)}>
-              {instance.name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          value={status}
-          aria-label='筛选预警状态'
-          onChange={(event) => {
-            setStatus(event.target.value)
-            resetPage()
-          }}
-        >
-          <NativeSelectOption value=''>全部状态</NativeSelectOption>
-          <NativeSelectOption value='open'>预警中</NativeSelectOption>
-          <NativeSelectOption value='resolved'>已恢复</NativeSelectOption>
-        </NativeSelect>
-        <NativeSelect
-          value={alertType}
-          aria-label='筛选预警类型'
-          onChange={(event) => {
-            setAlertType(event.target.value)
-            resetPage()
-          }}
-        >
-          <NativeSelectOption value=''>全部类型</NativeSelectOption>
-          <NativeSelectOption value='availability'>
-            实例不可用
-          </NativeSelectOption>
-          <NativeSelectOption value='credential'>凭据异常</NativeSelectOption>
-        </NativeSelect>
-        <NativeSelect
-          value={deliveryStatus}
-          aria-label='筛选邮件状态'
-          onChange={(event) => {
-            setDeliveryStatus(event.target.value)
-            resetPage()
-          }}
-        >
-          <NativeSelectOption value=''>全部邮件状态</NativeSelectOption>
-          <NativeSelectOption value='pending'>等待发送</NativeSelectOption>
-          <NativeSelectOption value='retrying'>正在重试</NativeSelectOption>
-          <NativeSelectOption value='sent'>已发送</NativeSelectOption>
-          <NativeSelectOption value='cancelled'>已取消</NativeSelectOption>
-        </NativeSelect>
-        <div className='relative sm:col-span-2'>
-          <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
-          <Input
-            className='pl-9'
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value)
-              resetPage()
-            }}
-            placeholder='搜索实例、平台、错误代码或收件人'
-          />
-        </div>
-        <Input
-          type='datetime-local'
-          value={startTime}
-          aria-label='开始时间'
-          onChange={(event) => {
-            setStartTime(event.target.value)
-            resetPage()
-          }}
-        />
-        <Input
-          type='datetime-local'
-          value={endTime}
-          aria-label='结束时间'
-          onChange={(event) => {
-            setEndTime(event.target.value)
-            resetPage()
-          }}
-        />
-        <div className='text-muted-foreground text-sm tabular-nums sm:col-span-2 xl:col-span-4'>
-          共 {data?.total ?? 0} 条故障生命周期
-        </div>
-      </div>
-
-      <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
-        {(data?.items ?? []).map((item) => (
-          <AccordionItem
-            key={item.id}
-            value={String(item.id)}
-            className='border-0'
-          >
-            <div className='flex min-w-0 items-stretch'>
-              <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
-                <div className='min-w-0 flex-1 text-left'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <span className='font-medium break-words'>
-                      {item.instance_name || `#${item.instance_id}`}
-                    </span>
-                    <AlertStatusBadge status={item.status} />
-                  </div>
-                  <div className='text-muted-foreground mt-2 text-xs break-words'>
-                    {alertTypeLabel(item.alert_type)} · {item.error_code}
-                  </div>
-                  <div className='text-muted-foreground mt-1 text-xs tabular-nums'>
-                    最后发生 {formatTime(item.last_seen_at)}
-                  </div>
-                </div>
-              </AccordionTrigger>
-              <div className='flex shrink-0 items-center pe-2'>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='size-11'
-                  aria-label='查看实例预警详情'
-                  onClick={() => setSelected(item)}
-                >
-                  <Eye />
-                </Button>
-              </div>
-            </div>
-            <AccordionContent className='px-3 pb-4'>
-              <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
-                <Detail label='平台'>{item.instance_kind || '—'}</Detail>
-                <Detail label='出现次数'>
-                  {item.occurrences.toLocaleString()}
-                </Detail>
-                <Detail label='故障通知'>
-                  <DeliverySummary item={item} phase='failure' />
-                </Detail>
-                <Detail label='恢复通知'>
-                  <DeliverySummary item={item} phase='recovery' />
-                </Detail>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        ))}
-        {!data?.items.length && (
-          <div className='text-muted-foreground flex min-h-40 items-center justify-center px-4 text-sm'>
-            {query.isLoading ? '数据加载中' : '暂无实例预警'}
-          </div>
-        )}
-      </Accordion>
 
       <div className='hidden overflow-x-auto rounded-lg border md:block'>
         <Table>
-          <TableHeader className='bg-muted/40'>
+          <TableHeader>
             <TableRow>
+              <TableHead>规则</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>实例</TableHead>
-              <TableHead>类型 / 错误</TableHead>
-              <TableHead>次数</TableHead>
-              <TableHead>生命周期</TableHead>
-              <TableHead>故障通知</TableHead>
-              <TableHead>恢复通知</TableHead>
+              <TableHead>故障类型</TableHead>
+              <TableHead>周期 / 阈值</TableHead>
+              <TableHead>收件人</TableHead>
               <TableHead className='text-right'>操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {(data?.items ?? []).map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
-                  <AlertStatusBadge status={item.status} />
-                </TableCell>
-                <TableCell>
-                  <div className='font-medium'>
-                    {item.instance_name || `#${item.instance_id}`}
-                  </div>
-                  <div className='text-muted-foreground text-xs'>
-                    {item.instance_kind}
+            {(query.data?.data ?? []).map((rule) => (
+              <TableRow key={rule.id}>
+                <TableCell className='max-w-64 whitespace-normal'>
+                  <div className='font-medium'>{rule.name}</div>
+                  <div className='text-muted-foreground text-sm'>
+                    {rule.description || '无说明'}
                   </div>
                 </TableCell>
                 <TableCell>
-                  <div>{alertTypeLabel(item.alert_type)}</div>
-                  <code className='text-destructive text-xs break-all'>
-                    {item.error_code}
-                  </code>
+                  <Switch
+                    checked={rule.enabled}
+                    onCheckedChange={() => void toggle(rule)}
+                  />
                 </TableCell>
-                <TableCell className='tabular-nums'>
-                  {item.occurrences.toLocaleString()}
+                <TableCell>{rule.instance_ids.length} 个</TableCell>
+                <TableCell>{alertTypeText(rule.alert_types)}</TableCell>
+                <TableCell>
+                  {rule.check_interval_seconds} 秒 /{' '}
+                  {rule.failure_threshold ||
+                    `继承 ${rule.effective_failure_threshold}`}
                 </TableCell>
-                <TableCell className='text-xs whitespace-nowrap tabular-nums'>
-                  <div>{formatTime(item.first_seen_at)}</div>
-                  <div className='text-muted-foreground'>
-                    至 {formatTime(item.resolved_at || item.last_seen_at)}
+                <TableCell className='max-w-64 whitespace-normal'>
+                  {rule.recipients.length
+                    ? rule.recipients.join('、')
+                    : `继承全局（${rule.effective_recipients.length}）`}
+                </TableCell>
+                <TableCell>
+                  <div className='flex justify-end gap-1'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      aria-label='编辑规则'
+                      onClick={() => openEditor(rule)}
+                    >
+                      <Pencil />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      aria-label='删除规则'
+                      onClick={() => void remove(rule)}
+                    >
+                      <Trash2 />
+                    </Button>
                   </div>
-                </TableCell>
-                <TableCell>
-                  <DeliverySummary item={item} phase='failure' />
-                </TableCell>
-                <TableCell>
-                  <DeliverySummary item={item} phase='recovery' />
-                </TableCell>
-                <TableCell className='text-right'>
-                  <Button
-                    variant='ghost'
-                    size='icon-sm'
-                    aria-label='查看实例预警详情'
-                    onClick={() => setSelected(item)}
-                  >
-                    <Eye />
-                  </Button>
                 </TableCell>
               </TableRow>
             ))}
-            {!data?.items.length && (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className='text-muted-foreground h-40 text-center'
-                >
-                  {query.isLoading ? '数据加载中' : '暂无实例预警'}
-                </TableCell>
-              </TableRow>
-            )}
           </TableBody>
         </Table>
       </div>
 
-      <div className='flex flex-col gap-2 border-t px-4 py-3 text-sm min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
-        <span className='text-muted-foreground'>
-          第 {page} / {pages} 页
-        </span>
-        <div className='flex gap-2'>
-          <Button
-            size='sm'
-            variant='outline'
-            className='min-h-11 min-[420px]:min-h-0'
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-          >
-            上一页
-          </Button>
-          <Button
-            size='sm'
-            variant='outline'
-            className='min-h-11 min-[420px]:min-h-0'
-            disabled={page >= pages}
-            onClick={() => setPage(page + 1)}
-          >
-            下一页
-          </Button>
-        </div>
-      </div>
-
-      <InstanceAlertDialog item={selected} onClose={() => setSelected(null)} />
-    </div>
-  )
-}
-
-function InstanceAlertDialog({
-  item,
-  onClose,
-}: {
-  item: InstanceAlert | null
-  onClose: () => void
-}) {
-  return (
-    <Dialog open={Boolean(item)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className='max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-2xl'>
-        <DialogHeader>
-          <DialogTitle>实例预警详情</DialogTitle>
-          <DialogDescription>
-            {item &&
-              `${item.instance_name} · ${alertTypeLabel(item.alert_type)}`}
-          </DialogDescription>
-        </DialogHeader>
-        {item && (
-          <div className='grid gap-4 sm:grid-cols-2'>
-            <Detail label='状态'>
-              <AlertStatusBadge status={item.status} />
-            </Detail>
-            <Detail label='平台'>{item.instance_kind || '—'}</Detail>
-            <Detail label='错误代码' className='sm:col-span-2'>
-              <code className='text-destructive break-all'>
-                {item.error_code}
-              </code>
-            </Detail>
-            <Detail label='出现次数'>
-              {item.occurrences.toLocaleString()}
-            </Detail>
-            <Detail label='首次发生'>{formatTime(item.first_seen_at)}</Detail>
-            <Detail label='最后发生'>{formatTime(item.last_seen_at)}</Detail>
-            <Detail label='恢复时间'>{formatTime(item.resolved_at)}</Detail>
-            <DeliveryDetail item={item} phase='failure' />
-            <DeliveryDetail item={item} phase='recovery' />
+      <div className='grid gap-3 md:hidden'>
+        {(query.data?.data ?? []).map((rule) => (
+          <div key={rule.id} className='rounded-lg border p-4'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='min-w-0'>
+                <div className='font-medium break-words'>{rule.name}</div>
+                <div className='text-muted-foreground mt-1 text-sm'>
+                  {rule.instance_ids.length} 个实例 ·{' '}
+                  {rule.check_interval_seconds} 秒
+                </div>
+              </div>
+              <Badge variant={rule.enabled ? 'default' : 'secondary'}>
+                {rule.enabled ? '启用' : '停用'}
+              </Badge>
+            </div>
+            <div className='mt-3 text-sm'>
+              {alertTypeText(rule.alert_types)} · 连续失败{' '}
+              {rule.failure_threshold || rule.effective_failure_threshold} 次
+            </div>
+            <div className='mt-4 flex gap-2'>
+              <Button
+                className='min-h-11 flex-1'
+                variant='outline'
+                onClick={() => openEditor(rule)}
+              >
+                <Pencil />
+                编辑
+              </Button>
+              <Button
+                className='min-h-11'
+                variant='outline'
+                onClick={() => void toggle(rule)}
+              >
+                {rule.enabled ? '停用' : '启用'}
+              </Button>
+              <Button
+                className='min-h-11'
+                variant='ghost'
+                size='icon'
+                aria-label='删除规则'
+                onClick={() => void remove(rule)}
+              >
+                <Trash2 />
+              </Button>
+            </div>
           </div>
-        )}
-        <DialogFooter>
-          <Button variant='outline' onClick={onClose}>
-            关闭
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function DeliveryDetail({
-  item,
-  phase,
-}: {
-  item: InstanceAlert
-  phase: 'failure' | 'recovery'
-}) {
-  const recovery = phase === 'recovery'
-  const status = recovery ? item.recovery_email_status : item.email_status
-  const recipients = recovery
-    ? item.recovery_email_recipients
-    : item.email_recipients
-  const attempts = recovery ? item.recovery_email_attempts : item.email_attempts
-  const error = recovery ? item.recovery_email_error : item.email_error
-  const sentAt = recovery ? item.recovery_email_sent_at : item.email_sent_at
-  const nextRetryAt = recovery
-    ? item.recovery_email_next_retry_at
-    : item.email_next_retry_at
-  return (
-    <Detail
-      label={recovery ? '恢复邮件' : '故障邮件'}
-      className='sm:col-span-2'
-    >
-      <div className='space-y-1'>
-        <DeliveryStatusBadge status={status} />
-        <div>
-          收件人：<span className='break-all'>{recipients || '—'}</span>
-        </div>
-        <div>尝试次数：{attempts}</div>
-        {sentAt > 0 && <div>发送时间：{formatTime(sentAt)}</div>}
-        {nextRetryAt > 0 && <div>下次重试：{formatTime(nextRetryAt)}</div>}
-        {error && (
-          <div className='text-destructive break-all'>失败原因：{error}</div>
-        )}
+        ))}
       </div>
-    </Detail>
-  )
-}
-
-function DeliverySummary({
-  item,
-  phase,
-}: {
-  item: InstanceAlert
-  phase: 'failure' | 'recovery'
-}) {
-  const recovery = phase === 'recovery'
-  const status = recovery ? item.recovery_email_status : item.email_status
-  const attempts = recovery ? item.recovery_email_attempts : item.email_attempts
-  return (
-    <div className='flex flex-wrap items-center gap-1.5'>
-      <DeliveryStatusBadge status={status} />
-      {attempts > 0 && (
-        <span className='text-muted-foreground text-xs tabular-nums'>
-          {attempts} 次
-        </span>
+      {!query.isLoading && !query.data?.data?.length && (
+        <div className='text-muted-foreground rounded-lg border p-8 text-center'>
+          暂无实例预警规则
+        </div>
       )}
+
+      <Dialog
+        open={draft !== null}
+        onOpenChange={(open) => !open && setDraft(null)}
+      >
+        <DialogContent className='max-h-[92dvh] max-w-2xl overflow-y-auto'>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? '编辑实例预警规则' : '创建实例预警规则'}
+            </DialogTitle>
+            <DialogDescription>
+              一条启用规则可管理多个实例，同一实例不能同时属于两条启用规则。
+            </DialogDescription>
+          </DialogHeader>
+          {draft && (
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <Field label='规则名称'>
+                <Input
+                  value={draft.name}
+                  maxLength={128}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                />
+              </Field>
+              <Field label='巡检周期（秒）'>
+                <Input
+                  type='number'
+                  min={10}
+                  max={86400}
+                  value={draft.check_interval_seconds}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      check_interval_seconds: Number(e.target.value),
+                    })
+                  }
+                />
+              </Field>
+              <Field label='说明' className='sm:col-span-2'>
+                <Input
+                  value={draft.description}
+                  onChange={(e) =>
+                    setDraft({ ...draft, description: e.target.value })
+                  }
+                />
+              </Field>
+              <Field label='实例范围' className='sm:col-span-2'>
+                <MultiSelect
+                  options={options}
+                  selected={draft.instance_ids.map(String)}
+                  onChange={(values) =>
+                    setDraft({ ...draft, instance_ids: values.map(Number) })
+                  }
+                  maxValues={100}
+                  allowCreate={false}
+                  placeholder='选择最多 100 个实例'
+                />
+              </Field>
+              <Field label='故障类型' className='sm:col-span-2'>
+                <div className='flex flex-wrap gap-5 rounded-md border p-3'>
+                  <TypeCheckbox
+                    label='实例不可用'
+                    value='availability'
+                    draft={draft}
+                    setDraft={setDraft}
+                  />
+                  <TypeCheckbox
+                    label='凭据异常'
+                    value='credential'
+                    draft={draft}
+                    setDraft={setDraft}
+                  />
+                </div>
+              </Field>
+              <Field label='连续失败阈值（0 为继承全局）'>
+                <Input
+                  type='number'
+                  min={0}
+                  max={100}
+                  value={draft.failure_threshold}
+                  onChange={(e) =>
+                    setDraft({
+                      ...draft,
+                      failure_threshold: Number(e.target.value),
+                    })
+                  }
+                />
+              </Field>
+              <Field label='收件人（留空继承全局）'>
+                <MultiSelect
+                  options={[]}
+                  selected={draft.recipients}
+                  onChange={(recipients) => setDraft({ ...draft, recipients })}
+                  placeholder='输入邮箱后回车'
+                />
+              </Field>
+              <div className='flex items-center justify-between rounded-md border p-3 sm:col-span-2'>
+                <Label>启用规则</Label>
+                <Switch
+                  checked={draft.enabled}
+                  onCheckedChange={(enabled) => setDraft({ ...draft, enabled })}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setDraft(null)}>
+              取消
+            </Button>
+            <Button disabled={saving} onClick={() => void save()}>
+              {saving ? '保存中…' : '保存规则'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
-function AlertStatusBadge({ status }: { status: InstanceAlert['status'] }) {
-  return (
-    <Badge variant={status === 'open' ? 'destructive' : 'outline'}>
-      {status === 'open' ? '预警中' : '已恢复'}
-    </Badge>
-  )
-}
-
-function DeliveryStatusBadge({ status }: { status: string }) {
-  const labels: Record<string, string> = {
-    pending: '等待发送',
-    retrying: '正在重试',
-    sent: '已发送',
-    cancelled: '已取消',
-  }
-  let variant: 'default' | 'destructive' | 'secondary' = 'secondary'
-  if (status === 'sent') variant = 'default'
-  if (status === 'retrying') variant = 'destructive'
-  return <Badge variant={variant}>{labels[status] ?? '未发送'}</Badge>
-}
-
-function Detail({
+function Field({
   label,
-  className,
+  className = '',
   children,
 }: {
   label: string
@@ -502,22 +427,45 @@ function Detail({
   children: ReactNode
 }) {
   return (
-    <div className={className}>
-      <div className='text-muted-foreground text-xs'>{label}</div>
-      <div className='mt-1 text-sm break-words tabular-nums'>{children}</div>
+    <div className={`min-w-0 space-y-2 ${className}`}>
+      <Label>{label}</Label>
+      {children}
     </div>
   )
 }
 
-function alertTypeLabel(value: InstanceAlert['alert_type']) {
-  return value === 'credential' ? '凭据异常' : '实例不可用'
+function TypeCheckbox({
+  label,
+  value,
+  draft,
+  setDraft,
+}: {
+  label: string
+  value: 'availability' | 'credential'
+  draft: InstanceAlertRuleInput
+  setDraft: (value: InstanceAlertRuleInput) => void
+}) {
+  const checked = draft.alert_types.includes(value)
+  return (
+    <label className='flex min-h-11 items-center gap-2'>
+      <Checkbox
+        checked={checked}
+        onCheckedChange={(next) =>
+          setDraft({
+            ...draft,
+            alert_types: next
+              ? [...draft.alert_types, value]
+              : draft.alert_types.filter((item) => item !== value),
+          })
+        }
+      />
+      {label}
+    </label>
+  )
 }
 
-function formatTime(timestamp: number) {
-  return timestamp > 0 ? dateTime.format(new Date(timestamp * 1000)) : '—'
-}
-
-function localDateTimeUnix(value: string) {
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : 0
+function alertTypeText(values: string[]) {
+  return values
+    .map((value) => (value === 'credential' ? '凭据异常' : '实例不可用'))
+    .join('、')
 }

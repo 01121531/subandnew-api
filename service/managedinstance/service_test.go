@@ -29,6 +29,7 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceAudit{},
 		&model.ManagedInstanceSnapshot{}, &model.ManagedInstanceAlert{},
+		&model.ManagedInstanceAlertRule{}, &model.ManagedInstanceAlertRuleInstance{}, &model.ManagedInstanceAlertAssignment{},
 		&model.BillingAlertEvent{},
 		&model.SMTPSetting{},
 		&model.ManagedRPMHistory{},

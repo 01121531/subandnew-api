@@ -67,13 +67,18 @@ func upsertInstanceAlertEvent(tx *gorm.DB, instance *model.ManagedInstance, aler
 	if alert.AlertType == model.ManagedInstanceAlertTypeCredential {
 		thresholdName = "实例凭据异常"
 	}
+	ruleName := alert.RuleName
+	if ruleName == "" {
+		ruleName = "实例巡检"
+	}
 	event := &model.BillingAlertEvent{
 		EventKey:       fmt.Sprintf("instance-alert:%d:%s", alert.Id, eventPhase),
 		EventType:      eventType,
 		SourceType:     model.AlertSourceInstance,
 		SourceRecordID: alert.Id,
 		InstanceID:     alert.InstanceId,
-		RuleName:       "实例巡检",
+		RuleID:         alert.RuleID,
+		RuleName:       ruleName,
 		InstanceName:   instance.Name,
 		InstanceKind:   instance.Kind,
 		ThresholdName:  thresholdName,

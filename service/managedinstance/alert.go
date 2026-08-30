@@ -2,6 +2,7 @@ package managedinstance
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/01121531/subandnew-api/model"
 	"gorm.io/gorm"
@@ -59,26 +60,41 @@ func ListAlerts(filter AlertListFilter) (*AlertListResult, error) {
 }
 
 func reconcileProbeFailureAlert(tx *gorm.DB, instance *model.ManagedInstance, status string, errorCode string, checkedAt int64, nextFailures int) error {
+	policy, err := activePolicy(tx, instance.Id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	alertType := model.ManagedInstanceAlertTypeAvailability
-	thresholdReached := nextFailures >= managedInstanceAlertFailureThreshold(tx, instance)
+	thresholdReached := nextFailures >= policy.FailureThreshold
 	if status == model.ManagedInstanceStatusAuthFailed {
 		alertType = model.ManagedInstanceAlertTypeCredential
 		thresholdReached = true
 	}
-	if !thresholdReached {
+	if !policy.AlertTypes[alertType] || !thresholdReached {
 		return nil
 	}
 	var alert model.ManagedInstanceAlert
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("instance_id = ? AND alert_type = ? AND status = ?", instance.Id, alertType, model.ManagedInstanceAlertStatusOpen).
 		Order("id desc").First(&alert).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		emailStatus := model.ManagedInstanceAlertEmailCancelled
+		nextRetryAt := int64(0)
+		if policy.NotificationEnabled {
+			emailStatus = model.ManagedInstanceAlertEmailPending
+			nextRetryAt = checkedAt
+		}
 		alert = model.ManagedInstanceAlert{
 			InstanceId: instance.Id, AlertType: alertType, Status: model.ManagedInstanceAlertStatusOpen,
-			ErrorCode: errorCode, Occurrences: 1, FirstSeenAt: checkedAt, LastSeenAt: checkedAt,
+			RuleID: policy.RuleID, RuleName: policy.RuleName, ErrorCode: errorCode, Occurrences: 1,
+			FirstSeenAt: checkedAt, LastSeenAt: checkedAt, EmailStatus: emailStatus,
+			EmailRecipients: strings.Join(policy.Recipients, ","), EmailNextRetryAt: nextRetryAt,
 		}
 		if err := tx.Create(&alert).Error; err != nil {
 			return err
@@ -89,6 +105,9 @@ func reconcileProbeFailureAlert(tx *gorm.DB, instance *model.ManagedInstance, st
 		return writeAuditOutcome(tx, instance.Id, 0, "alert_open", "succeeded", map[string]any{
 			"alert_id": alert.Id, "alert_type": alertType, "error_code": errorCode,
 		})
+	}
+	if alert.RuleID != policy.RuleID {
+		return nil
 	}
 	if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ?", alert.Id).Updates(map[string]any{
 		"error_code": errorCode, "occurrences": gorm.Expr("occurrences + 1"), "last_seen_at": checkedAt, "updated_at": checkedAt,
@@ -128,7 +147,7 @@ func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt 
 			updates["email_next_retry_at"] = 0
 			updates["recovery_email_status"] = model.ManagedInstanceAlertEmailCancelled
 			updates["recovery_email_next_retry_at"] = 0
-		} else if alert.RecoveryEmailStatus != model.ManagedInstanceAlertEmailSent {
+		} else if alert.RecoveryEmailStatus != model.ManagedInstanceAlertEmailSent && alertRuleStillActive(tx, &alert) {
 			updates["recovery_email_status"] = model.ManagedInstanceAlertEmailPending
 			updates["recovery_email_error"] = ""
 			updates["recovery_email_next_retry_at"] = checkedAt
@@ -149,4 +168,16 @@ func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt 
 		}
 	}
 	return nil
+}
+
+func alertRuleStillActive(tx *gorm.DB, alert *model.ManagedInstanceAlert) bool {
+	if alert == nil || alert.RuleID <= 0 {
+		return false
+	}
+	var assignment model.ManagedInstanceAlertAssignment
+	if err := tx.Where("instance_id = ? AND rule_id = ?", alert.InstanceId, alert.RuleID).First(&assignment).Error; err != nil {
+		return false
+	}
+	var count int64
+	return tx.Model(&model.ManagedInstanceAlertRule{}).Where("id = ? AND enabled = ?", alert.RuleID, true).Count(&count).Error == nil && count == 1
 }

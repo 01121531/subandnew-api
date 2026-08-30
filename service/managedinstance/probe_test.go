@@ -500,9 +500,14 @@ func TestResolveProbeAlertQueuesRecoveryOnlyAfterFailureEmailSent(t *testing.T) 
 	db := newManagedInstanceTestDB(t)
 	instance := &model.ManagedInstance{Name: "recover", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://recover.example.com"}
 	require.NoError(t, db.Create(instance).Error)
+	rule, err := CreateAlertRule(AlertRuleInput{Name: "recover-rule", Enabled: true,
+		AlertTypes:           []string{model.ManagedInstanceAlertTypeAvailability, model.ManagedInstanceAlertTypeCredential},
+		CheckIntervalSeconds: 60, FailureThreshold: 3, InstanceIDs: []int64{instance.Id}}, 1)
+	require.NoError(t, err)
 
 	sent := &model.ManagedInstanceAlert{
 		InstanceId: instance.Id, AlertType: model.ManagedInstanceAlertTypeAvailability,
+		RuleID: rule.ID, RuleName: rule.Name,
 		Status: model.ManagedInstanceAlertStatusOpen, ErrorCode: "connector_failed",
 		EmailStatus: model.ManagedInstanceAlertEmailSent,
 	}
@@ -561,6 +566,10 @@ func createProbeInstance(t *testing.T, baseURL string, kind string, credential C
 		Name: "probe-" + kind, Kind: kind, BaseURL: baseURL, Environment: "development",
 		ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true, Credential: &credential, ActorID: 1,
 	})
+	require.NoError(t, err)
+	_, err = CreateAlertRule(AlertRuleInput{Name: "probe-rule-" + fmt.Sprint(instance.Id), Enabled: true,
+		AlertTypes:           []string{model.ManagedInstanceAlertTypeAvailability, model.ManagedInstanceAlertTypeCredential},
+		CheckIntervalSeconds: 60, FailureThreshold: 3, InstanceIDs: []int64{instance.Id}}, 1)
 	require.NoError(t, err)
 	return instance
 }
