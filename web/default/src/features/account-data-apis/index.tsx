@@ -1544,10 +1544,29 @@ function AccessLogDialog(props: {
 
 function AccessLogRow({ log }: { log: AccountDataAPIAccessLog }) {
   return (
-    <div className='grid gap-2 rounded-md border p-3 text-sm sm:grid-cols-4'>
-      <Detail label='时间' value={formatTime(log.created_at)} />
-      <Detail label='IP' value={log.ip_address} />
+    <div className='grid grid-cols-2 gap-3 rounded-md border p-3 text-sm lg:grid-cols-4'>
+      <div className='min-w-0'>
+        <div className='text-muted-foreground text-xs'>时间</div>
+        <div className='mt-1 text-sm whitespace-nowrap tabular-nums'>
+          {formatTime(log.created_at)}
+        </div>
+      </div>
       <Detail label='状态' value={String(log.status_code)} />
+      <div className='col-span-2 min-w-0'>
+        <div className='text-muted-foreground text-xs'>IP</div>
+        <div className='bg-muted/40 mt-1 flex min-h-9 items-center gap-1 rounded-md px-2'>
+          <code className='min-w-0 flex-1 text-xs leading-5 break-all'>
+            {log.ip_address || '—'}
+          </code>
+          {log.ip_address && (
+            <CopyButton
+              value={log.ip_address}
+              className='size-9'
+              tooltip='复制 IP'
+            />
+          )}
+        </div>
+      </div>
       <Detail label='返回条数' value={String(log.result_count)} />
       <Detail label='耗时' value={`${log.duration_ms} ms`} />
       <Detail
