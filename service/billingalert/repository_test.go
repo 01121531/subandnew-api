@@ -20,6 +20,7 @@ func setupRepositoryTestDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&model.ManagedInstance{},
+		&model.ManagedInstanceAlert{},
 		&model.BillingFilterTemplate{},
 		&model.BillingFilterTemplateVersion{},
 		&model.BillingAlertRule{},

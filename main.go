@@ -28,6 +28,7 @@ import (
 	assistantworker "github.com/01121531/subandnew-api/service/assistant/worker"
 	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/billingalert"
+	"github.com/01121531/subandnew-api/service/managedinstance"
 	_ "github.com/01121531/subandnew-api/setting/performance_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -76,6 +77,14 @@ func main() {
 		}
 		if repair.Invalid > 0 {
 			common.SysError(fmt.Sprintf("billing alert discount repair found %d invalid values", repair.Invalid))
+		}
+		alertRepair, alertRepairErr := managedinstance.RepairAlertEventProjections()
+		if alertRepairErr != nil {
+			common.FatalLog("failed to repair managed instance alert events: " + alertRepairErr.Error())
+			return
+		}
+		if alertRepair.Processed > 0 {
+			common.SysLog(fmt.Sprintf("managed instance alert event repair completed: processed=%d", alertRepair.Processed))
 		}
 	}
 

@@ -24,11 +24,22 @@ type AlertRecordFilter struct {
 
 type AlertRecordView struct {
 	model.BillingAlertEvent
-	RuleName      string                        `json:"rule_name"`
-	InstanceName  string                        `json:"instance_name"`
-	InstanceKind  string                        `json:"instance_kind"`
-	ThresholdName string                        `json:"threshold_name"`
-	Deliveries    []*model.BillingEmailDelivery `json:"deliveries"`
+	RuleName      string               `json:"rule_name"`
+	InstanceName  string               `json:"instance_name"`
+	InstanceKind  string               `json:"instance_kind"`
+	ThresholdName string               `json:"threshold_name"`
+	Deliveries    []*AlertDeliveryView `json:"deliveries"`
+}
+
+type AlertDeliveryView struct {
+	ID          int64  `json:"id"`
+	Phase       string `json:"phase,omitempty"`
+	Recipient   string `json:"recipient"`
+	Status      string `json:"status"`
+	Attempts    int    `json:"attempts"`
+	LastError   string `json:"last_error"`
+	NextRetryAt int64  `json:"next_retry_at"`
+	SentAt      int64  `json:"sent_at"`
 }
 
 type AlertRecordPage struct {
@@ -121,7 +132,7 @@ func alertRecordView(event *model.BillingAlertEvent) (*AlertRecordView, error) {
 		if err := model.DB.Select("name").First(&rule, event.RuleID).Error; err == nil {
 			view.RuleName = rule.Name
 		}
-	} else {
+	} else if event.SourceType == model.AlertSourceBilling {
 		var rule model.BillingAlertRule
 		if err := model.DB.Select("name").First(&rule, event.RuleID).Error; err == nil {
 			view.RuleName = rule.Name
@@ -132,14 +143,73 @@ func alertRecordView(event *model.BillingAlertEvent) (*AlertRecordView, error) {
 		view.InstanceName = instance.Name
 		view.InstanceKind = instance.Kind
 	}
-	if event.SourceType != model.AlertSourceMetric && event.ThresholdID > 0 {
+	if event.SourceType == model.AlertSourceBilling && event.ThresholdID > 0 {
 		var threshold model.BillingAlertThreshold
 		if err := model.DB.Select("name").First(&threshold, event.ThresholdID).Error; err == nil {
 			view.ThresholdName = threshold.Name
 		}
 	}
-	if err := model.DB.Where("event_id = ?", event.ID).Order("id ASC").Find(&view.Deliveries).Error; err != nil {
-		return nil, err
+	if event.SourceType == model.AlertSourceInstance {
+		view.Deliveries = instanceAlertDeliveries(event)
+	} else {
+		var deliveries []*model.BillingEmailDelivery
+		if err := model.DB.Where("event_id = ?", event.ID).Order("id ASC").Find(&deliveries).Error; err != nil {
+			return nil, err
+		}
+		view.Deliveries = make([]*AlertDeliveryView, 0, len(deliveries))
+		for _, delivery := range deliveries {
+			view.Deliveries = append(view.Deliveries, &AlertDeliveryView{
+				ID: delivery.ID, Recipient: delivery.Recipient, Status: delivery.Status,
+				Attempts: delivery.Attempts, LastError: delivery.LastError,
+				NextRetryAt: delivery.NextRetryAt, SentAt: delivery.SentAt,
+			})
+		}
 	}
 	return view, nil
+}
+
+func instanceAlertDeliveries(event *model.BillingAlertEvent) []*AlertDeliveryView {
+	if event.SourceRecordID <= 0 {
+		return []*AlertDeliveryView{}
+	}
+	var alert model.ManagedInstanceAlert
+	if err := model.DB.First(&alert, event.SourceRecordID).Error; err != nil {
+		return []*AlertDeliveryView{}
+	}
+	phase := "failure"
+	recipients := alert.EmailRecipients
+	status := alert.EmailStatus
+	attempts := alert.EmailAttempts
+	lastError := alert.EmailError
+	nextRetryAt := alert.EmailNextRetryAt
+	sentAt := alert.EmailSentAt
+	if event.EventType == model.InstanceAlertEventRecovered {
+		phase = "recovery"
+		recipients = alert.RecoveryEmailRecipients
+		status = alert.RecoveryEmailStatus
+		attempts = alert.RecoveryEmailAttempts
+		lastError = alert.RecoveryEmailError
+		nextRetryAt = alert.RecoveryEmailNextRetryAt
+		sentAt = alert.RecoveryEmailSentAt
+	}
+	values := strings.Split(recipients, ",")
+	result := make([]*AlertDeliveryView, 0, len(values))
+	for index, recipient := range values {
+		recipient = strings.TrimSpace(recipient)
+		if recipient == "" {
+			continue
+		}
+		result = append(result, &AlertDeliveryView{
+			ID: -(event.ID*1000 + int64(index) + 1), Phase: phase, Recipient: recipient,
+			Status: status, Attempts: attempts, LastError: lastError,
+			NextRetryAt: nextRetryAt, SentAt: sentAt,
+		})
+	}
+	if len(result) == 0 && status != "" {
+		result = append(result, &AlertDeliveryView{
+			ID: -(event.ID*1000 + 1), Phase: phase, Status: status, Attempts: attempts,
+			LastError: lastError, NextRetryAt: nextRetryAt, SentAt: sentAt,
+		})
+	}
+	return result
 }

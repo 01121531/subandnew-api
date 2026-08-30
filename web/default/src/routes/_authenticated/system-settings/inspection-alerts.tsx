@@ -16,12 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
-
-import { InstanceAlertSettings } from '@/features/instance-alert-settings'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute(
   '/_authenticated/system-settings/inspection-alerts'
 )({
-  component: InstanceAlertSettings,
+  beforeLoad: () => {
+    throw redirect({
+      to: '/billing-alerts',
+      search: { tab: 'notifications' },
+      replace: true,
+    })
+  },
 })

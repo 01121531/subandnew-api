@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-import { MailCheck, Settings, Shield } from 'lucide-react'
+import { Settings, Shield } from 'lucide-react'
 
 import { getAuthSectionNavItems } from '@/features/system-settings/auth/section-registry.tsx'
 import { getSiteSectionNavItems } from '@/features/system-settings/site/section-registry.tsx'
@@ -46,11 +46,6 @@ function getSystemSettingsNavGroups(t: TFunction): NavGroup[] {
           title: t('Authentication'),
           icon: Shield,
           items: getAuthSectionNavItems(t),
-        },
-        {
-          title: '巡检通知',
-          url: '/system-settings/inspection-alerts',
-          icon: MailCheck,
         },
       ],
     },

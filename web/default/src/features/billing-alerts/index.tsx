@@ -17,6 +17,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ShieldAlert,
   SlidersHorizontal,
   Trash2,
 } from 'lucide-react'
@@ -95,6 +96,7 @@ import {
   discountMultiplierToPercent,
   discountPercentToMultiplier,
 } from './discount'
+import { InstanceAlerts } from './instance-alerts'
 import { MetricAlertRules } from './metric-rules'
 import { BillingAlertRecords } from './records'
 import { SMTPSettings } from './smtp-settings'
@@ -1291,9 +1293,28 @@ function FormSection({
   )
 }
 
-export function BillingAlerts() {
+export type BillingAlertTab =
+  | 'rules'
+  | 'metrics'
+  | 'instance-alerts'
+  | 'records'
+  | 'templates'
+  | 'exchange'
+  | 'notifications'
+
+export function BillingAlerts({
+  activeTab = 'rules',
+  onTabChange,
+}: {
+  activeTab?: BillingAlertTab
+  onTabChange?: (tab: BillingAlertTab) => void
+}) {
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = user?.role === ROLE.SUPER_ADMIN
+  const visibleTab =
+    !isRoot && (activeTab === 'exchange' || activeTab === 'notifications')
+      ? 'rules'
+      : activeTab
   const [templateOpen, setTemplateOpen] = useState(false)
   const [ruleOpen, setRuleOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] =
@@ -1357,7 +1378,11 @@ export function BillingAlerts() {
       <SectionPageLayout.Title>预警任务</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='min-w-0'>
-          <Tabs defaultValue='rules' className='gap-5'>
+          <Tabs
+            value={visibleTab}
+            onValueChange={(value) => onTabChange?.(value as BillingAlertTab)}
+            className='gap-5'
+          >
             <TabsList
               variant='line'
               className='max-w-full justify-start overflow-x-auto'
@@ -1369,6 +1394,10 @@ export function BillingAlerts() {
               <TabsTrigger value='metrics'>
                 <Activity />
                 指标预警
+              </TabsTrigger>
+              <TabsTrigger value='instance-alerts'>
+                <ShieldAlert />
+                实例预警
               </TabsTrigger>
               <TabsTrigger value='records'>
                 <BellDot />
@@ -1385,7 +1414,7 @@ export function BillingAlerts() {
                 </TabsTrigger>
               )}
               {isRoot && (
-                <TabsTrigger value='smtp'>
+                <TabsTrigger value='notifications'>
                   <Mail />
                   通知设置
                 </TabsTrigger>
@@ -1641,6 +1670,9 @@ export function BillingAlerts() {
             <TabsContent value='metrics'>
               <MetricAlertRules instances={instances} isRoot={isRoot} />
             </TabsContent>
+            <TabsContent value='instance-alerts'>
+              <InstanceAlerts instances={instances} />
+            </TabsContent>
             <TabsContent value='records'>
               <BillingAlertRecords embedded />
             </TabsContent>
@@ -1833,7 +1865,7 @@ export function BillingAlerts() {
             <TabsContent value='exchange'>
               <ExchangeSettings />
             </TabsContent>
-            <TabsContent value='smtp'>
+            <TabsContent value='notifications'>
               <SMTPSettings />
             </TabsContent>
           </Tabs>

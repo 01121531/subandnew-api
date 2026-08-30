@@ -83,13 +83,22 @@ func reconcileProbeFailureAlert(tx *gorm.DB, instance *model.ManagedInstance, st
 		if err := tx.Create(&alert).Error; err != nil {
 			return err
 		}
+		if err := SyncAlertEvents(tx, instance, &alert); err != nil {
+			return err
+		}
 		return writeAuditOutcome(tx, instance.Id, 0, "alert_open", "succeeded", map[string]any{
 			"alert_id": alert.Id, "alert_type": alertType, "error_code": errorCode,
 		})
 	}
-	return tx.Model(&model.ManagedInstanceAlert{}).Where("id = ?", alert.Id).Updates(map[string]any{
+	if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ?", alert.Id).Updates(map[string]any{
 		"error_code": errorCode, "occurrences": gorm.Expr("occurrences + 1"), "last_seen_at": checkedAt, "updated_at": checkedAt,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	if err := tx.First(&alert, alert.Id).Error; err != nil {
+		return err
+	}
+	return SyncAlertEvents(tx, instance, &alert)
 }
 
 func managedInstanceAlertFailureThreshold(tx *gorm.DB, instance *model.ManagedInstance) int {
@@ -125,6 +134,12 @@ func resolveProbeAlerts(tx *gorm.DB, instance *model.ManagedInstance, checkedAt 
 			updates["recovery_email_next_retry_at"] = checkedAt
 		}
 		if err := tx.Model(&model.ManagedInstanceAlert{}).Where("id = ? AND status = ?", alert.Id, model.ManagedInstanceAlertStatusOpen).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&alert, alert.Id).Error; err != nil {
+			return err
+		}
+		if err := SyncAlertEvents(tx, instance, &alert); err != nil {
 			return err
 		}
 		if err := writeAuditOutcome(tx, instance.Id, 0, "alert_resolve", "succeeded", map[string]any{

@@ -454,6 +454,10 @@ func TestProbeAvailabilityAlertThresholdDeduplicatesAndResolves(t *testing.T) {
 	require.Equal(t, model.ManagedInstanceAlertStatusOpen, alert.Status)
 	require.Equal(t, model.ManagedInstanceAlertTypeAvailability, alert.AlertType)
 	require.Equal(t, 2, alert.Occurrences)
+	var failureEvents []model.BillingAlertEvent
+	require.NoError(t, db.Where("source_type = ? AND event_type = ?", model.AlertSourceInstance, model.InstanceAlertEventFailure).Find(&failureEvents).Error)
+	require.Len(t, failureEvents, 1)
+	require.Contains(t, failureEvents[0].ObservedValues, `"occurrences":2`)
 
 	healthy.Store(true)
 	_, err = Probe(context.Background(), instance.Id, 7)
@@ -461,6 +465,9 @@ func TestProbeAvailabilityAlertThresholdDeduplicatesAndResolves(t *testing.T) {
 	require.NoError(t, db.First(&alert, alert.Id).Error)
 	require.Equal(t, model.ManagedInstanceAlertStatusResolved, alert.Status)
 	require.NotZero(t, alert.ResolvedAt)
+	var recoveryEvents []model.BillingAlertEvent
+	require.NoError(t, db.Where("source_type = ? AND event_type = ?", model.AlertSourceInstance, model.InstanceAlertEventRecovered).Find(&recoveryEvents).Error)
+	require.Len(t, recoveryEvents, 1)
 
 	alerts, err := ListAlerts(AlertListFilter{InstanceID: instance.Id, Status: model.ManagedInstanceAlertStatusResolved})
 	require.NoError(t, err)

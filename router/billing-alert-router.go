@@ -39,6 +39,7 @@ func registerBillingAlertRoutes(api *gin.RouterGroup) {
 	billing.POST("/alert-rules/:id/evaluate", middleware.RootAuth(), controller.EvaluateBillingAlertRule)
 
 	billing.GET("/alert-records", middleware.RequirePermission(authz.BillingAlertView), controller.ListBillingAlertRecords)
+	billing.GET("/instance-alerts", middleware.RequirePermission(authz.BillingAlertView), controller.ListBillingInstanceAlerts)
 	billing.GET("/alert-records/:id", middleware.RequirePermission(authz.BillingAlertView), controller.GetBillingAlertRecord)
 	billing.POST("/alert-records/exports", middleware.RequirePermission(authz.BillingAlertView), controller.CreateBillingAlertRecordExport)
 	billing.GET("/alert-record-exports", middleware.RequirePermission(authz.BillingAlertView), controller.ListBillingAlertRecordExports)

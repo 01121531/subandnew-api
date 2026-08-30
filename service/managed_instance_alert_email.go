@@ -13,6 +13,7 @@ import (
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/billingalert"
+	"github.com/01121531/subandnew-api/service/managedinstance"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -143,9 +144,9 @@ func sendManagedInstanceAlertEmailPhase(ctx context.Context, alertID int64, phas
 		return nil
 	}
 	if alert.Status != model.ManagedInstanceAlertStatusOpen {
-		return model.DB.Model(&alert).Updates(map[string]any{
+		return updateManagedInstanceAlertProjection(alert.Id, map[string]any{
 			"email_status": model.ManagedInstanceAlertEmailCancelled, "email_next_retry_at": 0,
-		}).Error
+		})
 	}
 	var instance model.ManagedInstance
 	if err := model.DB.First(&instance, alert.InstanceId).Error; err != nil {
@@ -180,7 +181,13 @@ func sendManagedInstanceAlertEmailPhase(ctx context.Context, alertID int64, phas
 			updates["recovery_email_next_retry_at"] = now
 			scheduleRecovery = true
 		}
-		return tx.Model(&current).Updates(updates).Error
+		if err := tx.Model(&current).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&current, current.Id).Error; err != nil {
+			return err
+		}
+		return managedinstance.SyncAlertEvents(tx, &instance, &current)
 	})
 	if err == nil && scheduleRecovery {
 		notifySystemTaskRunner()
@@ -196,10 +203,10 @@ func sendManagedInstanceRecoveryEmail(ctx context.Context, alert *model.ManagedI
 		return nil
 	}
 	if alert.Status != model.ManagedInstanceAlertStatusResolved || alert.EmailStatus != model.ManagedInstanceAlertEmailSent {
-		return model.DB.Model(alert).Updates(map[string]any{
+		return updateManagedInstanceAlertProjection(alert.Id, map[string]any{
 			"recovery_email_status":        model.ManagedInstanceAlertEmailCancelled,
 			"recovery_email_next_retry_at": 0,
-		}).Error
+		})
 	}
 	var instance model.ManagedInstance
 	if err := model.DB.First(&instance, alert.InstanceId).Error; err != nil {
@@ -219,13 +226,13 @@ func sendManagedInstanceRecoveryEmail(ctx context.Context, alert *model.ManagedI
 		return recordManagedInstanceAlertEmailFailure(alert, managedInstanceAlertEmailPhaseRecovery, err)
 	}
 	now := common.GetTimestamp()
-	return model.DB.Model(alert).Updates(map[string]any{
+	return updateManagedInstanceAlertProjection(alert.Id, map[string]any{
 		"recovery_email_status":     model.ManagedInstanceAlertEmailSent,
 		"recovery_email_recipients": strings.Join(recipients, ","),
 		"recovery_email_attempts":   alert.RecoveryEmailAttempts + 1,
 		"recovery_email_error":      "", "recovery_email_sent_at": now,
 		"recovery_email_next_retry_at": 0, "updated_at": now,
-	}).Error
+	})
 }
 
 func recordManagedInstanceAlertEmailFailure(alert *model.ManagedInstanceAlert, phase string, deliveryErr error) error {
@@ -249,13 +256,29 @@ func recordManagedInstanceAlertEmailFailure(alert *model.ManagedInstanceAlert, p
 		delay = time.Hour
 	}
 	now := common.GetTimestamp()
-	if err := model.DB.Model(alert).Updates(map[string]any{
+	if err := updateManagedInstanceAlertProjection(alert.Id, map[string]any{
 		statusField: model.ManagedInstanceAlertEmailRetrying, attemptsField: attempts,
 		errorField: deliveryErr.Error(), nextRetryField: now + int64(delay/time.Second), "updated_at": now,
-	}).Error; err != nil {
+	}); err != nil {
 		return errors.Join(deliveryErr, err)
 	}
 	return deliveryErr
+}
+
+func updateManagedInstanceAlertProjection(alertID int64, updates map[string]any) error {
+	return model.DB.Transaction(func(tx *gorm.DB) error {
+		var alert model.ManagedInstanceAlert
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&alert, alertID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&alert).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&alert, alertID).Error; err != nil {
+			return err
+		}
+		return managedinstance.SyncAlertEvents(tx, nil, &alert)
+	})
 }
 
 func managedInstanceAlertEmailContent(instance *model.ManagedInstance, alert *model.ManagedInstanceAlert) (string, string, string) {

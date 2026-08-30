@@ -8,7 +8,7 @@ License, or (at your option) any later version.
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { BillingAlerts } from '@/features/billing-alerts'
+import { BillingAlerts, type BillingAlertTab } from '@/features/billing-alerts'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -17,6 +17,9 @@ import {
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/billing-alerts/')({
+  validateSearch: (search: Record<string, unknown>) => ({
+    tab: isBillingAlertTab(search.tab) ? search.tab : ('rules' as const),
+  }),
   beforeLoad: () => {
     const user = useAuthStore.getState().auth.user
     if (
@@ -29,5 +32,32 @@ export const Route = createFileRoute('/_authenticated/billing-alerts/')({
       throw redirect({ to: '/403' })
     }
   },
-  component: BillingAlerts,
+  component: BillingAlertsRoute,
 })
+
+const tabs = new Set<BillingAlertTab>([
+  'rules',
+  'metrics',
+  'instance-alerts',
+  'records',
+  'templates',
+  'exchange',
+  'notifications',
+])
+
+function isBillingAlertTab(value: unknown): value is BillingAlertTab {
+  return typeof value === 'string' && tabs.has(value as BillingAlertTab)
+}
+
+function BillingAlertsRoute() {
+  const { tab } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  return (
+    <BillingAlerts
+      activeTab={tab}
+      onTabChange={(nextTab) => {
+        void navigate({ search: { tab: nextTab }, replace: true })
+      }}
+    />
+  )
+}

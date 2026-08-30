@@ -192,6 +192,16 @@ func ListBillingAlertRecords(c *gin.Context) {
 	billingJSON(c, data, err)
 }
 
+func ListBillingInstanceAlerts(c *gin.Context) {
+	data, err := billingalert.ListInstanceAlerts(billingalert.InstanceAlertFilter{
+		Page: queryInt(c, "page", 1), PageSize: queryInt(c, "page_size", 20),
+		InstanceID: queryInt64(c, "instance_id"), Status: c.Query("status"),
+		AlertType: c.Query("alert_type"), DeliveryStatus: c.Query("delivery_status"),
+		Search: c.Query("search"), StartTime: queryInt64(c, "start_time"), EndTime: queryInt64(c, "end_time"),
+	})
+	billingJSON(c, data, err)
+}
+
 func GetBillingAlertRecord(c *gin.Context) {
 	id, ok := billingResourceID(c)
 	if !ok {

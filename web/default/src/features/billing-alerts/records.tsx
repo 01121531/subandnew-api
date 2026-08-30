@@ -89,6 +89,16 @@ const eventMeta: Record<string, { label: string; className: string }> = {
     className:
       'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300',
   },
+  instance_failure: {
+    label: '实例故障',
+    className:
+      'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300',
+  },
+  instance_recovered: {
+    label: '实例恢复',
+    className:
+      'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300',
+  },
 }
 
 function EventBadge({ type }: { type: string }) {
@@ -103,6 +113,7 @@ function EventBadge({ type }: { type: string }) {
 function eventRowClass(type: string) {
   if (
     type === 'monitor_failure' ||
+    type === 'instance_failure' ||
     type === 'metric_triggered' ||
     type === 'metric_monitor_failure'
   ) {
@@ -110,6 +121,7 @@ function eventRowClass(type: string) {
   }
   if (
     type === 'monitor_recovery' ||
+    type === 'instance_recovered' ||
     type === 'metric_recovered' ||
     type === 'metric_monitor_recovery'
   ) {
@@ -170,6 +182,103 @@ function metricConditionSummary(item: AlertRecord) {
   } catch {
     return item.metric_key || '指标条件'
   }
+}
+
+function instanceValueSummary(item: AlertRecord) {
+  const values = parseObject(item.observed_values)
+  const occurrences = Number(values.occurrences ?? 0)
+  const status = values.status === 'resolved' ? '已恢复' : '预警中'
+  return `${status} · 出现 ${occurrences.toLocaleString()} 次`
+}
+
+function conditionSummary(item: AlertRecord) {
+  if (item.source_type === 'metric') return metricConditionSummary(item)
+  if (item.source_type === 'instance') {
+    return item.threshold_name === 'credential' ? '凭据异常' : '实例不可用'
+  }
+  return `${item.threshold_name || '—'} · ${item.currency} ${item.threshold}`
+}
+
+function observedSummary(item: AlertRecord) {
+  if (item.source_type === 'metric') {
+    return metricValueSummary(item) || item.error_code || '—'
+  }
+  if (item.source_type === 'instance') {
+    return `${instanceValueSummary(item)}${item.error_code ? ` · ${item.error_code}` : ''}`
+  }
+  return `$${item.usd_total || '—'} · ¥${item.cny_total || '—'}`
+}
+
+function AlertScopeSummary({ item }: { item: AlertRecord }) {
+  if (item.source_type === 'metric') {
+    return (
+      <>
+        <div>
+          {item.scope_mode === 'aggregate' ? '汇总监控' : '实例独立监控'}
+        </div>
+        <div className='text-muted-foreground'>
+          {item.metric_key || '多指标'}
+        </div>
+      </>
+    )
+  }
+  if (item.source_type === 'instance') {
+    return (
+      <>
+        <div>后台巡检</div>
+        <div className='text-muted-foreground'>
+          {item.instance_kind || '未知平台'}
+        </div>
+      </>
+    )
+  }
+  return (
+    <>
+      <div>{item.exchange_rate || '—'}</div>
+      <div className='text-muted-foreground'>
+        折扣 {formatDiscountPercent(item.discount_rate)}
+      </div>
+    </>
+  )
+}
+
+function AlertRecordDetails({ item }: { item: AlertRecord }) {
+  if (item.source_type === 'metric') {
+    return (
+      <>
+        <Detail label='监控范围'>
+          {item.scope_mode === 'aggregate' ? '所选实例汇总' : '每个实例独立'}
+        </Detail>
+        <Detail label='触发条件' className='sm:col-span-2'>
+          {metricConditionSummary(item)}
+        </Detail>
+        <Detail label='观测值' className='sm:col-span-2'>
+          {metricValueSummary(item) || '—'}
+        </Detail>
+      </>
+    )
+  }
+  if (item.source_type === 'instance') {
+    return (
+      <>
+        <Detail label='故障类型'>{conditionSummary(item)}</Detail>
+        <Detail label='生命周期状态'>{instanceValueSummary(item)}</Detail>
+      </>
+    )
+  }
+  return (
+    <>
+      <Detail label='触发档位'>
+        {item.threshold_name || '—'} {item.currency} {item.threshold}
+      </Detail>
+      <Detail label='美元消耗'>${item.usd_total || '—'}</Detail>
+      <Detail label='人民币账单'>¥{item.cny_total || '—'}</Detail>
+      <Detail label='折扣比例'>
+        {formatDiscountPercent(item.discount_rate)}
+      </Detail>
+      <Detail label='USD/CNY 汇率'>{item.exchange_rate || '—'}</Detail>
+    </>
+  )
 }
 
 function deliveryVariant(
@@ -267,6 +376,7 @@ export function BillingAlertRecords({
           <NativeSelectOption value=''>全部来源</NativeSelectOption>
           <NativeSelectOption value='billing'>账单预警</NativeSelectOption>
           <NativeSelectOption value='metric'>指标预警</NativeSelectOption>
+          <NativeSelectOption value='instance'>实例预警</NativeSelectOption>
         </NativeSelect>
         <NativeSelect
           value={eventType}
@@ -294,6 +404,12 @@ export function BillingAlertRecords({
           </NativeSelectOption>
           <NativeSelectOption value='metric_monitor_recovery'>
             指标监控恢复
+          </NativeSelectOption>
+          <NativeSelectOption value='instance_failure'>
+            实例故障
+          </NativeSelectOption>
+          <NativeSelectOption value='instance_recovered'>
+            实例恢复
           </NativeSelectOption>
         </NativeSelect>
         <div className='relative'>
@@ -352,40 +468,13 @@ export function BillingAlertRecords({
             <AccordionContent className='px-3 pb-4'>
               <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
                 <MobileAlertDetail label='触发条件'>
-                  {item.source_type === 'metric' ? (
-                    metricConditionSummary(item)
-                  ) : (
-                    <>
-                      {item.threshold_name || '—'} · {item.currency}{' '}
-                      {item.threshold}
-                    </>
-                  )}
+                  {conditionSummary(item)}
                 </MobileAlertDetail>
                 <MobileAlertDetail label='观测结果'>
-                  {item.source_type === 'metric' ? (
-                    metricValueSummary(item) || item.error_code || '—'
-                  ) : (
-                    <>
-                      ${item.usd_total || '—'} · ¥{item.cny_total || '—'}
-                    </>
-                  )}
+                  {observedSummary(item)}
                 </MobileAlertDetail>
                 <MobileAlertDetail label='范围 / 换算'>
-                  {item.source_type === 'metric' ? (
-                    <>
-                      {item.scope_mode === 'aggregate'
-                        ? '汇总监控'
-                        : '实例独立监控'}
-                      <span className='text-muted-foreground mt-1 block text-xs'>
-                        {item.metric_key || '多指标'}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      汇率 {item.exchange_rate || '—'} · 折扣{' '}
-                      {formatDiscountPercent(item.discount_rate)}
-                    </>
-                  )}
+                  <AlertScopeSummary item={item} />
                 </MobileAlertDetail>
                 <MobileAlertDetail label='邮件'>
                   <div className='flex flex-wrap gap-1'>
@@ -449,53 +538,17 @@ export function BillingAlertRecords({
                   </div>
                 </TableCell>
                 <TableCell>
-                  {item.source_type === 'metric' ? (
-                    <div className='max-w-72 text-sm break-words'>
-                      {metricConditionSummary(item)}
-                    </div>
-                  ) : (
-                    <>
-                      <div>{item.threshold_name || '—'}</div>
-                      <div className='text-muted-foreground text-xs tabular-nums'>
-                        {item.currency && `${item.currency} ${item.threshold}`}
-                      </div>
-                    </>
-                  )}
+                  <div className='max-w-72 text-sm break-words'>
+                    {conditionSummary(item)}
+                  </div>
                 </TableCell>
                 <TableCell className='tabular-nums'>
-                  {item.source_type === 'metric' ? (
-                    <div className='max-w-64 text-sm break-words'>
-                      {metricValueSummary(item) || item.error_code || '—'}
-                    </div>
-                  ) : (
-                    <>
-                      <div>${item.usd_total || '—'}</div>
-                      <div className='text-muted-foreground text-xs'>
-                        ¥{item.cny_total || '—'}
-                      </div>
-                    </>
-                  )}
+                  <div className='max-w-64 text-sm break-words'>
+                    {observedSummary(item)}
+                  </div>
                 </TableCell>
                 <TableCell className='text-xs tabular-nums'>
-                  {item.source_type === 'metric' ? (
-                    <>
-                      <div>
-                        {item.scope_mode === 'aggregate'
-                          ? '汇总监控'
-                          : '实例独立监控'}
-                      </div>
-                      <div className='text-muted-foreground'>
-                        {item.metric_key || '多指标'}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div>{item.exchange_rate || '—'}</div>
-                      <div className='text-muted-foreground'>
-                        折扣 {formatDiscountPercent(item.discount_rate)}
-                      </div>
-                    </>
-                  )}
+                  <AlertScopeSummary item={item} />
                 </TableCell>
                 <TableCell>
                   <div className='flex flex-wrap gap-1'>
@@ -667,38 +720,7 @@ export function BillingAlertRecords({
               <Detail label='事件'>
                 <EventBadge type={selected.event_type} />
               </Detail>
-              {selected.source_type === 'metric' ? (
-                <>
-                  <Detail label='监控范围'>
-                    {selected.scope_mode === 'aggregate'
-                      ? '所选实例汇总'
-                      : '每个实例独立'}
-                  </Detail>
-                  <Detail label='触发条件' className='sm:col-span-2'>
-                    {metricConditionSummary(selected)}
-                  </Detail>
-                  <Detail label='观测值' className='sm:col-span-2'>
-                    {metricValueSummary(selected) || '—'}
-                  </Detail>
-                </>
-              ) : (
-                <>
-                  <Detail label='触发档位'>
-                    {selected.threshold_name || '—'} {selected.currency}{' '}
-                    {selected.threshold}
-                  </Detail>
-                  <Detail label='美元消耗'>${selected.usd_total || '—'}</Detail>
-                  <Detail label='人民币账单'>
-                    ¥{selected.cny_total || '—'}
-                  </Detail>
-                  <Detail label='折扣比例'>
-                    {formatDiscountPercent(selected.discount_rate)}
-                  </Detail>
-                  <Detail label='USD/CNY 汇率'>
-                    {selected.exchange_rate || '—'}
-                  </Detail>
-                </>
-              )}
+              <AlertRecordDetails item={selected} />
               <Detail label='收件人' className='sm:col-span-2'>
                 {selected.deliveries.map((item) => (
                   <div

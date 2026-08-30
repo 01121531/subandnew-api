@@ -13,13 +13,16 @@ const (
 	BillingAlertEventFailure   = "monitor_failure"
 	BillingAlertEventRecovery  = "monitor_recovery"
 
-	AlertSourceBilling = "billing"
-	AlertSourceMetric  = "metric"
+	AlertSourceBilling  = "billing"
+	AlertSourceMetric   = "metric"
+	AlertSourceInstance = "instance"
 
 	MetricAlertEventTriggered       = "metric_triggered"
 	MetricAlertEventRecovered       = "metric_recovered"
 	MetricAlertEventMonitorFailure  = "metric_monitor_failure"
 	MetricAlertEventMonitorRecovery = "metric_monitor_recovery"
+	InstanceAlertEventFailure       = "instance_failure"
+	InstanceAlertEventRecovered     = "instance_recovered"
 )
 
 type MetricAlertRule struct {
@@ -222,6 +225,7 @@ type BillingAlertEvent struct {
 	EventKey             string `json:"event_key" gorm:"type:varchar(192);not null;uniqueIndex"`
 	EventType            string `json:"event_type" gorm:"type:varchar(32);not null;index"`
 	SourceType           string `json:"source_type" gorm:"type:varchar(16);not null;default:'billing';index"`
+	SourceRecordID       int64  `json:"source_record_id" gorm:"not null;default:0;index"`
 	RuleID               int64  `json:"rule_id" gorm:"not null;index"`
 	InstanceID           int64  `json:"instance_id" gorm:"not null;index"`
 	CycleID              int64  `json:"cycle_id" gorm:"not null;default:0;index"`
