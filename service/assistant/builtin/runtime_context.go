@@ -26,7 +26,7 @@ type runtimeContextOutput struct {
 func registerRuntimeContext(registry *tool.Registry, db *gorm.DB) error {
 	return tool.Register(registry, tool.ToolSpec{
 		Name: "get_runtime_context", Version: "v1",
-		Description: "返回当前中国标准时间和当前身份的默认实例解析结果。仅在问题依赖现在、今天、昨天、上周等相对时间，或需要解释默认实例回退时调用。",
+		Description: "返回当前中国标准时间和当前身份的默认实例解析结果。仅在用户明确询问当前时间或要求解释默认实例回退时调用；指标工具的 today、yesterday 等固定周期无需调用。",
 		Permission:  tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
 		Risk:        tool.RiskLow, ReadOnly: true, Idempotent: true,
 		InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),

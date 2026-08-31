@@ -185,13 +185,7 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err := registerRuntimeContext(registry, db); err != nil {
 		return nil, err
 	}
-	if err := registerDashboardSummary(registry, db); err != nil {
-		return nil, err
-	}
-	if err := registerRealtimeMetrics(registry, db); err != nil {
-		return nil, err
-	}
-	if err := registerMetricHistory(registry, db); err != nil {
+	if err := registerQueryMetrics(registry, db); err != nil {
 		return nil, err
 	}
 	if err := registerManagedAccountQuery(registry, db); err != nil {

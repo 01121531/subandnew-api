@@ -93,6 +93,42 @@ func TestRuntimeContextReturnsShanghaiTimeAndEffectiveDefault(t *testing.T) {
 	require.Equal(t, 8*60*60, offset)
 }
 
+func TestRegistryExposesOnlyUnifiedMetricTool(t *testing.T) {
+	db, _, _, _ := newBuiltinTestContext(t)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	names := make([]string, 0)
+	for _, spec := range registry.List() {
+		names = append(names, spec.Name)
+	}
+	require.Contains(t, names, "query_metrics")
+	require.NotContains(t, names, "get_dashboard_summary")
+	require.NotContains(t, names, "get_realtime_metrics")
+	require.NotContains(t, names, "get_metric_history")
+}
+
+func TestQueryMetricsValidatesPeriodSpecificArguments(t *testing.T) {
+	require.NoError(t, (queryMetricsInput{Metrics: []string{"cost"}, Period: "today"}).Validate())
+	require.NoError(t, (queryMetricsInput{Metrics: []string{"rpm"}, Period: "point", PointAt: "2026-08-31 10:00"}).Validate())
+	require.Error(t, (queryMetricsInput{Metrics: []string{"cost"}, Period: "today", StartAt: "2026-08-31"}).Validate())
+	require.Error(t, (queryMetricsInput{Metrics: []string{"rpm"}, Period: "realtime", Mode: "series"}).Validate())
+	require.Error(t, (queryMetricsInput{Metrics: []string{"cost"}, Period: "custom", StartAt: "2026-08-01"}).Validate())
+	require.Error(t, (queryMetricsInput{Metrics: []string{"unknown"}, Period: "today"}).Validate())
+}
+
+func TestQueryMetricsFixedPeriodsResolveInShanghai(t *testing.T) {
+	now := time.Date(2026, 8, 31, 10, 30, 0, 0, assistantLocation)
+	window, _, err := normalizeQueryMetricsRange(queryMetricsInput{Period: "today"}, now)
+	require.NoError(t, err)
+	require.Equal(t, "2026-08-31T00:00:00+08:00", window.StartAt)
+	require.Equal(t, "2026-08-31T10:30:00+08:00", window.EndAt)
+
+	window, _, err = normalizeQueryMetricsRange(queryMetricsInput{Period: "yesterday"}, now)
+	require.NoError(t, err)
+	require.Equal(t, "2026-08-30T00:00:00+08:00", window.StartAt)
+	require.Equal(t, "2026-08-30T23:59:59+08:00", window.EndAt)
+}
+
 func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)
@@ -117,7 +153,7 @@ func TestListInstancesUsesDefaultAndAllowsExplicitAllScope(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
+func TestQueryMetricsDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
 	location := time.FixedZone(assistantTimezone, 8*60*60)
 	now := time.Date(2026, 8, 29, 1, 5, 58, 0, location).Unix()
@@ -133,8 +169,12 @@ func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 	registry, err := NewRegistry(db)
 	require.NoError(t, err)
 
-	result, err := registry.Execute(t.Context(), execution, "get_dashboard_summary", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`],"preset_days":7}`))
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["requests"],"period":"last_7_days","mode":"summary"}`))
 	require.NoError(t, err)
+	var output queryMetricsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, 123.0, *output.Metrics["requests"].Value)
+	require.Equal(t, "request", output.Metrics["requests"].Unit)
 	require.Equal(t, tool.FreshnessStale, result.Freshness.State)
 	require.Equal(t, now, result.Freshness.ObservedAt.Unix())
 	require.Equal(t, assistantTimezone, result.Freshness.Timezone)
@@ -142,23 +182,84 @@ func TestDashboardSummaryCarriesProvenanceAndFreshness(t *testing.T) {
 	require.Equal(t, "managed_dashboard_snapshots", result.Provenance[0].Source)
 	require.Equal(t, assistantTimezone, result.Provenance[0].ObservedAt.Location().String())
 	require.Contains(t, string(result.Data), `"observed_at":"2026-08-29T01:05:58+08:00"`)
-	require.Contains(t, string(result.Data), `"end_at":"2026-08-29T01:05:58+08:00"`)
 	require.NotContains(t, string(result.Data), jsonNumber(now))
 	require.NotContains(t, string(result.Data), `"start":`)
 	require.NotContains(t, string(result.Data), `"end":`)
 }
 
-func TestRealtimeMetricsDoesNotExposeAccountDetails(t *testing.T) {
+func TestQueryMetricsTodayCostUsesOneParameterizedQuery(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	now := time.Now().In(assistantLocation).Unix()
+	payload, err := json.Marshal(managedinstance.SummaryResult{
+		Cost: managedinstance.MetricSample{Value: floatPointer(42.125), Unit: "USD", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.ManagedDashboardSnapshot{
+		InstanceID: visible.Id, RangeKey: "preset-1", PresetDays: 1, ObservedAt: now, Payload: string(payload),
+		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{"metrics":["cost"],"period":"today","mode":"summary"}`))
+	require.NoError(t, err)
+	var output queryMetricsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	require.Equal(t, []int64{visible.Id}, output.InstanceIDs)
+	require.Equal(t, queryMetricsPeriodToday, output.Period)
+	require.Equal(t, 42.125, *output.Metrics["cost"].Value)
+	require.Equal(t, "USD", output.Metrics["cost"].Unit)
+	require.Equal(t, []string{"managed_dashboard_snapshots"}, output.Sources)
+	require.NotContains(t, string(result.Data), "requests")
+	require.NotContains(t, string(result.Data), "tokens")
+}
+
+func TestQueryMetricsKeepsDifferentCostUnitsSeparate(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	second := model.ManagedInstance{Name: "second", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://second.example", Environment: "production", Status: model.ManagedInstanceStatusHealthy}
+	require.NoError(t, db.Create(&second).Error)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: second.Id}).Error)
+	now := time.Now().In(assistantLocation).Unix()
+	for _, item := range []struct {
+		instanceID int64
+		value      float64
+		unit       string
+	}{{visible.Id, 12.5, "USD"}, {second.Id, 600, "quota"}} {
+		payload, err := json.Marshal(managedinstance.SummaryResult{Cost: managedinstance.MetricSample{Value: floatPointer(item.value), Unit: item.unit, CollectionStatus: model.ManagedInstanceCollectionSucceeded}})
+		require.NoError(t, err)
+		require.NoError(t, db.Create(&model.ManagedDashboardSnapshot{
+			InstanceID: item.instanceID, RangeKey: "preset-1", PresetDays: 1, ObservedAt: now, Payload: string(payload),
+			LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+		}).Error)
+	}
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{"instance_scope":"all","metrics":["cost"],"period":"today"}`))
+	require.NoError(t, err)
+	var output queryMetricsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	cost := output.Metrics["cost"]
+	require.Nil(t, cost.Value)
+	require.Empty(t, cost.Unit)
+	require.Len(t, cost.Values, 2)
+	require.Equal(t, "USD", cost.Values[0].Unit)
+	require.Equal(t, 12.5, *cost.Values[0].Value)
+	require.Equal(t, "quota", cost.Values[1].Unit)
+	require.Equal(t, 600.0, *cost.Values[1].Value)
+}
+
+func TestQueryMetricsRealtimeDoesNotExposeUnrequestedAccountData(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
 	registry, err := NewRegistry(db)
 	require.NoError(t, err)
-	result, err := registry.Execute(t.Context(), execution, "get_realtime_metrics", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`]}`))
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["rpm"],"period":"realtime"}`))
 	require.NoError(t, err)
 	require.Equal(t, tool.FreshnessUnknown, result.Freshness.State)
-	require.NotContains(t, string(result.Data), `"accounts"`)
+	require.NotContains(t, string(result.Data), `"accounts_available"`)
+	require.NotContains(t, string(result.Data), `"accounts_total"`)
 }
 
-func TestMetricHistoryUsesDefaultInstanceAndShanghaiTime(t *testing.T) {
+func TestQueryMetricsPointUsesDefaultInstanceAndShanghaiTime(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
 	require.NoError(t, db.Model(&model.AssistantIdentity{}).Where("id = ?", execution.IdentityID).Update("default_instance_id", visible.Id).Error)
 	location := time.FixedZone(assistantTimezone, 8*60*60)
@@ -169,24 +270,24 @@ func TestMetricHistoryUsesDefaultInstanceAndShanghaiTime(t *testing.T) {
 	registry, err := NewRegistry(db)
 	require.NoError(t, err)
 
-	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
-		"metrics":["rpm","accounts_available"],"mode":"point","point_at":"2026-08-28 15:00:10","granularity":"minute"
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{
+		"metrics":["rpm","accounts_available"],"period":"point","mode":"point","point_at":"2026-08-28 15:00:10","granularity":"minute"
 	}`))
 	require.NoError(t, err)
-	var output metricHistoryOutput
+	var output queryMetricsOutput
 	require.NoError(t, json.Unmarshal(result.Data, &output))
 	require.Equal(t, []int64{visible.Id}, output.InstanceIDs)
-	require.Equal(t, assistantTimezone, output.Timezone)
+	require.Equal(t, assistantTimezone, output.Window.Timezone)
 	require.Len(t, output.Points, 1)
 	require.Equal(t, 50.0, *output.Points[0].Values["rpm"])
-	require.Equal(t, "unsupported", output.MetricStatus["accounts_available"].Status)
+	require.Equal(t, "unsupported", output.Metrics["accounts_available"].Status)
 	require.Equal(t, "2026-08-28T15:00:00+08:00", output.Points[0].Time)
-	require.Equal(t, output.Points[0].Time, output.Statistics["rpm"].LatestAt)
+	require.Equal(t, output.Points[0].Time, output.Metrics["rpm"].LatestAt)
 	require.NotContains(t, string(result.Data), `"timestamp"`)
 	require.NotContains(t, string(result.Data), jsonNumber(bucket))
 }
 
-func TestMetricHistoryReadsAuxiliarySampleWithoutRPM(t *testing.T) {
+func TestQueryMetricsReadsAuxiliarySampleWithoutRPM(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
 	require.NoError(t, db.Model(&visible).Update("kind", model.ManagedInstanceKindSub2API).Error)
 	location := time.FixedZone(assistantTimezone, 8*60*60)
@@ -198,12 +299,12 @@ func TestMetricHistoryReadsAuxiliarySampleWithoutRPM(t *testing.T) {
 	registry, err := NewRegistry(db)
 	require.NoError(t, err)
 
-	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{
 		"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["concurrency_used","concurrency_max"],
-		"mode":"point","point_at":"2026-08-28 16:00:30","granularity":"minute"
+		"period":"point","mode":"point","point_at":"2026-08-28 16:00:30","granularity":"minute"
 	}`))
 	require.NoError(t, err)
-	var output metricHistoryOutput
+	var output queryMetricsOutput
 	require.NoError(t, json.Unmarshal(result.Data, &output))
 	require.Len(t, output.Points, 1)
 	require.NotNil(t, output.Points[0].Values["concurrency_used"])
@@ -211,7 +312,7 @@ func TestMetricHistoryReadsAuxiliarySampleWithoutRPM(t *testing.T) {
 	require.Equal(t, 400.0, *output.Points[0].Values["concurrency_max"])
 }
 
-func TestMetricHistoryReadsDailyDashboardTrend(t *testing.T) {
+func TestQueryMetricsReadsDailyDashboardTrend(t *testing.T) {
 	db, execution, visible, _ := newBuiltinTestContext(t)
 	now := time.Now().Unix()
 	payload, err := json.Marshal(managedinstance.SummaryResult{Trend: []managedinstance.UsageTrendPoint{
@@ -226,16 +327,17 @@ func TestMetricHistoryReadsDailyDashboardTrend(t *testing.T) {
 	registry, err := NewRegistry(db)
 	require.NoError(t, err)
 
-	result, err := registry.Execute(t.Context(), execution, "get_metric_history", json.RawMessage(`{
-		"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["requests","tokens","actual_cost"],
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{
+		"instance_ids":[`+jsonNumber(visible.Id)+`],"metrics":["requests","tokens","cost"],"period":"custom",
 		"mode":"series","start_at":"2026-08-27","end_at":"2026-08-28","granularity":"day"
 	}`))
 	require.NoError(t, err)
-	var output metricHistoryOutput
+	var output queryMetricsOutput
 	require.NoError(t, json.Unmarshal(result.Data, &output))
 	require.Len(t, output.Points, 2)
-	require.Equal(t, 68.0, *output.Statistics["requests"].Sum)
-	require.Equal(t, 9.0123, *output.Statistics["actual_cost"].Latest)
+	require.Equal(t, 68.0, *output.Metrics["requests"].Sum)
+	require.Equal(t, 9.0123, *output.Metrics["cost"].Latest)
+	require.Equal(t, []string{"managed_dashboard_snapshots"}, output.Sources)
 }
 
 func TestMetricHistoryRejectsOverlongAndOversizedRanges(t *testing.T) {

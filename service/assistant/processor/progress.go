@@ -29,7 +29,7 @@ type progressReporter struct {
 type progressReporterConfig struct {
 	initialDelay time.Duration
 	heartbeat    time.Duration
-	maxMessages int
+	maxMessages  int
 	now          func() time.Time
 	send         func(int, string)
 }
@@ -45,7 +45,7 @@ func (p *Processor) startProgressReporter(ctx context.Context, event *model.Assi
 	return newProgressReporter(progressReporterConfig{
 		initialDelay: progressInitialDelay,
 		heartbeat:    progressHeartbeat,
-		maxMessages: maxProgressMessages,
+		maxMessages:  maxProgressMessages,
 		now:          p.now,
 		send: func(sequence int, text string) {
 			sendContext, cancel := context.WithTimeout(context.Background(), progressSendTimeout)
@@ -153,10 +153,8 @@ func progressStage(event runner.ProgressEvent) string {
 		switch event.Tool {
 		case "get_runtime_context", "list_instances":
 			return "正在确认实例与时间范围"
-		case "get_dashboard_summary", "get_realtime_metrics":
-			return "正在读取实例指标"
-		case "get_metric_history":
-			return "正在查询历史指标"
+		case "query_metrics":
+			return "正在查询实例指标"
 		case "query_managed_accounts":
 			return "正在读取账号快照"
 		case "get_usage_record_filter_options", "query_usage_records", "get_usage_record_summary":

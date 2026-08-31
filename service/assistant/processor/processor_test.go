@@ -31,7 +31,10 @@ func TestSystemPromptIsStableAndUsesRuntimeContextTool(t *testing.T) {
 	require.Contains(t, prompt, "Asia/Shanghai")
 	require.Contains(t, prompt, "禁止再次增加或扣减 8 小时")
 	require.Contains(t, prompt, "get_runtime_context")
-	require.Contains(t, prompt, "get_metric_history")
+	require.Contains(t, prompt, "query_metrics")
+	require.Contains(t, prompt, `"period":"today"`)
+	require.Contains(t, prompt, "不得为这些时间范围先调用 get_runtime_context")
+	require.NotContains(t, prompt, "get_metric_history")
 	require.Contains(t, prompt, "query_usage_records")
 	require.NotContains(t, prompt, "当前中国标准时间：")
 	require.Equal(t, prompt, systemPrompt())
@@ -223,10 +226,10 @@ func TestProgressReporterDelaysMessagesAndReportsToolStage(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial progress message was not sent")
 	}
-	reporter.Report(runner.ProgressEvent{Type: runner.ProgressToolStarted, Tool: "get_metric_history"})
+	reporter.Report(runner.ProgressEvent{Type: runner.ProgressToolStarted, Tool: "query_metrics"})
 	select {
 	case message := <-messages:
-		require.Equal(t, "正在查询历史指标。", message)
+		require.Equal(t, "正在查询实例指标。", message)
 	case <-time.After(time.Second):
 		t.Fatal("tool progress message was not sent")
 	}

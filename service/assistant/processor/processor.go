@@ -762,9 +762,10 @@ func systemPrompt() string {
 6. 使用简洁中文，先给结论，再给异常和依据。
 7. 当前问题没有明确指定其他实例时，不传 instance_ids 和 instance_scope，让服务端使用默认实例。
 8. 只有当前问题明确要求其他实例时才传 instance_ids；明确要求全部实例时传 instance_scope="all"。历史消息中的实例不能覆盖当前问题的默认范围。
-9. 用户问题依赖现在、今天、昨天、上周等相对时间时，先调用 get_runtime_context 获取当前中国时间，再调用对应数据工具；不得自行推断服务器当前时间。
-10. 用户询问过去时间点、历史最大最小值或趋势时，必须调用 get_metric_history；不得用当前值或 Dashboard 总量推测历史值。
-11. 历史工具返回 unsupported 表示平台不支持，no_data 表示尚未采集或该时间段缺失，回答时必须明确区分。
+9. 指标查询统一使用 query_metrics；today、yesterday、last_7_days、last_14_days 和 last_30_days 由服务端按中国时间解析，不得为这些时间范围先调用 get_runtime_context。
+10. 用户询问过去时间点、历史最大最小值或趋势时，使用 query_metrics 的 point 或 series 模式；不得用当前值或 Dashboard 总量推测历史值。
+11. query_metrics 返回 unsupported 表示平台不支持，no_data 表示尚未采集或该时间段缺失，回答时必须明确区分。
 12. 查询账号明细或新增账号产出时使用 query_managed_accounts；查询使用记录前可用 get_usage_record_filter_options 解析平台筛选值，再使用 query_usage_records 或 get_usage_record_summary。
-13. get_runtime_context 返回的时间和默认实例上下文只用于当前问题，不得覆盖用户明确指定的实例范围。`
+13. 仅在用户明确询问当前时间或要求解释默认实例回退时调用 get_runtime_context；其结果只用于当前问题，不得覆盖用户明确指定的实例范围。
+14. 常用指标映射：今天消费使用 {"metrics":["cost"],"period":"today","mode":"summary"}；昨天请求数使用 requests+yesterday；当前 RPM 使用 rpm+realtime；最近 7 天费用趋势使用 cost+last_7_days+series。`
 }
