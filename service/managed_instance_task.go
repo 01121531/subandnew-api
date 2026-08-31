@@ -205,22 +205,24 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 
 	type parsedAccountExportItem struct {
 		instanceID int64
-		accountID  int64
+		accountID  string
 	}
 	type accountExportInventoryContext struct {
-		instance  *managedinstance.InstanceView
-		inventory map[int64]managedinstance.InventoryItem
-		sources   map[string]string
+		instance         *managedinstance.InstanceView
+		inventory        map[int64]managedinstance.InventoryItem
+		accountIDAliases map[string]int64
+		ambiguousAliases map[string]struct{}
+		sources          map[string]string
 	}
 	parsedItems := make([]parsedAccountExportItem, 0, len(request.Items))
 	requestedInstances := make(map[int64]struct{})
 	seenSelections := make(map[string]struct{}, len(request.Items))
 	for _, item := range request.Items {
-		accountID, err := strconv.ParseInt(strings.TrimSpace(item.AccountID), 10, 64)
-		if err != nil || item.InstanceID <= 0 || accountID <= 0 {
+		accountID := strings.TrimSpace(item.AccountID)
+		if item.InstanceID <= 0 || accountID == "" || len(accountID) > 200 {
 			return nil, managedinstance.ErrInvalidInstance
 		}
-		key := strconv.FormatInt(item.InstanceID, 10) + ":" + strconv.FormatInt(accountID, 10)
+		key := strconv.FormatInt(item.InstanceID, 10) + ":" + accountID
 		if _, duplicate := seenSelections[key]; duplicate {
 			return nil, managedinstance.ErrInvalidInstance
 		}
@@ -244,11 +246,35 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 			return nil, err
 		}
 		inventory := make(map[int64]managedinstance.InventoryItem)
+		accountIDAliases := make(map[string]int64)
+		ambiguousAliases := make(map[string]struct{})
 		sources := make(map[string]string)
+		indexAccount := func(item managedinstance.InventoryItem) {
+			inventory[item.ID] = item
+			aliases := []string{
+				strconv.FormatInt(item.ID, 10),
+				strings.TrimSpace(item.IDText),
+				strconv.FormatFloat(float64(item.ID), 'f', -1, 64),
+			}
+			for _, alias := range aliases {
+				if alias == "" {
+					continue
+				}
+				if _, ambiguous := ambiguousAliases[alias]; ambiguous {
+					continue
+				}
+				if existing, exists := accountIDAliases[alias]; exists && existing != item.ID {
+					delete(accountIDAliases, alias)
+					ambiguousAliases[alias] = struct{}{}
+					continue
+				}
+				accountIDAliases[alias] = item.ID
+			}
+		}
 		page, inventoryErr := GetManagedAccountInventorySnapshot(instanceID)
 		if page != nil {
 			for _, item := range page.Items {
-				inventory[item.ID] = item
+				indexAccount(item)
 			}
 			for _, source := range page.Sources {
 				sources[source.ID] = source.Name
@@ -258,7 +284,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 			output, outputErr := GetManagedAccountOutputSnapshot(instanceID, request.RangeKey)
 			if output != nil {
 				for _, item := range output.Items {
-					inventory[item.Account.ID] = item.Account
+					indexAccount(item.Account)
 				}
 			}
 			if len(inventory) == 0 && outputErr != nil {
@@ -271,17 +297,30 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 			}
 			return nil, managedinstance.ErrRemoteDataUnavailable
 		}
-		contexts[instanceID] = accountExportInventoryContext{instance: instance, inventory: inventory, sources: sources}
+		contexts[instanceID] = accountExportInventoryContext{
+			instance: instance, inventory: inventory, accountIDAliases: accountIDAliases,
+			ambiguousAliases: ambiguousAliases, sources: sources,
+		}
 		soleInstanceID = instanceID
 		instanceNames = append(instanceNames, instance.Name)
 		instanceKinds[instance.Kind] = struct{}{}
 	}
+	seenResolvedSelections := make(map[string]struct{}, len(parsedItems))
 	for _, item := range parsedItems {
 		context := contexts[item.instanceID]
-		account, ok := context.inventory[item.accountID]
-		if !ok {
-			return nil, managedinstance.ErrInvalidInstance
+		internalAccountID, ok := context.accountIDAliases[item.accountID]
+		if _, ambiguous := context.ambiguousAliases[item.accountID]; ambiguous {
+			ok = false
 		}
+		account, accountExists := context.inventory[internalAccountID]
+		if !ok || !accountExists {
+			return nil, fmt.Errorf("%w: selected account is not available in the latest snapshot", managedinstance.ErrInvalidInstance)
+		}
+		resolvedKey := strconv.FormatInt(item.instanceID, 10) + ":" + strconv.FormatInt(internalAccountID, 10)
+		if _, duplicate := seenResolvedSelections[resolvedKey]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate account selection", managedinstance.ErrInvalidInstance)
+		}
+		seenResolvedSelections[resolvedKey] = struct{}{}
 		selection := managedinstance.AccountExportSelection{
 			InstanceID: item.instanceID, InstanceName: context.instance.Name, InstanceKind: context.instance.Kind,
 			SourceName: context.sources[account.SourceID], Account: account,
@@ -291,7 +330,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 			return nil, err
 		}
 		selections = append(selections, selection)
-		exportItems = append(exportItems, &model.ManagedExportItem{InstanceID: item.instanceID, ResourceID: item.accountID, Metadata: string(metadata)})
+		exportItems = append(exportItems, &model.ManagedExportItem{InstanceID: item.instanceID, ResourceID: internalAccountID, Metadata: string(metadata)})
 	}
 	if len(requestedInstances) > 1 {
 		soleInstanceID = 0

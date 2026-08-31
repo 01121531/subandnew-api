@@ -1465,6 +1465,7 @@
     "Account export added to queue": "账号导出已加入队列",
     "View export records": "查看导出记录",
     "Failed to create account export": "创建账号导出失败",
+    "Some selected accounts are no longer in the latest snapshot. Refresh the page and select them again.": "部分所选账号已不在最新快照中，请刷新页面后重新选择。",
     "Select all filtered accounts": "选择当前筛选的全部账号",
     "Selected {{selected}} / filtered {{filtered}}": "已选择 {{selected}} / 当前筛选 {{filtered}}",
     "Export Excel": "导出 Excel",

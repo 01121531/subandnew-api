@@ -235,6 +235,44 @@ func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {
 	require.Equal(t, "selected@example.com", frozen.Account.Email)
 }
 
+func TestEnqueueManagedAccountExportAcceptsOriginalAndLegacyRoundedAccountIDs(t *testing.T) {
+	for _, requestedID := range []string{
+		"8faa3804-86ab-4f4c-a090-e5111a406c74",
+		"6822196335042536000",
+	} {
+		t.Run(requestedID, func(t *testing.T) {
+			truncate(t)
+			instance := &model.ManagedInstance{Name: "large-id-export", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://large-id.example.com"}
+			require.NoError(t, model.DB.Create(instance).Error)
+			const internalID int64 = 6822196335042536377
+			payload, err := json.Marshal(managedinstance.InventoryPage{
+				ResourceKind: "account", Total: 1,
+				Items: []managedinstance.InventoryItem{{
+					ID: internalID, IDText: "8faa3804-86ab-4f4c-a090-e5111a406c74", Name: "selected",
+				}},
+			})
+			require.NoError(t, err)
+			require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+				InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
+				RangeKey: managedAccountInventoryRangeKey, Timezone: managedAccountDefaultTimezone,
+				ObservedAt: 100, Payload: string(payload), LastAttemptAt: 100,
+				LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+			}).Error)
+
+			task, err := EnqueueManagedAccountExport(7, ManagedAccountExportRequest{
+				Source: "inventory", Locale: "zh-CN",
+				Window: managedinstance.TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"},
+				Items:  []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: requestedID}},
+			})
+			require.NoError(t, err)
+			items, err := model.ListManagedExportItems(task.TaskID)
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			require.Equal(t, internalID, items[0].ResourceID)
+		})
+	}
+}
+
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	instance := &model.ManagedInstance{Id: 9, Kind: model.ManagedInstanceKindSub2API}
 	now := int64(10_000)

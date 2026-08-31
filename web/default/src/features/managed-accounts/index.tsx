@@ -505,7 +505,7 @@ function accountSelection(
   instance: ManagedInstance,
   item: ManagedInstanceInventoryItem
 ): AccountExportSelection {
-  const accountId = String(item.id)
+  const accountId = inventoryAccountID(item)
   return {
     key: `${instance.id}:${accountId}`,
     instanceId: instance.id,
@@ -596,8 +596,18 @@ function AccountExportBar(props: {
           onClick: () => window.location.assign('/export-records'),
         },
       })
-    } catch {
-      toast.error(t('Failed to create account export'))
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })
+        .response?.data?.message
+      if (message?.includes('selected account is not available')) {
+        toast.error(
+          t(
+            'Some selected accounts are no longer in the latest snapshot. Refresh the page and select them again.'
+          )
+        )
+      } else {
+        toast.error(message || t('Failed to create account export'))
+      }
     } finally {
       setSubmitting(false)
     }
