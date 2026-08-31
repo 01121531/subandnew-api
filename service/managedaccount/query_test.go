@@ -158,3 +158,65 @@ func TestExecuteMatchesTextPrefixSuffixAndContainsRules(t *testing.T) {
 		require.Equal(t, test.total, result.Total, test.operator)
 	}
 }
+
+func TestExecuteReturnsFilterOptionsFromAllMatchingPages(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "first", Group: "group-a", Status: "active", Enabled: &available},
+		{ID: 2, Name: "second", Group: "group-b", Status: "paused", Enabled: &available},
+	})
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		NarrowFields: []string{"group", "status", "available"}, Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	require.ElementsMatch(t, []string{"group-a", "group-b"}, result.FilterOptions["group"])
+	require.ElementsMatch(t, []string{"active", "paused"}, result.FilterOptions["status"])
+}
+
+func TestSanitizeSensitiveTextRemovesIPv6AndHighEntropyCredentials(t *testing.T) {
+	value := SanitizeSensitiveText("node 2409:8a55:3c14:19a1:ea08:73f4:323b:3d10 key AKIAABCDEFGHIJKLMNOP token 8xJ2mP9qR4sT7vW1yZ3aB6cD0eF5gH8jK2mN9pQ")
+	require.NotContains(t, value, "2409:8a55")
+	require.NotContains(t, value, "AKIAABCDEFGHIJKLMNOP")
+	require.NotContains(t, value, "8xJ2mP9q")
+	require.Contains(t, value, "[已隐藏]")
+}
+
+func TestExecuteRedactsSensitiveInstanceAndSourceFields(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	require.NoError(t, db.Model(&model.ManagedInstance{}).Where("id = ?", instance.Id).Update("name", "[2409:8a55:3c14:19a1:ea08:73f4:323b:3d10]").Error)
+	available := true
+	sourceID := "AKIAABCDEFGHIJKLMNOP"
+	sourceName := "node 2409:8a55:3c14:19a1:ea08:73f4:323b:3d10"
+	now := time.Now().Unix()
+	payload, err := json.Marshal(managedinstance.InventoryPage{ResourceKind: "account", Sources: []managedinstance.InventorySource{{ID: sourceID, Name: sourceName}}, Items: []managedinstance.InventoryItem{{
+		ID: 1, Name: "token 8xJ2mP9qR4sT7vW1yZ3aB6cD0eF5gH8jK2mN9pQ", SourceID: sourceID, Enabled: &available,
+	}}, Total: 1})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.ManagedAccountSnapshot{InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
+		RangeKey: "inventory", Timezone: TimezoneShanghai, SchemaVersion: 2, ObservedAt: now, Payload: string(payload),
+		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded}).Error)
+
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory, Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	item := result.Items[0]
+	for _, value := range []string{item.InstanceName, item.Name, item.SourceID, item.SourceName} {
+		require.NotContains(t, value, "2409:8a55")
+		require.NotContains(t, value, "AKIAABCDEFGHIJKLMNOP")
+		require.NotContains(t, value, "8xJ2mP9q")
+		require.Contains(t, value, "[已隐藏]")
+	}
+}
+
+func TestExecuteThrottlesSnapshotAccessTimestampWrites(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{{ID: 1, Name: "first"}})
+	recent := time.Now().Unix() - 30
+	require.NoError(t, db.Model(&model.ManagedAccountSnapshot{}).Where("instance_id = ?", instance.Id).Update("last_accessed_at", recent).Error)
+	_, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory, Page: 1, PageSize: 10})
+	require.NoError(t, err)
+	var snapshot model.ManagedAccountSnapshot
+	require.NoError(t, db.Where("instance_id = ?", instance.Id).First(&snapshot).Error)
+	require.Equal(t, recent, snapshot.LastAccessedAt)
+}

@@ -126,7 +126,7 @@ func TestOpenAICompatibleRetriesTransientFailureOnlyBeforeFirstData(t *testing.T
 	}))
 	defer server.Close()
 
-	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, Model: "model", HTTPClient: server.Client()})
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, Model: "model", HTTPClient: server.Client(), SafeRetryAfterWrite: true})
 	require.NoError(t, err)
 	result, err := client.GenerateStream(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
 	require.NoError(t, err)
@@ -134,6 +134,37 @@ func TestOpenAICompatibleRetriesTransientFailureOnlyBeforeFirstData(t *testing.T
 	require.Equal(t, 2, result.Attempts)
 	require.True(t, result.RetriedBeforeFirstByte)
 	require.Equal(t, 2, attempts)
+}
+
+func TestOpenAICompatibleDoesNotRetryWrittenRequestByDefault(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		attempts++
+		response.WriteHeader(http.StatusBadGateway)
+		_, _ = response.Write([]byte(`{"error":{"code":"origin_bad_gateway"}}`))
+	}))
+	defer server.Close()
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, Model: "model", HTTPClient: server.Client()})
+	require.NoError(t, err)
+	_, err = client.GenerateStream(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
+	require.Error(t, err)
+	require.Equal(t, 1, attempts)
+}
+
+func TestOpenAICompatiblePreservesUsageWhenStreamFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":40,\"completion_tokens\":2,\"total_tokens\":42}}\n\n")
+		_, _ = fmt.Fprint(response, "data: not-json\n\n")
+	}))
+	defer server.Close()
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, Model: "model", HTTPClient: server.Client()})
+	require.NoError(t, err)
+	_, err = client.GenerateStream(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
+	require.Error(t, err)
+	partial, ok := PartialResponse(err)
+	require.True(t, ok)
+	require.Equal(t, 42, partial.Usage.TotalTokens)
 }
 
 func TestOpenAICompatibleGenerateWithTools(t *testing.T) {
@@ -208,7 +239,7 @@ func TestOpenAICompatibleHTTPErrorIsSanitized(t *testing.T) {
 		_, _ = response.Write([]byte(`{"error":{"code":"rate_limit","message":"request containing secret-value failed"}}`))
 	}))
 	defer server.Close()
-	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, APIKey: "secret-value", Model: "model", HTTPClient: server.Client()})
+	client, err := NewOpenAICompatibleClient(OpenAICompatibleConfig{BaseURL: server.URL, APIKey: "secret-value", Model: "model", HTTPClient: server.Client(), SafeRetryAfterWrite: true})
 	require.NoError(t, err)
 	_, err = client.Generate(t.Context(), Request{Messages: []Message{{Role: RoleUser, Content: "hello"}}})
 	require.Error(t, err)

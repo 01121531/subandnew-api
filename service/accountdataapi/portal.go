@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
@@ -22,8 +23,11 @@ import (
 )
 
 const (
-	PortalSessionLifetime = 12 * time.Hour
-	PortalExportLimit     = 10000
+	PortalSessionLifetime  = 12 * time.Hour
+	PortalExportLimit      = 10000
+	portalLoginWindow      = 15 * time.Minute
+	portalLoginMaxAttempts = 5
+	portalLoginLocalLimit  = 10000
 )
 
 var (
@@ -190,9 +194,11 @@ func MarkPortalUsed(auth *PortalAuthenticated, result *managedaccount.Result) {
 		return
 	}
 	now := common.GetTimestamp()
-	_ = model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPI{}).Where("id = ?", auth.API.ID).UpdateColumns(map[string]any{
+	if err := model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPI{}).Where("id = ?", auth.API.ID).UpdateColumns(map[string]any{
 		"last_accessed_at": now, "request_count": gorm.Expr("request_count + 1"), "matched_count": result.Total, "last_observed_at": result.ObservedAt,
-	}).Error
+	}).Error; err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("account data portal usage write failed: api_id=%d error=%v", auth.API.ID, err))
+	}
 }
 
 func QueryPortal(ctx context.Context, auth *PortalAuthenticated, input PortalQueryInput) (*managedaccount.Result, error) {
@@ -419,53 +425,137 @@ func maybeCleanupPortalSessions(now int64) {
 	if time.Since(portalSessionCleanup.last) < time.Hour {
 		return
 	}
-	if model.DB.Where("expires_at <= ? OR revoked_at > 0", now).Delete(&model.ManagedAccountAPIPortalSession{}).Error == nil {
+	if err := model.DB.Where("expires_at <= ? OR revoked_at > 0", now).Delete(&model.ManagedAccountAPIPortalSession{}).Error; err == nil {
 		portalSessionCleanup.last = time.Now()
+	} else {
+		logger.LogWarn(context.Background(), "account data portal session cleanup failed: "+err.Error())
 	}
 }
 
 type portalLoginAttempt struct {
-	count int
-	until time.Time
+	count     int
+	until     time.Time
+	updatedAt time.Time
 }
 
 var portalLoginAttempts = struct {
 	sync.Mutex
-	items map[string]portalLoginAttempt
+	items     map[string]portalLoginAttempt
+	lastPrune time.Time
 }{items: map[string]portalLoginAttempt{}}
 
 func portalLoginAttemptKey(slug, ip string) string { return hashToken(slug + "\x00" + ip) }
 
+func portalLoginRedisKey(slug, ip string) string {
+	return "accountDataPortalLogin:" + portalLoginAttemptKey(slug, ip)
+}
+
+func PortalRateLimitIdentity(apiID int64, ip string) string {
+	return fmt.Sprintf("portal:%d:%s", apiID, strings.TrimSpace(ip))
+}
+
 func portalLoginBlocked(slug, ip string) (bool, int) {
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		key := portalLoginRedisKey(slug, ip)
+		count, err := common.RDB.Get(ctx, key).Int()
+		if err == nil {
+			ttl, ttlErr := common.RDB.TTL(ctx, key).Result()
+			if ttlErr == nil && count >= portalLoginMaxAttempts {
+				return true, max(1, int(ttl.Seconds()))
+			}
+			return false, 0
+		}
+	}
 	key := portalLoginAttemptKey(slug, ip)
 	now := time.Now()
 	portalLoginAttempts.Lock()
 	defer portalLoginAttempts.Unlock()
+	prunePortalLoginAttemptsLocked(now)
 	attempt := portalLoginAttempts.items[key]
 	if now.After(attempt.until) {
 		delete(portalLoginAttempts.items, key)
 		return false, 0
 	}
-	return attempt.count >= 5, max(1, int(time.Until(attempt.until).Seconds()))
+	return attempt.count >= portalLoginMaxAttempts, max(1, int(time.Until(attempt.until).Seconds()))
 }
 
 func portalLoginFailed(slug, ip string) {
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		key := portalLoginRedisKey(slug, ip)
+		count, err := common.RDB.Incr(ctx, key).Result()
+		if err == nil {
+			if count == 1 {
+				_ = common.RDB.Expire(ctx, key, portalLoginWindow).Err()
+			}
+			return
+		}
+	}
 	key := portalLoginAttemptKey(slug, ip)
 	now := time.Now()
 	portalLoginAttempts.Lock()
 	defer portalLoginAttempts.Unlock()
+	prunePortalLoginAttemptsLocked(now)
 	attempt := portalLoginAttempts.items[key]
 	if now.After(attempt.until) {
-		attempt = portalLoginAttempt{until: now.Add(15 * time.Minute)}
+		attempt = portalLoginAttempt{until: now.Add(portalLoginWindow)}
 	}
 	attempt.count++
+	attempt.updatedAt = now
 	portalLoginAttempts.items[key] = attempt
 }
 
 func portalLoginSucceeded(slug, ip string) {
+	if common.RedisEnabled && common.RDB != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_ = common.RDB.Del(ctx, portalLoginRedisKey(slug, ip)).Err()
+		cancel()
+	}
 	portalLoginAttempts.Lock()
 	delete(portalLoginAttempts.items, portalLoginAttemptKey(slug, ip))
 	portalLoginAttempts.Unlock()
+}
+
+func prunePortalLoginAttemptsLocked(now time.Time) {
+	if len(portalLoginAttempts.items) < portalLoginLocalLimit && now.Sub(portalLoginAttempts.lastPrune) < time.Minute {
+		return
+	}
+	portalLoginAttempts.lastPrune = now
+	for key, attempt := range portalLoginAttempts.items {
+		if now.After(attempt.until) {
+			delete(portalLoginAttempts.items, key)
+		}
+	}
+	for len(portalLoginAttempts.items) >= portalLoginLocalLimit {
+		oldestKey := ""
+		var oldest time.Time
+		for key, attempt := range portalLoginAttempts.items {
+			if oldestKey == "" || attempt.updatedAt.Before(oldest) {
+				oldestKey, oldest = key, attempt.updatedAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(portalLoginAttempts.items, oldestKey)
+	}
+}
+
+func PortalFilterOptions(options map[string][]string, fields []string) map[string][]string {
+	allowed := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		allowed[field] = struct{}{}
+	}
+	result := make(map[string][]string)
+	for field, values := range options {
+		if _, ok := allowed[field]; ok {
+			result[field] = append([]string(nil), values...)
+		}
+	}
+	return result
 }
 
 var portalFieldLabels = map[string]string{

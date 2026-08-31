@@ -57,6 +57,27 @@ func TestCreateAppliesFrozenMetricFilter(t *testing.T) {
 	require.Equal(t, "acct-1", result.Items[0].AccountID)
 }
 
+func TestCleanupAccessLogsDeletesExpiredRowsInBatches(t *testing.T) {
+	db, instance := setupAPIServiceTest(t)
+	api := model.ManagedAccountAPI{Name: "logs", Status: model.ManagedAccountAPIEnabled, Dataset: managedaccount.DatasetInventory,
+		PresetDays: 7, Timezone: managedaccount.TimezoneShanghai, MatchMode: managedinstance.AccountFilterMatchAll,
+		SortBy: "created_at", SortOrder: "desc", PageSize: 50, RateLimitPerMinute: 60}
+	require.NoError(t, db.Create(&api).Error)
+	_ = instance
+	now := time.Now().Unix()
+	rows := make([]model.ManagedAccountAPIAccessLog, 1205)
+	for index := range rows {
+		rows[index] = model.ManagedAccountAPIAccessLog{APIID: api.ID, RequestID: "old", IPAddress: "203.0.113.1", StatusCode: 200,
+			CreatedAt: now - int64((91*24*time.Hour)/time.Second)}
+	}
+	require.NoError(t, db.CreateInBatches(rows, 200).Error)
+	require.NoError(t, db.Create(&model.ManagedAccountAPIAccessLog{APIID: api.ID, RequestID: "recent", IPAddress: "203.0.113.1", StatusCode: 200, CreatedAt: now}).Error)
+	require.NoError(t, cleanupAccessLogs(db, now))
+	var remaining int64
+	require.NoError(t, db.Model(&model.ManagedAccountAPIAccessLog{}).Count(&remaining).Error)
+	require.EqualValues(t, 1, remaining)
+}
+
 func apiInput(instanceID int64) ConfigInput {
 	return ConfigInput{Name: "partner-a", Dataset: managedaccount.DatasetInventory, PresetDays: 7, InstanceIDs: []int64{instanceID},
 		IncludeTerms: []string{"example.com"}, MatchMode: managedinstance.AccountFilterMatchAll,

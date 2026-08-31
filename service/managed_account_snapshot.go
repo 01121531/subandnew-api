@@ -59,6 +59,16 @@ type ManagedAccountSnapshotView struct {
 	Task               *model.SystemTaskResponse     `json:"task,omitempty"`
 }
 
+// ManagedAccountQuerySnapshot is the typed, single-read representation used by
+// account queries. It avoids fetching and decoding the same payload again after
+// reading snapshot metadata.
+type ManagedAccountQuerySnapshot struct {
+	InventorySection     ManagedAccountSnapshotSection
+	AccountOutputSection ManagedAccountSnapshotSection
+	Inventory            *managedinstance.InventoryPage
+	AccountOutput        *managedinstance.AccountOutputResult
+}
+
 type ManagedAccountRefreshView struct {
 	Enqueued bool                      `json:"enqueued"`
 	Task     *model.SystemTaskResponse `json:"task,omitempty"`
@@ -166,6 +176,56 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
 	}
 	return view, nil
+}
+
+func GetManagedAccountQuerySnapshot(instanceID int64, rangeKey string) (*ManagedAccountQuerySnapshot, error) {
+	if instanceID <= 0 {
+		return nil, managedinstance.ErrInvalidInstance
+	}
+	if err := backfillManagedAccountInventory(instanceID); err != nil {
+		return nil, err
+	}
+	inventorySnapshot, err := findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	if err != nil {
+		return nil, err
+	}
+	var outputSnapshot *model.ManagedAccountSnapshot
+	if strings.TrimSpace(rangeKey) != "" {
+		outputSnapshot, err = findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindOutput, strings.TrimSpace(rangeKey))
+		if err != nil {
+			return nil, err
+		}
+	}
+	touchManagedAccountSnapshots(common.GetTimestamp(), inventorySnapshot, outputSnapshot)
+	result := &ManagedAccountQuerySnapshot{
+		InventorySection:     managedAccountSnapshotSectionMetadata(inventorySnapshot),
+		AccountOutputSection: managedAccountSnapshotSectionMetadata(outputSnapshot),
+	}
+	if inventorySnapshot != nil && inventorySnapshot.ObservedAt > 0 && strings.TrimSpace(inventorySnapshot.Payload) != "" {
+		var inventory managedinstance.InventoryPage
+		if err := json.Unmarshal([]byte(inventorySnapshot.Payload), &inventory); err != nil {
+			return nil, err
+		}
+		for index := range inventory.Items {
+			if inventory.Items[index].IDText == "" {
+				inventory.Items[index].IDText = strconv.FormatInt(inventory.Items[index].ID, 10)
+			}
+		}
+		result.Inventory = &inventory
+	}
+	if outputSnapshot != nil && outputSnapshot.ObservedAt > 0 && strings.TrimSpace(outputSnapshot.Payload) != "" {
+		var output managedinstance.AccountOutputResult
+		if err := json.Unmarshal([]byte(outputSnapshot.Payload), &output); err != nil {
+			return nil, err
+		}
+		for index := range output.Items {
+			if output.Items[index].Account.IDText == "" {
+				output.Items[index].Account.IDText = strconv.FormatInt(output.Items[index].Account.ID, 10)
+			}
+		}
+		result.AccountOutput = &output
+	}
+	return result, nil
 }
 
 // GetManagedAccountInventorySnapshot returns the last successful inventory used by
@@ -327,6 +387,25 @@ func managedAccountSnapshotSection(snapshot *model.ManagedAccountSnapshot) Manag
 	return section
 }
 
+func managedAccountSnapshotSectionMetadata(snapshot *model.ManagedAccountSnapshot) ManagedAccountSnapshotSection {
+	section := ManagedAccountSnapshotSection{}
+	if snapshot == nil {
+		return section
+	}
+	section.LastAttemptAt = snapshot.LastAttemptAt
+	section.LastAttemptStatus = snapshot.LastAttemptStatus
+	section.LastErrorCode = snapshot.LastErrorCode
+	if snapshot.ObservedAt > 0 && strings.TrimSpace(snapshot.Payload) != "" {
+		section.Observation = &managedinstance.ObservationView{
+			SourceInstanceID: snapshot.InstanceID,
+			ObservedAt:       snapshot.ObservedAt,
+			CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			ETag:             snapshot.ETag,
+		}
+	}
+	return section
+}
+
 func touchManagedAccountSnapshots(now int64, snapshots ...*model.ManagedAccountSnapshot) {
 	ids := make([]int64, 0, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -335,7 +414,12 @@ func touchManagedAccountSnapshots(now int64, snapshots ...*model.ManagedAccountS
 		}
 	}
 	if len(ids) > 0 {
-		_ = model.DB.Model(&model.ManagedAccountSnapshot{}).Where("id IN ?", ids).Update("last_accessed_at", now).Error
+		cutoff := now - int64(time.Hour/time.Second)
+		if err := model.DB.Model(&model.ManagedAccountSnapshot{}).
+			Where("id IN ? AND (last_accessed_at = 0 OR last_accessed_at < ?)", ids, cutoff).
+			Update("last_accessed_at", now).Error; err != nil {
+			logger.LogWarn(context.Background(), "managed account snapshot access timestamp update failed: "+err.Error())
+		}
 	}
 }
 

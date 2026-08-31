@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"net"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,6 +33,15 @@ var secretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bsk-[a-z0-9_-]{8,}`),
 	regexp.MustCompile(`(?i)\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token|password|passwd|secret|cookie)\s*[:=]\s*[^\s,;]+`),
 }
+
+var sensitiveNotePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`),
+	regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{30,}\b`),
+	regexp.MustCompile(`(?i)\b(?:ghp|github_pat|glpat|xox[baprs])_[a-z0-9_-]{16,}\b`),
+}
+
+var ipv6CandidatePattern = regexp.MustCompile(`(?i)(?:\[[0-9a-f:.%]+\]|(?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]*)(?::[0-9]{1,5})?`)
+var highEntropyCandidatePattern = regexp.MustCompile(`[A-Za-z0-9_+/=-]{32,}`)
 
 var quickTermSeparator = regexp.MustCompile(`[,，\n]+`)
 
@@ -117,19 +128,20 @@ type Summary struct {
 }
 
 type Result struct {
-	Dataset    string         `json:"dataset"`
-	PresetDays int            `json:"preset_days,omitempty"`
-	Items      []Item         `json:"items"`
-	Total      int            `json:"total"`
-	Page       int            `json:"page"`
-	PageSize   int            `json:"page_size"`
-	HasMore    bool           `json:"has_more"`
-	Summary    Summary        `json:"summary"`
-	Sources    []SourceStatus `json:"sources"`
-	ObservedAt int64          `json:"observed_at,omitempty"`
-	Stale      bool           `json:"stale"`
-	Partial    bool           `json:"partial"`
-	NoData     bool           `json:"no_data"`
+	Dataset       string              `json:"dataset"`
+	PresetDays    int                 `json:"preset_days,omitempty"`
+	Items         []Item              `json:"items"`
+	Total         int                 `json:"total"`
+	Page          int                 `json:"page"`
+	PageSize      int                 `json:"page_size"`
+	HasMore       bool                `json:"has_more"`
+	Summary       Summary             `json:"summary"`
+	Sources       []SourceStatus      `json:"sources"`
+	ObservedAt    int64               `json:"observed_at,omitempty"`
+	Stale         bool                `json:"stale"`
+	Partial       bool                `json:"partial"`
+	NoData        bool                `json:"no_data"`
+	FilterOptions map[string][]string `json:"filter_options,omitempty"`
 }
 
 type row struct {
@@ -254,6 +266,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		return nil, err
 	}
 	rows := make([]row, 0)
+	filterOptionSets := newFilterOptionSets(input.NarrowFields)
 	statuses := make([]SourceStatus, 0, len(input.InstanceIDs))
 	observedAt := int64(0)
 	successfulSources := 0
@@ -270,16 +283,16 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 			continue
 		}
 		status := SourceStatus{InstanceID: instanceID, InstanceName: SanitizeText(instance.Name), Platform: instance.Kind, Status: "no_data", Stale: true}
-		snapshot, snapshotErr := controlplaneservice.GetManagedAccountSnapshot(instanceID, accountRange)
+		snapshot, snapshotErr := controlplaneservice.GetManagedAccountQuerySnapshot(instanceID, accountRange.RangeKey)
 		if snapshotErr != nil {
 			status.ErrorCode = errorCode(snapshotErr)
 			statuses = append(statuses, status)
 			stale = true
 			continue
 		}
-		section := snapshot.Inventory
+		section := snapshot.InventorySection
 		if input.Dataset == DatasetOutput {
-			section = snapshot.AccountOutput
+			section = snapshot.AccountOutputSection
 		}
 		status.LastAttemptAt = section.LastAttemptAt
 		status.LastAttemptStatus = section.LastAttemptStatus
@@ -296,42 +309,30 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		stale = stale || status.Stale
 		observedAt = conservativeTimestamp(observedAt, status.ObservedAt)
 		if input.Dataset == DatasetInventory {
-			inventory, inventoryErr := controlplaneservice.GetManagedAccountInventorySnapshot(instanceID)
-			if inventoryErr != nil {
-				statuses[len(statuses)-1].Status = model.ManagedInstanceCollectionFailed
-				statuses[len(statuses)-1].ErrorCode = errorCode(inventoryErr)
-				statuses[len(statuses)-1].Stale = true
-				stale = true
-				continue
-			}
 			successfulSources++
+			inventory := snapshot.Inventory
 			if inventory != nil {
 				sourceNames := sourceNameMap(inventory)
 				for _, account := range inventory.Items {
 					candidate := inventoryRow(instance, account, sourceNames)
 					if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
-						rows = append(rows, candidate)
+						addFilterOptions(filterOptionSets, candidate.doc)
+						rows = append(rows, row{item: candidate.item})
 					}
 				}
 			}
 			continue
 		}
-		inventory, _ := controlplaneservice.GetManagedAccountInventorySnapshot(instanceID)
+		inventory := snapshot.Inventory
 		sourceNames := sourceNameMap(inventory)
-		output, outputErr := controlplaneservice.GetManagedAccountOutputSnapshot(instanceID, accountRange.RangeKey)
-		if outputErr != nil {
-			statuses[len(statuses)-1].Status = model.ManagedInstanceCollectionFailed
-			statuses[len(statuses)-1].ErrorCode = errorCode(outputErr)
-			statuses[len(statuses)-1].Stale = true
-			stale = true
-			continue
-		}
+		output := snapshot.AccountOutput
 		successfulSources++
 		if output != nil {
 			for _, account := range output.Items {
 				candidate := outputRow(instance, account, sourceNames)
 				if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
-					rows = append(rows, candidate)
+					addFilterOptions(filterOptionSets, candidate.doc)
+					rows = append(rows, row{item: candidate.item})
 				}
 			}
 		}
@@ -352,7 +353,51 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		Dataset: input.Dataset, PresetDays: input.PresetDays, Items: items, Total: len(rows), Page: input.Page,
 		PageSize: input.PageSize, HasMore: end < len(rows), Summary: summary, Sources: statuses,
 		ObservedAt: observedAt, Stale: stale, Partial: successfulSources > 0 && successfulSources < len(input.InstanceIDs), NoData: successfulSources == 0,
+		FilterOptions: finalizeFilterOptions(filterOptionSets),
 	}, nil
+}
+
+func newFilterOptionSets(fields []string) map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	for _, field := range fields {
+		switch field {
+		case "ownership", "instance", "platform", "type", "group", "status", "source", "available":
+			result[field] = make(map[string]string)
+		}
+	}
+	return result
+}
+
+func addFilterOptions(options map[string]map[string]string, doc map[string][]string) {
+	for field, values := range doc {
+		set := options[field]
+		if set == nil {
+			continue
+		}
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			key := strings.ToLower(value)
+			if _, exists := set[key]; !exists {
+				set[key] = value
+			}
+		}
+	}
+}
+
+func finalizeFilterOptions(options map[string]map[string]string) map[string][]string {
+	result := make(map[string][]string, len(options))
+	for field, set := range options {
+		values := make([]string, 0, len(set))
+		for _, value := range set {
+			values = append(values, value)
+		}
+		sort.Slice(values, func(i, j int) bool { return strings.ToLower(values[i]) < strings.ToLower(values[j]) })
+		result[field] = values
+	}
+	return result
 }
 
 func inventoryRow(instance *managedinstance.InstanceView, account managedinstance.InventoryItem, sources map[string]string) row {
@@ -380,11 +425,11 @@ func itemFromInventory(instance *managedinstance.InstanceView, account managedin
 		accountID = strconv.FormatInt(account.ID, 10)
 	}
 	return Item{
-		InstanceID: instance.Id, InstanceName: SanitizeText(instance.Name), Platform: SanitizeText(instance.Kind),
-		AccountID: SanitizeText(accountID), Name: SanitizeText(account.Name), Email: SanitizeText(account.Email),
-		Note: SanitizeText(account.Note), Ownership: SanitizeText(account.Ownership), Type: SanitizeText(account.Type),
+		InstanceID: instance.Id, InstanceName: SanitizeSensitiveText(instance.Name), Platform: SanitizeText(instance.Kind),
+		AccountID: SanitizeText(accountID), Name: SanitizeSensitiveText(account.Name), Email: SanitizeText(account.Email),
+		Note: SanitizeSensitiveText(account.Note), Ownership: SanitizeText(account.Ownership), Type: SanitizeText(account.Type),
 		Group: SanitizeText(account.Group), Status: SanitizeText(account.Status), Available: account.Enabled,
-		RateLimited: account.RateLimited, SourceID: SanitizeText(account.SourceID), SourceName: SanitizeText(sources[account.SourceID]),
+		RateLimited: account.RateLimited, SourceID: SanitizeSensitiveText(account.SourceID), SourceName: SanitizeSensitiveText(sources[account.SourceID]),
 		CreatedAt: account.CreatedAt, LastActivityAt: account.LastActivityAt, DisabledAt: account.DisabledAt,
 		ExpiresAt: account.ExpiresAt, RPM: account.RPM, ActiveSessions: account.ActiveSessions,
 		Utilization5H: account.Utilization5H, Utilization7D: account.Utilization7D,
@@ -832,6 +877,51 @@ func SanitizeText(value string) string {
 		return value
 	}
 	return string([]rune(value)[:textLimit]) + "..."
+}
+
+func SanitizeSensitiveText(value string) string {
+	value = SanitizeText(value)
+	for _, pattern := range sensitiveNotePatterns {
+		value = pattern.ReplaceAllString(value, "[已隐藏]")
+	}
+	value = ipv6CandidatePattern.ReplaceAllStringFunc(value, func(candidate string) string {
+		host := strings.Trim(candidate, "[]")
+		if parsedHost, _, err := net.SplitHostPort(candidate); err == nil {
+			host = strings.Trim(parsedHost, "[]")
+		}
+		if zoneIndex := strings.LastIndex(host, "%"); zoneIndex >= 0 {
+			host = host[:zoneIndex]
+		}
+		if ip := net.ParseIP(host); ip != nil && strings.Contains(host, ":") {
+			return "[已隐藏]"
+		}
+		return candidate
+	})
+	value = highEntropyCandidatePattern.ReplaceAllStringFunc(value, func(candidate string) string {
+		if shannonEntropy(candidate) >= 3.5 {
+			return "[已隐藏]"
+		}
+		return candidate
+	})
+	return value
+}
+
+func shannonEntropy(value string) float64 {
+	if value == "" {
+		return 0
+	}
+	counts := make(map[rune]int)
+	runes := []rune(value)
+	for _, current := range runes {
+		counts[current]++
+	}
+	total := float64(len(runes))
+	result := 0.0
+	for _, count := range counts {
+		probability := float64(count) / total
+		result -= probability * math.Log2(probability)
+	}
+	return result
 }
 
 func FormatTime(timestamp int64) string {

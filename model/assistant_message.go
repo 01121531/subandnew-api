@@ -18,6 +18,7 @@ type AssistantMessage struct {
 	InboundEventID    int64  `json:"inbound_event_id" gorm:"not null;uniqueIndex:uidx_assistant_message_turn,priority:1;index"`
 	RunID             int64  `json:"run_id,omitempty" gorm:"not null;default:0;index"`
 	Role              string `json:"role" gorm:"type:varchar(16);not null;uniqueIndex:uidx_assistant_message_turn,priority:2"`
+	ScopeFingerprint  string `json:"-" gorm:"type:char(64);not null;default:'';index"`
 	Content           string `json:"-" gorm:"type:text;not null"`
 	ContentKeyVersion string `json:"-" gorm:"type:varchar(32);not null"`
 	CreatedAt         int64  `json:"created_at" gorm:"bigint;not null;index"`

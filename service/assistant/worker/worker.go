@@ -190,19 +190,29 @@ func (w *Worker) dispatchBacklog(ctx context.Context) {
 	now := w.now().Unix()
 	var eventIDs []int64
 	if err := w.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).
-		Where("status IN ? AND next_attempt_at <= ? AND attempt < ?", []string{model.AssistantInboundStatusPending, model.AssistantInboundStatusFailed}, now, 3).
+		Where("attempt < ? AND ((status IN ? AND next_attempt_at <= ?) OR (status = ? AND lease_until <= ?))", 3, []string{model.AssistantInboundStatusPending, model.AssistantInboundStatusFailed}, now, model.AssistantInboundStatusProcessing, now).
+		Where("NOT EXISTS (SELECT 1 FROM assistant_inbox earlier WHERE earlier.channel_id = assistant_inbox.channel_id AND earlier.peer_id = assistant_inbox.peer_id AND earlier.id < assistant_inbox.id AND earlier.status NOT IN ?)", []string{model.AssistantInboundStatusSucceeded, model.AssistantInboundStatusDeadLetter}).
 		Order("id ASC").Limit(50).Pluck("id", &eventIDs).Error; err == nil {
 		for _, id := range eventIDs {
 			w.dispatchEvent(ctx, id)
 		}
 	}
+	w.reconcileExpiredOutboxClaims(ctx, now)
 	var outboxIDs []int64
 	if err := w.db.WithContext(ctx).Model(&model.AssistantOutbox{}).
-		Where("status IN ? AND next_attempt_at <= ? AND attempt < ?", []string{model.AssistantOutboxStatusPending, model.AssistantOutboxStatusFailed}, now, 5).
+		Where("attempt < ? AND ((status IN ? AND next_attempt_at <= ?) OR (status = ? AND lease_until <= ? AND delivery_started_at = 0 AND claim_owner <> ''))", 5, []string{model.AssistantOutboxStatusPending, model.AssistantOutboxStatusFailed}, now, model.AssistantOutboxStatusSending, now).
 		Order("id ASC").Limit(50).Pluck("id", &outboxIDs).Error; err == nil {
 		for _, id := range outboxIDs {
 			w.dispatchOutbox(ctx, id)
 		}
+	}
+}
+
+func (w *Worker) reconcileExpiredOutboxClaims(ctx context.Context, now int64) {
+	if err := w.db.WithContext(ctx).Model(&model.AssistantOutbox{}).
+		Where("status = ? AND lease_until <= ? AND (delivery_started_at > 0 OR claim_owner = '')", model.AssistantOutboxStatusSending, now).
+		Updates(map[string]any{"status": model.AssistantOutboxStatusUnknown, "claim_owner": "", "lease_until": 0, "error_code": "delivery_result_unknown"}).Error; err != nil {
+		common.SysError("assistant outbox lease recovery failed: " + err.Error())
 	}
 }
 
@@ -214,13 +224,21 @@ func (w *Worker) dispatchEvent(ctx context.Context, id int64) {
 	go func() {
 		defer w.waitGroup.Done()
 		defer w.clearInFlight(w.eventsInFlight, id)
+		reservation, err := w.processor.ReserveTurn(ctx, id)
+		if err != nil {
+			if !errors.Is(err, processor.ErrConversationBusy) && !errors.Is(err, processor.ErrEventNotPending) && !errors.Is(err, context.Canceled) {
+				common.SysError(fmt.Sprintf("assistant inbound %d reservation failed: %v", id, err))
+			}
+			return
+		}
+		defer reservation.Release(context.Background())
 		select {
 		case w.workSlots <- struct{}{}:
 			defer func() { <-w.workSlots }()
 		case <-ctx.Done():
 			return
 		}
-		if err := w.processor.Process(ctx, id); err != nil && !errors.Is(err, processor.ErrEventNotPending) && !errors.Is(err, context.Canceled) {
+		if err := w.processor.ProcessReserved(ctx, reservation); err != nil && !errors.Is(err, processor.ErrEventNotPending) && !errors.Is(err, context.Canceled) {
 			common.SysError(fmt.Sprintf("assistant inbound %d failed: %v", id, err))
 		}
 	}()

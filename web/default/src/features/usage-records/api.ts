@@ -171,16 +171,6 @@ export async function createManagedAccountExport(
   return response.data
 }
 
-export async function getUsageRecordsExport(
-  taskId: string
-): Promise<ApiResponse<UsageRecordExportTask>> {
-  const response = await api.get<ApiResponse<UsageRecordExportTask>>(
-    `/api/managed-exports/${encodeURIComponent(taskId)}`,
-    { disableDuplicate: true }
-  )
-  return response.data
-}
-
 export async function downloadUsageRecordsExport(taskId: string) {
   const response = await api.get(
     `/api/managed-exports/${encodeURIComponent(taskId)}/download`,

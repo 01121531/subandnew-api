@@ -24,6 +24,7 @@ import { PasswordInput } from '@/components/password-input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -42,14 +43,17 @@ export function AdminStep({ form, rootInitialized }: AdminStepProps) {
   const { t } = useTranslation()
   if (rootInitialized) {
     return (
-      <Alert className='border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/40'>
-        <AlertDescription className='flex items-start gap-2'>
-          <ShieldCheck className='mt-0.5 size-4 text-sky-500' />
-          {t(
-            'The administrator account is already initialized. You can keep your existing credentials and continue to the next step.'
-          )}
-        </AlertDescription>
-      </Alert>
+      <div className='grid gap-4'>
+        <Alert className='border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/40'>
+          <AlertDescription className='flex items-start gap-2'>
+            <ShieldCheck className='mt-0.5 size-4 text-sky-500' />
+            {t(
+              'The administrator account is already initialized. You can keep your existing credentials and continue to the next step.'
+            )}
+          </AlertDescription>
+        </Alert>
+        <SetupTokenField form={form} />
+      </div>
     )
   }
 
@@ -120,6 +124,42 @@ export function AdminStep({ form, rootInitialized }: AdminStepProps) {
           </FormItem>
         )}
       />
+
+      <SetupTokenField form={form} className='sm:col-span-2' />
     </div>
+  )
+}
+
+function SetupTokenField({
+  form,
+  className,
+}: {
+  form: UseFormReturn<SetupFormValues>
+  className?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <FormField
+      control={form.control}
+      name='setup_token'
+      render={({ field }) => (
+        <FormItem className={className}>
+          <FormLabel>{t('Initialization token (optional)')}</FormLabel>
+          <FormControl>
+            <PasswordInput
+              {...field}
+              placeholder={t('Enter the server initialization token')}
+              autoComplete='off'
+            />
+          </FormControl>
+          <FormDescription>
+            {t(
+              'Required only when the server has SETUP_TOKEN configured. It is sent for this initialization request and is never stored.'
+            )}
+          </FormDescription>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
   )
 }

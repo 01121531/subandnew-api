@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"sort"
@@ -21,17 +22,19 @@ import (
 const maxProviderResponseBytes = 4 << 20
 
 type OpenAICompatibleConfig struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	HTTPClient *http.Client
+	BaseURL             string
+	APIKey              string
+	Model               string
+	HTTPClient          *http.Client
+	SafeRetryAfterWrite bool
 }
 
 type OpenAICompatibleClient struct {
-	endpoint   string
-	apiKey     string
-	model      string
-	httpClient *http.Client
+	endpoint            string
+	apiKey              string
+	model               string
+	httpClient          *http.Client
+	safeRetryAfterWrite bool
 }
 
 type HTTPError struct {
@@ -79,10 +82,11 @@ func NewOpenAICompatibleClient(config OpenAICompatibleConfig) (*OpenAICompatible
 	}
 	baseURL.Path = chatCompletionsPath(baseURL.Path)
 	return &OpenAICompatibleClient{
-		endpoint:   baseURL.String(),
-		apiKey:     strings.TrimSpace(config.APIKey),
-		model:      model,
-		httpClient: client,
+		endpoint:            baseURL.String(),
+		apiKey:              strings.TrimSpace(config.APIKey),
+		model:               model,
+		httpClient:          client,
+		safeRetryAfterWrite: config.SafeRetryAfterWrite,
 	}, nil
 }
 
@@ -151,32 +155,44 @@ func (c *OpenAICompatibleClient) generateWithRetry(ctx context.Context, attempt 
 		response.Attempts = 1
 		return response, nil
 	}
-	if received || !retriableBeforeFirstByte(ctx, err) {
-		return Response{}, &RequestError{Cause: err, Attempts: 1}
+	if received || !c.retriableBeforeFirstByte(ctx, err) {
+		return Response{}, &RequestError{Cause: err, Attempts: 1, PartialResponse: response}
 	}
 	if err := waitForRetry(ctx, retryDelay(err)); err != nil {
-		return Response{}, &RequestError{Cause: err, Attempts: 1}
+		return Response{}, &RequestError{Cause: err, Attempts: 1, PartialResponse: response}
 	}
 	response, _, err = attempt()
 	if err != nil {
-		return Response{}, &RequestError{Cause: err, Attempts: 2, RetriedBeforeFirstByte: true}
+		return Response{}, &RequestError{Cause: err, Attempts: 2, RetriedBeforeFirstByte: true, PartialResponse: response}
 	}
 	response.Attempts = 2
 	response.RetriedBeforeFirstByte = true
 	return response, nil
 }
 
-func retriableBeforeFirstByte(ctx context.Context, err error) bool {
+func (c *OpenAICompatibleClient) retriableBeforeFirstByte(ctx context.Context, err error) bool {
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	var httpError *HTTPError
 	if errors.As(err, &httpError) {
-		return httpError.Retriable()
+		return c.safeRetryAfterWrite && httpError.Retriable()
+	}
+	var transportError *requestTransportError
+	if errors.As(err, &transportError) {
+		return !transportError.wroteRequest
 	}
 	var networkError net.Error
-	return errors.As(err, &networkError)
+	return c.safeRetryAfterWrite && errors.As(err, &networkError)
 }
+
+type requestTransportError struct {
+	cause        error
+	wroteRequest bool
+}
+
+func (e *requestTransportError) Error() string { return e.cause.Error() }
+func (e *requestTransportError) Unwrap() error { return e.cause }
 
 func retryDelay(err error) time.Duration {
 	var httpError *HTTPError
@@ -235,7 +251,9 @@ func (c *OpenAICompatibleClient) doRequest(ctx context.Context, payload openAIRe
 	if err != nil {
 		return nil, fmt.Errorf("encode assistant model request: %w", err)
 	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	wroteRequest := false
+	trace := &httptrace.ClientTrace{WroteRequest: func(httptrace.WroteRequestInfo) { wroteRequest = true }}
+	httpRequest, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create assistant model request: %w", err)
 	}
@@ -246,7 +264,7 @@ func (c *OpenAICompatibleClient) doRequest(ctx context.Context, payload openAIRe
 
 	response, err := c.httpClient.Do(httpRequest)
 	if err != nil {
-		return nil, fmt.Errorf("send assistant model request: %w", err)
+		return nil, &requestTransportError{cause: fmt.Errorf("send assistant model request: %w", err), wroteRequest: wroteRequest}
 	}
 	return response, nil
 }
@@ -374,7 +392,7 @@ func decodeOpenAIStream(body io.Reader) (Response, bool, error) {
 		line := strings.TrimSuffix(scanner.Text(), "\r")
 		if line == "" {
 			if err := flush(); err != nil {
-				return Response{}, received, err
+				return result, received, err
 			}
 			if done {
 				break
@@ -387,19 +405,19 @@ func decodeOpenAIStream(body io.Reader) (Response, bool, error) {
 	}
 	if err := scanner.Err(); err != nil {
 		if limited.N <= 0 || strings.Contains(strings.ToLower(err.Error()), "token too long") {
-			return Response{}, received, errors.New("assistant model response exceeds size limit")
+			return result, received, errors.New("assistant model response exceeds size limit")
 		}
-		return Response{}, received, fmt.Errorf("read assistant model stream: %w", err)
+		return result, received, fmt.Errorf("read assistant model stream: %w", err)
 	}
 	if limited.N <= 0 {
-		return Response{}, received, errors.New("assistant model response exceeds size limit")
+		return result, received, errors.New("assistant model response exceeds size limit")
 	}
 	if !done {
 		if err := flush(); err != nil {
-			return Response{}, received, err
+			return result, received, err
 		}
 		if result.FinishReason == "" {
-			return Response{}, received, errors.New("assistant model stream ended before completion")
+			return result, received, errors.New("assistant model stream ended before completion")
 		}
 	}
 	if !received {
@@ -414,7 +432,7 @@ func decodeOpenAIStream(body io.Reader) (Response, bool, error) {
 		call := toolCalls[index]
 		arguments := call.arguments.String()
 		if strings.TrimSpace(call.id) == "" || strings.TrimSpace(call.name) == "" || !json.Valid([]byte(arguments)) {
-			return Response{}, true, errors.New("assistant model returned an invalid tool call")
+			return result, true, errors.New("assistant model returned an invalid tool call")
 		}
 		result.Message.ToolCalls = append(result.Message.ToolCalls, ToolCall{ID: call.id, Name: call.name, Arguments: json.RawMessage(arguments)})
 	}

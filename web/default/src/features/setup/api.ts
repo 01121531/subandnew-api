@@ -41,5 +41,10 @@ export function buildSetupPayload(
   values: SetupFormValues,
   rootInitialized: boolean
 ) {
-  return rootInitialized ? {} : values
+  const setupToken = values.setup_token.trim()
+  const { setup_token: _setupToken, ...rootPayload } = values
+  return {
+    ...(rootInitialized ? {} : rootPayload),
+    ...(setupToken ? { setup_token: setupToken } : {}),
+  }
 }

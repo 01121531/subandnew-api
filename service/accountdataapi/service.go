@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
@@ -45,7 +46,8 @@ var defaultFields = []string{"instance_name", "platform", "name", "type", "statu
 
 var accessLogCleanup struct {
 	sync.Mutex
-	last time.Time
+	last    time.Time
+	running bool
 }
 
 type ConfigInput struct {
@@ -492,17 +494,24 @@ func MarkUsed(auth *Authenticated, result *managedaccount.Result) {
 		return
 	}
 	now := common.GetTimestamp()
-	_ = model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPI{}).Where("id = ?", auth.API.ID).UpdateColumns(map[string]any{
+	if err := model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPI{}).Where("id = ?", auth.API.ID).UpdateColumns(map[string]any{
 		"last_accessed_at": now, "request_count": gorm.Expr("request_count + 1"), "matched_count": result.Total, "last_observed_at": result.ObservedAt,
-	}).Error
-	_ = model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPIKey{}).Where("id = ?", auth.Key.ID).UpdateColumn("last_used_at", now).Error
+	}).Error; err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("account data authorization usage write failed: api_id=%d error=%v", auth.API.ID, err))
+	}
+	if err := model.DB.Session(&gorm.Session{SkipHooks: true}).Model(&model.ManagedAccountAPIKey{}).Where("id = ?", auth.Key.ID).UpdateColumn("last_used_at", now).Error; err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("account data API key usage write failed: key_id=%d error=%v", auth.Key.ID, err))
+	}
 }
 
 func RecordAccess(entry *model.ManagedAccountAPIAccessLog) {
 	if entry == nil || entry.APIID <= 0 {
 		return
 	}
-	_ = model.DB.Create(entry).Error
+	maybeCleanupAccessLogs()
+	if err := model.DB.Create(entry).Error; err != nil {
+		logger.LogError(context.Background(), fmt.Sprintf("account data access log write failed: api_id=%d action=%s status=%d error=%v", entry.APIID, entry.Action, entry.StatusCode, err))
+	}
 }
 
 func ListAccessLogs(apiID int64, page, pageSize int) ([]*model.ManagedAccountAPIAccessLog, int64, error) {
@@ -529,19 +538,54 @@ func ListAccessLogs(apiID int64, page, pageSize int) ([]*model.ManagedAccountAPI
 }
 
 func CleanupAccessLogs(now int64) error {
+	return cleanupAccessLogs(model.DB, now)
+}
+
+func cleanupAccessLogs(db *gorm.DB, now int64) error {
+	if db == nil {
+		return errors.New("account data access log database is unavailable")
+	}
 	cutoff := now - int64((90*24*time.Hour)/time.Second)
-	return model.DB.Where("created_at < ?", cutoff).Delete(&model.ManagedAccountAPIAccessLog{}).Error
+	const batchSize = 1000
+	for {
+		var ids []int64
+		if err := db.Model(&model.ManagedAccountAPIAccessLog{}).
+			Where("created_at < ?", cutoff).Order("id ASC").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := db.Where("id IN ?", ids).Delete(&model.ManagedAccountAPIAccessLog{}).Error; err != nil {
+			return err
+		}
+		if len(ids) < batchSize {
+			return nil
+		}
+	}
 }
 
 func maybeCleanupAccessLogs() {
 	accessLogCleanup.Lock()
-	defer accessLogCleanup.Unlock()
-	if time.Since(accessLogCleanup.last) < time.Hour {
+	if accessLogCleanup.running || time.Since(accessLogCleanup.last) < time.Hour {
+		accessLogCleanup.Unlock()
 		return
 	}
-	if CleanupAccessLogs(common.GetTimestamp()) == nil {
-		accessLogCleanup.last = time.Now()
-	}
+	accessLogCleanup.running = true
+	db := model.DB
+	accessLogCleanup.Unlock()
+	go func() {
+		err := cleanupAccessLogs(db, common.GetTimestamp())
+		accessLogCleanup.Lock()
+		accessLogCleanup.running = false
+		if err == nil {
+			accessLogCleanup.last = time.Now()
+		}
+		accessLogCleanup.Unlock()
+		if err != nil {
+			logger.LogError(context.Background(), "account data access log cleanup failed: "+err.Error())
+		}
+	}()
 }
 
 func prepareInput(input ConfigInput) (ConfigInput, managedaccount.Query, error) {

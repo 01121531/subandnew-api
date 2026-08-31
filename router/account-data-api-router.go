@@ -23,11 +23,11 @@ func registerAccountDataAPIRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	management.GET("/:id/access-logs", middleware.RequirePermission(authz.ManagedAccountAPIAudit), controller.ListAccountDataAPIAccessLogs)
 
 	open := engine.Group("/open-api/v1")
-	open.Use(middleware.RouteTag("api"))
+	open.Use(middleware.RouteTag("api"), middleware.GlobalAPIRateLimit(), middleware.AnonymousRequestBodyLimit())
 	open.GET("/accounts", controller.GetOpenAccountData)
 
 	portal := engine.Group("/open-portal/v1/account-data/:slug")
-	portal.Use(middleware.RouteTag("api"))
+	portal.Use(middleware.RouteTag("api"), middleware.GlobalAPIRateLimit(), middleware.AnonymousRequestBodyLimit())
 	portal.POST("/login", controller.LoginAccountDataPortal)
 	portal.GET("/session", controller.GetAccountDataPortalSession)
 	portal.POST("/query", controller.QueryAccountDataPortal)

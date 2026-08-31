@@ -63,22 +63,24 @@ export async function loginPortal(slug: string, password: string) {
   return { ...response.data, csrf_token: response.csrf_token ?? '' }
 }
 
-export async function getPortalSession(slug: string) {
-  const response = (await request<PortalSessionProbe>(
-    `${base(slug)}/session`
-  )) as Envelope<PortalSessionProbe>
+export async function getPortalSession(slug: string, signal?: AbortSignal) {
+  const response = (await request<PortalSessionProbe>(`${base(slug)}/session`, {
+    signal,
+  })) as Envelope<PortalSessionProbe>
   return response.data
 }
 
 export async function queryPortal(
   slug: string,
   csrf: string,
-  query: PortalQuery
+  query: PortalQuery,
+  signal?: AbortSignal
 ) {
   const response = (await request<PortalResult>(`${base(slug)}/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Portal-CSRF': csrf },
     body: JSON.stringify(query),
+    signal,
   })) as Envelope<PortalResult>
   return response.data
 }

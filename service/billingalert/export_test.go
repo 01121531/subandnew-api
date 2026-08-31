@@ -17,7 +17,7 @@ func TestRunAlertExportCreatesReusableCSV(t *testing.T) {
 	events := []*model.BillingAlertEvent{
 		{
 			EventKey: "billing-export-1", EventType: "threshold", RuleName: "monthly",
-			InstanceName: "new-api-a", InstanceKind: "new-api", ThresholdName: "warning",
+			InstanceName: "=HYPERLINK(\"https://example.invalid\")", InstanceKind: "new-api", ThresholdName: "warning",
 			Currency: model.BillingCurrencyCNY, Threshold: "100", USDTotal: "20",
 			CNYTotal: "102.4", DiscountRate: "0.8", ExchangeRate: "6.4",
 			ExchangeSource: "ecb", ExchangeObservedDate: "2026-08-13",
@@ -61,6 +61,7 @@ func TestRunAlertExportCreatesReusableCSV(t *testing.T) {
 	require.Equal(t, "来源", rows[0][0])
 	require.Equal(t, model.AlertSourceBilling, rows[1][0])
 	require.Equal(t, "threshold", rows[1][1])
+	require.Equal(t, "'=HYPERLINK(\"https://example.invalid\")", rows[1][2])
 	require.Equal(t, "80%", rows[1][14])
 	require.Equal(t, "monitor_recovery", rows[2][1])
 	require.Equal(t, "100%", rows[2][14])

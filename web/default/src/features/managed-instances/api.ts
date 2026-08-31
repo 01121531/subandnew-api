@@ -29,7 +29,6 @@ import type {
   ManagedInstanceCredentialInput,
   ManagedInstanceFilters,
   ManagedInstanceAlertList,
-  ManagedInstanceAccountOutput,
   ManagedAccountRangeInput,
   ManagedAccountRefreshView,
   ManagedAccountSnapshotView,
@@ -41,8 +40,6 @@ import type {
   ManagedInstanceOperationExecuteInput,
   ManagedInstanceOperationExecution,
   ManagedInstanceOperationPlanInput,
-  ManagedInstancePreflight,
-  ManagedInstanceRealtimeMetrics,
   ManagedInstanceRPMHistory,
   ManagedInstanceRPMHistoryBucket,
   ManagedInstanceTask,
@@ -174,13 +171,6 @@ export async function createManagedInstance(
   return response.data
 }
 
-export async function probeManagedInstance(
-  input: ManagedInstanceInput
-): Promise<ApiResponse<ManagedInstancePreflight>> {
-  const response = await api.post('/api/managed-instances/probe', input)
-  return response.data
-}
-
 export async function updateManagedInstance(
   id: number,
   input: ManagedInstanceInput
@@ -251,23 +241,6 @@ export async function getManagedInstanceMetrics(
   return response.data
 }
 
-export async function getManagedInstanceRealtimeMetrics(
-  id: number,
-  options?: { silent?: boolean }
-): Promise<
-  ApiResponse<ManagedInstanceObservation<ManagedInstanceRealtimeMetrics>>
-> {
-  const response = await api.get(
-    `/api/managed-instances/${id}/realtime-metrics`,
-    {
-      disableDuplicate: true,
-      skipBusinessError: options?.silent,
-      skipErrorHandler: options?.silent,
-    }
-  )
-  return response.data
-}
-
 export async function refreshManagedRealtime(
   ids: number[]
 ): Promise<ApiResponse<Array<{ instance_id: number; enqueued: boolean }>>> {
@@ -297,28 +270,6 @@ export async function getManagedInstanceRPMHistory(
   return response.data
 }
 
-export async function getManagedInstanceAccountOutput(
-  id: number,
-  window: { start: number; end: number },
-  options?: { silent?: boolean }
-): Promise<
-  ApiResponse<ManagedInstanceObservation<ManagedInstanceAccountOutput>>
-> {
-  const params = new URLSearchParams({
-    start: String(window.start),
-    end: String(window.end),
-  })
-  const response = await api.get(
-    `/api/managed-instances/${id}/account-output?${params.toString()}`,
-    {
-      disableDuplicate: true,
-      skipBusinessError: options?.silent,
-      skipErrorHandler: options?.silent,
-    }
-  )
-  return response.data
-}
-
 function managedAccountRangeParams(input: ManagedAccountRangeInput) {
   const params = new URLSearchParams()
   if (input.preset_days) params.set('preset_days', String(input.preset_days))
@@ -331,7 +282,7 @@ function managedAccountRangeParams(input: ManagedAccountRangeInput) {
 export async function getManagedAccountSnapshot(
   id: number,
   input: ManagedAccountRangeInput,
-  options?: { silent?: boolean }
+  options?: { silent?: boolean; signal?: AbortSignal }
 ): Promise<ApiResponse<ManagedAccountSnapshotView>> {
   const params = managedAccountRangeParams(input)
   const response = await api.get(
@@ -340,6 +291,7 @@ export async function getManagedAccountSnapshot(
       disableDuplicate: true,
       skipBusinessError: options?.silent,
       skipErrorHandler: options?.silent,
+      signal: options?.signal,
     }
   )
   return response.data
@@ -357,16 +309,6 @@ export async function refreshManagedAccountSnapshot(
       skipBusinessError: options?.silent,
       skipErrorHandler: options?.silent,
     }
-  )
-  return response.data
-}
-
-export async function getManagedAlerts(): Promise<
-  ApiResponse<ManagedInstanceAlertList>
-> {
-  const response = await api.get(
-    '/api/managed-instances/alerts?page=1&page_size=100',
-    { disableDuplicate: true }
   )
   return response.data
 }

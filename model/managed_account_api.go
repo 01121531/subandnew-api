@@ -90,8 +90,8 @@ func (key *ManagedAccountAPIKey) BeforeCreate(_ *gorm.DB) error {
 }
 
 type ManagedAccountAPIAccessLog struct {
-	ID          int64  `json:"id" gorm:"primaryKey"`
-	APIID       int64  `json:"api_id" gorm:"not null;index"`
+	ID          int64  `json:"id" gorm:"primaryKey;index:idx_managed_account_api_logs_api_created_id,priority:3"`
+	APIID       int64  `json:"api_id" gorm:"not null;index;index:idx_managed_account_api_logs_api_created_id,priority:1"`
 	KeyID       int64  `json:"key_id" gorm:"not null;index"`
 	KeyPrefix   string `json:"key_prefix" gorm:"type:varchar(24);not null"`
 	AuthType    string `json:"auth_type" gorm:"type:varchar(16);not null;default:'api_key';index"`
@@ -103,7 +103,7 @@ type ManagedAccountAPIAccessLog struct {
 	DurationMS  int64  `json:"duration_ms" gorm:"bigint;not null"`
 	ResultCount int    `json:"result_count" gorm:"not null;default:0"`
 	ErrorCode   string `json:"error_code" gorm:"type:varchar(64);index"`
-	CreatedAt   int64  `json:"created_at" gorm:"bigint;not null;index"`
+	CreatedAt   int64  `json:"created_at" gorm:"bigint;not null;index;index:idx_managed_account_api_logs_api_created_id,priority:2"`
 }
 
 func (ManagedAccountAPIAccessLog) TableName() string { return "managed_account_api_access_logs" }

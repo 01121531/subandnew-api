@@ -2,11 +2,14 @@ package managedinstance
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
+	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"gorm.io/gorm"
 )
@@ -21,6 +24,11 @@ const (
 	conductorRPMMinuteMaxRange = 24 * time.Hour
 	conductorRPMHourMaxRange   = 31 * 24 * time.Hour
 )
+
+var managedHistoryWriteFailures = struct {
+	sync.Mutex
+	last map[int64]time.Time
+}{last: make(map[int64]time.Time)}
 
 type ConductorRPMHistoryPoint struct {
 	Timestamp            int64    `json:"timestamp"`
@@ -39,6 +47,8 @@ type ConductorRPMHistoryPoint struct {
 	TodayCostSamples     int      `json:"today_cost_samples"`
 	ActiveSessions       *int     `json:"active_sessions"`
 	ActiveSessionSamples int      `json:"active_session_samples"`
+	RPMComplete          bool     `json:"-"`
+	SuccessRateComplete  bool     `json:"-"`
 }
 
 type ConductorRPMHistoryResult struct {
@@ -78,7 +88,25 @@ func (stream *conductorRealtimeStream) sampleRPM(ctx context.Context) {
 		TodayCost: metricHistoryValue(state.TodayCost), AccountsAvailable: &state.AccountsAvailable,
 		AccountsTotal: &state.AccountsTotal, ActiveSessions: &state.ActiveSessions,
 	}
-	_ = RecordManagedRealtimeHistorySample(ctx, stream.instanceID, common.GetTimestamp(), sample)
+	if err := RecordManagedRealtimeHistorySample(ctx, stream.instanceID, common.GetTimestamp(), sample); err != nil {
+		ReportManagedRealtimeHistoryWriteError(ctx, stream.instanceID, err)
+	}
+}
+
+func ReportManagedRealtimeHistoryWriteError(ctx context.Context, instanceID int64, err error) {
+	if err == nil {
+		return
+	}
+	now := time.Now()
+	managedHistoryWriteFailures.Lock()
+	last := managedHistoryWriteFailures.last[instanceID]
+	if now.Sub(last) < time.Minute {
+		managedHistoryWriteFailures.Unlock()
+		return
+	}
+	managedHistoryWriteFailures.last[instanceID] = now
+	managedHistoryWriteFailures.Unlock()
+	logger.LogError(ctx, fmt.Sprintf("managed realtime history write failed: instance_id=%d error=%v", instanceID, err))
 }
 
 func recordConductorRPMSample(ctx context.Context, instanceID int64, observedAt int64, rpm float64, capacities ...float64) error {
@@ -275,7 +303,9 @@ func cleanupConductorRPMHistory(ctx context.Context, now int64) {
 		return
 	}
 	cutoff := now - int64(conductorRPMRetention/time.Second)
-	_ = model.DB.WithContext(ctx).Where("bucket_start < ?", cutoff).Delete(&model.ManagedRPMHistory{}).Error
+	if err := model.DB.WithContext(ctx).Where("bucket_start < ?", cutoff).Delete(&model.ManagedRPMHistory{}).Error; err != nil {
+		logger.LogError(ctx, "managed realtime history cleanup failed: "+err.Error())
+	}
 }
 
 func CleanupManagedRPMHistory(ctx context.Context, now int64) {
@@ -349,6 +379,9 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		successRateWeightedSum float64
 		successRateWeightSum   float64
 		successRateSamples     int
+		rpmInstances           map[int64]struct{}
+		capacityInstances      map[int64]struct{}
+		successRateInstances   map[int64]struct{}
 	}
 	expected := 0
 	if len(expectedInstances) > 0 {
@@ -356,24 +389,29 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 	}
 	minutes := map[int64]*aggregate{}
 	for _, row := range rows {
-		if row.SampleCount <= 0 || row.BucketStart < start || row.BucketStart > end {
+		if row.BucketStart < start || row.BucketStart > end {
 			continue
 		}
 		minute := minutes[row.BucketStart]
 		if minute == nil {
-			minute = &aggregate{}
+			minute = &aggregate{rpmInstances: map[int64]struct{}{}, capacityInstances: map[int64]struct{}{}, successRateInstances: map[int64]struct{}{}}
 			minutes[row.BucketStart] = minute
 		}
-		minute.sum += row.RPMSum / float64(row.SampleCount)
-		minute.samples += row.SampleCount
+		if row.SampleCount > 0 {
+			minute.sum += row.RPMSum / float64(row.SampleCount)
+			minute.samples += row.SampleCount
+			minute.rpmInstances[row.InstanceID] = struct{}{}
+		}
 		if row.CapacitySampleCount > 0 {
 			minute.capacitySum += row.CapacitySum / float64(row.CapacitySampleCount)
 			minute.capacityCount++
+			minute.capacityInstances[row.InstanceID] = struct{}{}
 		}
 		if row.SuccessRateSampleCount > 0 && row.SuccessRateWeightSum > 0 {
 			minute.successRateWeightedSum += row.SuccessRateWeightedSum
 			minute.successRateWeightSum += row.SuccessRateWeightSum
 			minute.successRateSamples += row.SuccessRateSampleCount
+			minute.successRateInstances[row.InstanceID] = struct{}{}
 		}
 	}
 	for _, minute := range minutes {
@@ -386,11 +424,13 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			period := managedHistoryBucketStart(timestamp, bucket)
 			value := aggregates[period]
 			if value == nil {
-				value = &aggregate{}
+				value = &aggregate{rpmInstances: map[int64]struct{}{}, capacityInstances: map[int64]struct{}{}, successRateInstances: map[int64]struct{}{}}
 				aggregates[period] = value
 			}
-			value.sum += minute.sum
-			value.count++
+			if minute.samples > 0 {
+				value.sum += minute.sum
+				value.count++
+			}
 			value.samples += minute.samples
 			if minute.capacityComplete {
 				value.capacitySum += minute.capacitySum
@@ -399,6 +439,15 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			value.successRateWeightedSum += minute.successRateWeightedSum
 			value.successRateWeightSum += minute.successRateWeightSum
 			value.successRateSamples += minute.successRateSamples
+			for id := range minute.rpmInstances {
+				value.rpmInstances[id] = struct{}{}
+			}
+			for id := range minute.capacityInstances {
+				value.capacityInstances[id] = struct{}{}
+			}
+			for id := range minute.successRateInstances {
+				value.successRateInstances[id] = struct{}{}
+			}
 		}
 	}
 	points := make([]ConductorRPMHistoryPoint, 0, len(aggregates))
@@ -418,6 +467,7 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			capacity = &capacityValue
 		}
 		var successRate *float64
+		successComplete := value.successRateSamples > 0 && (expected == 0 || len(value.successRateInstances) == expected)
 		if value.successRateSamples > 0 && value.successRateWeightSum > 0 {
 			rate := value.successRateWeightedSum / value.successRateWeightSum
 			successRate = &rate
@@ -425,6 +475,7 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 		point := ConductorRPMHistoryPoint{
 			Timestamp: timestamp, RPM: rpm, Capacity: capacity, Samples: value.samples,
 			SuccessRate: successRate, SuccessRateSamples: value.successRateSamples,
+			RPMComplete: value.samples > 0 && (expected == 0 || len(value.rpmInstances) == expected), SuccessRateComplete: successComplete,
 		}
 		if accounts, ok := accountPoints[timestamp]; ok {
 			point.AccountsAvailable = accounts.available

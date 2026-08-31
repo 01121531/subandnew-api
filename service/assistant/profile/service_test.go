@@ -73,6 +73,24 @@ func TestProfileOnlyOnePrimary(t *testing.T) {
 	require.True(t, second.IsPrimary)
 }
 
+func TestProfileReusesClientUntilConfigurationChanges(t *testing.T) {
+	service := newProfileService(t)
+	created, err := service.Create(CreateInput{Name: "cached", BaseURL: "https://api.example.com/v1", Model: "model-a", Enabled: true, IsPrimary: true})
+	require.NoError(t, err)
+	first, _, err := service.PrimaryClient()
+	require.NoError(t, err)
+	second, _, err := service.PrimaryClient()
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+
+	modelName := "model-b"
+	_, err = service.Update(created.Id, UpdateInput{Model: &modelName})
+	require.NoError(t, err)
+	third, _, err := service.PrimaryClient()
+	require.NoError(t, err)
+	require.NotEqual(t, first, third)
+}
+
 func TestProfileRejectsInvalidInputAndMissingCipher(t *testing.T) {
 	service := newProfileService(t)
 	_, err := service.Create(CreateInput{Name: "bad", BaseURL: "file:///tmp/model", Model: "model"})

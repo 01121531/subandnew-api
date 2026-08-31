@@ -29,6 +29,8 @@ type AssistantInboundEvent struct {
 	Cursor            string `json:"-" gorm:"type:text"`
 	Attempt           int    `json:"attempt" gorm:"not null;default:0"`
 	NextAttemptAt     int64  `json:"next_attempt_at" gorm:"bigint;not null;default:0;index:idx_assistant_inbound_due,priority:2"`
+	ClaimOwner        string `json:"-" gorm:"type:varchar(191);not null;default:'';index"`
+	LeaseUntil        int64  `json:"-" gorm:"bigint;not null;default:0;index"`
 	ErrorCode         string `json:"error_code,omitempty" gorm:"type:varchar(128)"`
 	ReceivedAt        int64  `json:"received_at" gorm:"bigint;not null;index"`
 	ProcessedAt       int64  `json:"processed_at" gorm:"bigint;not null;default:0"`

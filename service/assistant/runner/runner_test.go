@@ -24,6 +24,12 @@ type fakeStreamingClient struct {
 	streamCalls int
 }
 
+type partialUsageClient struct{}
+
+func (partialUsageClient) Generate(context.Context, provider.Request) (provider.Response, error) {
+	return provider.Response{}, &provider.RequestError{Cause: errors.New("stream interrupted"), Attempts: 1, PartialResponse: provider.Response{Usage: provider.Usage{InputTokens: 40, OutputTokens: 2, TotalTokens: 42}}}
+}
+
 func (client *fakeStreamingClient) GenerateStream(_ context.Context, request provider.Request) (provider.Response, error) {
 	client.streamCalls++
 	return client.fakeClient.Generate(context.Background(), request)
@@ -37,6 +43,14 @@ func (client *fakeClient) Generate(_ context.Context, request provider.Request) 
 	response := client.responses[0]
 	client.responses = client.responses[1:]
 	return response, nil
+}
+
+func TestRunnerPreservesConfirmedUsageOnProviderFailure(t *testing.T) {
+	agent, err := New(partialUsageClient{}, newRunnerRegistry(t), Config{SystemPrompt: "stable", MaxSteps: 1, MaxToolCalls: 1, RequestTimeout: time.Second, RunTimeout: 30 * time.Second})
+	require.NoError(t, err)
+	outcome, err := agent.Run(t.Context(), tool.ExecutionContext{UserID: 7}, []provider.Message{{Role: provider.RoleUser, Content: "hello"}})
+	require.Error(t, err)
+	require.Equal(t, 42, outcome.Usage.TotalTokens)
 }
 
 type listInput struct {

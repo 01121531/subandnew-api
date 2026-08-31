@@ -307,6 +307,48 @@ func TestSystemTaskClaimPassDispatchesEarliestPendingByType(t *testing.T) {
 	}, 2*time.Second, 20*time.Millisecond)
 }
 
+func TestSystemTaskClaimPassDoesNotClaimBeyondDispatchCapacity(t *testing.T) {
+	truncate(t)
+
+	started := make(chan struct{}, systemTaskDispatchLimit+4)
+	finished := make(chan error, systemTaskDispatchLimit)
+	release := make(chan struct{})
+	handler := &stubScheduledHandler{
+		taskType: "test_dispatch_capacity",
+		onRun: func(_ context.Context, task *model.SystemTask, runnerID string) {
+			started <- struct{}{}
+			<-release
+			finished <- model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, nil, "")
+		},
+	}
+	withSystemTaskRegistry(t, handler)
+
+	for index := 0; index < systemTaskDispatchLimit+4; index++ {
+		_, _, err := EnqueueScopedSystemTask(handler.taskType, fmt.Sprintf("scope-%d", index), nil, nil)
+		require.NoError(t, err)
+	}
+
+	runSystemTaskClaimPass(context.Background(), "runner-capacity")
+	require.Eventually(t, func() bool { return len(started) == systemTaskDispatchLimit }, 2*time.Second, 20*time.Millisecond)
+
+	var running int64
+	require.NoError(t, model.DB.Model(&model.SystemTask{}).Where("type = ? AND status = ?", handler.taskType, model.SystemTaskStatusRunning).Count(&running).Error)
+	require.Equal(t, int64(systemTaskDispatchLimit), running)
+	var pending int64
+	require.NoError(t, model.DB.Model(&model.SystemTask{}).Where("type = ? AND status = ?", handler.taskType, model.SystemTaskStatusPending).Count(&pending).Error)
+	require.Equal(t, int64(4), pending)
+
+	close(release)
+	require.Eventually(t, func() bool { return len(finished) == systemTaskDispatchLimit }, 2*time.Second, 20*time.Millisecond)
+	for index := 0; index < systemTaskDispatchLimit; index++ {
+		require.NoError(t, <-finished)
+	}
+	require.Eventually(t, func() bool {
+		var succeeded int64
+		return model.DB.Model(&model.SystemTask{}).Where("type = ? AND status = ?", handler.taskType, model.SystemTaskStatusSucceeded).Count(&succeeded).Error == nil && succeeded == systemTaskDispatchLimit
+	}, 2*time.Second, 20*time.Millisecond)
+}
+
 func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	truncate(t)
 

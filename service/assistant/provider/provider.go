@@ -59,6 +59,16 @@ type RequestError struct {
 	Cause                  error
 	Attempts               int
 	RetriedBeforeFirstByte bool
+	PartialResponse        Response
+}
+
+func PartialResponse(err error) (Response, bool) {
+	var requestError *RequestError
+	if !errors.As(err, &requestError) {
+		return Response{}, false
+	}
+	response := requestError.PartialResponse
+	return response, response.Usage != (Usage{}) || response.Message.Content != "" || len(response.Message.ToolCalls) > 0
 }
 
 func (e *RequestError) Error() string {

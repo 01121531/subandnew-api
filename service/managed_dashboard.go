@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -86,6 +87,9 @@ type managedDashboardSubscriber struct {
 
 var (
 	managedDashboardCollectorOnce sync.Once
+	managedDashboardCollectorMu   sync.Mutex
+	managedDashboardCollectorStop context.CancelFunc
+	managedDashboardCollectorWG   sync.WaitGroup
 	managedDashboardSlotsOnce     sync.Once
 	managedDashboardSlots         chan struct{}
 	managedDashboardHostSlots     = map[string]*managedInstanceOperationScopedSlot{}
@@ -253,16 +257,24 @@ func StartManagedDashboardCollector() {
 		if !common.IsMasterNode || model.DB == nil {
 			return
 		}
+		collectorCtx, cancel := context.WithCancel(context.Background())
+		managedDashboardCollectorMu.Lock()
+		managedDashboardCollectorStop = cancel
+		managedDashboardCollectorMu.Unlock()
+		managedDashboardCollectorWG.Add(1)
 		go func() {
-			collectManagedDashboardPresets()
+			defer managedDashboardCollectorWG.Done()
+			collectManagedDashboardPresets(collectorCtx)
 			ticker := time.NewTicker(managedDashboardRefreshInterval)
 			cleanupTicker := time.NewTicker(24 * time.Hour)
 			defer ticker.Stop()
 			defer cleanupTicker.Stop()
 			for {
 				select {
+				case <-collectorCtx.Done():
+					return
 				case <-ticker.C:
-					collectManagedDashboardPresets()
+					collectManagedDashboardPresets(collectorCtx)
 				case <-cleanupTicker.C:
 					cutoff := common.GetTimestamp() - int64(managedDashboardCustomRetention/time.Second)
 					_ = model.DB.Where("preset_days = 0 AND last_accessed_at < ?", cutoff).Delete(&model.ManagedDashboardSnapshot{}).Error
@@ -272,9 +284,39 @@ func StartManagedDashboardCollector() {
 	})
 }
 
-func collectManagedDashboardPresets() {
+func StopManagedDashboardCollector(ctx context.Context) error {
+	managedDashboardCollectorMu.Lock()
+	cancel := managedDashboardCollectorStop
+	managedDashboardCollectorMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	managedDashboardRetryMu.Lock()
+	for instanceID, timer := range managedDashboardRetries {
+		timer.Stop()
+		delete(managedDashboardRetries, instanceID)
+	}
+	managedDashboardRetryMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		managedDashboardCollectorWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func collectManagedDashboardPresets(ctx context.Context) {
 	var instances []model.ManagedInstance
-	if err := model.DB.Order("id ASC").Find(&instances).Error; err != nil {
+	if err := model.DB.WithContext(ctx).Order("id ASC").Find(&instances).Error; err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		logger.LogWarn(context.Background(), fmt.Sprintf("dashboard collector instance query failed: %v", err))
 		return
 	}
@@ -285,13 +327,18 @@ func collectManagedDashboardPresets() {
 			continue
 		}
 		ids = append(ids, instance.Id)
+		managedDashboardCollectorWG.Add(1)
 		go func() {
-			if err := refreshManagedDashboardPresets(context.Background(), instance.Id, 0); err != nil {
+			defer managedDashboardCollectorWG.Done()
+			if err := refreshManagedDashboardPresets(ctx, instance.Id, 0); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				if err == errManagedDashboardBusy {
 					return
 				}
 				logger.LogWarn(context.Background(), fmt.Sprintf("dashboard collection failed: instance=%d err=%v", instance.Id, err))
-				scheduleManagedDashboardRetry(instance.Id)
+				scheduleManagedDashboardRetry(ctx, instance.Id)
 			}
 		}()
 	}
@@ -318,7 +365,10 @@ func publishManagedDashboardTopology(instances []model.ManagedInstance, ids []in
 	publishManagedDashboardEvent(ManagedDashboardEvent{Type: "topology", InstanceIDs: ids})
 }
 
-func scheduleManagedDashboardRetry(instanceID int64) {
+func scheduleManagedDashboardRetry(ctx context.Context, instanceID int64) {
+	if ctx.Err() != nil {
+		return
+	}
 	managedDashboardRetryMu.Lock()
 	defer managedDashboardRetryMu.Unlock()
 	if _, exists := managedDashboardRetries[instanceID]; exists {
@@ -328,8 +378,14 @@ func scheduleManagedDashboardRetry(instanceID int64) {
 		managedDashboardRetryMu.Lock()
 		delete(managedDashboardRetries, instanceID)
 		managedDashboardRetryMu.Unlock()
-		if err := refreshManagedDashboardPresets(context.Background(), instanceID, 0); err != nil {
-			scheduleManagedDashboardRetry(instanceID)
+		if ctx.Err() != nil {
+			return
+		}
+		if err := refreshManagedDashboardPresets(ctx, instanceID, 0); err != nil {
+			if errors.Is(err, managedinstance.ErrInvalidInstance) || errors.Is(err, managedinstance.ErrInstanceNotFound) || ctx.Err() != nil {
+				return
+			}
+			scheduleManagedDashboardRetry(ctx, instanceID)
 		}
 	})
 }

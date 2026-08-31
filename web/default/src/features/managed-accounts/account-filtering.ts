@@ -42,20 +42,20 @@ export const ACCOUNT_FILTER_FIELDS = [
 
 export type AccountFilterField = (typeof ACCOUNT_FILTER_FIELDS)[number]
 export type AccountFilterMatchMode = 'all' | 'any'
-export type AccountFilterValueMode = 'all' | 'any'
-export type AccountTextFilterOperator =
+type AccountFilterValueMode = 'all' | 'any'
+type AccountTextFilterOperator =
   | 'contains'
   | 'starts_with'
   | 'ends_with'
   | 'not_contains'
   | 'is_empty'
   | 'is_not_empty'
-export type AccountCategoryFilterOperator =
+type AccountCategoryFilterOperator =
   | 'is'
   | 'is_not'
   | 'is_empty'
   | 'is_not_empty'
-export type AccountMetricFilterOperator =
+type AccountMetricFilterOperator =
   | 'eq'
   | 'gt'
   | 'gte'
@@ -109,7 +109,7 @@ export const TEXT_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'ownership',
 ])
 
-export const NUMBER_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
+const NUMBER_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'requests',
   'tokens',
   'amount',
@@ -119,7 +119,7 @@ export const NUMBER_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'utilization_7d',
 ])
 
-export const TIME_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
+const TIME_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'created_at',
   'last_activity_at',
 ])
@@ -178,7 +178,7 @@ export function parseAccountFilterDisplayValues(value: string) {
     })
 }
 
-export function normalizeAccountFilterValues(values: unknown[]) {
+function normalizeAccountFilterValues(values: unknown[]) {
   return values
     .filter((value) => value != null)
     .map((value) => String(value).trim())
@@ -253,7 +253,7 @@ export function matchesAdvancedAccountFilter(
     : matches.some(Boolean)
 }
 
-export function matchesAccountFilterRule(
+function matchesAccountFilterRule(
   document: AccountFilterDocument,
   rule: AccountFilterRule
 ) {
@@ -327,7 +327,7 @@ function matchesMetricAccountFilterRule(
   })
 }
 
-export function parseMetricFilterValue(field: AccountFilterField, raw: string) {
+function parseMetricFilterValue(field: AccountFilterField, raw: string) {
   const value = raw.trim()
   if (!value) return null
   if (!TIME_ACCOUNT_FILTER_FIELDS.has(field)) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/01121531/subandnew-api/model"
@@ -22,8 +23,16 @@ var (
 const modelProfileSecretPurpose = "model-profile-api-key"
 
 type Service struct {
-	db     *gorm.DB
-	cipher *secrets.Cipher
+	db      *gorm.DB
+	cipher  *secrets.Cipher
+	mu      sync.Mutex
+	clients map[int64]cachedClient
+}
+
+type cachedClient struct {
+	fingerprint string
+	client      provider.Client
+	httpClient  interface{ CloseIdleConnections() }
 }
 
 type CreateInput struct {
@@ -55,7 +64,7 @@ func NewService(db *gorm.DB, cipher *secrets.Cipher) (*Service, error) {
 	if db == nil {
 		return nil, errors.New("assistant model profile database is nil")
 	}
-	return &Service{db: db, cipher: cipher}, nil
+	return &Service{db: db, cipher: cipher, clients: make(map[int64]cachedClient)}, nil
 }
 
 func (s *Service) Create(input CreateInput) (*model.AssistantModelProfile, error) {
@@ -203,6 +212,7 @@ func (s *Service) Delete(id int64) error {
 	if result.RowsAffected == 0 {
 		return ErrNotFound
 	}
+	s.invalidateClient(id)
 	return nil
 }
 
@@ -233,6 +243,12 @@ func (s *Service) clientForProfile(profile *model.AssistantModelProfile) (provid
 	if profile == nil {
 		return nil, nil, ErrNotFound
 	}
+	fingerprint := fmt.Sprintf("%d:%d:%s:%s:%s:%d", profile.Id, profile.UpdatedAt, profile.BaseURL, profile.Model, profile.APIKeyFingerprint, profile.TimeoutSeconds)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.clients[profile.Id]; ok && cached.fingerprint == fingerprint {
+		return cached.client, profile, nil
+	}
 	apiKey := ""
 	if profile.APIKeyCiphertext != "" {
 		if s.cipher == nil {
@@ -257,7 +273,20 @@ func (s *Service) clientForProfile(profile *model.AssistantModelProfile) (provid
 	if err != nil {
 		return nil, nil, err
 	}
+	if cached, ok := s.clients[profile.Id]; ok && cached.httpClient != nil {
+		cached.httpClient.CloseIdleConnections()
+	}
+	s.clients[profile.Id] = cachedClient{fingerprint: fingerprint, client: client, httpClient: httpClient}
 	return client, profile, nil
+}
+
+func (s *Service) invalidateClient(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cached, ok := s.clients[id]; ok && cached.httpClient != nil {
+		cached.httpClient.CloseIdleConnections()
+	}
+	delete(s.clients, id)
 }
 
 func applyDefaults(profile *model.AssistantModelProfile) {

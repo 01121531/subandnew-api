@@ -42,10 +42,10 @@ export interface UsageRecordSummary {
   currency: 'USD' | 'quota'
 }
 
-export type UsageRecordFilterValue = string | string[]
+type UsageRecordFilterValue = string | string[]
 export type UsageRecordFilters = Record<string, UsageRecordFilterValue>
 
-export type UsageRecordFilterOption = {
+type UsageRecordFilterOption = {
   value: string
   label: string
 }

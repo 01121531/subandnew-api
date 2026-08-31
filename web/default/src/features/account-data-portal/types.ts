@@ -41,7 +41,7 @@ export type PortalQuery = {
   page_size: number
 }
 
-export type PortalItem = Record<string, unknown> & {
+type PortalItem = Record<string, unknown> & {
   instance_id: number
   account_id: string
 }
@@ -66,6 +66,10 @@ export type PortalResult = {
   observed_at: string
   stale: boolean
   partial: boolean
+  filter_options?: Record<
+    string,
+    Array<string | { value: string; label?: string }>
+  >
 }
 
 export type PortalSelection = { instance_id: number; account_id: string }

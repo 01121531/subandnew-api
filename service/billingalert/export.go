@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -102,13 +103,13 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 			if err != nil {
 				discountRate = event.DiscountRate
 			}
-			_ = writer.Write([]string{
+			_ = writer.Write(alertCSVRow([]string{
 				event.SourceType, event.EventType, event.InstanceName, event.InstanceKind, event.RuleName,
 				event.ScopeMode, event.MetricKey, event.Conditions, event.ObservedValues, event.ThresholdName,
 				event.Currency, event.Threshold, event.USDTotal, event.CNYTotal, discountRate,
 				event.ExchangeRate, event.ExchangeSource, event.ExchangeObservedDate, event.Recipients,
 				event.ErrorCode, time.Unix(event.CreatedAt, 0).Format(time.RFC3339),
-			})
+			}))
 			count++
 			if count > billingAlertExportLimit {
 				writer.Flush()
@@ -133,6 +134,16 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 		return err
 	}
 	return finishAlertExport(&record, "succeeded", "", finalPath, count, info.Size())
+}
+
+func alertCSVRow(values []string) []string {
+	for index, value := range values {
+		trimmed := strings.TrimLeft(value, " \t\r\n")
+		if trimmed != "" && strings.ContainsRune("=+-@", rune(trimmed[0])) {
+			values[index] = "'" + value
+		}
+	}
+	return values
 }
 
 func finishAlertExport(record *model.BillingAlertExport, status string, errorCode string, path string, count int64, size int64) error {

@@ -132,19 +132,22 @@ type queryMetricUnitValue struct {
 }
 
 type queryMetricResult struct {
-	Value       *float64               `json:"value,omitempty"`
-	Unit        string                 `json:"unit,omitempty"`
-	Values      []queryMetricUnitValue `json:"values,omitempty"`
-	Status      string                 `json:"status"`
-	Aggregation string                 `json:"aggregation"`
-	Count       int                    `json:"count,omitempty"`
-	Minimum     *float64               `json:"minimum,omitempty"`
-	Maximum     *float64               `json:"maximum,omitempty"`
-	Average     *float64               `json:"average,omitempty"`
-	Sum         *float64               `json:"sum,omitempty"`
-	Latest      *float64               `json:"latest,omitempty"`
-	LatestAt    string                 `json:"latest_at,omitempty"`
-	ObservedAt  string                 `json:"observed_at,omitempty"`
+	Value                *float64               `json:"value,omitempty"`
+	Unit                 string                 `json:"unit,omitempty"`
+	Values               []queryMetricUnitValue `json:"values,omitempty"`
+	Status               string                 `json:"status"`
+	Aggregation          string                 `json:"aggregation"`
+	Count                int                    `json:"count,omitempty"`
+	Minimum              *float64               `json:"minimum,omitempty"`
+	Maximum              *float64               `json:"maximum,omitempty"`
+	Average              *float64               `json:"average,omitempty"`
+	Sum                  *float64               `json:"sum,omitempty"`
+	Latest               *float64               `json:"latest,omitempty"`
+	LatestAt             string                 `json:"latest_at,omitempty"`
+	ObservedAt           string                 `json:"observed_at,omitempty"`
+	SupportedInstances   []int64                `json:"supported_instances,omitempty"`
+	UnsupportedInstances []int64                `json:"unsupported_instances,omitempty"`
+	MissingInstances     []int64                `json:"missing_instances,omitempty"`
 }
 
 type queryMetricsPoint struct {
@@ -166,6 +169,7 @@ type queryMetricsOutput struct {
 	Complete        bool                         `json:"complete"`
 	ObservedAt      string                       `json:"observed_at,omitempty"`
 	Sources         []string                     `json:"sources"`
+	TimeSemantics   string                       `json:"time_semantics,omitempty"`
 }
 
 type queryMetricsRange struct {
@@ -212,6 +216,14 @@ func executeQueryMetrics(ctx context.Context, db *gorm.DB, execution tool.Execut
 		InstanceIDs: append([]int64(nil), resolution.IDs...), Instances: instances,
 		SelectionSource: resolution.Source, DefaultFallback: resolution.Fallback,
 		Period: period, Mode: mode, Window: window, Metrics: make(map[string]queryMetricResult, len(metrics)), Complete: true,
+	}
+	if containsDailyQueryMetric(metrics) {
+		output.TimeSemantics = "china_natural_day"
+		if period == queryMetricsPeriodCustom {
+			if err := validateQueryMetricsNaturalDayRange(input.StartAt, input.EndAt); err != nil {
+				return tool.Output[queryMetricsOutput]{}, err
+			}
+		}
 	}
 	if period == queryMetricsPeriodRealtime {
 		return queryRealtimeMetrics(ctx, resolution.IDs, instances, metrics, output)
@@ -340,6 +352,35 @@ func normalizeQueryMetricsRange(input queryMetricsInput, now time.Time) (queryMe
 	return window, rangeValue, nil
 }
 
+func containsDailyQueryMetric(metrics []string) bool {
+	for _, metric := range metrics {
+		if metric == "cost" || metric == "requests" || metric == "tokens" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateQueryMetricsNaturalDayRange(startRaw, endRaw string) error {
+	start, startDateOnly, err := parseAssistantHistoryTime(startRaw, false)
+	if err != nil {
+		return err
+	}
+	end, endDateOnly, err := parseAssistantHistoryTime(endRaw, true)
+	if err != nil {
+		return err
+	}
+	if startDateOnly && endDateOnly {
+		return nil
+	}
+	start = start.In(assistantLocation)
+	end = end.In(assistantLocation)
+	if start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 || end.Hour() != 23 || end.Minute() != 59 || end.Second() != 59 {
+		return errors.New("cost, requests, and tokens custom ranges must use complete Asia/Shanghai natural days")
+	}
+	return nil
+}
+
 func queryRealtimeMetrics(_ context.Context, ids []int64, instances []instanceSummary, metrics []string, output queryMetricsOutput) (tool.Output[queryMetricsOutput], error) {
 	type total struct {
 		value      float64
@@ -394,6 +435,22 @@ func queryRealtimeMetrics(_ context.Context, ids []int64, instances []instanceSu
 			status = model.ManagedInstanceCollectionUnsupported
 		}
 		result := queryMetricResult{Status: status, Aggregation: queryMetricAggregation(metric, queryMetricsModeSummary), Count: validCounts[metric]}
+		for _, instance := range instances {
+			if metricSupportedByInstance(queryHistoryMetricName(metric, true), instance.Kind) {
+				result.SupportedInstances = append(result.SupportedInstances, instance.ID)
+			} else {
+				result.UnsupportedInstances = append(result.UnsupportedInstances, instance.ID)
+			}
+		}
+		if validCounts[metric] < len(result.SupportedInstances) {
+			for _, id := range result.SupportedInstances {
+				state, available, _ := managedinstance.CurrentManagedRealtime(id)
+				value, _, metricStatus, _ := realtimeQueryMetric(state, metric)
+				if !available || metricStatus != model.ManagedInstanceCollectionSucceeded || value == nil {
+					result.MissingInstances = append(result.MissingInstances, id)
+				}
+			}
+		}
 		units := totals[metric]
 		unitNames := make([]string, 0, len(units))
 		for unit := range units {
@@ -480,9 +537,10 @@ func queryDashboardMetricSummary(ids []int64, metrics []string, presetDays int) 
 		value      float64
 		count      int
 		observedAt int64
+		instances  map[int64]struct{}
 	}
 	totals := make(map[string]map[string]*total, len(metrics))
-	unsupported := make(map[string]int, len(metrics))
+	unsupported := make(map[string]map[int64]struct{}, len(metrics))
 	observedAt := int64(0)
 	stale := false
 	provenance := make([]tool.Provenance, 0, len(snapshots.Items))
@@ -508,7 +566,10 @@ func queryDashboardMetricSummary(ids []int64, metrics []string, presetDays int) 
 				sample = summary.Tokens
 			}
 			if sample.CollectionStatus == model.ManagedInstanceCollectionUnsupported {
-				unsupported[metric]++
+				if unsupported[metric] == nil {
+					unsupported[metric] = map[int64]struct{}{}
+				}
+				unsupported[metric][item.InstanceID] = struct{}{}
 				continue
 			}
 			if sample.Value == nil || sample.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
@@ -519,12 +580,13 @@ func queryDashboardMetricSummary(ids []int64, metrics []string, presetDays int) 
 			}
 			entry := totals[metric][sample.Unit]
 			if entry == nil {
-				entry = &total{}
+				entry = &total{instances: map[int64]struct{}{}}
 				totals[metric][sample.Unit] = entry
 			}
 			entry.value += *sample.Value
 			entry.count++
 			entry.observedAt = conservativeTimestamp(entry.observedAt, section.Observation.ObservedAt)
+			entry.instances[item.InstanceID] = struct{}{}
 		}
 	}
 	results := make(map[string]queryMetricResult, len(metrics))
@@ -538,10 +600,26 @@ func queryDashboardMetricSummary(ids []int64, metrics []string, presetDays int) 
 			status = model.ManagedInstanceCollectionSucceeded
 		} else if count > 0 {
 			status = "partial"
-		} else if len(ids) > 0 && unsupported[metric] == len(ids) {
+		} else if len(ids) > 0 && len(unsupported[metric]) == len(ids) {
 			status = model.ManagedInstanceCollectionUnsupported
 		}
 		result := queryMetricResult{Status: status, Aggregation: "total", Count: count}
+		for _, id := range ids {
+			observed := false
+			for _, entry := range totals[metric] {
+				if _, ok := entry.instances[id]; ok {
+					observed = true
+					break
+				}
+			}
+			if observed {
+				result.SupportedInstances = append(result.SupportedInstances, id)
+			} else if _, ok := unsupported[metric][id]; ok {
+				result.UnsupportedInstances = append(result.UnsupportedInstances, id)
+			} else {
+				result.MissingInstances = append(result.MissingInstances, id)
+			}
+		}
 		units := make([]string, 0, len(totals[metric]))
 		for unit := range totals[metric] {
 			units = append(units, unit)
@@ -571,6 +649,7 @@ func queryMetricResultsFromHistory(metrics []string, history metricHistoryOutput
 			Unit: status.Unit, Status: status.Status, Aggregation: status.Aggregation,
 			Count: statistics.Count, Minimum: statistics.Minimum, Maximum: statistics.Maximum,
 			Average: statistics.Average, Sum: statistics.Sum, Latest: statistics.Latest, LatestAt: statistics.LatestAt,
+			SupportedInstances: status.SupportedInstances, UnsupportedInstances: status.UnsupportedInstances, MissingInstances: status.MissingInstances,
 		}
 		if history.Mode == metricHistoryModePoint || status.Aggregation == "period_end" {
 			result.Value = statistics.Latest

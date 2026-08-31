@@ -17,6 +17,7 @@ var expectedControlPlaneTables = []string{
 	"assistant_channel_leases",
 	"assistant_channel_secrets",
 	"assistant_channels",
+	"assistant_conversation_leases",
 	"assistant_conversations",
 	"assistant_identities",
 	"assistant_identity_instance_scopes",
@@ -40,6 +41,7 @@ var expectedControlPlaneTables = []string{
 	"billing_filter_template_versions",
 	"billing_filter_templates",
 	"casbin_rule",
+	"control_plane_leases",
 	"custom_oauth_providers",
 	"exchange_rate_settings",
 	"exchange_rates",
@@ -115,7 +117,11 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&AssistantIdentityInstanceScope{}, "uidx_assistant_identity_instance"))
 	require.True(t, db.Migrator().HasIndex(&AssistantInboundEvent{}, "uidx_assistant_inbound_external"))
 	require.True(t, db.Migrator().HasIndex(&AssistantConversation{}, "uidx_assistant_conversation_peer"))
+	require.True(t, db.Migrator().HasIndex(&AssistantConversationLease{}, "uidx_assistant_conversation_lease"))
+	require.True(t, db.Migrator().HasColumn(&AssistantInboundEvent{}, "lease_until"))
+	require.True(t, db.Migrator().HasColumn(&AssistantConversation{}, "scope_fingerprint"))
 	require.True(t, db.Migrator().HasIndex(&AssistantMessage{}, "uidx_assistant_message_turn"))
+	require.True(t, db.Migrator().HasColumn(&AssistantMessage{}, "scope_fingerprint"))
 	require.True(t, db.Migrator().HasIndex(&AssistantRun{}, "uidx_assistant_run_public_id"))
 	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cached_input_tokens"))
 	require.True(t, db.Migrator().HasColumn(&AssistantRun{}, "cache_observed_input_tokens"))
@@ -126,6 +132,7 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	require.True(t, db.Migrator().HasColumn(&AssistantToolCall{}, "error_detail"))
 	require.True(t, db.Migrator().HasColumn(&AssistantToolCall{}, "error_detail_truncated"))
 	require.True(t, db.Migrator().HasIndex(&AssistantOutbox{}, "uidx_assistant_outbox_reply_key"))
+	require.True(t, db.Migrator().HasColumn(&AssistantOutbox{}, "delivery_started_at"))
 	for _, column := range []string{
 		"accounts_available_last", "accounts_total_last", "account_sample_count",
 		"concurrency_used_last", "concurrency_max_last", "concurrency_sample_count", "concurrency_used_samples", "concurrency_max_samples",

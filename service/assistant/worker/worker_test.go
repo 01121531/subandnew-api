@@ -53,3 +53,20 @@ func TestChannelLeaseAllowsOnlyOneOwnerUntilExpiry(t *testing.T) {
 	require.True(t, acquired)
 	require.Greater(t, secondToken, firstToken)
 }
+
+func TestExpiredOutboxSendBecomesUnknownInsteadOfBlindRetry(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantOutbox{}))
+	outbox := model.AssistantOutbox{ChannelID: 1, ReplyKey: "reply", Payload: "encrypted", Status: model.AssistantOutboxStatusSending, ClaimOwner: "dead-node", LeaseUntil: 99, DeliveryStartedAt: 90}
+	require.NoError(t, db.Create(&outbox).Error)
+	legacy := model.AssistantOutbox{ChannelID: 1, ReplyKey: "legacy-reply", Payload: "encrypted", Status: model.AssistantOutboxStatusSending}
+	require.NoError(t, db.Create(&legacy).Error)
+	worker := &Worker{db: db}
+	worker.reconcileExpiredOutboxClaims(t.Context(), 100)
+	require.NoError(t, db.First(&outbox, outbox.ID).Error)
+	require.Equal(t, model.AssistantOutboxStatusUnknown, outbox.Status)
+	require.Equal(t, "delivery_result_unknown", outbox.ErrorCode)
+	require.NoError(t, db.First(&legacy, legacy.ID).Error)
+	require.Equal(t, model.AssistantOutboxStatusUnknown, legacy.Status)
+}

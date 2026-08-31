@@ -24,6 +24,12 @@ const (
 	// pass runs, independent of how often the runner wakes to claim tasks.
 	systemTaskSchedulerInterval = 15 * time.Second
 	systemTaskStaleLockInterval = 30 * time.Second
+
+	// systemTaskDispatchLimit bounds claimed work before handlers apply their
+	// own, usually smaller, concurrency limits. Without this guard a backlog can
+	// claim 100 scoped tasks at once and keep every waiting task alive with a
+	// lease heartbeat even though only a handful can make progress.
+	systemTaskDispatchLimit = 8
 )
 
 // SystemTaskHandler executes a claimed task of a specific type. Run owns the
@@ -79,6 +85,7 @@ var (
 	systemTaskRunnerMu   sync.Mutex
 	systemTaskRunnerStop context.CancelFunc
 	systemTaskRunnerWG   sync.WaitGroup
+	systemTaskSlots      = make(chan struct{}, systemTaskDispatchLimit)
 	// systemTaskWakeup signals the runner to check for runnable tasks
 	// immediately instead of waiting for the idle poll. Buffered so a signal
 	// raised while the runner is busy is not lost and is handled on the next loop.
@@ -259,8 +266,12 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		if ctx.Err() != nil {
 			return
 		}
+		if !reserveSystemTaskSlot() {
+			return
+		}
 		handler := handlersByType[task.Type]
 		if handler == nil {
+			releaseSystemTaskSlot()
 			continue
 		}
 		var claimedTask *model.SystemTask
@@ -270,6 +281,7 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 			// pending row during this pass, even if it completes before the query
 			// result has finished being traversed.
 			if _, attempted := attemptedUnscopedTypes[task.Type]; attempted {
+				releaseSystemTaskSlot()
 				continue
 			}
 			attemptedUnscopedTypes[task.Type] = struct{}{}
@@ -278,10 +290,12 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 			claimedTask, claimed, err = model.ClaimScopedSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
 		}
 		if err != nil {
+			releaseSystemTaskSlot()
 			logger.LogWarn(context.Background(), fmt.Sprintf("system task claim failed: %v", err))
 			continue
 		}
 		if !claimed {
+			releaseSystemTaskSlot()
 			continue
 		}
 		dispatchHandler := handler
@@ -289,12 +303,26 @@ func runSystemTaskClaimPass(ctx context.Context, runnerID string) {
 		systemTaskRunnerWG.Add(1)
 		gopool.Go(func() {
 			defer systemTaskRunnerWG.Done()
+			defer releaseSystemTaskSlot()
 			runWithLeaseHeartbeat(ctx, dispatchTask, runnerID, func(taskCtx context.Context) {
 				dispatchHandler.Run(taskCtx, dispatchTask, runnerID)
 			})
 			notifySystemTaskRunner()
 		})
 	}
+}
+
+func reserveSystemTaskSlot() bool {
+	select {
+	case systemTaskSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func releaseSystemTaskSlot() {
+	<-systemTaskSlots
 }
 
 // runSystemTaskScheduler creates a new task row for each enabled scheduled

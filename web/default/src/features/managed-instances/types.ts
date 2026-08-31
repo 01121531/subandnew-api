@@ -219,7 +219,7 @@ interface ManagedInstanceResourceSummary {
   unhealthy: number | null
 }
 
-export interface ManagedInstanceUsageTrendPoint {
+interface ManagedInstanceUsageTrendPoint {
   date: string
   requests: number
   tokens: number
@@ -237,7 +237,7 @@ export interface ManagedInstanceSummary {
   trend: ManagedInstanceUsageTrendPoint[]
 }
 
-export interface ManagedDashboardRange {
+interface ManagedDashboardRange {
   range_key: string
   preset_days: number
   start: number
@@ -254,7 +254,7 @@ export interface ManagedDashboardSnapshotSection {
   stale: boolean
 }
 
-export interface ManagedDashboardInstanceSnapshot {
+interface ManagedDashboardInstanceSnapshot {
   instance_id: number
   summary: ManagedDashboardSnapshotSection
   today: ManagedDashboardSnapshotSection
@@ -276,25 +276,6 @@ export interface ManagedDashboardEvent {
   instance_id?: number
   snapshot?: ManagedDashboardSnapshotSection
   instance_ids?: number[]
-}
-
-export interface ManagedInstanceRealtimeMetrics {
-  rpm: ManagedInstanceMetricSample
-  rpm_capacity: ManagedInstanceMetricSample
-  success_rate: ManagedInstanceMetricSample
-  success_rate_sample_count?: number
-  concurrency_used: ManagedInstanceMetricSample
-  concurrency_max: ManagedInstanceMetricSample
-  concurrency_collection_status?: string
-  today_cost: ManagedInstanceMetricSample
-  accounts_total?: number
-  accounts_available?: number
-  accounts_rate_limited?: number
-  accounts_collection_status?: string
-  accounts_reporting?: number
-  active_sessions?: number
-  stream_status?: string
-  stale?: boolean
 }
 
 export interface ManagedInstanceRealtimeState {
@@ -323,7 +304,7 @@ export interface ManagedInstanceRealtimeState {
   account_snapshot?: ManagedAccountSnapshotEvent
 }
 
-export interface ManagedAccountSnapshotEvent {
+interface ManagedAccountSnapshotEvent {
   instance_id: number
   observed_at: number
   last_attempt_at: number
@@ -334,7 +315,7 @@ export interface ManagedAccountSnapshotEvent {
 
 export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour'
 
-export interface ManagedInstanceRPMHistoryPoint {
+interface ManagedInstanceRPMHistoryPoint {
   timestamp: number
   rpm: number
   capacity: number | null
@@ -363,7 +344,7 @@ export interface ManagedInstanceAccountOutputItem {
   error_code?: string
 }
 
-export interface ManagedInstanceAccountOutput {
+interface ManagedInstanceAccountOutput {
   source_instance_id: number
   kind: string
   window: { start: number; end: number }
@@ -383,7 +364,7 @@ export interface ManagedAccountRangeInput {
   timezone?: string
 }
 
-export interface ManagedAccountSnapshotSection<T> {
+interface ManagedAccountSnapshotSection<T> {
   observation?: ManagedInstanceObservation<T>
   last_attempt_at: number
   last_attempt_status: ManagedInstanceCollectionStatus | ''
@@ -438,28 +419,6 @@ export interface ManagedInstanceAlertList {
   total: number
   page: number
   page_size: number
-}
-
-interface ManagedInstanceConnectionStage {
-  name: 'dns' | 'tcp' | 'tls' | 'http'
-  status: 'not_run' | 'succeeded' | 'failed'
-}
-
-export interface ManagedInstancePreflight {
-  success: boolean
-  probe?: {
-    kind: ManagedInstanceKind
-    version: string
-    system_name: string
-    start_time: number
-    status: ManagedInstanceStatus
-    capabilities: string[]
-    latency_ms: number
-    checked_at: number
-  }
-  stages: ManagedInstanceConnectionStage[]
-  error_code?: string
-  advice?: string
 }
 
 export type ManagedInstanceOperationAction =

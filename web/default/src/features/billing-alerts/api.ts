@@ -128,7 +128,7 @@ export interface SMTPSetting {
   enabled: boolean
 }
 
-export interface AlertDelivery {
+interface AlertDelivery {
   id: number
   phase?: 'failure' | 'recovery'
   recipient: string
@@ -174,7 +174,7 @@ export interface MetricAlertCondition {
   recovery_threshold: string
 }
 
-export interface MetricAlertState {
+interface MetricAlertState {
   id: number
   scope_key: string
   instance_id: number
@@ -248,39 +248,6 @@ export interface AlertRecordExport {
   finished_at: number
   expires_at: number
   created_at: number
-}
-
-export interface InstanceAlert {
-  id: number
-  instance_id: number
-  instance_name: string
-  instance_kind: string
-  alert_type: 'availability' | 'credential'
-  status: 'open' | 'resolved'
-  error_code: string
-  occurrences: number
-  first_seen_at: number
-  last_seen_at: number
-  resolved_at: number
-  email_status: 'pending' | 'retrying' | 'sent' | 'cancelled'
-  email_recipients: string
-  email_attempts: number
-  email_error: string
-  email_sent_at: number
-  email_next_retry_at: number
-  recovery_email_status: 'pending' | 'retrying' | 'sent' | 'cancelled'
-  recovery_email_recipients: string
-  recovery_email_attempts: number
-  recovery_email_error: string
-  recovery_email_sent_at: number
-  recovery_email_next_retry_at: number
-}
-
-export interface InstanceAlertPage {
-  items: InstanceAlert[]
-  total: number
-  page: number
-  page_size: number
 }
 
 export interface InstanceAlertRule {
@@ -515,18 +482,14 @@ export async function testSMTPSettings(recipient: string) {
   return (await api.post('/api/billing/smtp-settings/test', { recipient })).data
 }
 
-export async function listAlertRecords(params: URLSearchParams) {
+export async function listAlertRecords(
+  params: URLSearchParams,
+  signal?: AbortSignal
+) {
   return (
     await api.get<ApiResponse<AlertRecordPage>>(
-      `/api/billing/alert-records?${params}`
-    )
-  ).data
-}
-
-export async function listInstanceAlerts(params: URLSearchParams) {
-  return (
-    await api.get<ApiResponse<InstanceAlertPage>>(
-      `/api/billing/instance-alerts?${params}`
+      `/api/billing/alert-records?${params}`,
+      { signal, disableDuplicate: true, skipErrorHandler: true }
     )
   ).data
 }
@@ -560,12 +523,6 @@ export async function updateInstanceAlertRule(
 
 export async function deleteInstanceAlertRule(id: number) {
   return (await api.delete(`/api/instance-alert-rules/${id}`)).data
-}
-
-export async function getAlertRecord(id: number) {
-  return (
-    await api.get<ApiResponse<AlertRecord>>(`/api/billing/alert-records/${id}`)
-  ).data
 }
 
 export async function createAlertRecordExport(params: URLSearchParams) {

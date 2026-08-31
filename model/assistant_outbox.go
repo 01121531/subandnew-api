@@ -27,6 +27,9 @@ type AssistantOutbox struct {
 	Status            string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index:idx_assistant_outbox_due,priority:1"`
 	Attempt           int    `json:"attempt" gorm:"not null;default:0"`
 	NextAttemptAt     int64  `json:"next_attempt_at" gorm:"bigint;not null;default:0;index:idx_assistant_outbox_due,priority:2"`
+	ClaimOwner        string `json:"-" gorm:"type:varchar(191);not null;default:'';index"`
+	LeaseUntil        int64  `json:"-" gorm:"bigint;not null;default:0;index"`
+	DeliveryStartedAt int64  `json:"delivery_started_at" gorm:"bigint;not null;default:0;index"`
 	RemoteResult      string `json:"-" gorm:"type:text"`
 	ErrorCode         string `json:"error_code,omitempty" gorm:"type:varchar(128)"`
 	SentAt            int64  `json:"sent_at" gorm:"bigint;not null;default:0"`

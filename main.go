@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,13 +33,10 @@ import (
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	_ "github.com/01121531/subandnew-api/setting/performance_setting"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-
-	_ "net/http/pprof"
 )
 
 //go:embed web/default/dist
@@ -63,38 +62,6 @@ func main() {
 		return
 	}
 	systemupdate.RecoverInterruptedUpdate(common.Version)
-	if common.IsMasterNode {
-		migration, migrationErr := managedinstance.MigrateLegacyAlertRules()
-		if migrationErr != nil {
-			common.FatalLog("failed to migrate managed instance alert rules: " + migrationErr.Error())
-			return
-		}
-		if migration.Instances > 0 {
-			common.SysLog(fmt.Sprintf("managed instance alert rule migration completed: rules=%d instances=%d", migration.Rules, migration.Instances))
-		}
-		repair, repairErr := billingalert.RepairLegacyDiscountRates()
-		if repairErr != nil {
-			common.FatalLog("failed to repair billing alert discount rates: " + repairErr.Error())
-			return
-		}
-		if repair.CorrectedTotal() > 0 {
-			common.SysLog(fmt.Sprintf(
-				"billing alert discount repair completed: rules=%d cycles=%d evaluations=%d events=%d",
-				repair.Rules, repair.Cycles, repair.Evaluations, repair.Events,
-			))
-		}
-		if repair.Invalid > 0 {
-			common.SysError(fmt.Sprintf("billing alert discount repair found %d invalid values", repair.Invalid))
-		}
-		alertRepair, alertRepairErr := managedinstance.RepairAlertEventProjections()
-		if alertRepairErr != nil {
-			common.FatalLog("failed to repair managed instance alert events: " + alertRepairErr.Error())
-			return
-		}
-		if alertRepair.Processed > 0 {
-			common.SysLog(fmt.Sprintf("managed instance alert event repair completed: processed=%d", alertRepair.Processed))
-		}
-	}
 
 	common.SysLog("SubAndNew API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -103,10 +70,6 @@ func main() {
 	if common.DebugEnabled {
 		common.SysLog("running in debug mode")
 	}
-	if strings.TrimSpace(os.Getenv("SESSION_SECRET")) == "" {
-		common.SysError("SESSION_SECRET is not configured; sessions will be invalidated on restart and cannot be shared across nodes")
-	}
-
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
 
@@ -117,32 +80,59 @@ func main() {
 	// all currently alive nodes in multi-instance deployments.
 	service.StartSystemInstanceReporter()
 
-	// Run only handlers registered by the control-plane task packages.
-	service.StartSystemTaskRunner()
-	service.StartManagedDashboardCollector()
-	service.StartManagedConductorRealtimeCollector()
-	service.StartManagedPollingRealtimeCollector()
+	leadershipLost := make(chan struct{}, 1)
+	var controlPlaneMu sync.Mutex
+	controlPlaneShuttingDown := false
 	var aiAssistantWorker *assistantworker.Worker
-	if common.IsMasterNode && !strings.EqualFold(strings.TrimSpace(os.Getenv("ASSISTANT_WORKER_ENABLED")), "false") {
-		configuredWorker, workerErr := assistantworker.NewDefault(model.DB, common.NodeName)
-		switch {
-		case workerErr == nil:
-			aiAssistantWorker = configuredWorker
-			aiAssistantWorker.Start()
-			common.SysLog("AI assistant worker started")
-		case errors.Is(workerErr, assistantsecrets.ErrKeyNotConfigured):
-			common.SysLog("AI assistant worker disabled: configure ASSISTANT_SECRET_KEY(S) or MANAGED_INSTANCE_SECRET_KEY")
-		default:
-			common.SysError("AI assistant worker failed to initialize: " + workerErr.Error())
+	startControlPlaneServices := func() {
+		controlPlaneMu.Lock()
+		defer controlPlaneMu.Unlock()
+		if controlPlaneShuttingDown {
+			return
+		}
+		if err := runControlPlaneRepairs(); err != nil {
+			common.SysError("control plane repair failed: " + err.Error())
+			select {
+			case leadershipLost <- struct{}{}:
+			default:
+			}
+			return
+		}
+		service.StartSystemTaskRunner()
+		service.StartManagedDashboardCollector()
+		service.StartManagedConductorRealtimeCollector()
+		service.StartManagedPollingRealtimeCollector()
+		if !strings.EqualFold(strings.TrimSpace(os.Getenv("ASSISTANT_WORKER_ENABLED")), "false") {
+			configuredWorker, workerErr := assistantworker.NewDefault(model.DB, common.NodeName)
+			switch {
+			case workerErr == nil:
+				aiAssistantWorker = configuredWorker
+				aiAssistantWorker.Start()
+				common.SysLog("AI assistant worker started")
+			case errors.Is(workerErr, assistantsecrets.ErrKeyNotConfigured):
+				common.SysLog("AI assistant worker disabled: configure ASSISTANT_SECRET_KEY(S) or MANAGED_INSTANCE_SECRET_KEY")
+			default:
+				common.SysError("AI assistant worker failed to initialize: " + workerErr.Error())
+			}
 		}
 	}
+	controlPlaneLeader := service.StartControlPlaneLeader(startControlPlaneServices, func() {
+		select {
+		case leadershipLost <- struct{}{}:
+		default:
+		}
+	})
 
+	var pprofServer *http.Server
 	if os.Getenv("ENABLE_PPROF") == "true" {
-		gopool.Go(func() {
-			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))
-		})
+		pprofServer = newPprofServer()
+		go func() {
+			if err := pprofServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("pprof server failed: %v", err)
+			}
+		}()
 		go common.Monitor()
-		common.SysLog("pprof enabled")
+		common.SysLog("pprof enabled on 127.0.0.1:8005")
 	}
 
 	err = common.StartPyroScope()
@@ -213,6 +203,8 @@ func main() {
 	case reason := <-systemupdate.ShutdownRequests():
 		shutdownTimeoutSeconds = systemupdate.ShutdownTimeoutSeconds()
 		common.SysLog("received internal shutdown request for " + reason)
+	case <-leadershipLost:
+		common.SysLog("control plane leadership was lost, shutting down this master process")
 	}
 	signal.Stop(quit)
 
@@ -220,6 +212,30 @@ func main() {
 	shutdownTimeout := time.Duration(shutdownTimeoutSeconds) * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	controlPlaneMu.Lock()
+	controlPlaneShuttingDown = true
+	workerToStop := aiAssistantWorker
+	controlPlaneMu.Unlock()
+	if workerToStop != nil {
+		if err := workerToStop.Stop(ctx); err != nil {
+			common.SysError("AI assistant worker did not stop before shutdown deadline: " + err.Error())
+		}
+	}
+	if err := service.StopManagedDashboardCollector(ctx); err != nil {
+		common.SysError("managed dashboard collector did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := service.StopManagedConductorRealtimeCollector(ctx); err != nil {
+		common.SysError("managed conductor realtime collector did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := service.StopManagedPollingRealtimeCollector(ctx); err != nil {
+		common.SysError("managed polling realtime collector did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := service.StopSystemTaskRunner(ctx); err != nil {
+		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := controlPlaneLeader.Stop(ctx); err != nil {
+		common.SysError("control plane leader did not stop before shutdown deadline: " + err.Error())
+	}
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 		// Shutdown returning on deadline does not wait for active handlers. Close
@@ -230,21 +246,60 @@ func main() {
 			common.SysError(fmt.Sprintf("failed to close active server connections: %v", closeErr))
 		}
 	}
-	if aiAssistantWorker != nil {
-		if err := aiAssistantWorker.Stop(ctx); err != nil {
-			common.SysError("AI assistant worker did not stop before shutdown deadline: " + err.Error())
+	if pprofServer != nil {
+		if err := pprofServer.Shutdown(ctx); err != nil {
+			common.SysError("pprof server did not stop before shutdown deadline: " + err.Error())
 		}
-	}
-	if err := service.StopManagedConductorRealtimeCollector(ctx); err != nil {
-		common.SysError("managed conductor realtime collector did not stop before shutdown deadline: " + err.Error())
-	}
-	if err := service.StopSystemTaskRunner(ctx); err != nil {
-		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())
 	}
 	if err := service.StopSystemInstanceReporter(ctx); err != nil {
 		common.SysError("system instance reporter did not stop before shutdown deadline: " + err.Error())
 	}
 	common.SysLog("server exited")
+}
+
+func runControlPlaneRepairs() error {
+	migration, err := managedinstance.MigrateLegacyAlertRules()
+	if err != nil {
+		return fmt.Errorf("migrate managed instance alert rules: %w", err)
+	}
+	if migration.Instances > 0 {
+		common.SysLog(fmt.Sprintf("managed instance alert rule migration completed: rules=%d instances=%d", migration.Rules, migration.Instances))
+	}
+	repair, err := billingalert.RepairLegacyDiscountRates()
+	if err != nil {
+		return fmt.Errorf("repair billing alert discount rates: %w", err)
+	}
+	if repair.CorrectedTotal() > 0 {
+		common.SysLog(fmt.Sprintf(
+			"billing alert discount repair completed: rules=%d cycles=%d evaluations=%d events=%d",
+			repair.Rules, repair.Cycles, repair.Evaluations, repair.Events,
+		))
+	}
+	if repair.Invalid > 0 {
+		common.SysError(fmt.Sprintf("billing alert discount repair found %d invalid values", repair.Invalid))
+	}
+	alertRepair, err := managedinstance.RepairAlertEventProjections()
+	if err != nil {
+		return fmt.Errorf("repair managed instance alert events: %w", err)
+	}
+	if alertRepair.Processed > 0 {
+		common.SysLog(fmt.Sprintf("managed instance alert event repair completed: processed=%d", alertRepair.Processed))
+	}
+	return nil
+}
+
+func newPprofServer() *http.Server {
+	pprofMux := http.NewServeMux()
+	pprofMux.HandleFunc("/debug/pprof/", httppprof.Index)
+	pprofMux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+	pprofMux.HandleFunc("/debug/pprof/profile", httppprof.Profile)
+	pprofMux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+	pprofMux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+	return &http.Server{
+		Addr:              "127.0.0.1:8005",
+		Handler:           pprofMux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
 }
 
 func InitResources() error {

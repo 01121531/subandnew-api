@@ -7,6 +7,7 @@ published by the Free Software Foundation, either version 3 of the
 License, or (at your option) any later version.
 */
 import {
+  AlertCircle,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -17,7 +18,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { MultiSelect } from '@/components/multi-select'
@@ -41,6 +42,7 @@ import {
   type AccountAdvancedFilter,
   type AccountFilterField,
 } from '@/features/managed-accounts/account-filtering'
+import { useMediaQuery } from '@/hooks'
 import { accountAmountSummaries } from '@/lib/account-amounts'
 
 import {
@@ -51,6 +53,17 @@ import {
   PortalRequestError,
   queryPortal,
 } from './api'
+import {
+  emptyPortalSelection,
+  isAbortError,
+  isPortalSelectionChecked,
+  portalFilterOptions,
+  PortalRequestGate,
+  portalSelectionCount,
+  portalSelectionKey,
+  toggleAllPortalSelection,
+  togglePortalSelection,
+} from './portal-state'
 import type {
   PortalQuery,
   PortalResult,
@@ -105,10 +118,6 @@ function emptyQuery(pageSize: number): PortalQuery {
     page: 1,
     page_size: pageSize,
   }
-}
-
-function selectionKey(item: PortalSelection) {
-  return `${item.instance_id}\u0000${item.account_id}`
 }
 
 function formatValue(field: string, value: unknown) {
@@ -172,6 +181,8 @@ function observedLabel(value: string | number) {
 export function AccountDataPortal({ slug }: { slug: string }) {
   const [session, setSession] = useState<PortalSession | null>(null)
   const [checking, setChecking] = useState(true)
+  const [sessionError, setSessionError] = useState('')
+  const [sessionProbe, setSessionProbe] = useState(0)
   const [password, setPassword] = useState('')
   const [loginPending, setLoginPending] = useState(false)
   const [query, setQuery] = useState<PortalQuery>(emptyQuery(50))
@@ -181,18 +192,20 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   })
   const [result, setResult] = useState<PortalResult | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState<Map<string, PortalSelection>>(
-    new Map()
-  )
-  const [allFilteredSelected, setAllFilteredSelected] = useState(false)
-  const [excluded, setExcluded] = useState<Map<string, PortalSelection>>(
-    new Map()
-  )
+  const [queryError, setQueryError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [selection, setSelection] = useState(emptyPortalSelection)
   const [exporting, setExporting] = useState(false)
+  const requestGate = useRef(new PortalRequestGate())
+  const isMobile = useMediaQuery('(max-width: 767px)')
 
   useEffect(() => {
-    void getPortalSession(slug)
+    const controller = new AbortController()
+    setChecking(true)
+    setSessionError('')
+    void getPortalSession(slug, controller.signal)
       .then((value) => {
+        if (controller.signal.aborted) return
         if (!value.authenticated) {
           setSession(null)
           return
@@ -200,33 +213,52 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         setSession(value)
         setQuery(emptyQuery(Math.min(value.page_size || 50, 50)))
       })
-      .catch(() => setSession(null))
-      .finally(() => setChecking(false))
-  }, [slug])
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setSessionError(
+          error instanceof Error
+            ? error.message
+            : '无法确认门户登录状态，请检查网络后重试。'
+        )
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setChecking(false)
+      })
+    return () => controller.abort()
+  }, [sessionProbe, slug])
 
   const requestQuery = useMemo(
     () => ({ ...query, ...accountFilterSnapshot(filter) }),
     [filter, query]
   )
-  const load = useCallback(async () => {
-    if (!session) return
-    setLoading(true)
-    try {
-      setResult(await queryPortal(slug, session.csrf_token, requestQuery))
-    } catch (error) {
-      if (error instanceof PortalRequestError && error.status === 401) {
-        setSession(null)
-      } else {
-        toast.error(error instanceof Error ? error.message : '数据加载失败')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [requestQuery, session, slug])
-
   useEffect(() => {
-    if (session) void load()
-  }, [load, session])
+    if (!session) return
+    const sequence = requestGate.current.next()
+    const controller = new AbortController()
+    setLoading(true)
+    setQueryError('')
+    void queryPortal(slug, session.csrf_token, requestQuery, controller.signal)
+      .then((value) => {
+        if (requestGate.current.isCurrent(sequence)) setResult(value)
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error) || !requestGate.current.isCurrent(sequence)) {
+          return
+        }
+        if (error instanceof PortalRequestError && error.status === 401) {
+          setSession(null)
+          setResult(null)
+          return
+        }
+        setQueryError(
+          error instanceof Error ? error.message : '数据加载失败，请重试。'
+        )
+      })
+      .finally(() => {
+        if (requestGate.current.isCurrent(sequence)) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [refreshKey, requestQuery, session, slug])
   const filterSignature = JSON.stringify([
     query.include_terms,
     query.exclude_terms,
@@ -234,9 +266,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
     filter,
   ])
   useEffect(() => {
-    setSelected(new Map())
-    setExcluded(new Map())
-    setAllFilteredSelected(false)
+    setSelection(emptyPortalSelection())
   }, [filterSignature])
 
   const login = async () => {
@@ -254,6 +284,14 @@ export function AccountDataPortal({ slug }: { slug: string }) {
   }
   if (checking) {
     return <PortalLoading />
+  }
+  if (sessionError) {
+    return (
+      <PortalSessionError
+        message={sessionError}
+        onRetry={() => setSessionProbe((current) => current + 1)}
+      />
+    )
   }
   if (!session) {
     return (
@@ -293,60 +331,34 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         'last_activity_at',
       ].includes(field)
   )
-  const options = Object.fromEntries(allowedFields.map((field) => [field, []]))
-  for (const item of result?.items ?? []) {
-    for (const field of allowedFields) {
-      let sourceField: string = field
-      if (field === 'instance') sourceField = 'instance_name'
-      if (field === 'source') sourceField = 'source_name'
-      const value = item[sourceField]
-      if (value == null || value === '') continue
-      const list = options[field] as Array<{ value: string; label: string }>
-      if (!list.some((option) => option.value === String(value))) {
-        list.push({ value: String(value), label: String(value) })
-      }
-    }
-  }
-  const selectedCount = allFilteredSelected
-    ? Math.max(0, (result?.pagination.total ?? 0) - excluded.size)
-    : selected.size
+  const options = portalFilterOptions(result, allowedFields)
+  const selectedCount = portalSelectionCount(
+    selection,
+    result?.pagination.total ?? 0
+  )
   const portalAmounts = accountAmountSummaries(result?.summary.amounts)
 
   const selectionChecked = (item: PortalSelection) => {
-    const key = selectionKey(item)
-    return allFilteredSelected ? !excluded.has(key) : selected.has(key)
+    return isPortalSelectionChecked(selection, item)
   }
 
   const toggleSelection = (item: PortalSelection, checked: boolean) => {
-    const key = selectionKey(item)
-    if (allFilteredSelected) {
-      setExcluded((old) => {
-        const next = new Map(old)
-        if (checked) next.delete(key)
-        else next.set(key, item)
-        return next
-      })
-      return
-    }
-    setSelected((old) => {
-      const next = new Map(old)
-      if (checked) next.set(key, item)
-      else next.delete(key)
-      return next
-    })
+    setSelection((current) => togglePortalSelection(current, item, checked))
   }
 
   const runExport = async (mode: 'filtered' | 'selected') => {
     setExporting(true)
     try {
-      const exportAllFiltered = mode === 'selected' && allFilteredSelected
+      const exportAllFiltered = mode === 'selected' && selection.allFiltered
       const file = await exportPortal(
         slug,
         session.csrf_token,
         requestQuery,
         exportAllFiltered ? 'filtered' : mode,
-        mode === 'selected' && !exportAllFiltered ? [...selected.values()] : [],
-        exportAllFiltered ? [...excluded.values()] : []
+        mode === 'selected' && !exportAllFiltered
+          ? [...selection.selected.values()]
+          : [],
+        exportAllFiltered ? [...selection.excluded.values()] : []
       )
       const url = URL.createObjectURL(file.blob)
       const link = document.createElement('a')
@@ -467,6 +479,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
           />
           <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_11rem_9rem_auto]'>
             <Input
+              aria-label='搜索开放字段'
               value={query.search}
               onChange={(event) =>
                 setQuery((old) => ({
@@ -478,6 +491,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               placeholder='在开放字段内继续搜索'
             />
             <NativeSelect
+              aria-label='排序字段'
               value={query.sort_by}
               onChange={(event) =>
                 setQuery((old) => ({
@@ -497,6 +511,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                 ))}
             </NativeSelect>
             <NativeSelect
+              aria-label='排序方向'
               value={query.sort_order}
               onChange={(event) =>
                 setQuery((old) => ({
@@ -512,13 +527,30 @@ export function AccountDataPortal({ slug }: { slug: string }) {
             <Button
               variant='outline'
               disabled={loading}
-              onClick={() => void load()}
+              onClick={() => setRefreshKey((current) => current + 1)}
             >
               <RefreshCw className={loading ? 'animate-spin' : ''} />
               刷新
             </Button>
           </div>
         </section>
+        {queryError && (
+          <div
+            className='border-destructive/30 bg-destructive/5 text-destructive flex flex-col gap-3 rounded-md border px-4 py-3 text-sm sm:flex-row sm:items-center'
+            role='alert'
+          >
+            <AlertCircle className='size-4 shrink-0' aria-hidden='true' />
+            <span className='min-w-0 flex-1 break-words'>{queryError}</span>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setRefreshKey((current) => current + 1)}
+            >
+              <RefreshCw />
+              重试
+            </Button>
+          </div>
+        )}
         <section className='overflow-hidden rounded-md border'>
           <div className='flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center'>
             <span className='text-muted-foreground flex-1 text-sm'>
@@ -545,29 +577,33 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               <LoaderCircle className='animate-spin' />
             </div>
           )}
-          {(!loading || result != null) &&
+          {!queryError &&
+            (!loading || result != null) &&
             (result?.items.length ?? 0) === 0 && (
               <div className='text-muted-foreground py-20 text-center'>
                 没有符合条件的账号
               </div>
             )}
-          {(!loading || result != null) && (result?.items.length ?? 0) > 0 && (
-            <>
-              <div className='hidden overflow-x-auto md:block'>
+          {(!loading || result != null) &&
+            (result?.items.length ?? 0) > 0 &&
+            (!isMobile ? (
+              <div className='overflow-x-auto'>
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className='w-12'>
                         <Checkbox
-                          checked={allFilteredSelected && excluded.size === 0}
-                          indeterminate={
-                            allFilteredSelected && excluded.size > 0
+                          aria-label='选择全部筛选结果'
+                          checked={
+                            selection.allFiltered &&
+                            selection.excluded.size === 0
                           }
-                          onCheckedChange={() => {
-                            setSelected(new Map())
-                            setExcluded(new Map())
-                            setAllFilteredSelected(!allFilteredSelected)
-                          }}
+                          indeterminate={
+                            selection.allFiltered && selection.excluded.size > 0
+                          }
+                          onCheckedChange={() =>
+                            setSelection(toggleAllPortalSelection)
+                          }
                         />
                       </TableHead>
                       {columns.map((field) => (
@@ -583,11 +619,12 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                         instance_id: Number(item.instance_id),
                         account_id: String(item.account_id),
                       }
-                      const key = selectionKey(identity)
+                      const key = portalSelectionKey(identity)
                       return (
                         <TableRow key={key}>
                           <TableCell>
                             <Checkbox
+                              aria-label={`选择账号 ${String(item.name ?? item.email ?? item.account_id)}`}
                               checked={selectionChecked(identity)}
                               onCheckedChange={(checked) =>
                                 toggleSelection(identity, checked)
@@ -608,17 +645,19 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                   </TableBody>
                 </Table>
               </div>
-              <div className='grid gap-2 p-2 md:hidden'>
+            ) : (
+              <div className='grid gap-2 p-2'>
                 {result?.items.map((item) => {
                   const identity = {
                     instance_id: Number(item.instance_id),
                     account_id: String(item.account_id),
                   }
-                  const key = selectionKey(identity)
+                  const key = portalSelectionKey(identity)
                   return (
                     <article key={key} className='rounded-md border p-3'>
                       <div className='flex items-start gap-3'>
                         <Checkbox
+                          aria-label={`选择账号 ${String(item.name ?? item.email ?? item.account_id)}`}
                           checked={selectionChecked(identity)}
                           onCheckedChange={(checked) =>
                             toggleSelection(identity, checked)
@@ -667,12 +706,12 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                   )
                 })}
               </div>
-            </>
-          )}
+            ))}
           <div className='flex flex-col gap-2 border-t p-3 sm:flex-row sm:items-center sm:justify-between'>
             <div className='flex items-center gap-2'>
               <Label>每页</Label>
               <NativeSelect
+                aria-label='每页账号数'
                 className='w-24'
                 value={String(query.page_size)}
                 onChange={(event) =>
@@ -696,6 +735,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               <Button
                 variant='outline'
                 size='icon'
+                aria-label='上一页'
                 disabled={query.page <= 1 || loading}
                 onClick={() =>
                   setQuery((old) => ({ ...old, page: old.page - 1 }))
@@ -713,6 +753,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               <Button
                 variant='outline'
                 size='icon'
+                aria-label='下一页'
                 disabled={!result?.pagination.has_more || loading}
                 onClick={() =>
                   setQuery((old) => ({ ...old, page: old.page + 1 }))
@@ -782,6 +823,32 @@ function PortalLoading() {
     </main>
   )
 }
+
+function PortalSessionError(props: { message: string; onRetry: () => void }) {
+  return (
+    <main className='bg-muted/30 flex min-h-dvh items-center justify-center p-4'>
+      <div
+        className='bg-background grid w-full max-w-md gap-4 rounded-md border p-6 shadow-sm'
+        role='alert'
+      >
+        <div className='bg-destructive/10 text-destructive flex size-12 items-center justify-center rounded-md'>
+          <AlertCircle aria-hidden='true' />
+        </div>
+        <div>
+          <h1 className='text-lg font-semibold'>门户暂时无法连接</h1>
+          <p className='text-muted-foreground mt-1 text-sm break-words'>
+            {props.message}
+          </p>
+        </div>
+        <Button className='min-h-11' onClick={props.onRetry}>
+          <RefreshCw />
+          重新连接
+        </Button>
+      </div>
+    </main>
+  )
+}
+
 function Metric(props: {
   title: string
   value: string | number

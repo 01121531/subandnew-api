@@ -104,7 +104,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 		&model.User{}, &model.ManagedInstance{}, &model.ManagedInstanceCredential{},
 		&model.AssistantChannel{}, &model.AssistantChannelSecret{}, &model.AssistantIdentity{},
 		&model.AssistantIdentityInstanceScope{}, &model.AssistantSetting{}, &model.AssistantBindingCode{}, &model.AssistantInboundEvent{},
-		&model.AssistantConversation{}, &model.AssistantMessage{}, &model.AssistantRun{}, &model.AssistantToolCall{}, &model.AssistantOutbox{},
+		&model.AssistantConversation{}, &model.AssistantConversationLease{}, &model.AssistantMessage{}, &model.AssistantRun{}, &model.AssistantToolCall{}, &model.AssistantOutbox{},
 	))
 	previousDB := model.DB
 	model.DB = db
@@ -170,7 +170,7 @@ func TestProcessorRunsGroundedToolAndDeliversEncryptedOutbox(t *testing.T) {
 	require.Len(t, messages, 2)
 	require.NotContains(t, messages[0].Content, "列出实例")
 	require.NotContains(t, messages[1].Content, "共 1 个实例")
-	history, err := processor.loadConversationHistory(t.Context(), run.ConversationID)
+	history, err := processor.loadConversationHistory(t.Context(), run.ConversationID, messages[0].ScopeFingerprint)
 	require.NoError(t, err)
 	require.Equal(t, []provider.Message{{Role: provider.RoleUser, Content: "列出实例"}, {Role: provider.RoleAssistant, Content: "共 1 个实例，prod 状态正常；数据来自控制平面快照。"}}, history)
 	var outbox model.AssistantOutbox
@@ -412,4 +412,69 @@ func TestFailRunPersistsPartialUsageAndToolTrace(t *testing.T) {
 	var callCount int64
 	require.NoError(t, db.Model(&model.AssistantToolCall{}).Where("run_id = ?", run.ID).Count(&callCount).Error)
 	require.EqualValues(t, 1, callCount)
+}
+
+func TestConversationLeaseRecoversExpiredInboundAndPreservesOrder(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantInboundEvent{}, &model.AssistantConversationLease{}))
+	now := time.Unix(1_000, 0)
+	processorA := &Processor{db: db, now: func() time.Time { return now }, ownerID: "node-a"}
+	processorB := &Processor{db: db, now: func() time.Time { return now }, ownerID: "node-b"}
+	first := model.AssistantInboundEvent{ChannelID: 1, AccountID: "bot", ExternalMessageID: "first", PeerID: "peer", Status: model.AssistantInboundStatusProcessing, LeaseUntil: now.Add(-time.Second).Unix()}
+	second := model.AssistantInboundEvent{ChannelID: 1, AccountID: "bot", ExternalMessageID: "second", PeerID: "peer", Status: model.AssistantInboundStatusPending}
+	require.NoError(t, db.Create(&first).Error)
+	require.NoError(t, db.Create(&second).Error)
+
+	_, err = processorB.ReserveTurn(t.Context(), second.ID)
+	require.ErrorIs(t, err, ErrConversationBusy)
+	reservation, err := processorA.ReserveTurn(t.Context(), first.ID)
+	require.NoError(t, err)
+	_, err = processorB.ReserveTurn(t.Context(), first.ID)
+	require.ErrorIs(t, err, ErrConversationBusy)
+	claimed, err := processorA.claimEvent(t.Context(), first.ID, reservation.ownerID)
+	require.NoError(t, err)
+	require.Equal(t, model.AssistantInboundStatusProcessing, claimed.Status)
+	require.Equal(t, reservation.ownerID, claimed.ClaimOwner)
+	require.Greater(t, claimed.LeaseUntil, now.Unix())
+	require.NoError(t, processorA.finishEvent(t.Context(), first.ID, reservation.ownerID))
+	reservation.Release(context.Background())
+
+	secondReservation, err := processorB.ReserveTurn(t.Context(), second.ID)
+	require.NoError(t, err)
+	secondReservation.Release(context.Background())
+}
+
+func TestConversationHistoryExcludesOldScopeAndUsesWholeTurnBudget(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{}, &model.AssistantMessage{}))
+	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{7}, 32)}, "v1")
+	require.NoError(t, err)
+	processor := &Processor{db: db, cipher: cipher, now: time.Now}
+	identity := model.AssistantIdentity{ChannelID: 1, ExternalUserID: "peer", UserID: 9, Status: model.AssistantIdentityStatusActive, AllowedInstanceScope: model.AssistantInstanceScopeSelected}
+	require.NoError(t, db.Create(&identity).Error)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: identity.ID, InstanceID: 1}).Error)
+	oldScope, err := processor.scopeFingerprint(t.Context(), &identity)
+	require.NoError(t, err)
+	require.NoError(t, processor.storeMessage(t.Context(), 1, 1, 0, model.AssistantMessageRoleUser, oldScope, "old authorized data"))
+	require.NoError(t, db.Where("identity_id = ?", identity.ID).Delete(&model.AssistantIdentityInstanceScope{}).Error)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: identity.ID, InstanceID: 2}).Error)
+	newScope, err := processor.scopeFingerprint(t.Context(), &identity)
+	require.NoError(t, err)
+	require.NotEqual(t, oldScope, newScope)
+
+	payload := strings.Repeat("x", 5*1024)
+	for turn := int64(2); turn <= 5; turn++ {
+		require.NoError(t, processor.storeMessage(t.Context(), 1, turn, 0, model.AssistantMessageRoleUser, newScope, "user-"+payload))
+		require.NoError(t, processor.storeMessage(t.Context(), 1, turn, turn, model.AssistantMessageRoleAssistant, newScope, "assistant-"+payload))
+	}
+	history, err := processor.loadConversationHistory(t.Context(), 1, newScope)
+	require.NoError(t, err)
+	require.Len(t, history, 4)
+	require.Equal(t, provider.RoleUser, history[0].Role)
+	require.Equal(t, provider.RoleAssistant, history[1].Role)
+	for _, message := range history {
+		require.NotContains(t, message.Content, "old authorized data")
+	}
 }

@@ -48,7 +48,7 @@ export const api = axios.create({
   },
 })
 
-export function isControlPlaneRequest(
+function isControlPlaneRequest(
   config: Pick<AxiosRequestConfig, 'baseURL' | 'url'>
 ) {
   const requestURL = config.url ?? ''

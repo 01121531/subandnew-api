@@ -26,6 +26,7 @@ export async function listAccountDataAPIs(input: {
   status: string
   page: number
   pageSize: number
+  signal?: AbortSignal
 }) {
   const params = new URLSearchParams({
     page: String(input.page),
@@ -34,7 +35,8 @@ export async function listAccountDataAPIs(input: {
   if (input.search) params.set('search', input.search)
   if (input.status) params.set('status', input.status)
   const response = await api.get<Response<AccountDataAPIList>>(
-    `/api/account-data-apis?${params}`
+    `/api/account-data-apis?${params}`,
+    { signal: input.signal, disableDuplicate: true }
   )
   return response.data
 }
@@ -102,9 +104,14 @@ export async function revokeAccountDataAPIKey(id: number, keyId: number) {
   return response.data
 }
 
-export async function listAccountDataAPIAccessLogs(id: number, page = 1) {
+export async function listAccountDataAPIAccessLogs(
+  id: number,
+  page = 1,
+  signal?: AbortSignal
+) {
   const response = await api.get<Response<AccountDataAPIAccessLogList>>(
-    `/api/account-data-apis/${id}/access-logs?page=${page}&page_size=20`
+    `/api/account-data-apis/${id}/access-logs?page=${page}&page_size=20`,
+    { signal, disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }

@@ -16,6 +16,7 @@ import {
   Clock3,
   Coins,
   LockKeyhole,
+  RefreshCw,
   Wrench,
 } from 'lucide-react'
 import { useState } from 'react'
@@ -591,8 +592,15 @@ export function AssistantAuditSection() {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const runsQuery = useQuery({
     queryKey: ['assistant', 'runs', { page, status }],
-    queryFn: () => listAssistantRuns({ page, pageSize: PAGE_SIZE, status }),
+    queryFn: ({ signal }) =>
+      listAssistantRuns({ page, pageSize: PAGE_SIZE, status, signal }),
     enabled: canAudit,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((run) =>
+        ['pending', 'running'].includes(run.status)
+      )
+        ? 5_000
+        : false,
   })
   const totalPages = Math.max(
     1,
@@ -608,39 +616,51 @@ export function AssistantAuditSection() {
       icon={<Activity />}
       iconTone='info'
       action={
-        <div className='w-full space-y-1.5 sm:w-48'>
-          <Label htmlFor='assistant-run-status' className='sr-only'>
-            {t('Filter by status')}
-          </Label>
-          <NativeSelect
-            id='assistant-run-status'
-            className='w-full [&_select]:h-11'
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value as AssistantRunStatus | '')
-              setPage(1)
-              setExpandedRunId(null)
-            }}
+        <div className='flex w-full items-end gap-2 sm:w-auto'>
+          <div className='min-w-0 flex-1 space-y-1.5 sm:w-48'>
+            <Label htmlFor='assistant-run-status' className='sr-only'>
+              {t('Filter by status')}
+            </Label>
+            <NativeSelect
+              id='assistant-run-status'
+              className='w-full [&_select]:h-11'
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as AssistantRunStatus | '')
+                setPage(1)
+                setExpandedRunId(null)
+              }}
+            >
+              <NativeSelectOption value=''>
+                {t('All statuses')}
+              </NativeSelectOption>
+              <NativeSelectOption value='pending'>
+                {t('Pending')}
+              </NativeSelectOption>
+              <NativeSelectOption value='running'>
+                {t('Running')}
+              </NativeSelectOption>
+              <NativeSelectOption value='succeeded'>
+                {t('Succeeded')}
+              </NativeSelectOption>
+              <NativeSelectOption value='failed'>
+                {t('Failed')}
+              </NativeSelectOption>
+              <NativeSelectOption value='cancelled'>
+                {t('Cancelled')}
+              </NativeSelectOption>
+            </NativeSelect>
+          </div>
+          <Button
+            variant='outline'
+            size='icon'
+            className='size-11 shrink-0'
+            aria-label={t('Refresh')}
+            disabled={runsQuery.isFetching}
+            onClick={() => runsQuery.refetch()}
           >
-            <NativeSelectOption value=''>
-              {t('All statuses')}
-            </NativeSelectOption>
-            <NativeSelectOption value='pending'>
-              {t('Pending')}
-            </NativeSelectOption>
-            <NativeSelectOption value='running'>
-              {t('Running')}
-            </NativeSelectOption>
-            <NativeSelectOption value='succeeded'>
-              {t('Succeeded')}
-            </NativeSelectOption>
-            <NativeSelectOption value='failed'>
-              {t('Failed')}
-            </NativeSelectOption>
-            <NativeSelectOption value='cancelled'>
-              {t('Cancelled')}
-            </NativeSelectOption>
-          </NativeSelect>
+            <RefreshCw className={runsQuery.isFetching ? 'animate-spin' : ''} />
+          </Button>
         </div>
       }
     >

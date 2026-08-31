@@ -109,24 +109,28 @@ type metricHistoryStatistics struct {
 }
 
 type metricHistoryMetricStatus struct {
-	Unit        string `json:"unit"`
-	Status      string `json:"status"`
-	Aggregation string `json:"aggregation"`
+	Unit                 string  `json:"unit"`
+	Status               string  `json:"status"`
+	Aggregation          string  `json:"aggregation"`
+	SupportedInstances   []int64 `json:"supported_instances,omitempty"`
+	UnsupportedInstances []int64 `json:"unsupported_instances,omitempty"`
+	MissingInstances     []int64 `json:"missing_instances,omitempty"`
 }
 
 type metricHistoryOutput struct {
-	InstanceIDs  []int64                              `json:"instance_ids"`
-	Instances    []instanceSummary                    `json:"instances"`
-	Mode         string                               `json:"mode"`
-	Granularity  string                               `json:"granularity"`
-	StartAt      string                               `json:"start_at"`
-	EndAt        string                               `json:"end_at"`
-	Timezone     string                               `json:"timezone"`
-	Points       []metricHistoryPoint                 `json:"points,omitempty"`
-	Statistics   map[string]metricHistoryStatistics   `json:"statistics"`
-	MetricStatus map[string]metricHistoryMetricStatus `json:"metric_status"`
-	Complete     bool                                 `json:"complete"`
-	ObservedAt   string                               `json:"observed_at,omitempty"`
+	InstanceIDs   []int64                              `json:"instance_ids"`
+	Instances     []instanceSummary                    `json:"instances"`
+	Mode          string                               `json:"mode"`
+	Granularity   string                               `json:"granularity"`
+	StartAt       string                               `json:"start_at"`
+	EndAt         string                               `json:"end_at"`
+	Timezone      string                               `json:"timezone"`
+	Points        []metricHistoryPoint                 `json:"points,omitempty"`
+	Statistics    map[string]metricHistoryStatistics   `json:"statistics"`
+	MetricStatus  map[string]metricHistoryMetricStatus `json:"metric_status"`
+	Complete      bool                                 `json:"complete"`
+	ObservedAt    string                               `json:"observed_at,omitempty"`
+	TimeSemantics string                               `json:"time_semantics,omitempty"`
 }
 
 type metricHistoryQuery struct {
@@ -157,13 +161,7 @@ func registerMetricHistory(registry *tool.Registry, db *gorm.DB) error {
 		if err != nil {
 			return tool.Output[metricHistoryOutput]{}, err
 		}
-		historyIDs := make([]int64, 0, len(instances))
-		for _, instance := range instances {
-			if instance.Kind != model.ManagedInstanceKindGeneric {
-				historyIDs = append(historyIDs, instance.ID)
-			}
-		}
-		result, observedAt, err := queryMetricHistory(ctx, db, historyIDs, metrics, query)
+		result, observedAt, err := queryMetricHistory(ctx, db, resolution.IDs, metrics, query)
 		if err != nil {
 			return tool.Output[metricHistoryOutput]{}, err
 		}
@@ -197,7 +195,7 @@ func normalizeMetricHistoryQuery(input metricHistoryInput) (metricHistoryQuery, 
 	}
 	dailyOnly := containsDailyMetric(normalizedMetricNames(input.Metrics))
 	var start, end int64
-	var pointDateOnly bool
+	var pointDateOnly, startDateOnly, endDateOnly bool
 	var err error
 	if mode == metricHistoryModePoint {
 		var point time.Time
@@ -208,9 +206,9 @@ func normalizeMetricHistoryQuery(input metricHistoryInput) (metricHistoryQuery, 
 		start, end = point.Unix(), point.Unix()
 	} else {
 		var startTime, endTime time.Time
-		startTime, _, err = parseAssistantHistoryTime(input.StartAt, false)
+		startTime, startDateOnly, err = parseAssistantHistoryTime(input.StartAt, false)
 		if err == nil {
-			endTime, _, err = parseAssistantHistoryTime(input.EndAt, true)
+			endTime, endDateOnly, err = parseAssistantHistoryTime(input.EndAt, true)
 		}
 		if err != nil {
 			return metricHistoryQuery{}, err
@@ -233,6 +231,13 @@ func normalizeMetricHistoryQuery(input metricHistoryInput) (metricHistoryQuery, 
 	}
 	if dailyOnly && granularity != managedinstance.ConductorRPMBucketDay {
 		return metricHistoryQuery{}, errors.New("requests, tokens, and actual_cost require day granularity")
+	}
+	if dailyOnly && mode != metricHistoryModePoint && !(startDateOnly && endDateOnly) {
+		startTime := time.Unix(start, 0).In(assistantLocation)
+		endTime := time.Unix(end, 0).In(assistantLocation)
+		if startTime.Hour() != 0 || startTime.Minute() != 0 || startTime.Second() != 0 || endTime.Hour() != 23 || endTime.Minute() != 59 || endTime.Second() != 59 {
+			return metricHistoryQuery{}, errors.New("daily metrics require complete Asia/Shanghai natural days")
+		}
 	}
 	if estimatedHistoryPoints(start, end, granularity) > metricHistoryMaxPoints {
 		return metricHistoryQuery{}, errors.New("selected granularity would return more than 200 points")
@@ -335,6 +340,17 @@ func queryMetricHistory(ctx context.Context, db *gorm.DB, ids []int64, metrics [
 		Timezone: assistantTimezone, Statistics: map[string]metricHistoryStatistics{},
 		MetricStatus: map[string]metricHistoryMetricStatus{}, Complete: true,
 	}
+	if containsDailyMetric(metrics) {
+		result.TimeSemantics = "china_natural_day"
+	}
+	instances, err := metricHistoryInstances(ctx, db, ids)
+	if err != nil {
+		return metricHistoryOutput{}, 0, err
+	}
+	instanceKinds := make(map[int64]string, len(instances))
+	for _, instance := range instances {
+		instanceKinds[instance.ID] = instance.Kind
+	}
 	points := map[int64]map[string]*float64{}
 	observedAt := int64(0)
 	realtimeMetrics := make([]string, 0, len(metrics))
@@ -350,27 +366,35 @@ func queryMetricHistory(ctx context.Context, db *gorm.DB, ids []int64, metrics [
 		if !definition.dailyOnly {
 			realtimeMetrics = append(realtimeMetrics, metric)
 		}
+		supported, unsupported := splitMetricInstanceSupport(metric, ids, instanceKinds)
+		status := result.MetricStatus[metric]
+		status.SupportedInstances = supported
+		status.UnsupportedInstances = unsupported
+		result.MetricStatus[metric] = status
 	}
-	if len(realtimeMetrics) > 0 && len(ids) > 0 {
-		history, err := managedinstance.GetManagedRPMHistory(ctx, ids, query.granularity, query.start, query.end)
+	for _, metric := range realtimeMetrics {
+		status := result.MetricStatus[metric]
+		if len(status.SupportedInstances) == 0 {
+			continue
+		}
+		history, err := managedinstance.GetManagedRPMHistory(ctx, status.SupportedInstances, query.granularity, query.start, query.end)
 		if err != nil {
 			return metricHistoryOutput{}, 0, err
 		}
 		for _, point := range history.Points {
 			values := ensureMetricPoint(points, point.Timestamp, metrics)
-			for _, metric := range realtimeMetrics {
-				values[metric] = realtimeHistoryValue(point, metric)
-			}
+			values[metric] = realtimeHistoryValue(point, metric)
 			if point.Timestamp > observedAt {
 				observedAt = point.Timestamp
 			}
 		}
-		if err := mergeRealtimePeriodEndHistory(ctx, db, ids, realtimeMetrics, query, points); err != nil {
+		if err := mergeRealtimePeriodEndHistory(ctx, db, status.SupportedInstances, []string{metric}, query, points); err != nil {
 			return metricHistoryOutput{}, 0, err
 		}
 	}
 	if containsDailyMetric(metrics) {
-		dashboardObservedAt, err := mergeDashboardHistory(ctx, db, ids, metrics, query, points)
+		dailyIDs := supportedMetricInstanceUnion(metrics, result.MetricStatus)
+		dashboardObservedAt, err := mergeDashboardHistory(ctx, db, dailyIDs, metrics, query, points)
 		if err != nil {
 			return metricHistoryOutput{}, 0, err
 		}
@@ -378,6 +402,11 @@ func queryMetricHistory(ctx context.Context, db *gorm.DB, ids []int64, metrics [
 			observedAt = dashboardObservedAt
 		}
 	}
+	coverage, err := loadMetricHistoryCoverage(ctx, db, ids, metrics, query, instanceKinds)
+	if err != nil {
+		return metricHistoryOutput{}, 0, err
+	}
+	missingByMetric := enforceMetricHistoryCoverage(points, metrics, query, result.MetricStatus, coverage)
 	timestamps := make([]int64, 0, len(points))
 	for timestamp := range points {
 		timestamps = append(timestamps, timestamp)
@@ -399,12 +428,20 @@ func queryMetricHistory(ctx context.Context, db *gorm.DB, ids []int64, metrics [
 		if query.mode == metricHistoryModePoint {
 			expectedPoints = 1
 		}
-		if statistics.Count == expectedPoints {
+		status.MissingInstances = missingByMetric[metric]
+		switch {
+		case len(status.SupportedInstances) == 0:
+			status.Status = model.ManagedInstanceCollectionUnsupported
+			result.Complete = false
+		case statistics.Count == expectedPoints && len(status.UnsupportedInstances) == 0 && len(status.MissingInstances) == 0:
 			status.Status = "succeeded"
-		} else if statistics.Count > 0 {
+		case statistics.Count > 0:
 			status.Status = "partial"
 			result.Complete = false
-		} else {
+		default:
+			if len(status.UnsupportedInstances) > 0 || (len(status.MissingInstances) > 0 && len(status.MissingInstances) < len(status.SupportedInstances)) {
+				status.Status = "partial"
+			}
 			result.Complete = false
 		}
 		result.MetricStatus[metric] = status
@@ -513,6 +550,178 @@ func managedHistoryRowValue(row model.ManagedRPMHistory, metric string) (float64
 	}
 }
 
+type metricHistoryCoverage map[string]map[int64]map[int64]struct{}
+
+func splitMetricInstanceSupport(metric string, ids []int64, kinds map[int64]string) ([]int64, []int64) {
+	supported := make([]int64, 0, len(ids))
+	unsupported := make([]int64, 0)
+	for _, id := range ids {
+		if metricSupportedByInstance(metric, kinds[id]) {
+			supported = append(supported, id)
+		} else {
+			unsupported = append(unsupported, id)
+		}
+	}
+	return supported, unsupported
+}
+
+func metricSupportedByInstance(metric, kind string) bool {
+	switch metric {
+	case "rpm", "requests", "tokens", "actual_cost":
+		return kind != "" && kind != model.ManagedInstanceKindGeneric
+	case "rpm_capacity":
+		return kind == model.ManagedInstanceKindConductor
+	case "success_rate":
+		return kind == model.ManagedInstanceKindClaudeGateway
+	case "concurrency_used", "concurrency_max":
+		return kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindClaudeGateway
+	case "accounts_available", "accounts_total":
+		return kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
+	case "active_sessions":
+		return kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
+	case "today_cost":
+		return kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
+	default:
+		return false
+	}
+}
+
+func supportedMetricInstanceUnion(metrics []string, statuses map[string]metricHistoryMetricStatus) []int64 {
+	seen := map[int64]struct{}{}
+	result := make([]int64, 0)
+	for _, metric := range metrics {
+		if !metricHistoryDefinitions[metric].dailyOnly {
+			continue
+		}
+		for _, id := range statuses[metric].SupportedInstances {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func addMetricCoverage(coverage metricHistoryCoverage, metric string, timestamp, instanceID int64) {
+	byTime := coverage[metric]
+	if byTime == nil {
+		byTime = map[int64]map[int64]struct{}{}
+		coverage[metric] = byTime
+	}
+	instances := byTime[timestamp]
+	if instances == nil {
+		instances = map[int64]struct{}{}
+		byTime[timestamp] = instances
+	}
+	instances[instanceID] = struct{}{}
+}
+
+func loadMetricHistoryCoverage(ctx context.Context, db *gorm.DB, ids []int64, metrics []string, query metricHistoryQuery, kinds map[int64]string) (metricHistoryCoverage, error) {
+	coverage := metricHistoryCoverage{}
+	if len(ids) == 0 {
+		return coverage, nil
+	}
+	if !containsOnlyDailyMetrics(metrics) {
+		var rows []model.ManagedRPMHistory
+		if err := db.WithContext(ctx).Where("instance_id IN ? AND bucket_start >= ? AND bucket_start <= ?", ids, query.start-query.start%60, query.end).
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			timestamp := historyBucketStart(row.BucketStart, query.granularity)
+			for _, metric := range metrics {
+				if metricHistoryDefinitions[metric].dailyOnly || !metricSupportedByInstance(metric, kinds[row.InstanceID]) {
+					continue
+				}
+				if _, ok := managedHistoryRowValue(row, metric); ok {
+					addMetricCoverage(coverage, metric, timestamp, row.InstanceID)
+				}
+			}
+		}
+	}
+	if containsDailyMetric(metrics) {
+		var snapshots []model.ManagedDashboardSnapshot
+		if err := db.WithContext(ctx).Where("instance_id IN ? AND range_key = ? AND observed_at > 0", ids, "preset-30").Find(&snapshots).Error; err != nil {
+			return nil, err
+		}
+		for _, snapshot := range snapshots {
+			var summary managedinstance.SummaryResult
+			if json.Unmarshal([]byte(snapshot.Payload), &summary) != nil {
+				continue
+			}
+			for _, trend := range summary.Trend {
+				day, err := time.ParseInLocation("2006-01-02", trend.Date, assistantLocation)
+				if err != nil || day.Unix() < historyBucketStart(query.start, managedinstance.ConductorRPMBucketDay) || day.Unix() > query.end {
+					continue
+				}
+				for _, metric := range metrics {
+					if metricHistoryDefinitions[metric].dailyOnly && metricSupportedByInstance(metric, kinds[snapshot.InstanceID]) {
+						addMetricCoverage(coverage, metric, day.Unix(), snapshot.InstanceID)
+					}
+				}
+			}
+		}
+	}
+	return coverage, nil
+}
+
+func containsOnlyDailyMetrics(metrics []string) bool {
+	for _, metric := range metrics {
+		if !metricHistoryDefinitions[metric].dailyOnly {
+			return false
+		}
+	}
+	return true
+}
+
+func enforceMetricHistoryCoverage(points map[int64]map[string]*float64, metrics []string, query metricHistoryQuery, statuses map[string]metricHistoryMetricStatus, coverage metricHistoryCoverage) map[string][]int64 {
+	missing := make(map[string][]int64, len(metrics))
+	timestamps := expectedHistoryTimestamps(query)
+	for _, timestamp := range timestamps {
+		ensureMetricPoint(points, timestamp, metrics)
+	}
+	for _, metric := range metrics {
+		status := statuses[metric]
+		missingSet := map[int64]struct{}{}
+		for _, timestamp := range timestamps {
+			present := coverage[metric][timestamp]
+			for _, id := range status.SupportedInstances {
+				if _, ok := present[id]; !ok {
+					missingSet[id] = struct{}{}
+				}
+			}
+			if len(present) != len(status.SupportedInstances) {
+				points[timestamp][metric] = nil
+			}
+		}
+		for _, id := range status.SupportedInstances {
+			if _, ok := missingSet[id]; ok {
+				missing[metric] = append(missing[metric], id)
+			}
+		}
+	}
+	return missing
+}
+
+func expectedHistoryTimestamps(query metricHistoryQuery) []int64 {
+	start := historyBucketStart(query.start, query.granularity)
+	end := historyBucketStart(query.end, query.granularity)
+	result := make([]int64, 0, estimatedHistoryPoints(query.start, query.end, query.granularity))
+	for current := start; current <= end; {
+		result = append(result, current)
+		if query.granularity == managedinstance.ConductorRPMBucketDay {
+			current = time.Unix(current, 0).In(assistantLocation).AddDate(0, 0, 1).Unix()
+		} else if query.granularity == managedinstance.ConductorRPMBucketHour {
+			current += 3600
+		} else {
+			current += 60
+		}
+	}
+	return result
+}
+
 func metricSupportedByAnyInstance(metric string, instances []instanceSummary) bool {
 	for _, instance := range instances {
 		switch metric {
@@ -564,7 +773,7 @@ func ensureMetricPoint(points map[int64]map[string]*float64, timestamp int64, me
 func realtimeHistoryValue(point managedinstance.ConductorRPMHistoryPoint, metric string) *float64 {
 	switch metric {
 	case "rpm":
-		if point.Samples > 0 {
+		if point.Samples > 0 && point.RPMComplete {
 			value := point.RPM
 			return &value
 		}

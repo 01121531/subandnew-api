@@ -52,6 +52,7 @@ import { getManagedInstances } from '@/features/managed-instances/api'
 import { InstanceConnectionAlert } from '@/features/managed-instances/components/instance-connection-alert'
 import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type { ManagedInstance } from '@/features/managed-instances/types'
+import { useMediaQuery } from '@/hooks'
 import { cn } from '@/lib/utils'
 
 import {
@@ -949,6 +950,7 @@ function UsageRecordsContent(props: {
   hasInstance: boolean
   onRetry: () => void
 }) {
+  const isMobile = useMediaQuery('(max-width: 767px)')
   if (props.loading) {
     return (
       <div className='grid gap-2 p-3'>
@@ -980,12 +982,9 @@ function UsageRecordsContent(props: {
   if (props.records.length === 0) {
     return <EmptyMessage text='当前筛选条件下没有记录' />
   }
-  return (
-    <>
-      <div className='hidden overflow-x-auto md:block'>
-        <UsageDesktopTable system={props.system} records={props.records} />
-      </div>
-      <div className='divide-border divide-y md:hidden'>
+  if (isMobile) {
+    return (
+      <div className='divide-border divide-y'>
         {props.records.map((record, index) => (
           <UsageMobileRow
             key={String(record.id ?? index)}
@@ -994,7 +993,12 @@ function UsageRecordsContent(props: {
           />
         ))}
       </div>
-    </>
+    )
+  }
+  return (
+    <div className='overflow-x-auto'>
+      <UsageDesktopTable system={props.system} records={props.records} />
+    </div>
   )
 }
 

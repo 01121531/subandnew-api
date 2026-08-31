@@ -66,6 +66,7 @@ import {
   isAccountFilterRuleComplete,
   type AccountAdvancedFilter,
 } from '@/features/managed-accounts/account-filtering'
+import { useDebounce, useMediaQuery } from '@/hooks'
 import { accountAmountSummaries } from '@/lib/account-amounts'
 import {
   ADMIN_PERMISSION_ACTIONS,
@@ -273,6 +274,8 @@ export function AccountDataAPIs() {
     ADMIN_PERMISSION_ACTIONS.AUDIT
   )
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 350)
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<AccountDataAPI | null | undefined>()
@@ -299,8 +302,15 @@ export function AccountDataAPIs() {
   }, [])
 
   const query = useQuery({
-    queryKey: [...QUERY_KEY, search, status, page],
-    queryFn: () => listAccountDataAPIs({ search, status, page, pageSize: 20 }),
+    queryKey: [...QUERY_KEY, debouncedSearch, status, page],
+    queryFn: ({ signal }) =>
+      listAccountDataAPIs({
+        search: debouncedSearch,
+        status,
+        page,
+        pageSize: 20,
+        signal,
+      }),
   })
   const removeMutation = useMutation({
     mutationFn: deleteAccountDataAPI,
@@ -360,6 +370,7 @@ export function AccountDataAPIs() {
               <div className='relative min-w-0 flex-1'>
                 <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
                 <Input
+                  aria-label={t('搜索授权名称')}
                   className='h-11 pl-9 sm:h-9'
                   value={search}
                   onChange={(event) => {
@@ -415,9 +426,79 @@ export function AccountDataAPIs() {
                 </p>
               </div>
             )}
-            {!query.isLoading && !query.isError && items.length > 0 && (
-              <>
-                <div className='hidden overflow-hidden rounded-lg border md:block'>
+            {!query.isLoading &&
+              !query.isError &&
+              items.length > 0 &&
+              (isMobile ? (
+                <Accordion className='rounded-lg border px-3'>
+                  {items.map((item) => (
+                    <AccordionItem key={item.id} value={String(item.id)}>
+                      <AccordionTrigger className='min-h-14'>
+                        <span className='min-w-0'>
+                          <span className='flex items-center gap-2'>
+                            <span className='truncate font-medium'>
+                              {item.name}
+                            </span>
+                            <StatusBadge item={item} />
+                          </span>
+                          <span className='text-muted-foreground mt-1 block text-xs'>
+                            {item.matched_count} {t('个账号')} ·{' '}
+                            {item.instance_ids.length} {t('个实例')}
+                          </span>
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className='grid grid-cols-2 gap-3 border-t pt-3 text-sm'>
+                          <Detail
+                            label={t('数据集')}
+                            value={
+                              item.dataset === 'inventory'
+                                ? t('账号明细')
+                                : t('新增账号产出')
+                            }
+                          />
+                          <Detail
+                            label={t('最近访问')}
+                            value={formatTime(item.last_accessed_at)}
+                          />
+                          <Detail
+                            label={t('采集时间')}
+                            value={formatTime(item.last_observed_at)}
+                          />
+                          <Detail
+                            label={t('限流')}
+                            value={`${item.rate_limit_per_minute}/min`}
+                          />
+                          <Detail
+                            label={t('活动密钥')}
+                            value={activeKeyLabel(item)}
+                          />
+                          <Detail
+                            label={t('可视化门户')}
+                            value={
+                              item.portal_enabled ? t('已启用') : t('未启用')
+                            }
+                          />
+                        </div>
+                        <RowActions
+                          item={item}
+                          canManage={canManage}
+                          canAudit={canAudit}
+                          mobile
+                          onEdit={() => setEditing(item)}
+                          onLogs={() => setLogsTarget(item)}
+                          onRotate={() => rotateMutation.mutate(item)}
+                          onRevoke={(keyId) =>
+                            revokeMutation.mutate({ apiId: item.id, keyId })
+                          }
+                          onDelete={() => setDeleteTarget(item)}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  ))}
+                </Accordion>
+              ) : (
+                <div className='overflow-hidden rounded-lg border'>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -494,76 +575,7 @@ export function AccountDataAPIs() {
                     </TableBody>
                   </Table>
                 </div>
-
-                <Accordion className='rounded-lg border px-3 md:hidden'>
-                  {items.map((item) => (
-                    <AccordionItem key={item.id} value={String(item.id)}>
-                      <AccordionTrigger className='min-h-14'>
-                        <span className='min-w-0'>
-                          <span className='flex items-center gap-2'>
-                            <span className='truncate font-medium'>
-                              {item.name}
-                            </span>
-                            <StatusBadge item={item} />
-                          </span>
-                          <span className='text-muted-foreground mt-1 block text-xs'>
-                            {item.matched_count} {t('个账号')} ·{' '}
-                            {item.instance_ids.length} {t('个实例')}
-                          </span>
-                        </span>
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <div className='grid grid-cols-2 gap-3 border-t pt-3 text-sm'>
-                          <Detail
-                            label={t('数据集')}
-                            value={
-                              item.dataset === 'inventory'
-                                ? t('账号明细')
-                                : t('新增账号产出')
-                            }
-                          />
-                          <Detail
-                            label={t('最近访问')}
-                            value={formatTime(item.last_accessed_at)}
-                          />
-                          <Detail
-                            label={t('采集时间')}
-                            value={formatTime(item.last_observed_at)}
-                          />
-                          <Detail
-                            label={t('限流')}
-                            value={`${item.rate_limit_per_minute}/min`}
-                          />
-                          <Detail
-                            label={t('活动密钥')}
-                            value={activeKeyLabel(item)}
-                          />
-                          <Detail
-                            label={t('可视化门户')}
-                            value={
-                              item.portal_enabled ? t('已启用') : t('未启用')
-                            }
-                          />
-                        </div>
-                        <RowActions
-                          item={item}
-                          canManage={canManage}
-                          canAudit={canAudit}
-                          mobile
-                          onEdit={() => setEditing(item)}
-                          onLogs={() => setLogsTarget(item)}
-                          onRotate={() => rotateMutation.mutate(item)}
-                          onRevoke={(keyId) =>
-                            revokeMutation.mutate({ apiId: item.id, keyId })
-                          }
-                          onDelete={() => setDeleteTarget(item)}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
-                  ))}
-                </Accordion>
-              </>
-            )}
+              ))}
 
             {total > 20 && (
               <div className='flex items-center justify-end gap-2'>
@@ -1503,15 +1515,31 @@ function AccessLogDialog(props: {
   item: AccountDataAPI | null
   onOpenChange: (open: boolean) => void
 }) {
+  const [page, setPage] = useState(1)
+  useEffect(() => setPage(1), [props.item?.id])
   const query = useQuery({
-    queryKey: ['account-data-api-logs', props.item?.id],
-    queryFn: () => listAccountDataAPIAccessLogs(props.item?.id ?? 0),
+    queryKey: ['account-data-api-logs', props.item?.id, page],
+    queryFn: ({ signal }) =>
+      listAccountDataAPIAccessLogs(props.item?.id ?? 0, page, signal),
     enabled: props.item != null,
   })
   const logs = query.data?.data.items ?? []
+  const total = query.data?.data.total ?? 0
+  const pages = Math.max(1, Math.ceil(total / 20))
   let content: ReactNode
   if (query.isLoading) {
     content = <div className='py-10 text-center'>加载中...</div>
+  } else if (query.isError) {
+    content = (
+      <div className='flex min-h-40 flex-col items-center justify-center gap-3 text-center'>
+        <p className='text-sm font-medium'>访问日志加载失败</p>
+        <p className='text-muted-foreground text-xs'>请检查网络连接后重试。</p>
+        <Button variant='outline' size='sm' onClick={() => query.refetch()}>
+          <RefreshCw />
+          重试
+        </Button>
+      </div>
+    )
   } else if (logs.length === 0) {
     content = (
       <div className='text-muted-foreground py-10 text-center'>
@@ -1520,11 +1548,36 @@ function AccessLogDialog(props: {
     )
   } else {
     content = (
-      <div className='grid gap-2'>
-        {logs.map((log) => (
-          <AccessLogRow key={log.id} log={log} />
-        ))}
-      </div>
+      <>
+        <div className='grid gap-2'>
+          {logs.map((log) => (
+            <AccessLogRow key={log.id} log={log} />
+          ))}
+        </div>
+        <div className='mt-3 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between'>
+          <p className='text-muted-foreground text-center text-sm sm:text-left'>
+            第 {page} / {pages} 页 · 共 {total} 条
+          </p>
+          <div className='grid grid-cols-2 gap-2'>
+            <Button
+              variant='outline'
+              disabled={page <= 1 || query.isFetching}
+              onClick={() => setPage((current) => current - 1)}
+            >
+              <ChevronLeft />
+              上一页
+            </Button>
+            <Button
+              variant='outline'
+              disabled={page >= pages || query.isFetching}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              下一页
+              <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      </>
     )
   }
   return (

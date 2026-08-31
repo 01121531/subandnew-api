@@ -168,6 +168,9 @@ func (r *Runner) Run(ctx context.Context, execution tool.ExecutionContext, conve
 		response, err := generate(requestContext, r.client, request)
 		requestCancel()
 		if err != nil {
+			if partial, ok := provider.PartialResponse(err); ok {
+				addUsage(&outcome.Usage, partial.Usage)
+			}
 			attempts, retried := provider.RequestAttempts(err)
 			outcome.ProviderRetries += max(0, attempts-1)
 			outcome.RetriedBeforeFirstByte = outcome.RetriedBeforeFirstByte || retried

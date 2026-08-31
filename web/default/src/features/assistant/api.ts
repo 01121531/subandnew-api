@@ -110,6 +110,7 @@ export async function listAssistantRuns(input: {
   page: number
   pageSize: number
   status: AssistantRunStatus | ''
+  signal?: AbortSignal
 }) {
   const params = new URLSearchParams({
     page: String(input.page),
@@ -117,7 +118,8 @@ export async function listAssistantRuns(input: {
   })
   if (input.status) params.set('status', input.status)
   const response = await api.get<ApiResponse<AssistantRunList>>(
-    `/api/assistant/runs?${params.toString()}`
+    `/api/assistant/runs?${params.toString()}`,
+    { signal: input.signal, disableDuplicate: true, skipErrorHandler: true }
   )
   const data = response.data.data
   return {

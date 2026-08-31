@@ -253,7 +253,9 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 				sample.ActiveSessions = &state.ActiveSessions
 			}
 		}
-		_ = managedinstance.RecordManagedRealtimeHistorySample(ctx, target.InstanceID, observedAt, sample)
+		if err := managedinstance.RecordManagedRealtimeHistorySample(ctx, target.InstanceID, observedAt, sample); err != nil {
+			managedinstance.ReportManagedRealtimeHistoryWriteError(ctx, target.InstanceID, err)
+		}
 	}
 }
 

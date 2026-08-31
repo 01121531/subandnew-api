@@ -363,6 +363,57 @@ func TestMetricHistoryTreatsUTCAndShanghaiInputsAsSameInstant(t *testing.T) {
 	require.Equal(t, shanghaiQuery, utcQuery)
 }
 
+func TestQueryMetricsMixedUnsupportedInstancesReturnsPartial(t *testing.T) {
+	db, execution, visible, hidden := newBuiltinTestContext(t)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: hidden.Id}).Error)
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	bucket := time.Date(2026, 8, 28, 15, 0, 0, 0, location).Unix()
+	require.NoError(t, db.Create(&model.ManagedRPMHistory{InstanceID: visible.Id, BucketStart: bucket, RPMSum: 25, RPMLast: 25, SampleCount: 1}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{
+		"instance_scope":"all","metrics":["rpm"],"period":"point","mode":"point",
+		"point_at":"2026-08-28 15:00:10","granularity":"minute"
+	}`))
+	require.NoError(t, err)
+	var output queryMetricsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	rpm := output.Metrics["rpm"]
+	require.Equal(t, "partial", rpm.Status)
+	require.Equal(t, []int64{visible.Id}, rpm.SupportedInstances)
+	require.Equal(t, []int64{hidden.Id}, rpm.UnsupportedInstances)
+	require.Equal(t, 25.0, *rpm.Value)
+}
+
+func TestQueryMetricsReportsMissingInstanceWithoutTreatingItAsZero(t *testing.T) {
+	db, execution, visible, _ := newBuiltinTestContext(t)
+	second := model.ManagedInstance{Name: "second", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://second.example", Status: model.ManagedInstanceStatusHealthy}
+	require.NoError(t, db.Create(&second).Error)
+	require.NoError(t, db.Create(&model.AssistantIdentityInstanceScope{IdentityID: execution.IdentityID, InstanceID: second.Id}).Error)
+	location := time.FixedZone(assistantTimezone, 8*60*60)
+	bucket := time.Date(2026, 8, 28, 15, 0, 0, 0, location).Unix()
+	require.NoError(t, db.Create(&model.ManagedRPMHistory{InstanceID: visible.Id, BucketStart: bucket, RPMSum: 0, RPMLast: 0, SampleCount: 1}).Error)
+	registry, err := NewRegistry(db)
+	require.NoError(t, err)
+	result, err := registry.Execute(t.Context(), execution, "query_metrics", json.RawMessage(`{
+		"instance_scope":"all","metrics":["rpm"],"period":"point","mode":"point",
+		"point_at":"2026-08-28 15:00:10","granularity":"minute"
+	}`))
+	require.NoError(t, err)
+	var output queryMetricsOutput
+	require.NoError(t, json.Unmarshal(result.Data, &output))
+	rpm := output.Metrics["rpm"]
+	require.Equal(t, "partial", rpm.Status)
+	require.Nil(t, rpm.Value)
+	require.Equal(t, []int64{second.Id}, rpm.MissingInstances)
+}
+
+func TestQueryMetricsRejectsPartialNaturalDayRange(t *testing.T) {
+	err := validateQueryMetricsNaturalDayRange("2026-08-28 10:00:00", "2026-08-28 18:00:00")
+	require.ErrorContains(t, err, "natural days")
+	require.NoError(t, validateQueryMetricsNaturalDayRange("2026-08-28", "2026-08-29"))
+}
+
 func TestHealthAndAlertsStayWithinIdentityScope(t *testing.T) {
 	db, execution, visible, hidden := newBuiltinTestContext(t)
 	now := time.Now().Unix()

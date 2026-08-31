@@ -78,7 +78,7 @@ func QueryAccountDataPortal(c *gin.Context) {
 		portalError(c, requestID, err)
 		return
 	}
-	allowed, retryAfter := accountdataapi.AllowRequest(c.Request.Context(), -auth.Session.ID, auth.API.RateLimitPerMinute)
+	allowed, retryAfter := accountdataapi.AllowRequestKey(c.Request.Context(), accountdataapi.PortalRateLimitIdentity(auth.API.ID, c.ClientIP()), auth.API.RateLimitPerMinute)
 	if !allowed {
 		c.Header("Retry-After", fmt.Sprint(retryAfter))
 		portalAccessLog(auth.API.ID, auth.Session.ID, "query", requestID, c.ClientIP(), http.StatusTooManyRequests, 0, "rate_limited", started)
@@ -106,6 +106,7 @@ func QueryAccountDataPortal(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{
 		"items": items, "pagination": gin.H{"page": result.Page, "page_size": result.PageSize, "total": result.Total, "has_more": result.HasMore},
 		"summary": portalSummary(result, auth.View.Fields), "observed_at": accountDataTime(result.ObservedAt), "stale": result.Stale, "partial": result.Partial,
+		"filter_options": accountdataapi.PortalFilterOptions(result.FilterOptions, accountdataapi.PortalFilterFields(auth.View.Fields)),
 	}})
 }
 
@@ -140,7 +141,7 @@ func ExportAccountDataPortal(c *gin.Context) {
 		portalError(c, requestID, err)
 		return
 	}
-	allowed, retryAfter := accountdataapi.AllowRequest(c.Request.Context(), -auth.Session.ID, auth.API.RateLimitPerMinute)
+	allowed, retryAfter := accountdataapi.AllowRequestKey(c.Request.Context(), accountdataapi.PortalRateLimitIdentity(auth.API.ID, c.ClientIP()), auth.API.RateLimitPerMinute)
 	if !allowed {
 		c.Header("Retry-After", fmt.Sprint(retryAfter))
 		portalAccessLog(auth.API.ID, auth.Session.ID, "export", requestID, c.ClientIP(), http.StatusTooManyRequests, 0, "rate_limited", started)

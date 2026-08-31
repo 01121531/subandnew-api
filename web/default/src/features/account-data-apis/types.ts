@@ -11,8 +11,8 @@ import type {
   AccountFilterRuleInput,
 } from '@/features/managed-accounts/account-filtering'
 
-export type AccountDataAPIDataset = 'inventory' | 'account_output'
-export type AccountDataAPIStatus = 'enabled' | 'disabled'
+type AccountDataAPIDataset = 'inventory' | 'account_output'
+type AccountDataAPIStatus = 'enabled' | 'disabled'
 
 export type AccountDataAPIInput = {
   name: string

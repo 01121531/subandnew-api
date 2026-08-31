@@ -26,6 +26,7 @@ export interface SetupFormValues {
   username: string
   password: string
   confirmPassword: string
+  setup_token: string
 }
 
 export interface SetupResponse {

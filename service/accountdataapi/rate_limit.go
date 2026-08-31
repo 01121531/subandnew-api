@@ -3,6 +3,7 @@ package accountdataapi
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -18,12 +19,22 @@ func AllowRequest(ctx context.Context, keyID int64, maximum int) (bool, int) {
 	if keyID == 0 || maximum <= 0 {
 		return false, 60
 	}
+	return AllowRequestKey(ctx, fmt.Sprintf("key:%d", keyID), maximum)
+}
+
+// AllowRequestKey applies the authorization-level limit independently of a
+// short-lived portal session. Callers must use a stable, non-secret key.
+func AllowRequestKey(ctx context.Context, identity string, maximum int) (bool, int) {
+	identity = strings.TrimSpace(identity)
+	if identity == "" || maximum <= 0 {
+		return false, 60
+	}
 	now := time.Now()
 	retryAfter := 60 - now.Second()
 	if retryAfter <= 0 {
 		retryAfter = 1
 	}
-	key := fmt.Sprintf("accountDataAPI:%d:%s", keyID, now.UTC().Format("200601021504"))
+	key := fmt.Sprintf("accountDataAPI:%s:%s", identity, now.UTC().Format("200601021504"))
 	if common.RedisEnabled && common.RDB != nil {
 		count, err := common.RDB.Incr(ctx, key).Result()
 		if err != nil {

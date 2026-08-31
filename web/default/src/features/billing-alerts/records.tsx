@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useDebounce, useMediaQuery } from '@/hooks'
 
 import {
   type AlertRecord,
@@ -306,6 +307,8 @@ export function BillingAlertRecords({
   const [eventType, setEventType] = useState('')
   const [sourceType, setSourceType] = useState('')
   const [recipient, setRecipient] = useState('')
+  const debouncedRecipient = useDebounce(recipient, 350)
+  const isMobile = useMediaQuery('(max-width: 767px)')
   const [selected, setSelected] = useState<AlertRecord | null>(null)
   const params = useMemo(() => {
     const value = new URLSearchParams({
@@ -314,12 +317,14 @@ export function BillingAlertRecords({
     })
     if (eventType) value.set('event_type', eventType)
     if (sourceType) value.set('source_type', sourceType)
-    if (recipient.trim()) value.set('recipient', recipient.trim())
+    if (debouncedRecipient.trim()) {
+      value.set('recipient', debouncedRecipient.trim())
+    }
     return value
-  }, [eventType, page, recipient, sourceType])
+  }, [debouncedRecipient, eventType, page, sourceType])
   const query = useQuery({
     queryKey: ['billing-alert-records', params.toString()],
-    queryFn: () => listAlertRecords(params),
+    queryFn: ({ signal }) => listAlertRecords(params, signal),
     refetchInterval: 60_000,
   })
   const exportsQuery = useQuery({
@@ -415,6 +420,7 @@ export function BillingAlertRecords({
         <div className='relative'>
           <Search className='text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2' />
           <Input
+            aria-label='筛选收件邮箱'
             className='pl-9'
             value={recipient}
             onChange={(e) => {
@@ -428,168 +434,171 @@ export function BillingAlertRecords({
           共 {data?.total ?? 0} 条
         </Badge>
       </div>
-      <Accordion className='divide-border divide-y overflow-hidden rounded-lg border md:hidden'>
-        {(data?.items ?? []).map((item) => (
-          <AccordionItem
-            key={item.id}
-            value={String(item.id)}
-            className={eventRowClass(item.event_type)}
-          >
-            <div className='flex min-w-0 items-stretch'>
-              <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
-                <div className='min-w-0 flex-1'>
-                  <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                    <span className='min-w-0 font-medium break-words'>
-                      {item.instance_name || `#${item.instance_id}`}
-                    </span>
-                    <EventBadge type={item.event_type} />
+      {isMobile ? (
+        <Accordion className='divide-border divide-y overflow-hidden rounded-lg border'>
+          {(data?.items ?? []).map((item) => (
+            <AccordionItem
+              key={item.id}
+              value={String(item.id)}
+              className={eventRowClass(item.event_type)}
+            >
+              <div className='flex min-w-0 items-stretch'>
+                <AccordionTrigger className='min-h-24 min-w-0 flex-1 gap-3 rounded-none px-3 py-3 hover:no-underline'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      <span className='min-w-0 font-medium break-words'>
+                        {item.instance_name || `#${item.instance_id}`}
+                      </span>
+                      <EventBadge type={item.event_type} />
+                    </div>
+                    <div className='text-muted-foreground mt-2 text-xs break-words'>
+                      {item.rule_name || `规则 #${item.rule_id}`} ·{' '}
+                      {item.instance_kind}
+                    </div>
+                    <div className='text-muted-foreground mt-2 text-xs tabular-nums'>
+                      {dateTime.format(new Date(item.created_at * 1000))}
+                    </div>
                   </div>
-                  <div className='text-muted-foreground mt-2 text-xs break-words'>
-                    {item.rule_name || `规则 #${item.rule_id}`} ·{' '}
-                    {item.instance_kind}
-                  </div>
-                  <div className='text-muted-foreground mt-2 text-xs tabular-nums'>
-                    {dateTime.format(new Date(item.created_at * 1000))}
-                  </div>
-                </div>
-              </AccordionTrigger>
-              <div className='flex shrink-0 items-center pe-2'>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='size-11'
-                  aria-label='查看详情'
-                  onClick={() => setSelected(item)}
-                >
-                  <Eye />
-                </Button>
-              </div>
-            </div>
-            <AccordionContent className='px-3 pb-4'>
-              <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
-                <MobileAlertDetail label='触发条件'>
-                  {conditionSummary(item)}
-                </MobileAlertDetail>
-                <MobileAlertDetail label='观测结果'>
-                  {observedSummary(item)}
-                </MobileAlertDetail>
-                <MobileAlertDetail label='范围 / 换算'>
-                  <AlertScopeSummary item={item} />
-                </MobileAlertDetail>
-                <MobileAlertDetail label='邮件'>
-                  <div className='flex flex-wrap gap-1'>
-                    {item.deliveries.map((delivery) => (
-                      <Badge
-                        key={delivery.id}
-                        variant={deliveryVariant(delivery.status)}
-                      >
-                        {delivery.status}
-                      </Badge>
-                    ))}
-                  </div>
-                </MobileAlertDetail>
-                {item.error_code && (
-                  <MobileAlertDetail label='错误'>
-                    <span className='text-destructive break-words'>
-                      {item.error_code}
-                    </span>
-                  </MobileAlertDetail>
-                )}
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        ))}
-        {!data?.items.length && (
-          <div className='text-muted-foreground flex min-h-40 items-center justify-center px-4 text-sm'>
-            {query.isLoading ? '数据加载中' : '暂无预警记录'}
-          </div>
-        )}
-      </Accordion>
-      <div className='hidden overflow-x-auto rounded-lg border md:block'>
-        <Table>
-          <TableHeader className='bg-muted/40'>
-            <TableRow>
-              <TableHead>事件</TableHead>
-              <TableHead>实例 / 规则</TableHead>
-              <TableHead>触发条件</TableHead>
-              <TableHead>观测结果</TableHead>
-              <TableHead>范围 / 换算</TableHead>
-              <TableHead>邮件</TableHead>
-              <TableHead>时间</TableHead>
-              <TableHead className='text-right'>操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(data?.items ?? []).map((item) => (
-              <TableRow
-                key={item.id}
-                className={eventRowClass(item.event_type)}
-              >
-                <TableCell>
-                  <EventBadge type={item.event_type} />
-                </TableCell>
-                <TableCell>
-                  <div className='font-medium'>
-                    {item.instance_name || `#${item.instance_id}`}
-                  </div>
-                  <div className='text-muted-foreground text-xs'>
-                    {item.rule_name || `规则 #${item.rule_id}`} ·{' '}
-                    {item.instance_kind}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className='max-w-72 text-sm break-words'>
-                    {conditionSummary(item)}
-                  </div>
-                </TableCell>
-                <TableCell className='tabular-nums'>
-                  <div className='max-w-64 text-sm break-words'>
-                    {observedSummary(item)}
-                  </div>
-                </TableCell>
-                <TableCell className='text-xs tabular-nums'>
-                  <AlertScopeSummary item={item} />
-                </TableCell>
-                <TableCell>
-                  <div className='flex flex-wrap gap-1'>
-                    {item.deliveries.map((delivery) => (
-                      <Badge
-                        key={delivery.id}
-                        variant={deliveryVariant(delivery.status)}
-                      >
-                        {delivery.status}
-                      </Badge>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell className='whitespace-nowrap'>
-                  {dateTime.format(new Date(item.created_at * 1000))}
-                </TableCell>
-                <TableCell className='text-right'>
+                </AccordionTrigger>
+                <div className='flex shrink-0 items-center pe-2'>
                   <Button
                     variant='ghost'
-                    size='icon-sm'
+                    size='icon'
+                    className='size-11'
                     aria-label='查看详情'
                     onClick={() => setSelected(item)}
                   >
                     <Eye />
                   </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!data?.items.length && (
+                </div>
+              </div>
+              <AccordionContent className='px-3 pb-4'>
+                <div className='bg-muted/35 grid gap-3 rounded-md p-3 min-[420px]:grid-cols-2'>
+                  <MobileAlertDetail label='触发条件'>
+                    {conditionSummary(item)}
+                  </MobileAlertDetail>
+                  <MobileAlertDetail label='观测结果'>
+                    {observedSummary(item)}
+                  </MobileAlertDetail>
+                  <MobileAlertDetail label='范围 / 换算'>
+                    <AlertScopeSummary item={item} />
+                  </MobileAlertDetail>
+                  <MobileAlertDetail label='邮件'>
+                    <div className='flex flex-wrap gap-1'>
+                      {item.deliveries.map((delivery) => (
+                        <Badge
+                          key={delivery.id}
+                          variant={deliveryVariant(delivery.status)}
+                        >
+                          {delivery.status}
+                        </Badge>
+                      ))}
+                    </div>
+                  </MobileAlertDetail>
+                  {item.error_code && (
+                    <MobileAlertDetail label='错误'>
+                      <span className='text-destructive break-words'>
+                        {item.error_code}
+                      </span>
+                    </MobileAlertDetail>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          ))}
+          {!data?.items.length && (
+            <div className='text-muted-foreground flex min-h-40 items-center justify-center px-4 text-sm'>
+              {query.isLoading ? '数据加载中' : '暂无预警记录'}
+            </div>
+          )}
+        </Accordion>
+      ) : (
+        <div className='overflow-x-auto rounded-lg border'>
+          <Table>
+            <TableHeader className='bg-muted/40'>
               <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className='text-muted-foreground h-40 text-center'
-                >
-                  {query.isLoading ? '数据加载中' : '暂无预警记录'}
-                </TableCell>
+                <TableHead>事件</TableHead>
+                <TableHead>实例 / 规则</TableHead>
+                <TableHead>触发条件</TableHead>
+                <TableHead>观测结果</TableHead>
+                <TableHead>范围 / 换算</TableHead>
+                <TableHead>邮件</TableHead>
+                <TableHead>时间</TableHead>
+                <TableHead className='text-right'>操作</TableHead>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {(data?.items ?? []).map((item) => (
+                <TableRow
+                  key={item.id}
+                  className={eventRowClass(item.event_type)}
+                >
+                  <TableCell>
+                    <EventBadge type={item.event_type} />
+                  </TableCell>
+                  <TableCell>
+                    <div className='font-medium'>
+                      {item.instance_name || `#${item.instance_id}`}
+                    </div>
+                    <div className='text-muted-foreground text-xs'>
+                      {item.rule_name || `规则 #${item.rule_id}`} ·{' '}
+                      {item.instance_kind}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className='max-w-72 text-sm break-words'>
+                      {conditionSummary(item)}
+                    </div>
+                  </TableCell>
+                  <TableCell className='tabular-nums'>
+                    <div className='max-w-64 text-sm break-words'>
+                      {observedSummary(item)}
+                    </div>
+                  </TableCell>
+                  <TableCell className='text-xs tabular-nums'>
+                    <AlertScopeSummary item={item} />
+                  </TableCell>
+                  <TableCell>
+                    <div className='flex flex-wrap gap-1'>
+                      {item.deliveries.map((delivery) => (
+                        <Badge
+                          key={delivery.id}
+                          variant={deliveryVariant(delivery.status)}
+                        >
+                          {delivery.status}
+                        </Badge>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell className='whitespace-nowrap'>
+                    {dateTime.format(new Date(item.created_at * 1000))}
+                  </TableCell>
+                  <TableCell className='text-right'>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      aria-label='查看详情'
+                      onClick={() => setSelected(item)}
+                    >
+                      <Eye />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {!data?.items.length && (
+                <TableRow>
+                  <TableCell
+                    colSpan={8}
+                    className='text-muted-foreground h-40 text-center'
+                  >
+                    {query.isLoading ? '数据加载中' : '暂无预警记录'}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      )}
       <div className='flex flex-col gap-2 border-t px-4 py-3 text-sm min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
         <span className='text-muted-foreground'>
           第 {page} / {pages} 页
@@ -621,87 +630,90 @@ export function BillingAlertRecords({
             <FileClock className='size-4' />
             最近导出
           </div>
-          <div className='divide-border divide-y md:hidden'>
-            {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
-              <div
-                key={item.id}
-                className='flex min-w-0 items-center justify-between gap-3 px-4 py-3'
-              >
-                <div className='min-w-0'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Badge variant={exportVariant(item.status)}>
-                      {exportStatusLabel(item.status)}
-                    </Badge>
-                    <span className='text-sm tabular-nums'>
-                      {item.record_count.toLocaleString()} 条
-                    </span>
-                  </div>
-                  <div className='text-muted-foreground mt-1 text-xs break-words'>
-                    {item.file_name || item.error_code || '准备中'}
-                  </div>
-                  <div className='text-muted-foreground mt-1 text-xs tabular-nums'>
-                    {dateTime.format(new Date(item.created_at * 1000))}
-                  </div>
-                </div>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='size-11 shrink-0'
-                  aria-label='下载导出文件'
-                  disabled={item.status !== 'succeeded'}
-                  onClick={() => void downloadAlertRecordExport(item.task_id)}
+          {isMobile ? (
+            <div className='divide-border divide-y'>
+              {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
+                <div
+                  key={item.id}
+                  className='flex min-w-0 items-center justify-between gap-3 px-4 py-3'
                 >
-                  <Download />
-                </Button>
-              </div>
-            ))}
-          </div>
-          <div className='hidden overflow-x-auto md:block'>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>状态</TableHead>
-                  <TableHead>记录数</TableHead>
-                  <TableHead>文件</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead className='text-right'>操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
+                  <div className='min-w-0'>
+                    <div className='flex flex-wrap items-center gap-2'>
                       <Badge variant={exportVariant(item.status)}>
                         {exportStatusLabel(item.status)}
                       </Badge>
-                    </TableCell>
-                    <TableCell className='tabular-nums'>
-                      {item.record_count.toLocaleString()}
-                    </TableCell>
-                    <TableCell>
+                      <span className='text-sm tabular-nums'>
+                        {item.record_count.toLocaleString()} 条
+                      </span>
+                    </div>
+                    <div className='text-muted-foreground mt-1 text-xs break-words'>
                       {item.file_name || item.error_code || '准备中'}
-                    </TableCell>
-                    <TableCell>
+                    </div>
+                    <div className='text-muted-foreground mt-1 text-xs tabular-nums'>
                       {dateTime.format(new Date(item.created_at * 1000))}
-                    </TableCell>
-                    <TableCell className='text-right'>
-                      <Button
-                        variant='ghost'
-                        size='icon-sm'
-                        aria-label='下载导出文件'
-                        disabled={item.status !== 'succeeded'}
-                        onClick={() =>
-                          void downloadAlertRecordExport(item.task_id)
-                        }
-                      >
-                        <Download />
-                      </Button>
-                    </TableCell>
+                    </div>
+                  </div>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='size-11 shrink-0'
+                    aria-label='下载导出文件'
+                    disabled={item.status !== 'succeeded'}
+                    onClick={() => void downloadAlertRecordExport(item.task_id)}
+                  >
+                    <Download />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className='overflow-x-auto'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>状态</TableHead>
+                    <TableHead>记录数</TableHead>
+                    <TableHead>文件</TableHead>
+                    <TableHead>创建时间</TableHead>
+                    <TableHead className='text-right'>操作</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {(exportsQuery.data?.data ?? []).slice(0, 5).map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <Badge variant={exportVariant(item.status)}>
+                          {exportStatusLabel(item.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className='tabular-nums'>
+                        {item.record_count.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {item.file_name || item.error_code || '准备中'}
+                      </TableCell>
+                      <TableCell>
+                        {dateTime.format(new Date(item.created_at * 1000))}
+                      </TableCell>
+                      <TableCell className='text-right'>
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          aria-label='下载导出文件'
+                          disabled={item.status !== 'succeeded'}
+                          onClick={() =>
+                            void downloadAlertRecordExport(item.task_id)
+                          }
+                        >
+                          <Download />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </section>
       )}
       <Dialog

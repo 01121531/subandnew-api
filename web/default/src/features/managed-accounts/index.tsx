@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import type { TFunction } from 'i18next'
 import {
@@ -100,7 +100,6 @@ import {
 } from '@/features/fleet-dashboard/time-range'
 import { FleetTimeRangeFilter } from '@/features/fleet-dashboard/time-range-filter'
 import {
-  getManagedAccountSnapshot,
   getManagedInstances,
   refreshManagedAccountSnapshot,
   refreshManagedRealtime,
@@ -137,6 +136,7 @@ import {
   type AccountFilterDocument,
   type AccountFilterField,
 } from './account-filtering'
+import { useBatchedAccountSnapshots } from './use-batched-account-snapshots'
 
 type AccountFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
 type ResourceRow = {
@@ -809,19 +809,11 @@ export function ManagedAccounts() {
   }, [timeRange])
   const selectionScopeKey = `${family}:${effectiveInstanceID}:${rangeQueryKey}`
 
-  const snapshotQueries = useQueries({
-    queries: instances.map((instance) => ({
-      queryKey: ['managed-account-snapshot', instance.id, rangeQueryKey],
-      queryFn: () =>
-        getManagedAccountSnapshot(instance.id, accountRangeInput, {
-          silent: true,
-        }),
-      retry: 1,
-      retryDelay: FAILED_REFRESH_RETRY_MS,
-      staleTime: Number.POSITIVE_INFINITY,
-      refetchOnWindowFocus: false,
-    })),
-  })
+  const snapshotQueries = useBatchedAccountSnapshots(
+    instances.map((instance) => instance.id),
+    rangeQueryKey,
+    accountRangeInput
+  )
   const exportRangeKey =
     snapshotQueries.find((query) => query.data?.data.range.range_key)?.data
       ?.data.range.range_key ??

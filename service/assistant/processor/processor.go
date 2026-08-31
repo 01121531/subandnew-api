@@ -2,13 +2,14 @@ package processor
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,10 +36,13 @@ const (
 	outboxPayloadPurpose     = "wechat-ilink-outbox"
 	messageContentPurpose    = "assistant-conversation-message"
 	promptVersion            = "wechat-readonly-v2"
-	conversationHistoryLimit = 12
+	conversationHistoryLimit = 24
+	conversationHistoryBytes = 24 << 10
 	maxInboundAttempts       = 3
 	maxOutboxAttempts        = 5
 	maxAuditErrorDetailBytes = 64 << 10
+	workLeaseDuration        = 60 * time.Second
+	conversationLeasePeriod  = 20 * time.Second
 )
 
 const (
@@ -50,6 +54,7 @@ const (
 
 var (
 	ErrEventNotPending     = errors.New("assistant inbound event is not pending")
+	ErrConversationBusy    = errors.New("assistant conversation is busy")
 	ErrOutboxNotDue        = errors.New("assistant outbox message is not due")
 	sensitiveAnswerPattern = regexp.MustCompile(`(?i)(https?://|wss?://|\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b|bearer\s+[a-z0-9._~+/=-]{8,}|sk-[a-z0-9_-]{8,}|(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|passwd|secret|cookie)\s*[:=])`)
 )
@@ -84,7 +89,16 @@ type Processor struct {
 	resolveModel    ModelResolver
 	registryFactory RegistryFactory
 	now             func() time.Time
-	turnLocks       [64]sync.Mutex
+	ownerID         string
+}
+
+type TurnReservation struct {
+	processor *Processor
+	event     model.AssistantInboundEvent
+	ownerID   string
+	cancel    context.CancelFunc
+	done      chan struct{}
+	release   sync.Once
 }
 
 type OutboxPayload struct {
@@ -102,7 +116,7 @@ func New(db *gorm.DB, cipher *secrets.Cipher, channels *channelservice.Service, 
 	if err != nil {
 		return nil, err
 	}
-	return &Processor{db: db, cipher: cipher, channels: channels, bindings: bindings, resolveModel: resolveModel, registryFactory: registryFactory, now: time.Now}, nil
+	return &Processor{db: db, cipher: cipher, channels: channels, bindings: bindings, resolveModel: resolveModel, registryFactory: registryFactory, now: time.Now, ownerID: uuid.NewString()}, nil
 }
 
 func NewDefault(db *gorm.DB, cipher *secrets.Cipher, channels *channelservice.Service) (*Processor, error) {
@@ -118,15 +132,28 @@ func NewDefault(db *gorm.DB, cipher *secrets.Cipher, channels *channelservice.Se
 }
 
 func (p *Processor) Process(ctx context.Context, eventID int64) error {
-	turnLock, err := p.turnLock(ctx, eventID)
+	reservation, err := p.ReserveTurn(ctx, eventID)
 	if err != nil {
 		return err
 	}
-	turnLock.Lock()
-	defer turnLock.Unlock()
-	event, err := p.claimEvent(ctx, eventID)
+	defer reservation.Release(context.Background())
+	return p.ProcessReserved(ctx, reservation)
+}
+
+func (p *Processor) ProcessReserved(ctx context.Context, reservation *TurnReservation) error {
+	if reservation == nil || reservation.processor != p {
+		return ErrEventNotPending
+	}
+	event, err := p.claimEvent(ctx, reservation.event.ID, reservation.ownerID)
 	if err != nil {
 		return err
+	}
+	var existingReplies int64
+	if err := p.db.WithContext(ctx).Model(&model.AssistantOutbox{}).Where("reply_key = ?", fmt.Sprintf("inbound:%d:final", event.ID)).Count(&existingReplies).Error; err != nil {
+		return p.failEvent(ctx, event, "outbox_recovery_failed", err)
+	}
+	if existingReplies > 0 {
+		return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 	}
 	loadedEvent, payload, err := p.channels.LoadInbound(ctx, event.ID)
 	if err != nil {
@@ -147,7 +174,7 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		if err := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "绑定成功。你现在可以查询实例状态、Dashboard 汇总和实时指标。发送 /帮助 查看示例。 "); err != nil {
 			return p.failEvent(ctx, event, "outbox_failed", err)
 		}
-		return p.finishEvent(ctx, event.ID)
+		return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 	}
 
 	identity, err := p.activeIdentity(ctx, event.ChannelID, event.ExternalUserID)
@@ -159,7 +186,7 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		if outboxErr := p.enqueueReply(ctx, event, 0, 0, payload.ContextToken, message); outboxErr != nil {
 			return p.failEvent(ctx, event, "outbox_failed", outboxErr)
 		}
-		return p.finishEvent(ctx, event.ID)
+		return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 	}
 	conversation, err := p.conversation(ctx, event, identity)
 	if err != nil {
@@ -172,13 +199,13 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		if err := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "对话上下文已清空，下一条消息会开始一个全新的查询。 "); err != nil {
 			return p.failEvent(ctx, event, "outbox_failed", err)
 		}
-		return p.finishEvent(ctx, event.ID)
+		return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 	}
 	if response, handled := deterministicCommand(payload.Text); handled {
 		if err := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, response); err != nil {
 			return p.failEvent(ctx, event, "outbox_failed", err)
 		}
-		return p.finishEvent(ctx, event.ID)
+		return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 	}
 	stopTyping := p.beginTyping(ctx, event.ChannelID, event.PeerID, payload.ContextToken)
 	defer stopTyping()
@@ -188,14 +215,14 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 		if replyErr := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "智能助手模型暂不可用，请稍后重试或联系管理员检查模型配置。"); replyErr != nil {
 			return p.failEvent(ctx, event, "model_unavailable", err)
 		}
-		return p.finishEventWithError(ctx, event.ID, "model_unavailable")
+		return p.finishEventWithError(ctx, event.ID, event.ClaimOwner, "model_unavailable")
 	}
 	registry, err := p.registryFactory()
 	if err != nil {
 		if replyErr := p.enqueueReply(ctx, event, conversation.ID, 0, payload.ContextToken, "助手工具暂时不可用，请稍后重试。"); replyErr != nil {
 			return p.failEvent(ctx, event, "tool_registry_failed", err)
 		}
-		return p.finishEventWithError(ctx, event.ID, "tool_registry_failed")
+		return p.finishEventWithError(ctx, event.ID, event.ClaimOwner, "tool_registry_failed")
 	}
 	requestTimeout := time.Duration(modelProfile.TimeoutSeconds) * time.Second
 	runTimeout := time.Duration(modelProfile.RunTimeoutSeconds) * time.Second
@@ -214,12 +241,12 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 	}
 	progress := p.startProgressReporter(ctx, event, payload.ContextToken, runRow.RunID)
 	defer progress.Stop()
-	if err := p.storeMessage(ctx, conversation.ID, event.ID, 0, model.AssistantMessageRoleUser, payload.Text); err != nil {
+	if err := p.storeMessage(ctx, conversation.ID, event.ID, 0, model.AssistantMessageRoleUser, conversation.ScopeFingerprint, payload.Text); err != nil {
 		progress.Stop()
 		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "助手无法保存本次消息，请联系管理员检查服务状态。运行编号："+runRow.RunID)
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_store_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Started: time.Unix(runRow.StartedAt, 0)})
 	}
-	history, err := p.loadConversationHistory(ctx, conversation.ID)
+	history, err := p.loadConversationHistory(ctx, conversation.ID, conversation.ScopeFingerprint)
 	if err != nil {
 		progress.Stop()
 		_ = p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, "助手无法读取对话上下文，请稍后重新提问。运行编号："+runRow.RunID)
@@ -254,13 +281,13 @@ func (p *Processor) Process(ctx context.Context, eventID int64) error {
 	if err := p.persistSuccessfulRun(ctx, &runRow, specs, outcome, started); err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "run_persist_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
-	if err := p.storeMessage(ctx, conversation.ID, event.ID, runRow.ID, model.AssistantMessageRoleAssistant, outcome.Answer); err != nil {
+	if err := p.storeMessage(ctx, conversation.ID, event.ID, runRow.ID, model.AssistantMessageRoleAssistant, conversation.ScopeFingerprint, outcome.Answer); err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "message_store_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
 	if err := p.enqueueReply(ctx, event, conversation.ID, runRow.ID, payload.ContextToken, outcome.Answer); err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "outbox_failed", Stage: assistantErrorStageMessageDelivery, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
-	return p.finishEvent(ctx, event.ID)
+	return p.finishEvent(ctx, event.ID, event.ClaimOwner)
 }
 
 func assistantRunFailureCode(err error) string {
@@ -294,14 +321,89 @@ func assistantFailureReply(details assistantFailureDetails, requestTimeout time.
 	return message + "。请稍后重新提问；系统已记录运行编号：" + runID
 }
 
-func (p *Processor) turnLock(ctx context.Context, eventID int64) (*sync.Mutex, error) {
-	var event model.AssistantInboundEvent
-	if eventID <= 0 || p.db.WithContext(ctx).Select("channel_id", "peer_id").First(&event, eventID).Error != nil {
+func (p *Processor) ReserveTurn(ctx context.Context, eventID int64) (*TurnReservation, error) {
+	if eventID <= 0 {
 		return nil, ErrEventNotPending
 	}
-	hasher := fnv.New32a()
-	_, _ = fmt.Fprintf(hasher, "%d:%s", event.ChannelID, event.PeerID)
-	return &p.turnLocks[int(hasher.Sum32())%len(p.turnLocks)], nil
+	var event model.AssistantInboundEvent
+	if err := p.db.WithContext(ctx).First(&event, eventID).Error; err != nil {
+		return nil, ErrEventNotPending
+	}
+	now := p.now().Unix()
+	eligible := (event.Status == model.AssistantInboundStatusPending || event.Status == model.AssistantInboundStatusFailed) && event.NextAttemptAt <= now && event.Attempt < maxInboundAttempts
+	eligible = eligible || (event.Status == model.AssistantInboundStatusProcessing && event.LeaseUntil <= now && event.Attempt < maxInboundAttempts)
+	if !eligible {
+		return nil, ErrEventNotPending
+	}
+	var earlier int64
+	if err := p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).
+		Where("channel_id = ? AND peer_id = ? AND id < ? AND status NOT IN ?", event.ChannelID, event.PeerID, event.ID, []string{model.AssistantInboundStatusSucceeded, model.AssistantInboundStatusDeadLetter}).
+		Count(&earlier).Error; err != nil {
+		return nil, err
+	}
+	if earlier > 0 {
+		return nil, ErrConversationBusy
+	}
+	ownerID := p.ownerID + ":" + fmt.Sprint(event.ID) + ":" + uuid.NewString()
+	lockedUntil := p.now().Add(workLeaseDuration).Unix()
+	acquired := false
+	err := p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		seed := model.AssistantConversationLease{ChannelID: event.ChannelID, AccountID: event.AccountID, PeerID: event.PeerID}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&seed).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&model.AssistantConversationLease{}).
+			Where("channel_id = ? AND peer_id = ? AND (locked_until <= ? OR owner_id = ?)", event.ChannelID, event.PeerID, now, ownerID).
+			Updates(map[string]any{"owner_id": ownerID, "locked_until": lockedUntil, "fencing_token": gorm.Expr("fencing_token + 1")})
+		if result.Error != nil {
+			return result.Error
+		}
+		acquired = result.RowsAffected == 1
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, ErrConversationBusy
+	}
+	leaseContext, cancel := context.WithCancel(ctx)
+	reservation := &TurnReservation{processor: p, event: event, ownerID: ownerID, cancel: cancel, done: make(chan struct{})}
+	go reservation.heartbeat(leaseContext)
+	return reservation, nil
+}
+
+func (reservation *TurnReservation) heartbeat(ctx context.Context) {
+	defer close(reservation.done)
+	ticker := time.NewTicker(conversationLeasePeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			until := reservation.processor.now().Add(workLeaseDuration).Unix()
+			_ = reservation.processor.db.WithContext(ctx).Model(&model.AssistantConversationLease{}).
+				Where("channel_id = ? AND peer_id = ? AND owner_id = ?", reservation.event.ChannelID, reservation.event.PeerID, reservation.ownerID).
+				Update("locked_until", until).Error
+			_ = reservation.processor.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).
+				Where("id = ? AND status = ? AND claim_owner = ?", reservation.event.ID, model.AssistantInboundStatusProcessing, reservation.ownerID).
+				Update("lease_until", until).Error
+		}
+	}
+}
+
+func (reservation *TurnReservation) Release(ctx context.Context) {
+	if reservation == nil || reservation.processor == nil {
+		return
+	}
+	reservation.release.Do(func() {
+		reservation.cancel()
+		<-reservation.done
+		_ = reservation.processor.db.WithContext(ctx).Model(&model.AssistantConversationLease{}).
+			Where("channel_id = ? AND peer_id = ? AND owner_id = ?", reservation.event.ChannelID, reservation.event.PeerID, reservation.ownerID).
+			Updates(map[string]any{"owner_id": "", "locked_until": 0}).Error
+	})
 }
 
 func safeAssistantAnswer(answer string) string {
@@ -316,15 +418,15 @@ func safeAssistantAnswer(answer string) string {
 	return answer
 }
 
-func (p *Processor) storeMessage(ctx context.Context, conversationID int64, eventID int64, runID int64, role string, content string) error {
+func (p *Processor) storeMessage(ctx context.Context, conversationID int64, eventID int64, runID int64, role string, scopeFingerprint string, content string) error {
 	content = strings.TrimSpace(content)
-	if conversationID <= 0 || eventID <= 0 || content == "" || (role != model.AssistantMessageRoleUser && role != model.AssistantMessageRoleAssistant) {
+	if conversationID <= 0 || eventID <= 0 || content == "" || scopeFingerprint == "" || (role != model.AssistantMessageRoleUser && role != model.AssistantMessageRoleAssistant) {
 		return errors.New("assistant conversation message is invalid")
 	}
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		message := model.AssistantMessage{
 			ConversationID: conversationID, InboundEventID: eventID, RunID: runID,
-			Role: role, Content: "pending-encryption", ContentKeyVersion: "pending",
+			Role: role, ScopeFingerprint: scopeFingerprint, Content: "pending-encryption", ContentKeyVersion: "pending",
 		}
 		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&message)
 		if result.Error != nil || result.RowsAffected == 0 {
@@ -338,21 +440,69 @@ func (p *Processor) storeMessage(ctx context.Context, conversationID int64, even
 	})
 }
 
-func (p *Processor) loadConversationHistory(ctx context.Context, conversationID int64) ([]provider.Message, error) {
+func (p *Processor) loadConversationHistory(ctx context.Context, conversationID int64, scopeFingerprint string) ([]provider.Message, error) {
 	var stored []model.AssistantMessage
-	if err := p.db.WithContext(ctx).Where("conversation_id = ?", conversationID).Order("id DESC").Limit(conversationHistoryLimit).Find(&stored).Error; err != nil {
+	if err := p.db.WithContext(ctx).Where("conversation_id = ? AND scope_fingerprint = ?", conversationID, scopeFingerprint).Order("id DESC").Limit(conversationHistoryLimit).Find(&stored).Error; err != nil {
 		return nil, err
 	}
-	messages := make([]provider.Message, 0, len(stored))
-	for index := len(stored) - 1; index >= 0; index-- {
-		message := stored[index]
+	type historyRound struct {
+		inboundID int64
+		messages  []provider.Message
+		bytes     int
+		hasUser   bool
+	}
+	rounds := make([]historyRound, 0, len(stored)/2+1)
+	for _, message := range stored {
 		plaintext, err := p.cipher.Decrypt(messageContentPurpose, fmt.Sprint(message.ID), message.ContentKeyVersion, message.Content)
 		if err != nil {
 			return nil, err
 		}
-		messages = append(messages, provider.Message{Role: message.Role, Content: string(plaintext)})
+		if len(rounds) == 0 || rounds[len(rounds)-1].inboundID != message.InboundEventID {
+			rounds = append(rounds, historyRound{inboundID: message.InboundEventID})
+		}
+		round := &rounds[len(rounds)-1]
+		content := string(plaintext)
+		round.messages = append(round.messages, provider.Message{Role: message.Role, Content: content})
+		round.bytes += len(content)
+		round.hasUser = round.hasUser || message.Role == model.AssistantMessageRoleUser
+	}
+	selected := make([]historyRound, 0, len(rounds))
+	totalBytes := 0
+	for _, round := range rounds {
+		if !round.hasUser {
+			continue
+		}
+		if totalBytes+round.bytes > conversationHistoryBytes {
+			if len(selected) == 0 {
+				perMessage := conversationHistoryBytes / max(1, len(round.messages))
+				for index := range round.messages {
+					round.messages[index].Content = truncateUTF8Bytes(round.messages[index].Content, perMessage)
+				}
+				selected = append(selected, round)
+			}
+			break
+		}
+		totalBytes += round.bytes
+		selected = append(selected, round)
+	}
+	messages := make([]provider.Message, 0, len(stored))
+	for roundIndex := len(selected) - 1; roundIndex >= 0; roundIndex-- {
+		round := selected[roundIndex]
+		for messageIndex := len(round.messages) - 1; messageIndex >= 0; messageIndex-- {
+			messages = append(messages, round.messages[messageIndex])
+		}
 	}
 	return messages, nil
+}
+
+func truncateUTF8Bytes(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	for limit > 0 && !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit]
 }
 
 func (p *Processor) clearConversation(ctx context.Context, conversationID int64) error {
@@ -382,9 +532,11 @@ func (p *Processor) beginTyping(ctx context.Context, channelID int64, peerID str
 
 func (p *Processor) Deliver(ctx context.Context, outboxID int64) error {
 	var outbox model.AssistantOutbox
+	ownerID := p.ownerID + ":outbox:" + fmt.Sprint(outboxID) + ":" + uuid.NewString()
+	now := p.now().Unix()
 	result := p.db.WithContext(ctx).Model(&model.AssistantOutbox{}).
-		Where("id = ? AND status IN ? AND next_attempt_at <= ? AND attempt < ?", outboxID, []string{model.AssistantOutboxStatusPending, model.AssistantOutboxStatusFailed}, p.now().Unix(), maxOutboxAttempts).
-		Updates(map[string]any{"status": model.AssistantOutboxStatusSending, "attempt": gorm.Expr("attempt + 1")})
+		Where("id = ? AND attempt < ? AND ((status IN ? AND next_attempt_at <= ?) OR (status = ? AND lease_until <= ? AND delivery_started_at = 0 AND claim_owner <> ''))", outboxID, maxOutboxAttempts, []string{model.AssistantOutboxStatusPending, model.AssistantOutboxStatusFailed}, now, model.AssistantOutboxStatusSending, now).
+		Updates(map[string]any{"status": model.AssistantOutboxStatusSending, "attempt": gorm.Expr("attempt + 1"), "claim_owner": ownerID, "lease_until": p.now().Add(workLeaseDuration).Unix(), "error_code": ""})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -406,6 +558,16 @@ func (p *Processor) Deliver(ctx context.Context, outboxID int64) error {
 	if err != nil {
 		return p.failOutbox(ctx, &outbox, "channel_unavailable", err)
 	}
+	started := p.now().Unix()
+	if result := p.db.WithContext(ctx).Model(&outbox).Where("status = ? AND claim_owner = ?", model.AssistantOutboxStatusSending, ownerID).
+		Updates(map[string]any{"delivery_started_at": started, "lease_until": p.now().Add(workLeaseDuration).Unix()}); result.Error != nil || result.RowsAffected != 1 {
+		if result.Error != nil {
+			return result.Error
+		}
+		return ErrOutboxNotDue
+	}
+	outbox.ClaimOwner = ownerID
+	outbox.DeliveryStartedAt = started
 	_, err = client.SendMessage(ctx, wechatilink.Message{
 		ToUserID: payload.ToUserID, ClientID: payload.ClientID, ContextToken: payload.ContextToken,
 		MessageType: wechatilink.MessageTypeBot, MessageState: wechatilink.MessageStateFinish,
@@ -414,18 +576,19 @@ func (p *Processor) Deliver(ctx context.Context, outboxID int64) error {
 	if err != nil {
 		return p.failOutbox(ctx, &outbox, "channel_send_failed", err)
 	}
-	return p.db.WithContext(ctx).Model(&outbox).Updates(map[string]any{
-		"status": model.AssistantOutboxStatusSucceeded, "sent_at": p.now().Unix(), "error_code": "",
+	return p.db.WithContext(ctx).Model(&outbox).Where("claim_owner = ?", ownerID).Updates(map[string]any{
+		"status": model.AssistantOutboxStatusSucceeded, "sent_at": p.now().Unix(), "error_code": "", "claim_owner": "", "lease_until": 0,
 	}).Error
 }
 
-func (p *Processor) claimEvent(ctx context.Context, eventID int64) (*model.AssistantInboundEvent, error) {
+func (p *Processor) claimEvent(ctx context.Context, eventID int64, ownerID string) (*model.AssistantInboundEvent, error) {
 	if eventID <= 0 {
 		return nil, ErrEventNotPending
 	}
+	now := p.now().Unix()
 	result := p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).
-		Where("id = ? AND status IN ? AND next_attempt_at <= ? AND attempt < ?", eventID, []string{model.AssistantInboundStatusPending, model.AssistantInboundStatusFailed}, p.now().Unix(), maxInboundAttempts).
-		Updates(map[string]any{"status": model.AssistantInboundStatusProcessing, "attempt": gorm.Expr("attempt + 1"), "error_code": ""})
+		Where("id = ? AND attempt < ? AND EXISTS (SELECT 1 FROM assistant_conversation_leases lease WHERE lease.channel_id = assistant_inbox.channel_id AND lease.peer_id = assistant_inbox.peer_id AND lease.owner_id = ? AND lease.locked_until > ?) AND ((status IN ? AND next_attempt_at <= ?) OR (status = ? AND lease_until <= ?))", eventID, maxInboundAttempts, ownerID, now, []string{model.AssistantInboundStatusPending, model.AssistantInboundStatusFailed}, now, model.AssistantInboundStatusProcessing, now).
+		Updates(map[string]any{"status": model.AssistantInboundStatusProcessing, "attempt": gorm.Expr("attempt + 1"), "error_code": "", "claim_owner": ownerID, "lease_until": p.now().Add(workLeaseDuration).Unix()})
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -456,13 +619,17 @@ func (p *Processor) activeIdentity(ctx context.Context, channelID int64, externa
 }
 
 func (p *Processor) conversation(ctx context.Context, event *model.AssistantInboundEvent, identity *model.AssistantIdentity) (*model.AssistantConversation, error) {
+	fingerprint, err := p.scopeFingerprint(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
 	conversation := model.AssistantConversation{
 		ChannelID: event.ChannelID, AccountID: event.AccountID, PeerID: event.PeerID, UserID: identity.UserID,
-		Status: model.AssistantConversationStatusActive, LastMessageAt: p.now().Unix(),
+		Status: model.AssistantConversationStatusActive, LastMessageAt: p.now().Unix(), ScopeFingerprint: fingerprint,
 	}
-	err := p.db.WithContext(ctx).Clauses(clause.OnConflict{
+	err = p.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "account_id"}, {Name: "peer_id"}},
-		DoUpdates: clause.Assignments(map[string]any{"user_id": identity.UserID, "status": model.AssistantConversationStatusActive, "last_message_at": p.now().Unix()}),
+		DoUpdates: clause.Assignments(map[string]any{"user_id": identity.UserID, "status": model.AssistantConversationStatusActive, "last_message_at": p.now().Unix(), "scope_fingerprint": fingerprint}),
 	}).Create(&conversation).Error
 	if err != nil {
 		return nil, err
@@ -471,6 +638,25 @@ func (p *Processor) conversation(ctx context.Context, event *model.AssistantInbo
 		err = p.db.WithContext(ctx).Where("channel_id = ? AND account_id = ? AND peer_id = ?", event.ChannelID, event.AccountID, event.PeerID).First(&conversation).Error
 	}
 	return &conversation, err
+}
+
+func (p *Processor) scopeFingerprint(ctx context.Context, identity *model.AssistantIdentity) (string, error) {
+	if identity == nil || identity.ID <= 0 {
+		return "", errors.New("assistant identity is invalid")
+	}
+	instanceIDs := make([]int64, 0)
+	if identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected {
+		if err := p.db.WithContext(ctx).Model(&model.AssistantIdentityInstanceScope{}).Where("identity_id = ?", identity.ID).Order("instance_id ASC").Pluck("instance_id", &instanceIDs).Error; err != nil {
+			return "", err
+		}
+	}
+	sort.Slice(instanceIDs, func(i, j int) bool { return instanceIDs[i] < instanceIDs[j] })
+	digest := sha256.New()
+	_, _ = fmt.Fprintf(digest, "%d:%d:%s:%s", identity.ID, identity.UserID, identity.Status, identity.AllowedInstanceScope)
+	for _, instanceID := range instanceIDs {
+		_, _ = fmt.Fprintf(digest, ":%d", instanceID)
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }
 
 func (p *Processor) enqueueReply(ctx context.Context, event *model.AssistantInboundEvent, conversationID int64, runID int64, contextToken string, text string) error {
@@ -560,21 +746,33 @@ func (p *Processor) upsertRunToolTraces(tx *gorm.DB, runID int64, specs []tool.T
 	return nil
 }
 
-func (p *Processor) finishEvent(ctx context.Context, eventID int64) error {
-	return p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).Where("id = ?", eventID).Updates(map[string]any{
-		"status": model.AssistantInboundStatusSucceeded, "processed_at": p.now().Unix(), "error_code": "",
+func (p *Processor) finishEvent(ctx context.Context, eventID int64, ownerID string) error {
+	query := p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).Where("id = ?", eventID)
+	if ownerID != "" {
+		query = query.Where("claim_owner = ?", ownerID)
+	}
+	return query.Updates(map[string]any{
+		"status": model.AssistantInboundStatusSucceeded, "processed_at": p.now().Unix(), "error_code": "", "claim_owner": "", "lease_until": 0,
 	}).Error
 }
 
-func (p *Processor) finishEventWithError(ctx context.Context, eventID int64, code string) error {
-	return p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).Where("id = ?", eventID).Updates(map[string]any{
-		"status": model.AssistantInboundStatusSucceeded, "processed_at": p.now().Unix(), "error_code": code,
+func (p *Processor) finishEventWithError(ctx context.Context, eventID int64, ownerID string, code string) error {
+	query := p.db.WithContext(ctx).Model(&model.AssistantInboundEvent{}).Where("id = ?", eventID)
+	if ownerID != "" {
+		query = query.Where("claim_owner = ?", ownerID)
+	}
+	return query.Updates(map[string]any{
+		"status": model.AssistantInboundStatusSucceeded, "processed_at": p.now().Unix(), "error_code": code, "claim_owner": "", "lease_until": 0,
 	}).Error
 }
 
 func (p *Processor) failEvent(ctx context.Context, event *model.AssistantInboundEvent, code string, cause error) error {
-	_ = p.db.WithContext(ctx).Model(event).Updates(map[string]any{
-		"status": model.AssistantInboundStatusFailed, "next_attempt_at": p.now().Add(time.Minute).Unix(), "error_code": code,
+	query := p.db.WithContext(ctx).Model(event)
+	if event.ClaimOwner != "" {
+		query = query.Where("claim_owner = ?", event.ClaimOwner)
+	}
+	_ = query.Updates(map[string]any{
+		"status": model.AssistantInboundStatusFailed, "next_attempt_at": p.now().Add(time.Minute).Unix(), "error_code": code, "claim_owner": "", "lease_until": 0,
 	}).Error
 	return cause
 }
@@ -607,7 +805,7 @@ func (p *Processor) failRunAndEvent(ctx context.Context, event *model.AssistantI
 		}
 		return tx.Model(runRow).Updates(updates).Error
 	})
-	return p.finishEventWithError(persistContext, event.ID, failure.Code)
+	return p.finishEventWithError(persistContext, event.ID, event.ClaimOwner, failure.Code)
 }
 
 func describeAssistantFailure(failure assistantRunFailure) assistantFailureDetails {
@@ -716,8 +914,18 @@ func boundedAssistantErrorDetail(value string) (string, bool) {
 }
 
 func (p *Processor) failOutbox(ctx context.Context, outbox *model.AssistantOutbox, code string, cause error) error {
-	_ = p.db.WithContext(ctx).Model(outbox).Updates(map[string]any{
-		"status": model.AssistantOutboxStatusFailed, "next_attempt_at": p.now().Add(time.Minute).Unix(), "error_code": code,
+	status := model.AssistantOutboxStatusFailed
+	nextAttemptAt := p.now().Add(time.Minute).Unix()
+	if outbox.DeliveryStartedAt > 0 {
+		status = model.AssistantOutboxStatusUnknown
+		nextAttemptAt = 0
+	}
+	query := p.db.WithContext(ctx).Model(outbox)
+	if outbox.ClaimOwner != "" {
+		query = query.Where("claim_owner = ?", outbox.ClaimOwner)
+	}
+	_ = query.Updates(map[string]any{
+		"status": status, "next_attempt_at": nextAttemptAt, "error_code": code, "claim_owner": "", "lease_until": 0,
 	}).Error
 	return cause
 }

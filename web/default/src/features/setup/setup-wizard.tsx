@@ -65,6 +65,7 @@ const DEFAULT_FORM_VALUES: SetupFormValues = {
   username: '',
   password: '',
   confirmPassword: '',
+  setup_token: '',
 }
 
 export function SetupWizard() {

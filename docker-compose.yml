@@ -12,7 +12,11 @@ services:
     environment:
       SQL_DSN: postgresql://root:change-me@postgres:5432/subandnew
       REDIS_CONN_STRING: redis://:change-me@redis:6379
-      SESSION_SECRET: replace-with-a-long-random-string
+      APP_ENV: production
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set to at least 32 random bytes}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:?SESSION_COOKIE_TRUSTED_URL must be an HTTPS URL}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
       MANAGED_INSTANCE_SECRET_KEY: replace-with-32-byte-standard-base64
       MANAGED_INSTANCE_SECRET_KEY_VERSION: v1
       MANAGED_USAGE_EXPORT_DIR: /data/exports/usage-records
