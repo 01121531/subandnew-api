@@ -83,4 +83,8 @@ func TestNormalizeAccountFilterAcceptsMetricAndChinaTimeRules(t *testing.T) {
 	chinaTime, err := ParseAccountFilterMetricValue("created_at", "2026-08-29 09:30")
 	require.NoError(t, err)
 	require.Equal(t, float64(1787967000), chinaTime)
+
+	pickerTime, err := ParseAccountFilterMetricValue("created_at", "2026-08-29T09:30")
+	require.NoError(t, err)
+	require.Equal(t, chinaTime, pickerTime)
 }

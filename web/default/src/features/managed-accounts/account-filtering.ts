@@ -124,11 +124,37 @@ const TIME_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'last_activity_at',
 ])
 
+export function isTimeAccountFilterField(field: AccountFilterField) {
+  return TIME_ACCOUNT_FILTER_FIELDS.has(field)
+}
+
 export function isMetricAccountFilterField(field: AccountFilterField) {
   return (
-    NUMBER_ACCOUNT_FILTER_FIELDS.has(field) ||
-    TIME_ACCOUNT_FILTER_FIELDS.has(field)
+    NUMBER_ACCOUNT_FILTER_FIELDS.has(field) || isTimeAccountFilterField(field)
   )
+}
+
+export function accountFilterDateTimeInputValue(raw: string | undefined) {
+  const value = raw?.trim() ?? ''
+  if (!value) return ''
+
+  const localMatch = value.match(
+    /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  )
+  if (localMatch) {
+    return `${localMatch[1]}T${localMatch[2] ?? '00'}:${localMatch[3] ?? '00'}:${localMatch[4] ?? '00'}`
+  }
+
+  const numeric = Number(value)
+  let timestamp = Date.parse(value)
+  if (Number.isFinite(numeric)) {
+    timestamp = numeric > 100_000_000_000 ? numeric : numeric * 1000
+  }
+  if (!Number.isFinite(timestamp)) return ''
+
+  // datetime-local has no timezone. Shift the instant before formatting so the
+  // picker consistently displays China Standard Time on every client device.
+  return new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 19)
 }
 
 const QUICK_ACCOUNT_FILTER_FIELDS: AccountFilterField[] = [

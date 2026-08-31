@@ -270,7 +270,11 @@ func ParseAccountFilterMetricValue(field, raw string) (float64, error) {
 		return float64(parsed.UnixNano()) / float64(time.Second), nil
 	}
 	location, _ := time.LoadLocation("Asia/Shanghai")
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+	for _, layout := range []string{
+		"2006-01-02 15:04:05", "2006-01-02 15:04",
+		"2006-01-02T15:04:05", "2006-01-02T15:04",
+		"2006-01-02",
+	} {
 		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
 			return float64(parsed.Unix()), nil
 		}

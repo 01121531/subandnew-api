@@ -66,8 +66,10 @@ import {
   accountFilterFromTemplate,
   accountFilterTemplateInput,
   createAccountFilterRule,
-  isMetricAccountFilterField,
   isAccountFilterRuleComplete,
+  isMetricAccountFilterField,
+  isTimeAccountFilterField,
+  accountFilterDateTimeInputValue,
   parseAccountFilterDisplayValues,
   type AccountAdvancedFilter,
   type AccountFilterField,
@@ -411,6 +413,7 @@ export function AccountFilterPanel(props: {
                     rule.operator === 'is_empty' ||
                     rule.operator === 'is_not_empty'
                   const metricField = isMetricAccountFilterField(rule.field)
+                  const timeField = isTimeAccountFilterField(rule.field)
                   let maxValues = 50
                   let limitMessage = '每条筛选规则最多包含 50 个值'
                   let valuePlaceholder = 'Enter one or more values'
@@ -501,11 +504,75 @@ export function AccountFilterPanel(props: {
                         <Label className='text-xs @5xl/account-filter:sr-only'>
                           {t('Values')}
                         </Label>
-                        {emptyOperator ? (
+                        {emptyOperator && (
                           <div className='text-muted-foreground flex min-h-11 items-center rounded-md border px-3 text-sm @5xl/account-filter:min-h-9'>
                             {t('No value required')}
                           </div>
-                        ) : (
+                        )}
+                        {!emptyOperator && timeField && (
+                          <>
+                            <div className='grid gap-2'>
+                              {Array.from({
+                                length: rule.operator === 'between' ? 2 : 1,
+                              }).map((_, valueIndex) => {
+                                const inputID = `account-filter-${rule.id}-${valueIndex}`
+                                let inputLabel = t(fieldLabels[rule.field])
+                                if (rule.operator === 'between') {
+                                  inputLabel = t(
+                                    valueIndex === 0 ? 'Start Time' : 'End Time'
+                                  )
+                                }
+                                return (
+                                  <div
+                                    key={inputID}
+                                    className='min-w-0 space-y-1'
+                                  >
+                                    <Label
+                                      htmlFor={inputID}
+                                      className='text-muted-foreground text-xs'
+                                    >
+                                      {inputLabel}
+                                    </Label>
+                                    <Input
+                                      id={inputID}
+                                      type='datetime-local'
+                                      step={1}
+                                      value={accountFilterDateTimeInputValue(
+                                        rule.values[valueIndex]
+                                      )}
+                                      aria-invalid={
+                                        !accountFilterDateTimeInputValue(
+                                          rule.values[valueIndex]
+                                        )
+                                      }
+                                      className='min-h-11 text-sm tabular-nums [color-scheme:light] @5xl/account-filter:min-h-9 dark:[color-scheme:dark]'
+                                      onChange={(event) => {
+                                        const values = Array.from(
+                                          {
+                                            length:
+                                              rule.operator === 'between'
+                                                ? 2
+                                                : 1,
+                                          },
+                                          (_, index) => rule.values[index] ?? ''
+                                        )
+                                        values[valueIndex] =
+                                          event.target.value.replace('T', ' ')
+                                        updateRule(rule.id, { values })
+                                      }}
+                                    />
+                                  </div>
+                                )
+                              })}
+                            </div>
+                            {!isAccountFilterRuleComplete(rule) && (
+                              <p className='text-destructive text-xs'>
+                                {t(invalidMessage)}
+                              </p>
+                            )}
+                          </>
+                        )}
+                        {!emptyOperator && !timeField && (
                           <>
                             <MultiSelect
                               options={props.options[rule.field] ?? []}

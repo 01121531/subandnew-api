@@ -21,6 +21,7 @@ import { describe, test } from 'node:test'
 
 import {
   accountFilterDocument,
+  accountFilterDateTimeInputValue,
   accountFilterSnapshot,
   createAccountFilterRule,
   matchesAdvancedAccountFilter,
@@ -146,6 +147,18 @@ describe('account filtering', () => {
       }),
       false
     )
+  })
+
+  test('formats saved China times and timestamps for datetime pickers', () => {
+    assert.equal(
+      accountFilterDateTimeInputValue('2026-08-29 09:30'),
+      '2026-08-29T09:30:00'
+    )
+    assert.equal(
+      accountFilterDateTimeInputValue('1787967000'),
+      '2026-08-29T09:30:00'
+    )
+    assert.equal(accountFilterDateTimeInputValue('not-a-date'), '')
   })
 
   test('negates the configured any or all value matching result', () => {
