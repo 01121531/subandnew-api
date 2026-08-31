@@ -212,6 +212,7 @@ func TestProgressReporterDelaysMessagesAndReportsToolStage(t *testing.T) {
 	reporter := newProgressReporter(progressReporterConfig{
 		initialDelay: 10 * time.Millisecond,
 		heartbeat:    time.Second,
+		minInterval:  time.Millisecond,
 		maxMessages:  8,
 		now:          time.Now,
 		send: func(_ int, message string) {
@@ -226,6 +227,7 @@ func TestProgressReporterDelaysMessagesAndReportsToolStage(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("initial progress message was not sent")
 	}
+	time.Sleep(2 * time.Millisecond)
 	reporter.Report(runner.ProgressEvent{Type: runner.ProgressToolStarted, Tool: "query_metrics"})
 	select {
 	case message := <-messages:
@@ -240,6 +242,7 @@ func TestProgressReporterStopsBeforeInitialDelay(t *testing.T) {
 	reporter := newProgressReporter(progressReporterConfig{
 		initialDelay: time.Second,
 		heartbeat:    time.Second,
+		minInterval:  time.Second,
 		maxMessages:  8,
 		now:          time.Now,
 		send:         func(_ int, message string) { messages <- message },
@@ -249,6 +252,63 @@ func TestProgressReporterStopsBeforeInitialDelay(t *testing.T) {
 	case message := <-messages:
 		t.Fatalf("unexpected progress message: %s", message)
 	default:
+	}
+}
+
+func TestProgressReporterCombinesStageBeforeInitialMessage(t *testing.T) {
+	messages := make(chan string, 2)
+	reporter := newProgressReporter(progressReporterConfig{
+		initialDelay: 20 * time.Millisecond,
+		heartbeat:    time.Second,
+		minInterval:  time.Second,
+		maxMessages:  3,
+		now:          time.Now,
+		send:         func(_ int, message string) { messages <- message },
+	})
+	defer reporter.Stop()
+	reporter.Report(runner.ProgressEvent{Type: runner.ProgressToolStarted, Tool: "query_metrics"})
+	select {
+	case message := <-messages:
+		require.Equal(t, "已收到，正在查询实例指标。", message)
+	case <-time.After(time.Second):
+		t.Fatal("combined progress message was not sent")
+	}
+	select {
+	case message := <-messages:
+		t.Fatalf("unexpected immediate progress message: %s", message)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestProgressReporterSuppressesInternalSummaryStageAndCapsMessages(t *testing.T) {
+	require.Empty(t, progressStage(runner.ProgressEvent{Type: runner.ProgressModelRequestStarted, Step: 2}))
+	messages := make(chan string, 4)
+	reporter := newProgressReporter(progressReporterConfig{
+		initialDelay: 10 * time.Millisecond,
+		heartbeat:    20 * time.Millisecond,
+		minInterval:  time.Hour,
+		maxMessages:  2,
+		now:          time.Now,
+		send:         func(_ int, message string) { messages <- message },
+	})
+	defer reporter.Stop()
+
+	select {
+	case <-messages:
+	case <-time.After(time.Second):
+		t.Fatal("initial progress message was not sent")
+	}
+	reporter.Report(runner.ProgressEvent{Type: runner.ProgressModelRequestStarted, Step: 2})
+	select {
+	case message := <-messages:
+		require.Contains(t, message, "已处理")
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat progress message was not sent")
+	}
+	select {
+	case message := <-messages:
+		t.Fatalf("progress message cap was not enforced: %s", message)
+	case <-time.After(60 * time.Millisecond):
 	}
 }
 

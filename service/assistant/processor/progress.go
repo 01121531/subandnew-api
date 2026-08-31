@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	progressInitialDelay = 5 * time.Second
-	progressHeartbeat    = 30 * time.Second
-	progressSendTimeout  = 3 * time.Second
-	maxProgressMessages  = 8
+	progressInitialDelay     = 8 * time.Second
+	progressHeartbeat        = 90 * time.Second
+	progressStageMinInterval = 20 * time.Second
+	progressSendTimeout      = 3 * time.Second
+	maxProgressMessages      = 3
 )
 
 type progressReporter struct {
@@ -29,6 +30,7 @@ type progressReporter struct {
 type progressReporterConfig struct {
 	initialDelay time.Duration
 	heartbeat    time.Duration
+	minInterval  time.Duration
 	maxMessages  int
 	now          func() time.Time
 	send         func(int, string)
@@ -45,6 +47,7 @@ func (p *Processor) startProgressReporter(ctx context.Context, event *model.Assi
 	return newProgressReporter(progressReporterConfig{
 		initialDelay: progressInitialDelay,
 		heartbeat:    progressHeartbeat,
+		minInterval:  progressStageMinInterval,
 		maxMessages:  maxProgressMessages,
 		now:          p.now,
 		send: func(sequence int, text string) {
@@ -67,7 +70,7 @@ func stoppedProgressReporter() *progressReporter {
 
 func newProgressReporter(config progressReporterConfig) *progressReporter {
 	reporter := &progressReporter{events: make(chan runner.ProgressEvent, 8), stop: make(chan struct{}), done: make(chan struct{})}
-	if config.initialDelay <= 0 || config.heartbeat <= 0 || config.maxMessages <= 0 || config.now == nil || config.send == nil {
+	if config.initialDelay <= 0 || config.heartbeat <= 0 || config.minInterval <= 0 || config.maxMessages <= 0 || config.now == nil || config.send == nil {
 		close(reporter.done)
 		return reporter
 	}
@@ -75,13 +78,22 @@ func newProgressReporter(config progressReporterConfig) *progressReporter {
 	go func() {
 		defer close(reporter.done)
 		initialTimer := time.NewTimer(config.initialDelay)
-		heartbeatTicker := time.NewTicker(config.heartbeat)
+		heartbeatTimer := time.NewTimer(config.initialDelay + config.heartbeat)
 		defer initialTimer.Stop()
-		defer heartbeatTicker.Stop()
+		defer heartbeatTimer.Stop()
 		stage := "正在分析问题"
-		lastStage := ""
+		lastAnnouncedStage := ""
 		lastSent := time.Time{}
 		sent := 0
+		resetHeartbeat := func() {
+			if !heartbeatTimer.Stop() {
+				select {
+				case <-heartbeatTimer.C:
+				default:
+				}
+			}
+			heartbeatTimer.Reset(config.heartbeat)
+		}
 		send := func(text string) {
 			if sent >= config.maxMessages {
 				return
@@ -89,6 +101,7 @@ func newProgressReporter(config progressReporterConfig) *progressReporter {
 			sent++
 			config.send(sent, text)
 			lastSent = config.now()
+			resetHeartbeat()
 		}
 		visible := false
 		for {
@@ -97,21 +110,28 @@ func newProgressReporter(config progressReporterConfig) *progressReporter {
 				return
 			case <-initialTimer.C:
 				visible = true
-				lastStage = stage
-				send("已收到，正在分析问题。")
+				lastAnnouncedStage = stage
+				if stage == "正在分析问题" {
+					send("已收到，正在分析问题。")
+				} else {
+					send("已收到，" + stage + "。")
+				}
 			case event := <-reporter.events:
 				nextStage := progressStage(event)
 				if nextStage == "" {
 					continue
 				}
 				stage = nextStage
-				if visible && stage != lastStage {
-					lastStage = stage
+				if visible && stage != lastAnnouncedStage && config.now().Sub(lastSent) >= config.minInterval {
+					lastAnnouncedStage = stage
 					send(stage + "。")
 				}
-			case <-heartbeatTicker.C:
-				if visible && sent < config.maxMessages && (lastSent.IsZero() || config.now().Sub(lastSent) >= config.heartbeat) {
+			case <-heartbeatTimer.C:
+				if visible && sent < config.maxMessages {
+					lastAnnouncedStage = stage
 					send(fmt.Sprintf("%s，已处理 %d 秒。", stage, max(0, int(config.now().Sub(started).Seconds()))))
+				} else if sent < config.maxMessages {
+					resetHeartbeat()
 				}
 			}
 		}
@@ -146,7 +166,7 @@ func progressStage(event runner.ProgressEvent) string {
 	switch event.Type {
 	case runner.ProgressModelRequestStarted:
 		if event.Step > 1 {
-			return "正在整理查询结果"
+			return ""
 		}
 		return "正在分析问题"
 	case runner.ProgressToolStarted:
