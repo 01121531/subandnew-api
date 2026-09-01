@@ -100,6 +100,7 @@ const DEFAULT_FIELDS = [
   'instance_name',
   'platform',
   'name',
+  'vendor_name',
   'type',
   'status',
   'available',
@@ -115,6 +116,8 @@ const FIELD_OPTIONS = [
   ['email', '邮箱'],
   ['note', '备注'],
   ['ownership', '账号归属'],
+  ['vendor_name', '供应商'],
+  ['vendor_email', '供应商邮箱'],
   ['group', '分组'],
   ['source_name', '工作节点'],
   ['created_at', '录入时间'],
@@ -130,6 +133,7 @@ const FIELD_OPTIONS = [
 
 const SORT_OPTIONS = [
   ['name', '账号名称'],
+  ['vendor_name', '供应商'],
   ['created_at', '录入时间'],
   ['last_activity_at', '最后活动'],
   ['status', '状态'],
@@ -1087,7 +1091,7 @@ function AuthorizationEditor(props: {
             <div>
               <p className='text-muted-foreground mb-3 text-sm'>
                 {t(
-                  '实例 ID 和字符串账号 ID 始终返回。邮箱、备注、金额及用量需要主动授权。'
+                  '实例 ID 和字符串账号 ID 始终返回。账号邮箱、供应商邮箱、备注、金额及用量需要主动授权。'
                 )}
               </p>
               <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>

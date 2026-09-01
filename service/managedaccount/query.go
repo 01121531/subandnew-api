@@ -82,6 +82,9 @@ type Item struct {
 	Email            string   `json:"email,omitempty"`
 	Note             string   `json:"note,omitempty"`
 	Ownership        string   `json:"ownership,omitempty"`
+	VendorID         string   `json:"-"`
+	VendorName       string   `json:"vendor_name,omitempty"`
+	VendorEmail      string   `json:"vendor_email,omitempty"`
 	Type             string   `json:"type,omitempty"`
 	Group            string   `json:"group,omitempty"`
 	Status           string   `json:"status,omitempty"`
@@ -106,15 +109,19 @@ type Item struct {
 }
 
 type SourceStatus struct {
-	InstanceID        int64  `json:"instance_id"`
-	InstanceName      string `json:"instance_name"`
-	Platform          string `json:"platform"`
-	Status            string `json:"status"`
-	ObservedAt        int64  `json:"observed_at,omitempty"`
-	LastAttemptAt     int64  `json:"last_attempt_at,omitempty"`
-	LastAttemptStatus string `json:"last_attempt_status,omitempty"`
-	ErrorCode         string `json:"error_code,omitempty"`
-	Stale             bool   `json:"stale"`
+	InstanceID             int64  `json:"instance_id"`
+	InstanceName           string `json:"instance_name"`
+	Platform               string `json:"platform"`
+	Status                 string `json:"status"`
+	ObservedAt             int64  `json:"observed_at,omitempty"`
+	LastAttemptAt          int64  `json:"last_attempt_at,omitempty"`
+	LastAttemptStatus      string `json:"last_attempt_status,omitempty"`
+	ErrorCode              string `json:"error_code,omitempty"`
+	Stale                  bool   `json:"stale"`
+	VendorCollectionStatus string `json:"vendor_collection_status,omitempty"`
+	VendorObservedAt       int64  `json:"vendor_observed_at,omitempty"`
+	VendorStale            bool   `json:"vendor_stale,omitempty"`
+	VendorErrorCode        string `json:"vendor_error_code,omitempty"`
 }
 
 type Summary struct {
@@ -212,7 +219,7 @@ func NormalizeQuery(input Query) (Query, error) {
 	if utf8.RuneCountInString(input.Search) > 200 {
 		return input, errors.New("search is too long")
 	}
-	validSort := map[string]bool{"": true, "name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
+	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
 	if !validSort[input.SortBy] || (input.SortOrder != "" && input.SortOrder != "asc" && input.SortOrder != "desc") {
 		return input, errors.New("invalid account sort")
 	}
@@ -271,6 +278,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 	observedAt := int64(0)
 	successfulSources := 0
 	stale := false
+	partial := false
 
 	for _, instanceID := range input.InstanceIDs {
 		if err := ctx.Err(); err != nil {
@@ -312,6 +320,15 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 			successfulSources++
 			inventory := snapshot.Inventory
 			if inventory != nil {
+				statusIndex := len(statuses) - 1
+				statuses[statusIndex].VendorCollectionStatus = inventory.VendorCollectionStatus
+				statuses[statusIndex].VendorObservedAt = inventory.VendorObservedAt
+				statuses[statusIndex].VendorStale = inventory.VendorStale
+				statuses[statusIndex].VendorErrorCode = inventory.VendorErrorCode
+				if inventory.VendorCollectionStatus == model.ManagedInstanceCollectionFailed {
+					partial = true
+					stale = true
+				}
 				sourceNames := sourceNameMap(inventory)
 				for _, account := range inventory.Items {
 					candidate := inventoryRow(instance, account, sourceNames)
@@ -328,6 +345,15 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		output := snapshot.AccountOutput
 		successfulSources++
 		if output != nil {
+			statusIndex := len(statuses) - 1
+			statuses[statusIndex].VendorCollectionStatus = output.VendorCollectionStatus
+			statuses[statusIndex].VendorObservedAt = output.VendorObservedAt
+			statuses[statusIndex].VendorStale = output.VendorStale
+			statuses[statusIndex].VendorErrorCode = output.VendorErrorCode
+			if output.VendorCollectionStatus == model.ManagedInstanceCollectionFailed {
+				partial = true
+				stale = true
+			}
 			for _, account := range output.Items {
 				candidate := outputRow(instance, account, sourceNames)
 				if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
@@ -352,7 +378,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 	return &Result{
 		Dataset: input.Dataset, PresetDays: input.PresetDays, Items: items, Total: len(rows), Page: input.Page,
 		PageSize: input.PageSize, HasMore: end < len(rows), Summary: summary, Sources: statuses,
-		ObservedAt: observedAt, Stale: stale, Partial: successfulSources > 0 && successfulSources < len(input.InstanceIDs), NoData: successfulSources == 0,
+		ObservedAt: observedAt, Stale: stale, Partial: partial || (successfulSources > 0 && successfulSources < len(input.InstanceIDs)), NoData: successfulSources == 0,
 		FilterOptions: finalizeFilterOptions(filterOptionSets),
 	}, nil
 }
@@ -427,7 +453,8 @@ func itemFromInventory(instance *managedinstance.InstanceView, account managedin
 	return Item{
 		InstanceID: instance.Id, InstanceName: SanitizeSensitiveText(instance.Name), Platform: SanitizeText(instance.Kind),
 		AccountID: SanitizeText(accountID), Name: SanitizeSensitiveText(account.Name), Email: SanitizeText(account.Email),
-		Note: SanitizeSensitiveText(account.Note), Ownership: SanitizeText(account.Ownership), Type: SanitizeText(account.Type),
+		Note: SanitizeSensitiveText(account.Note), Ownership: SanitizeText(account.Ownership), VendorID: SanitizeText(account.VendorID),
+		VendorName: SanitizeSensitiveText(account.VendorName), VendorEmail: SanitizeText(account.VendorEmail), Type: SanitizeText(account.Type),
 		Group: SanitizeText(account.Group), Status: SanitizeText(account.Status), Available: account.Enabled,
 		RateLimited: account.RateLimited, SourceID: SanitizeSensitiveText(account.SourceID), SourceName: SanitizeSensitiveText(sources[account.SourceID]),
 		CreatedAt: account.CreatedAt, LastActivityAt: account.LastActivityAt, DisabledAt: account.DisabledAt,
@@ -459,6 +486,7 @@ func document(item Item) map[string][]string {
 	doc := map[string][]string{
 		"name": {item.Name}, "email": {item.Email}, "account_id": {item.AccountID}, "note": {item.Note},
 		"ownership": {item.Ownership}, "instance": {item.InstanceName, strconv.FormatInt(item.InstanceID, 10)},
+		"vendor_name": {item.VendorName}, "vendor_email": {item.VendorEmail},
 		"platform": {item.Platform}, "type": {item.Type}, "group": {item.Group}, "status": {item.Status},
 		"source": {item.SourceID, item.SourceName}, "available": {available},
 	}
@@ -707,6 +735,8 @@ func compareItems(left, right Item, field string) int {
 	switch field {
 	case "name":
 		return strings.Compare(strings.ToLower(left.Name), strings.ToLower(right.Name))
+	case "vendor_name":
+		return strings.Compare(strings.ToLower(left.VendorName), strings.ToLower(right.VendorName))
 	case "status":
 		return strings.Compare(strings.ToLower(left.Status), strings.ToLower(right.Status))
 	case "requests":
@@ -950,6 +980,10 @@ func FieldValue(item Item, field string) (any, bool) {
 		return item.Note, item.Note != ""
 	case "ownership":
 		return item.Ownership, item.Ownership != ""
+	case "vendor_name":
+		return item.VendorName, item.VendorName != ""
+	case "vendor_email":
+		return item.VendorEmail, item.VendorEmail != ""
 	case "type":
 		return item.Type, item.Type != ""
 	case "group":
@@ -1000,6 +1034,7 @@ func FieldValue(item Item, field string) (any, bool) {
 func ValidateFields(fields []string) ([]string, error) {
 	allowed := map[string]bool{
 		"instance_name": true, "platform": true, "name": true, "email": true, "note": true, "ownership": true,
+		"vendor_name": true, "vendor_email": true,
 		"type": true, "group": true, "status": true, "available": true, "rate_limited": true, "source_id": true,
 		"source_name": true, "created_at": true, "last_activity_at": true, "disabled_at": true, "expires_at": true,
 		"requests": true, "tokens": true, "amount": true, "currency": true, "rpm": true, "active_sessions": true,

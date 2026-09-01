@@ -155,6 +155,9 @@ export interface ManagedInstanceInventoryItem {
   email?: string
   note?: string
   ownership?: string
+  vendor_id?: string
+  vendor_name?: string
+  vendor_email?: string
   type?: string
   platform?: string
   source_id?: string
@@ -204,6 +207,10 @@ export interface ManagedInstanceInventoryPage {
   sources?: ManagedInstanceInventorySource[]
   total: number
   next_cursor?: string
+  vendor_collection_status?: ManagedInstanceCollectionStatus
+  vendor_observed_at?: number
+  vendor_stale?: boolean
+  vendor_error_code?: string
 }
 
 export interface ManagedInstanceMetricSample {

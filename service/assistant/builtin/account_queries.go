@@ -57,7 +57,7 @@ func (input managedAccountsInput) Validate() error {
 			return err
 		}
 	}
-	validSort := map[string]bool{"": true, "name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
+	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
 	if !validSort[input.SortBy] || (input.SortOrder != "" && input.SortOrder != "asc" && input.SortOrder != "desc") {
 		return errors.New("invalid account sort")
 	}
@@ -73,6 +73,8 @@ type managedAccountItem struct {
 	Email            string   `json:"email,omitempty"`
 	Note             string   `json:"note,omitempty"`
 	Ownership        string   `json:"ownership,omitempty"`
+	VendorName       string   `json:"vendor_name,omitempty"`
+	VendorEmail      string   `json:"vendor_email,omitempty"`
 	Type             string   `json:"type,omitempty"`
 	Group            string   `json:"group,omitempty"`
 	Status           string   `json:"status,omitempty"`
@@ -106,6 +108,10 @@ type managedAccountSourceStatus struct {
 	LastAttemptStatus string `json:"last_attempt_status,omitempty"`
 	ErrorCode         string `json:"error_code,omitempty"`
 	Stale             bool   `json:"stale"`
+	VendorStatus      string `json:"vendor_status,omitempty"`
+	VendorObservedAt  string `json:"vendor_observed_at,omitempty"`
+	VendorStale       bool   `json:"vendor_stale,omitempty"`
+	VendorErrorCode   string `json:"vendor_error_code,omitempty"`
 }
 
 type managedAccountSummary struct {
@@ -135,7 +141,7 @@ type managedAccountRow struct {
 }
 
 func registerManagedAccountQuery(registry *tool.Registry, db *gorm.DB) error {
-	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","instance","platform","type","group","status","source","available"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_contains","is_empty","is_not_empty","is","is_not"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","created_at","last_activity_at","status","requests","tokens","amount"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","vendor_name","vendor_email","instance","platform","type","group","status","source","available"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_contains","is_empty","is_not_empty","is","is_not"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","vendor_name","created_at","last_activity_at","status","requests","tokens","amount"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
 	return tool.Register(registry, tool.ToolSpec{
 		Name: "query_managed_accounts", Version: "v1", Description: "从账号管理后台快照查询账号明细或新增账号产出，支持高级筛选、排序和分页；不会刷新目标实例。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
@@ -163,7 +169,8 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 		items = append(items, managedAccountItem{
 			InstanceID: item.InstanceID, InstanceName: item.InstanceName, Platform: item.Platform,
 			AccountID: item.AccountID, Name: item.Name, Email: item.Email, Note: item.Note,
-			Ownership: item.Ownership, Type: item.Type, Group: item.Group, Status: item.Status,
+			Ownership: item.Ownership, VendorName: item.VendorName, VendorEmail: item.VendorEmail,
+			Type: item.Type, Group: item.Group, Status: item.Status,
 			Available: item.Available, RateLimited: item.RateLimited, SourceID: item.SourceID,
 			SourceName: item.SourceName, CreatedAt: assistantTime(item.CreatedAt), LastActivityAt: assistantTime(item.LastActivityAt),
 			DisabledAt: assistantTime(item.DisabledAt), ExpiresAt: assistantTime(item.ExpiresAt),
@@ -179,6 +186,8 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 			InstanceID: source.InstanceID, InstanceName: source.InstanceName, Platform: source.Platform,
 			Status: source.Status, ObservedAt: assistantTime(source.ObservedAt), LastAttemptAt: assistantTime(source.LastAttemptAt),
 			LastAttemptStatus: source.LastAttemptStatus, ErrorCode: source.ErrorCode, Stale: source.Stale,
+			VendorStatus: source.VendorCollectionStatus, VendorObservedAt: assistantTime(source.VendorObservedAt),
+			VendorStale: source.VendorStale, VendorErrorCode: source.VendorErrorCode,
 		})
 		if source.ObservedAt > 0 {
 			provenance = append(provenance, tool.Provenance{Source: "managed_account_snapshots", Resource: "instance:" + strconv.FormatInt(source.InstanceID, 10) + ":" + result.Dataset, ObservedAt: unixTime(source.ObservedAt)})
@@ -197,7 +206,7 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 }
 
 func validateManagedAccountRule(rule managedinstance.AccountFilterRule) error {
-	textFields := map[string]bool{"name": true, "email": true, "account_id": true, "note": true, "ownership": true}
+	textFields := map[string]bool{"name": true, "email": true, "account_id": true, "note": true, "ownership": true, "vendor_name": true, "vendor_email": true}
 	categoryFields := map[string]bool{"instance": true, "platform": true, "type": true, "group": true, "status": true, "source": true, "available": true}
 	empty := rule.Operator == "is_empty" || rule.Operator == "is_not_empty"
 	if textFields[rule.Field] {
@@ -240,7 +249,7 @@ func inventorySourceNames(sources []managedinstance.InventorySource) map[string]
 
 func accountInventoryRow(instance *managedinstance.InstanceView, account managedinstance.InventoryItem, sources map[string]string) managedAccountRow {
 	amount := account.Cost
-	item := managedAccountItem{InstanceID: instance.Id, InstanceName: safeBusinessText(instance.Name), Platform: instance.Kind, AccountID: accountIdentifier(account), Name: safeBusinessText(account.Name), Email: safeBusinessText(account.Email), Note: safeBusinessText(account.Note), Ownership: safeBusinessText(account.Ownership), Type: safeBusinessText(account.Type), Group: safeBusinessText(account.Group), Status: safeBusinessText(account.Status), Available: account.Enabled, RateLimited: account.RateLimited, SourceID: safeBusinessText(account.SourceID), SourceName: sources[account.SourceID], CreatedAt: assistantTime(account.CreatedAt), LastActivityAt: assistantTime(account.LastActivityAt), DisabledAt: assistantTime(account.DisabledAt), ExpiresAt: assistantTime(account.ExpiresAt), Requests: account.Requests, Tokens: account.Tokens, Amount: amount, Currency: safeBusinessText(account.CostUnit), RPM: account.RPM, ActiveSessions: account.ActiveSessions, Utilization5H: account.Utilization5H, Utilization7D: account.Utilization7D, CollectionStatus: model.ManagedInstanceCollectionSucceeded}
+	item := managedAccountItem{InstanceID: instance.Id, InstanceName: safeBusinessText(instance.Name), Platform: instance.Kind, AccountID: accountIdentifier(account), Name: safeBusinessText(account.Name), Email: safeBusinessText(account.Email), Note: safeBusinessText(account.Note), Ownership: safeBusinessText(account.Ownership), VendorName: safeBusinessText(account.VendorName), VendorEmail: safeBusinessText(account.VendorEmail), Type: safeBusinessText(account.Type), Group: safeBusinessText(account.Group), Status: safeBusinessText(account.Status), Available: account.Enabled, RateLimited: account.RateLimited, SourceID: safeBusinessText(account.SourceID), SourceName: sources[account.SourceID], CreatedAt: assistantTime(account.CreatedAt), LastActivityAt: assistantTime(account.LastActivityAt), DisabledAt: assistantTime(account.DisabledAt), ExpiresAt: assistantTime(account.ExpiresAt), Requests: account.Requests, Tokens: account.Tokens, Amount: amount, Currency: safeBusinessText(account.CostUnit), RPM: account.RPM, ActiveSessions: account.ActiveSessions, Utilization5H: account.Utilization5H, Utilization7D: account.Utilization7D, CollectionStatus: model.ManagedInstanceCollectionSucceeded}
 	return managedAccountRow{item: item, doc: managedAccountDocument(item)}
 }
 
@@ -251,7 +260,7 @@ func accountOutputRow(instance *managedinstance.InstanceView, output managedinst
 		requestsValue, tokensValue, amountValue := output.TotalRequests, output.TotalTokens, output.Amount
 		requests, tokens, amount = &requestsValue, &tokensValue, &amountValue
 	}
-	item := managedAccountItem{InstanceID: instance.Id, InstanceName: safeBusinessText(instance.Name), Platform: instance.Kind, AccountID: accountIdentifier(account), Name: safeBusinessText(account.Name), Email: safeBusinessText(account.Email), Note: safeBusinessText(account.Note), Ownership: safeBusinessText(account.Ownership), Type: safeBusinessText(account.Type), Group: safeBusinessText(account.Group), Status: safeBusinessText(account.Status), Available: account.Enabled, RateLimited: account.RateLimited, SourceID: safeBusinessText(account.SourceID), SourceName: sources[account.SourceID], CreatedAt: assistantTime(account.CreatedAt), LastActivityAt: assistantTime(account.LastActivityAt), DisabledAt: assistantTime(account.DisabledAt), ExpiresAt: assistantTime(account.ExpiresAt), Requests: requests, Tokens: tokens, Amount: amount, Currency: safeBusinessText(output.Currency), CollectionStatus: output.CollectionStatus, ErrorCode: output.ErrorCode}
+	item := managedAccountItem{InstanceID: instance.Id, InstanceName: safeBusinessText(instance.Name), Platform: instance.Kind, AccountID: accountIdentifier(account), Name: safeBusinessText(account.Name), Email: safeBusinessText(account.Email), Note: safeBusinessText(account.Note), Ownership: safeBusinessText(account.Ownership), VendorName: safeBusinessText(account.VendorName), VendorEmail: safeBusinessText(account.VendorEmail), Type: safeBusinessText(account.Type), Group: safeBusinessText(account.Group), Status: safeBusinessText(account.Status), Available: account.Enabled, RateLimited: account.RateLimited, SourceID: safeBusinessText(account.SourceID), SourceName: sources[account.SourceID], CreatedAt: assistantTime(account.CreatedAt), LastActivityAt: assistantTime(account.LastActivityAt), DisabledAt: assistantTime(account.DisabledAt), ExpiresAt: assistantTime(account.ExpiresAt), Requests: requests, Tokens: tokens, Amount: amount, Currency: safeBusinessText(output.Currency), CollectionStatus: output.CollectionStatus, ErrorCode: output.ErrorCode}
 	return managedAccountRow{item: item, doc: managedAccountDocument(item)}
 }
 
@@ -271,7 +280,7 @@ func managedAccountDocument(item managedAccountItem) map[string][]string {
 			available = "unavailable"
 		}
 	}
-	return map[string][]string{"name": {item.Name}, "email": {item.Email}, "account_id": {item.AccountID}, "note": {item.Note}, "ownership": {item.Ownership}, "instance": {item.InstanceName, strconv.FormatInt(item.InstanceID, 10)}, "platform": {item.Platform}, "type": {item.Type}, "group": {item.Group}, "status": {item.Status}, "source": {item.SourceID, item.SourceName}, "available": {available}}
+	return map[string][]string{"name": {item.Name}, "email": {item.Email}, "account_id": {item.AccountID}, "note": {item.Note}, "ownership": {item.Ownership}, "vendor_name": {item.VendorName}, "vendor_email": {item.VendorEmail}, "instance": {item.InstanceName, strconv.FormatInt(item.InstanceID, 10)}, "platform": {item.Platform}, "type": {item.Type}, "group": {item.Group}, "status": {item.Status}, "source": {item.SourceID, item.SourceName}, "available": {available}}
 }
 
 func managedAccountMatches(doc map[string][]string, matchMode string, rules []managedinstance.AccountFilterRule) bool {

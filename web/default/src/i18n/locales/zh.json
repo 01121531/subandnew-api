@@ -1689,6 +1689,8 @@
     "Account name": "账号名称",
     "Account ID": "账号 ID",
     "Ownership": "账号归属",
+    "Vendor": "供应商",
+    "Vendor email": "供应商邮箱",
     "Account type": "账号类型",
     "Work node": "工作节点",
     "Availability": "可用性",

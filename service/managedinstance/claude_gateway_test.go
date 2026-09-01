@@ -62,11 +62,17 @@ func TestProbeGenericDetectsClaudeGateway(t *testing.T) {
 func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	vendorRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
 			require.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
-			writeProbeJSON(response, `{"accounts":[{"id":"8faa3804-86ab-4f4c-a090-e5111a406c74","name":"primary","account_type":"max","status":"active","health_status":"healthy","provider":"anthropic","group_name":"default","created_at":"2026-08-21T14:48:27.674Z","last_used_at":"1787414527000","total_requests":"42","total_tokens":1234,"total_cost":"9.875","stats":{"rpm":17,"concurrent":3,"active_sessions":2}}]}`)
+			writeProbeJSON(response, `{"accounts":[{"id":"8faa3804-86ab-4f4c-a090-e5111a406c74","name":"primary","owner_user_id":"vendor-1","account_type":"max","status":"active","health_status":"healthy","provider":"anthropic","group_name":"default","created_at":"2026-08-21T14:48:27.674Z","last_used_at":"1787414527000","total_requests":"42","total_tokens":1234,"total_cost":"9.875","stats":{"rpm":17,"concurrent":3,"active_sessions":2}}]}`)
+		case "/api/admin/vendors":
+			vendorRequests++
+			require.Equal(t, "true", request.URL.Query().Get("include_usage"))
+			require.Equal(t, "Bearer secret", request.Header.Get("Authorization"))
+			writeProbeJSON(response, `{"items":[{"id":"vendor-1","username":"供应商 A","email":"vendor@example.com","status":"active"}]}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -95,6 +101,64 @@ func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	require.Equal(t, 9.875, *item.Cost)
 	require.Equal(t, 17, *item.RPM)
 	require.Equal(t, 2, *item.ActiveSessions)
+	require.Equal(t, "vendor-1", item.VendorID)
+	require.Equal(t, "供应商 A", item.VendorName)
+	require.Equal(t, "vendor@example.com", item.VendorEmail)
+	require.Equal(t, model.ManagedInstanceCollectionSucceeded, page.VendorCollectionStatus)
+	require.False(t, page.VendorStale)
+	require.Positive(t, page.VendorObservedAt)
+	require.Equal(t, 1, vendorRequests)
+}
+
+func TestClaudeGatewayAccountVendorFallbackLabels(t *testing.T) {
+	platformOwned := claudeGatewayAccountItem(claudeGatewayAccount{ID: "platform", Name: "platform"}, nil)
+	require.Empty(t, platformOwned.VendorID)
+	require.Equal(t, "平台自有", platformOwned.VendorName)
+	require.Empty(t, platformOwned.VendorEmail)
+
+	unknown := claudeGatewayAccountItem(claudeGatewayAccount{ID: "unknown", Name: "unknown", OwnerUserID: "missing"}, nil)
+	require.Equal(t, "missing", unknown.VendorID)
+	require.Equal(t, "未知供应商", unknown.VendorName)
+	require.Empty(t, unknown.VendorEmail)
+}
+
+func TestClaudeGatewayInventoryKeepsPreviousVendorsWhenCollectionFails(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.ManagedAccountSnapshot{}))
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			writeProbeJSON(response, `{"accounts":[{"id":"account-1","name":"primary","owner_user_id":"vendor-1","status":"active","health_status":"healthy"}]}`)
+		case "/api/admin/vendors":
+			http.Error(response, "unavailable", http.StatusBadGateway)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	previousObservedAt := time.Now().Add(-5 * time.Minute).Unix()
+	payload, err := json.Marshal(InventoryPage{ResourceKind: "account", VendorObservedAt: previousObservedAt, Items: []InventoryItem{{
+		ID: 1, IDText: "account-1", Name: "primary", VendorID: "vendor-1", VendorName: "旧供应商", VendorEmail: "old@example.com",
+	}}})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.ManagedAccountSnapshot{
+		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory, RangeKey: "inventory",
+		SchemaVersion: 3, ObservedAt: previousObservedAt, Payload: string(payload),
+		LastAttemptAt: previousObservedAt, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "旧供应商", page.Items[0].VendorName)
+	require.Equal(t, "old@example.com", page.Items[0].VendorEmail)
+	require.Equal(t, model.ManagedInstanceCollectionFailed, page.VendorCollectionStatus)
+	require.True(t, page.VendorStale)
+	require.NotEmpty(t, page.VendorErrorCode)
+	require.Equal(t, previousObservedAt, page.VendorObservedAt)
 }
 
 func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
@@ -120,7 +184,7 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 		"stats":{"cooldown":false,"cooldown_remaining_seconds":0}
 	}`), &account))
 
-	item := claudeGatewayAccountItem(account)
+	item := claudeGatewayAccountItem(account, nil)
 	require.NotNil(t, item.Enabled)
 	require.True(t, *item.Enabled)
 	require.True(t, item.RateLimited)
@@ -169,16 +233,22 @@ func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/api/admin/oauth-accounts", request.URL.Path)
-		response.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
-			"accounts": []map[string]any{{
-				"id": "large-account", "name": "large-account", "status": "active", "health_status": "healthy",
-				"created_at":    "1970-01-01T00:02:30Z",
-				"usage_windows": map[string]any{"req_30d": 123, "tokens_30d": 456, "cost_30d": 7.89},
-			}},
-			"padding": strings.Repeat("x", int(defaultConnectorMaxBodyBytes)),
-		}))
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			response.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
+				"accounts": []map[string]any{{
+					"id": "large-account", "name": "large-account", "status": "active", "health_status": "healthy",
+					"created_at":    "1970-01-01T00:02:30Z",
+					"usage_windows": map[string]any{"req_30d": 123, "tokens_30d": 456, "cost_30d": 7.89},
+				}},
+				"padding": strings.Repeat("x", int(defaultConnectorMaxBodyBytes)),
+			}))
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
 	}))
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})

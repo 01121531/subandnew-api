@@ -69,14 +69,14 @@ func TestPortalFilterCannotUseHiddenFieldsOrExpandFixedScope(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, result.Total)
 	_, err = QueryPortal(t.Context(), auth, PortalQueryInput{Page: 1, PageSize: 20, MatchMode: "all", Rules: []managedinstance.AccountFilterRule{
-		{Field: "email", Operator: "contains", Values: []string{"example.com"}, ValueMode: "any"},
+		{Field: "vendor_email", Operator: "contains", Values: []string{"example.com"}, ValueMode: "any"},
 	}})
 	require.ErrorIs(t, err, ErrInvalid)
 }
 
 func TestPortalFilterFieldsIncludeOpenedMetrics(t *testing.T) {
-	fields := PortalFilterFields([]string{"name", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"})
-	require.ElementsMatch(t, []string{"account_id", "name", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"}, fields)
+	fields := PortalFilterFields([]string{"name", "vendor_name", "vendor_email", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"})
+	require.ElementsMatch(t, []string{"account_id", "name", "vendor_name", "vendor_email", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"}, fields)
 }
 
 func TestPortalRequiresPasswordAndHonorsCIDR(t *testing.T) {
@@ -151,9 +151,10 @@ func TestPortalWorkbookWritesScalarValuesAndShanghaiTimes(t *testing.T) {
 	requests, tokens, amount, available := 1476.0, 66759000.0, 294.8689, true
 	createdAt := time.Date(2026, time.August, 26, 5, 12, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)).Unix()
 	lastActivityAt := createdAt + 31*60
-	data, err := writePortalWorkbook([]string{"requests", "tokens", "amount", "available", "created_at", "last_activity_at"}, []managedaccount.Item{{
+	data, err := writePortalWorkbook([]string{"requests", "tokens", "amount", "available", "created_at", "last_activity_at", "vendor_name", "vendor_email"}, []managedaccount.Item{{
 		InstanceID: 1, AccountID: "8faa3804-86ab-4f4c-a090-e5111a406c74", Requests: &requests, Tokens: &tokens,
 		Amount: &amount, Available: &available, CreatedAt: createdAt, LastActivityAt: lastActivityAt,
+		VendorName: "供应商 A", VendorEmail: "vendor@example.com",
 	}})
 	require.NoError(t, err)
 	workbook, err := excelize.OpenReader(bytes.NewReader(data))
@@ -166,6 +167,8 @@ func TestPortalWorkbookWritesScalarValuesAndShanghaiTimes(t *testing.T) {
 	require.Equal(t, "TRUE", mustPortalCell(t, workbook, "F2"))
 	require.Equal(t, "2026-08-26 05:12:00", mustPortalCell(t, workbook, "G2"))
 	require.Equal(t, "2026-08-26 05:43:00", mustPortalCell(t, workbook, "H2"))
+	require.Equal(t, "供应商 A", mustPortalCell(t, workbook, "I2"))
+	require.Equal(t, "vendor@example.com", mustPortalCell(t, workbook, "J2"))
 }
 
 func TestPortalTimestampAcceptsSecondsMillisecondsAndRFC3339(t *testing.T) {

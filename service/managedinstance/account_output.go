@@ -26,16 +26,20 @@ type AccountOutputItem struct {
 }
 
 type AccountOutputResult struct {
-	SourceInstanceID  int64               `json:"source_instance_id"`
-	Kind              string              `json:"kind"`
-	Window            TimeWindow          `json:"window"`
-	Items             []AccountOutputItem `json:"items"`
-	AddedAccounts     int                 `json:"added_accounts"`
-	CollectedAccounts int                 `json:"collected_accounts"`
-	TotalRequests     float64             `json:"total_requests"`
-	TotalTokens       float64             `json:"total_tokens"`
-	TotalAmount       float64             `json:"total_amount"`
-	Currency          string              `json:"currency"`
+	SourceInstanceID       int64               `json:"source_instance_id"`
+	Kind                   string              `json:"kind"`
+	Window                 TimeWindow          `json:"window"`
+	Items                  []AccountOutputItem `json:"items"`
+	AddedAccounts          int                 `json:"added_accounts"`
+	CollectedAccounts      int                 `json:"collected_accounts"`
+	TotalRequests          float64             `json:"total_requests"`
+	TotalTokens            float64             `json:"total_tokens"`
+	TotalAmount            float64             `json:"total_amount"`
+	Currency               string              `json:"currency"`
+	VendorCollectionStatus string              `json:"vendor_collection_status,omitempty"`
+	VendorObservedAt       int64               `json:"vendor_observed_at,omitempty"`
+	VendorStale            bool                `json:"vendor_stale,omitempty"`
+	VendorErrorCode        string              `json:"vendor_error_code,omitempty"`
 }
 
 func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWindow) (*ObservationView, error) {
@@ -78,11 +82,15 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 		}
 	}
 	result := &AccountOutputResult{
-		SourceInstanceID: instance.Id,
-		Kind:             instance.Kind,
-		Window:           window,
-		Items:            make([]AccountOutputItem, len(items)),
-		AddedAccounts:    len(items),
+		SourceInstanceID:       instance.Id,
+		Kind:                   instance.Kind,
+		Window:                 window,
+		Items:                  make([]AccountOutputItem, len(items)),
+		AddedAccounts:          len(items),
+		VendorCollectionStatus: page.VendorCollectionStatus,
+		VendorObservedAt:       page.VendorObservedAt,
+		VendorStale:            page.VendorStale,
+		VendorErrorCode:        page.VendorErrorCode,
 	}
 	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
 		collectClaudeGatewayAccountOutput(result, items)

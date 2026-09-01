@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const managedInstanceSnapshotSchemaVersion = 2
+const managedInstanceSnapshotSchemaVersion = 3
 
 const (
 	managedInstanceInventoryPageSize = 100
@@ -45,6 +45,9 @@ type InventoryItem struct {
 	Email                 string   `json:"email,omitempty"`
 	Note                  string   `json:"note,omitempty"`
 	Ownership             string   `json:"ownership,omitempty"`
+	VendorID              string   `json:"vendor_id,omitempty"`
+	VendorName            string   `json:"vendor_name,omitempty"`
+	VendorEmail           string   `json:"vendor_email,omitempty"`
 	Type                  string   `json:"type,omitempty"`
 	Platform              string   `json:"platform,omitempty"`
 	SourceID              string   `json:"source_id,omitempty"`
@@ -89,11 +92,15 @@ type InventorySource struct {
 }
 
 type InventoryPage struct {
-	ResourceKind string            `json:"resource_kind"`
-	Items        []InventoryItem   `json:"items"`
-	Sources      []InventorySource `json:"sources,omitempty"`
-	Total        int               `json:"total"`
-	NextCursor   string            `json:"next_cursor,omitempty"`
+	ResourceKind           string            `json:"resource_kind"`
+	Items                  []InventoryItem   `json:"items"`
+	Sources                []InventorySource `json:"sources,omitempty"`
+	Total                  int               `json:"total"`
+	NextCursor             string            `json:"next_cursor,omitempty"`
+	VendorCollectionStatus string            `json:"vendor_collection_status,omitempty"`
+	VendorObservedAt       int64             `json:"vendor_observed_at,omitempty"`
+	VendorStale            bool              `json:"vendor_stale,omitempty"`
+	VendorErrorCode        string            `json:"vendor_error_code,omitempty"`
 }
 
 type ResourceSummary struct {
@@ -787,10 +794,14 @@ func collectCompleteInventory(ctx context.Context, adapter InstanceAdapter, conn
 		return collectParallelInventory(ctx, adapter, connector, credential, resourceKind, first)
 	}
 	combined := &InventoryPage{
-		ResourceKind: first.ResourceKind,
-		Items:        append([]InventoryItem(nil), first.Items...),
-		Total:        first.Total,
-		NextCursor:   first.NextCursor,
+		ResourceKind:           first.ResourceKind,
+		Items:                  append([]InventoryItem(nil), first.Items...),
+		Total:                  first.Total,
+		NextCursor:             first.NextCursor,
+		VendorCollectionStatus: first.VendorCollectionStatus,
+		VendorObservedAt:       first.VendorObservedAt,
+		VendorStale:            first.VendorStale,
+		VendorErrorCode:        first.VendorErrorCode,
 	}
 	seen := map[string]struct{}{}
 	for pageNumber := 1; combined.NextCursor != ""; pageNumber++ {

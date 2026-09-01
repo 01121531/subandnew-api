@@ -340,7 +340,7 @@ func PortalFilterFields(fields []string) []string {
 	allowed := map[string]bool{"account_id": true}
 	for _, field := range fields {
 		switch field {
-		case "name", "email", "note", "ownership", "platform", "type", "group", "status", "available":
+		case "name", "email", "note", "ownership", "vendor_name", "vendor_email", "platform", "type", "group", "status", "available":
 			allowed[field] = true
 		case "instance_name":
 			allowed["instance"] = true
@@ -351,7 +351,7 @@ func PortalFilterFields(fields []string) []string {
 		}
 	}
 	result := make([]string, 0, len(allowed))
-	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "instance", "platform", "type", "group", "status", "source", "available", "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at"} {
+	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "vendor_name", "vendor_email", "instance", "platform", "type", "group", "status", "source", "available", "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at"} {
 		if allowed[field] {
 			result = append(result, field)
 		}
@@ -561,6 +561,7 @@ func PortalFilterOptions(options map[string][]string, fields []string) map[strin
 var portalFieldLabels = map[string]string{
 	"instance_id": "实例 ID", "account_id": "账号 ID", "instance_name": "实例", "platform": "平台", "name": "名称",
 	"email": "邮箱", "note": "备注", "ownership": "账号归属", "type": "账号类型", "group": "分组", "status": "状态",
+	"vendor_name": "供应商", "vendor_email": "供应商邮箱",
 	"available": "可用状态", "rate_limited": "限流状态", "source_id": "节点 ID", "source_name": "工作节点",
 	"created_at": "录入时间", "last_activity_at": "最后活动", "disabled_at": "停用时间", "expires_at": "过期时间",
 	"requests": "请求数", "tokens": "Token", "amount": "消费金额", "currency": "币种", "rpm": "RPM",
@@ -617,7 +618,7 @@ func writePortalWorkbook(fields []string, items []managedaccount.Item) ([]byte, 
 	for index, field := range columns {
 		column, _ := excelize.ColumnNumberToName(index + 1)
 		width := 18.0
-		if field == "email" || field == "note" || field == "ownership" {
+		if field == "email" || field == "vendor_email" || field == "note" || field == "ownership" {
 			width = 28
 		}
 		if field == "account_id" {

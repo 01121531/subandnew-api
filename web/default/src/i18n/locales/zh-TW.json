@@ -1521,6 +1521,8 @@
     "Account name": "帳號名稱",
     "Account ID": "帳號 ID",
     "Ownership": "帳號歸屬",
+    "Vendor": "供應商",
+    "Vendor email": "供應商信箱",
     "Account type": "帳號類型",
     "Work node": "工作節點",
     "Availability": "可用性",

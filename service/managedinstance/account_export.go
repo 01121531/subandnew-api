@@ -371,7 +371,7 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	defer workbook.Close()
 	const sheet = "账号导出"
 	workbook.SetSheetName("Sheet1", sheet)
-	headers := []string{"账号归属", "账号 Email", "账号类型", "录入时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
+	headers := []string{"账号归属", "供应商", "供应商邮箱", "账号 Email", "账号类型", "录入时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
 	for column, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = workbook.SetCellValue(sheet, cell, header)
@@ -390,20 +390,20 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	headerStyle, _ := workbook.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "#111827"}, Fill: excelize.Fill{Type: "pattern", Color: []string{"#F3F4F6"}, Pattern: 1}, Border: []excelize.Border{{Type: "bottom", Color: "#D1D5DB", Style: 1}}, Alignment: &excelize.Alignment{Vertical: "center"}})
 	numberStyle, _ := workbook.NewStyle(&excelize.Style{NumFmt: 3})
 	moneyStyle, _ := workbook.NewStyle(&excelize.Style{CustomNumFmt: stringPointer("$#,##0.00000000")})
-	_ = workbook.SetCellStyle(sheet, "A1", "S1", headerStyle)
+	_ = workbook.SetCellStyle(sheet, "A1", "U1", headerStyle)
 	if len(rows) > 0 {
 		end := len(rows) + 1
-		_ = workbook.SetCellStyle(sheet, "G2", fmt.Sprintf("K%d", end), numberStyle)
-		_ = workbook.SetCellStyle(sheet, "Q2", fmt.Sprintf("Q%d", end), numberStyle)
-		_ = workbook.SetCellStyle(sheet, "L2", fmt.Sprintf("L%d", end), moneyStyle)
+		_ = workbook.SetCellStyle(sheet, "I2", fmt.Sprintf("M%d", end), numberStyle)
+		_ = workbook.SetCellStyle(sheet, "S2", fmt.Sprintf("S%d", end), numberStyle)
+		_ = workbook.SetCellStyle(sheet, "N2", fmt.Sprintf("N%d", end), moneyStyle)
 	}
-	widths := map[string]float64{"A": 20, "B": 32, "C": 16, "D": 20, "E": 25, "F": 26, "G": 14, "H": 16, "I": 16, "J": 18, "K": 18, "L": 18, "M": 20, "N": 16, "O": 22, "P": 14, "Q": 18, "R": 16, "S": 30}
+	widths := map[string]float64{"A": 20, "B": 20, "C": 30, "D": 32, "E": 16, "F": 20, "G": 25, "H": 26, "I": 14, "J": 16, "K": 16, "L": 18, "M": 18, "N": 18, "O": 20, "P": 16, "Q": 22, "R": 14, "S": 18, "T": 16, "U": 30}
 	for column, width := range widths {
 		_ = workbook.SetColWidth(sheet, column, column, width)
 	}
 	_ = workbook.SetRowHeight(sheet, 1, 24)
 	_ = workbook.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
-	_ = workbook.AutoFilter(sheet, "A1:S1", nil)
+	_ = workbook.AutoFilter(sheet, "A1:U1", nil)
 	temporaryFile, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
@@ -458,7 +458,7 @@ func accountExportCellValues(row AccountExportRow, window TimeWindow, location *
 		}
 	}
 	return []any{
-		ownership, item.Email, accountType, createdAt, accountExportSurvival(item, window.End), note,
+		ownership, item.VendorName, item.VendorEmail, item.Email, accountType, createdAt, accountExportSurvival(item, window.End), note,
 		optionalFloat(row.Requests), optionalFloat(row.InputTokens), optionalFloat(row.OutputTokens), optionalFloat(row.CacheWriteTokens), optionalFloat(row.CacheReadTokens), optionalFloat(row.Amount),
 		row.Selection.InstanceName, row.Selection.InstanceKind, firstNonEmpty(item.IDText, strconv.FormatInt(item.ID, 10)), available, optionalFloat(row.TotalTokens), status, row.ErrorCode,
 	}

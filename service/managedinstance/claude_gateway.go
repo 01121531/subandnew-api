@@ -71,6 +71,7 @@ type claudeGatewayAccount struct {
 	Provider         string              `json:"provider"`
 	InferenceBackend string              `json:"inference_backend"`
 	GroupName        string              `json:"group_name"`
+	OwnerUserID      string              `json:"owner_user_id"`
 	CreatedAt        string              `json:"created_at"`
 	LastUsedAt       string              `json:"last_used_at"`
 	DisabledAt       string              `json:"disabled_at"`
@@ -104,6 +105,13 @@ type claudeGatewayAccount struct {
 		CooldownReason    string              `json:"cooldown_reason"`
 		CooldownRemaining int                 `json:"cooldown_remaining_seconds"`
 	} `json:"stats"`
+}
+
+type claudeGatewayVendor struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Status   string `json:"status"`
 }
 
 type claudeGatewayTodaySummary struct {
@@ -308,7 +316,23 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 	if err != nil {
 		return nil, err
 	}
-	return claudeGatewayInventoryPage(accounts), nil
+	vendors, vendorErr := fetchClaudeGatewayVendors(ctx, connector, credential)
+	vendorObservedAt := common.GetTimestamp()
+	if vendorErr != nil {
+		vendors, vendorObservedAt = previousClaudeGatewayVendors(connector.instanceID)
+	}
+	page := claudeGatewayInventoryPage(accounts, vendors)
+	page.VendorObservedAt = vendorObservedAt
+	page.VendorCollectionStatus = model.ManagedInstanceCollectionSucceeded
+	if vendorErr != nil {
+		page.VendorCollectionStatus = model.ManagedInstanceCollectionFailed
+		page.VendorErrorCode = managedInstanceObservationErrorCode(vendorErr)
+		page.VendorStale = len(vendors) > 0
+		if !page.VendorStale {
+			page.VendorObservedAt = 0
+		}
+	}
+	return page, nil
 }
 
 func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
@@ -334,6 +358,77 @@ func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, crede
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	return envelope.Accounts, nil
+}
+
+func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
+	response, err := claudeGatewayDoJSONWithMaxBody(
+		ctx,
+		connector,
+		credential,
+		http.MethodGet,
+		"/api/admin/vendors?include_usage=true",
+		nil,
+		claudeGatewayAccountsMaxBodyBytes,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireHTTPStatus(response); err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Items []claudeGatewayVendor `json:"items"`
+	}
+	if json.Unmarshal(response.Body, &envelope) != nil || envelope.Items == nil || len(envelope.Items) > managedInstanceInventoryMaxItems {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	return claudeGatewayVendorMap(envelope.Items), nil
+}
+
+func claudeGatewayVendorMap(items []claudeGatewayVendor) map[string]claudeGatewayVendor {
+	result := make(map[string]claudeGatewayVendor, len(items))
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		item.ID = id
+		item.Username = strings.TrimSpace(item.Username)
+		item.Email = strings.TrimSpace(item.Email)
+		result[id] = item
+	}
+	return result
+}
+
+func previousClaudeGatewayVendors(instanceID int64) (map[string]claudeGatewayVendor, int64) {
+	if instanceID <= 0 || model.DB == nil || !model.DB.Migrator().HasTable(&model.ManagedAccountSnapshot{}) {
+		return nil, 0
+	}
+	var snapshot model.ManagedAccountSnapshot
+	query := model.DB.Where(
+		"instance_id = ? AND snapshot_kind = ? AND range_key = ? AND observed_at > 0 AND payload <> ''",
+		instanceID, model.ManagedAccountSnapshotKindInventory, "inventory",
+	).Order("observed_at DESC").Limit(1).Find(&snapshot)
+	if query.Error != nil || query.RowsAffected == 0 {
+		return nil, 0
+	}
+	var page InventoryPage
+	if json.Unmarshal([]byte(snapshot.Payload), &page) != nil {
+		return nil, 0
+	}
+	result := make(map[string]claudeGatewayVendor)
+	for _, item := range page.Items {
+		id := strings.TrimSpace(item.VendorID)
+		if id == "" || strings.TrimSpace(item.VendorName) == "" {
+			continue
+		}
+		result[id] = claudeGatewayVendor{ID: id, Username: item.VendorName, Email: item.VendorEmail}
+	}
+	observedAt := page.VendorObservedAt
+	if observedAt <= 0 && len(result) > 0 {
+		observedAt = snapshot.ObservedAt
+	}
+	return result, observedAt
 }
 
 func fetchClaudeGatewayTodaySummary(ctx context.Context, connector *Connector, credential *CredentialMaterial) (claudeGatewayTodaySummary, error) {
@@ -400,15 +495,15 @@ func fetchClaudeGatewayUsageSummary(ctx context.Context, connector *Connector, c
 	return envelope.Summary, nil
 }
 
-func claudeGatewayInventoryPage(accounts []claudeGatewayAccount) *InventoryPage {
+func claudeGatewayInventoryPage(accounts []claudeGatewayAccount, vendors map[string]claudeGatewayVendor) *InventoryPage {
 	items := make([]InventoryItem, 0, len(accounts))
 	for _, account := range accounts {
-		items = append(items, claudeGatewayAccountItem(account))
+		items = append(items, claudeGatewayAccountItem(account, vendors))
 	}
 	return &InventoryPage{ResourceKind: "account", Items: items, Total: len(items)}
 }
 
-func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
+func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]claudeGatewayVendor) InventoryItem {
 	name := firstNonEmpty(account.Name, account.Email, account.ID)
 	status := firstNonEmpty(account.HealthStatus, account.Status)
 	rateLimited := claudeGatewayRateLimited(account)
@@ -440,8 +535,9 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 	if displayID == "" {
 		displayID = strconv.FormatInt(stableID, 10)
 	}
-	return InventoryItem{
+	item := InventoryItem{
 		ID: stableID, IDText: displayID, Name: name, Email: strings.TrimSpace(account.Email), Note: strings.TrimSpace(account.Name), Ownership: strings.TrimSpace(account.GroupName),
+		VendorID: strings.TrimSpace(account.OwnerUserID),
 		Type:     firstNonEmpty(account.AccountType, account.AuthKind),
 		Platform: firstNonEmpty(account.Provider, account.InferenceBackend), Group: account.GroupName,
 		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
@@ -451,6 +547,25 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
 		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
 	}
+	applyClaudeGatewayVendor(&item, vendors)
+	return item
+}
+
+func applyClaudeGatewayVendor(item *InventoryItem, vendors map[string]claudeGatewayVendor) {
+	if item == nil {
+		return
+	}
+	if item.VendorID == "" {
+		item.VendorName = "平台自有"
+		return
+	}
+	vendor, ok := vendors[item.VendorID]
+	if !ok {
+		item.VendorName = "未知供应商"
+		return
+	}
+	item.VendorName = firstNonEmpty(vendor.Username, "未知供应商")
+	item.VendorEmail = vendor.Email
 }
 
 func claudeGatewayAccountAvailable(account claudeGatewayAccount) bool {
@@ -543,7 +658,7 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 			return storeClaudeGatewayRealtimeFailure(instanceID, err), err
 		}
 	}
-	page := claudeGatewayInventoryPage(accounts)
+	page := claudeGatewayInventoryPage(accounts, nil)
 	rpm, concurrency, sessions, available, reporting := 0.0, 0.0, 0, 0, 0
 	for index, account := range accounts {
 		if account.Stats.RPM >= 0 {

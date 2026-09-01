@@ -33,6 +33,8 @@ import {
 const account = accountFilterDocument({
   name: 'Alice Standard',
   email: 'Alice@Gmail.com',
+  vendor_name: 'Acme Supply',
+  vendor_email: 'owner@acme.test',
   instance: 'Shanghai Gateway',
   group: 'default',
   available: 'available',
@@ -120,6 +122,36 @@ describe('account filtering', () => {
         rules: [{ ...createAccountFilterRule('note'), operator: 'is_empty' }],
       }),
       true
+    )
+  })
+
+  test('supports vendor equality, prefix, suffix, and contains rules', () => {
+    const vendor = createAccountFilterRule('vendor_name')
+    vendor.operator = 'is'
+    vendor.values = ['acme supply']
+    assert.equal(
+      matchesAdvancedAccountFilter(account, {
+        match_mode: 'all',
+        rules: [vendor],
+      }),
+      true
+    )
+    vendor.operator = 'starts_with'
+    vendor.values = ['acme']
+    const email = createAccountFilterRule('vendor_email')
+    email.operator = 'ends_with'
+    email.values = ['@acme.test']
+    assert.equal(
+      matchesAdvancedAccountFilter(account, {
+        match_mode: 'all',
+        rules: [vendor, email],
+      }),
+      true
+    )
+    assert.equal(
+      matchesQuickAccountFilter(account, ['acme supply'], []),
+      false,
+      'vendor fields must not broaden quick search'
     )
   })
 

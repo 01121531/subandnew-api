@@ -64,6 +64,37 @@ func TestExecuteMatchesQuickAndAdvancedFilters(t *testing.T) {
 	require.Zero(t, result.Total, "short terms must not match every gmail.com domain")
 }
 
+func TestExecuteFiltersAndSortsVendorsWithoutExpandingQuickSearch(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "alpha", VendorID: "vendor-2", VendorName: "Zen Supply", VendorEmail: "zen@example.com", Enabled: &available},
+		{ID: 2, Name: "beta", VendorID: "vendor-1", VendorName: "Acme Supply", VendorEmail: "owner@acme.test", Enabled: &available},
+	})
+
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		MatchMode: managedinstance.AccountFilterMatchAll,
+		Rules: []managedinstance.AccountFilterRule{
+			{Field: "vendor_name", Operator: "is", Values: []string{"Acme Supply"}, ValueMode: managedinstance.AccountFilterValueAny},
+			{Field: "vendor_email", Operator: "ends_with", Values: []string{"@acme.test"}, ValueMode: managedinstance.AccountFilterValueAny},
+		},
+		Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, "Acme Supply", result.Items[0].VendorName)
+	require.Equal(t, "owner@acme.test", result.Items[0].VendorEmail)
+
+	result, err = Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		SortBy: "vendor_name", SortOrder: "asc", Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Acme Supply", "Zen Supply"}, []string{result.Items[0].VendorName, result.Items[1].VendorName})
+
+	result, err = Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		IncludeTerms: []string{"Acme Supply"}, Page: 1, PageSize: 50})
+	require.NoError(t, err)
+	require.Zero(t, result.Total, "vendor data must not broaden quick include search")
+}
+
 func TestExecuteReturnsPartialWithoutInventingRows(t *testing.T) {
 	db, instance := setupQueryTest(t)
 	missing := model.ManagedInstance{Name: "missing", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://missing.invalid"}

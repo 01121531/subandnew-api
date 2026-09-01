@@ -160,6 +160,7 @@ type AccountExportSelection = {
 type SortDirection = 'asc' | 'desc'
 type OutputSortKey =
   | 'account'
+  | 'vendor'
   | 'instance'
   | 'created_at'
   | 'requests'
@@ -167,6 +168,7 @@ type OutputSortKey =
   | 'amount'
 type AccountSortKey =
   | 'name'
+  | 'vendor'
   | 'instance'
   | 'created_at'
   | 'cost'
@@ -360,6 +362,10 @@ function compareResourceRows(
       leftValue = left.instance.name
       rightValue = right.instance.name
       break
+    case 'vendor':
+      leftValue = left.item.vendor_name
+      rightValue = right.item.vendor_name
+      break
     case 'created_at':
       leftValue = left.item.created_at
       rightValue = right.item.created_at
@@ -440,6 +446,8 @@ function resourceFilterDocument(row: ResourceRow): AccountFilterDocument {
     account_id: inventoryAccountID(item),
     note: item.note,
     ownership: item.ownership,
+    vendor_name: item.vendor_name,
+    vendor_email: item.vendor_email,
     instance: instance.name,
     platform: item.platform || instance.kind,
     type: item.type,
@@ -473,6 +481,8 @@ function outputFilterDocument(
     account_id: inventoryAccountID(account),
     note: account.note,
     ownership: account.ownership,
+    vendor_name: account.vendor_name,
+    vendor_email: account.vendor_email,
     instance: instance.name,
     platform: account.platform || instance.kind,
     type: account.type,
@@ -975,6 +985,13 @@ export function ManagedAccounts() {
       })
     ) as Partial<Record<AccountFilterField, MultiSelectOption[]>>
   }, [outputDocuments, resourceDocuments, t])
+
+  const vendorSnapshotWarning =
+    family === 'claude_gateway' &&
+    snapshotQueries.some((query) => {
+      const page = query.data?.data.inventory.observation?.data
+      return page?.vendor_collection_status === 'failed'
+    })
   const activeAdvancedRules = advancedFilter.rules.filter(
     isAccountFilterRuleComplete
   )
@@ -1325,6 +1342,11 @@ export function ManagedAccounts() {
           averageUnavailableSurvival={averageUnavailableSurvival}
           survivalSampleCount={unavailableSurvival.length}
         />
+        {vendorSnapshotWarning && (
+          <div className='border-warning/30 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
+            供应商信息本轮更新失败，当前显示上次成功映射或未知供应商；账号数据仍为最新快照。
+          </div>
+        )}
         <AccountOutputPanel
           family={family}
           rows={filteredOutputRows}
@@ -1951,6 +1973,7 @@ function AccountOutputTable({
 }) {
   const { t } = useTranslation()
   const isChannel = family === 'new_api'
+  const isClaudeGateway = family === 'claude_gateway'
   const [sortKey, setSortKey] = useState<OutputSortKey>('created_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [pageIndex, setPageIndex] = useState(0)
@@ -1977,6 +2000,12 @@ function AccountOutputTable({
           break
         case 'instance':
           compared = compareText(left.instance.name, right.instance.name)
+          break
+        case 'vendor':
+          compared = compareText(
+            left.output.account.vendor_name || '',
+            right.output.account.vendor_name || ''
+          )
           break
         case 'created_at':
           compared = compareNumber(
@@ -2098,6 +2127,9 @@ function AccountOutputTable({
   const sortOptions: { value: OutputSortKey; label: string }[] = [
     { value: 'account', label: t(isChannel ? 'Channel' : 'Account') },
     { value: 'instance', label: t('Instance') },
+    ...(isClaudeGateway
+      ? [{ value: 'vendor' as const, label: t('Vendor') }]
+      : []),
     {
       value: 'created_at',
       label: t(isChannel ? 'Created At' : 'Uploaded at'),
@@ -2214,6 +2246,18 @@ function AccountOutputTable({
                     <MobileDetail label={t('Instance')}>
                       {instance.name}
                     </MobileDetail>
+                    {isClaudeGateway && (
+                      <MobileDetail label={t('Vendor')}>
+                        <span className='block break-words'>
+                          {output.account.vendor_name || '--'}
+                        </span>
+                        {output.account.vendor_email && (
+                          <span className='text-muted-foreground block text-xs break-all'>
+                            {output.account.vendor_email}
+                          </span>
+                        )}
+                      </MobileDetail>
+                    )}
                     <MobileDetail label={t('Requests')}>
                       {succeeded
                         ? formatOptionalNumber(output.total_requests)
@@ -2232,7 +2276,9 @@ function AccountOutputTable({
         </Accordion>
       ) : (
         <div className='overflow-x-auto'>
-          <Table className='min-w-[860px]'>
+          <Table
+            className={isClaudeGateway ? 'min-w-[1080px]' : 'min-w-[860px]'}
+          >
             <TableHeader className='bg-muted/35'>
               <TableRow>
                 <TableHead className='w-12 ps-4'>
@@ -2245,6 +2291,7 @@ function AccountOutputTable({
                   />
                 </TableHead>
                 {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
+                {isClaudeGateway && sortableHead('vendor', t('Vendor'))}
                 {sortableHead('instance', t('Instance'))}
                 {sortableHead(
                   'created_at',
@@ -2277,6 +2324,18 @@ function AccountOutputTable({
                         #{output.account.id}
                       </p>
                     </TableCell>
+                    {isClaudeGateway && (
+                      <TableCell>
+                        <p className='max-w-44 truncate text-sm font-medium'>
+                          {output.account.vendor_name || '--'}
+                        </p>
+                        {output.account.vendor_email && (
+                          <p className='text-muted-foreground max-w-52 truncate text-xs'>
+                            {output.account.vendor_email}
+                          </p>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>{instance.name}</TableCell>
                     <TableCell className='whitespace-nowrap'>
                       {formatTimestamp(output.account.created_at)}
@@ -2457,6 +2516,9 @@ function AccountTable(props: {
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
+    ...(isClaudeGateway
+      ? [{ value: 'vendor' as const, label: t('Vendor') }]
+      : []),
     { value: 'instance', label: t('Instance') },
     {
       value: 'created_at',
@@ -2481,6 +2543,7 @@ function AccountTable(props: {
   let tableMinWidth = 'min-w-[1140px]'
   if (isChannel) tableMinWidth = 'min-w-[980px]'
   else if (isConductor) tableMinWidth = 'min-w-[1280px]'
+  else if (isClaudeGateway) tableMinWidth = 'min-w-[1440px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -2561,6 +2624,18 @@ function AccountTable(props: {
                           {instance.name}
                         </Link>
                       </MobileDetail>
+                      {isClaudeGateway && (
+                        <MobileDetail label={t('Vendor')}>
+                          <span className='block break-words'>
+                            {item.vendor_name || '--'}
+                          </span>
+                          {item.vendor_email && (
+                            <span className='text-muted-foreground block text-xs break-all'>
+                              {item.vendor_email}
+                            </span>
+                          )}
+                        </MobileDetail>
+                      )}
                       <MobileDetail
                         label={
                           isConductor
@@ -2659,6 +2734,7 @@ function AccountTable(props: {
                   <TableHead className='ps-6'>
                     {t(isChannel ? 'Channel' : 'Account')}
                   </TableHead>
+                  {isClaudeGateway && <TableHead>{t('Vendor')}</TableHead>}
                   <TableHead>{t('Instance')}</TableHead>
                   <TableHead>
                     {isConductor
@@ -2714,6 +2790,20 @@ function AccountTable(props: {
                           </p>
                         </div>
                       </TableCell>
+                      {isClaudeGateway && (
+                        <TableCell>
+                          <div className='max-w-52'>
+                            <p className='truncate text-sm font-medium'>
+                              {item.vendor_name || '--'}
+                            </p>
+                            {item.vendor_email && (
+                              <p className='text-muted-foreground truncate text-xs'>
+                                {item.vendor_email}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
                       <TableCell>
                         <Link
                           to='/instances/$id'

@@ -1689,6 +1689,8 @@
     "Account name": "Account name",
     "Account ID": "Account ID",
     "Ownership": "Ownership",
+    "Vendor": "Vendor",
+    "Vendor email": "Vendor email",
     "Account type": "Account type",
     "Work node": "Work node",
     "Availability": "Availability",

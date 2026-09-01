@@ -51,6 +51,7 @@ type AccountFilterTemplateView struct {
 
 var accountFilterFieldType = map[string]string{
 	"name": "text", "email": "text", "account_id": "text", "note": "text", "ownership": "text",
+	"vendor_name": "text", "vendor_email": "text",
 	"instance": "category", "platform": "category", "type": "category", "group": "category",
 	"status": "category", "source": "category", "available": "category",
 	"requests": "number", "tokens": "number", "amount": "number", "rpm": "number",
@@ -60,6 +61,7 @@ var accountFilterFieldType = map[string]string{
 
 var accountTextFilterOperators = map[string]bool{
 	"contains": true, "starts_with": true, "ends_with": true, "not_contains": true,
+	"is": true, "is_not": true,
 	"is_empty": true, "is_not_empty": true,
 }
 

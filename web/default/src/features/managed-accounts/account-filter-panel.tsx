@@ -91,6 +91,8 @@ const fieldLabels: Record<AccountFilterField, string> = {
   account_id: 'Account ID',
   note: 'Note',
   ownership: 'Ownership',
+  vendor_name: 'Vendor',
+  vendor_email: 'Vendor email',
   instance: 'Instance',
   platform: 'Platform',
   type: 'Account type',
@@ -145,6 +147,8 @@ function operatorsFor(field: AccountFilterField): AccountFilterOperator[] {
         'starts_with',
         'ends_with',
         'not_contains',
+        'is',
+        'is_not',
         'is_empty',
         'is_not_empty',
       ]

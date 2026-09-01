@@ -32,8 +32,8 @@ func setupAPIServiceTest(t *testing.T) (*gorm.DB, model.ManagedInstance) {
 	available := true
 	requestsHigh, requestsLow := 125.0, 12.0
 	payload, err := json.Marshal(managedinstance.InventoryPage{ResourceKind: "account", Items: []managedinstance.InventoryItem{
-		{ID: 1, IDText: "acct-1", Name: "allowed", Email: "allowed@example.com", Enabled: &available, CreatedAt: now, Requests: &requestsHigh},
-		{ID: 2, IDText: "acct-2", Name: "hidden", Email: "hidden@other.test", Enabled: &available, CreatedAt: now - 10, Requests: &requestsLow},
+		{ID: 1, IDText: "acct-1", Name: "allowed", Email: "allowed@example.com", VendorName: "供应商 A", VendorEmail: "vendor-a@example.com", Enabled: &available, CreatedAt: now, Requests: &requestsHigh},
+		{ID: 2, IDText: "acct-2", Name: "hidden", Email: "hidden@other.test", VendorName: "供应商 B", VendorEmail: "vendor-b@example.com", Enabled: &available, CreatedAt: now - 10, Requests: &requestsLow},
 	}, Total: 2})
 	require.NoError(t, err)
 	require.NoError(t, db.Create(&model.ManagedAccountSnapshot{InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
@@ -102,6 +102,17 @@ func TestCreateStoresOnlyHashAndQueriesFrozenFilter(t *testing.T) {
 	projected := Project(result.Items[0], append([]string{"instance_id", "account_id"}, auth.View.Fields...))
 	require.Equal(t, "acct-1", projected["account_id"])
 	require.NotContains(t, projected, "note")
+	require.NotContains(t, projected, "vendor_email")
+}
+
+func TestCreateDefaultsToVendorNameWithoutVendorEmail(t *testing.T) {
+	_, instance := setupAPIServiceTest(t)
+	input := apiInput(instance.Id)
+	input.Fields = nil
+	created, err := Create(t.Context(), input, 7)
+	require.NoError(t, err)
+	require.Contains(t, created.API.Fields, "vendor_name")
+	require.NotContains(t, created.API.Fields, "vendor_email")
 }
 
 func TestViewForNormalizesLegacyNullCollections(t *testing.T) {

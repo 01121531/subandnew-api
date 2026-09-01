@@ -22,6 +22,8 @@ export const ACCOUNT_FILTER_FIELDS = [
   'account_id',
   'note',
   'ownership',
+  'vendor_name',
+  'vendor_email',
   'instance',
   'platform',
   'type',
@@ -107,6 +109,8 @@ export const TEXT_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([
   'account_id',
   'note',
   'ownership',
+  'vendor_name',
+  'vendor_email',
 ])
 
 const NUMBER_ACCOUNT_FILTER_FIELDS = new Set<AccountFilterField>([

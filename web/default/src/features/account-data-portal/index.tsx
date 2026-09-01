@@ -80,6 +80,8 @@ const fieldLabels: Record<string, string> = {
   email: '邮箱',
   note: '备注',
   ownership: '账号归属',
+  vendor_name: '供应商',
+  vendor_email: '供应商邮箱',
   type: '账号类型',
   group: '分组',
   status: '状态',
@@ -98,6 +100,7 @@ const fieldLabels: Record<string, string> = {
 
 const sortableFields = new Set([
   'name',
+  'vendor_name',
   'created_at',
   'last_activity_at',
   'status',
@@ -313,6 +316,8 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         'account_id',
         'note',
         'ownership',
+        'vendor_name',
+        'vendor_email',
         'instance',
         'platform',
         'type',

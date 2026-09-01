@@ -42,7 +42,7 @@ var (
 	ErrSnapshotEmpty = errors.New("account snapshot unavailable")
 )
 
-var defaultFields = []string{"instance_name", "platform", "name", "type", "status", "available"}
+var defaultFields = []string{"instance_name", "platform", "name", "vendor_name", "type", "status", "available"}
 
 var accessLogCleanup struct {
 	sync.Mutex
