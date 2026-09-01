@@ -52,7 +52,6 @@ type ManagedAccountExportItemInput struct {
 }
 
 type ManagedAccountExportRequest struct {
-	ReportType     string                          `json:"report_type,omitempty"`
 	Source         string                          `json:"source"`
 	RangeKey       string                          `json:"range_key,omitempty"`
 	Window         managedinstance.TimeWindow      `json:"window"`
@@ -66,7 +65,6 @@ type ManagedAccountExportRequest struct {
 }
 
 type managedAccountExportSnapshot struct {
-	ReportType     string                     `json:"report_type,omitempty"`
 	Source         string                     `json:"source"`
 	RangeKey       string                     `json:"range_key,omitempty"`
 	Window         managedinstance.TimeWindow `json:"window"`
@@ -104,7 +102,6 @@ type ManagedUsageExportView struct {
 	FileSize      int64          `json:"file_size"`
 	RecordCount   int            `json:"record_count"`
 	WarningCount  int            `json:"warning_count"`
-	RetryCount    int64          `json:"retry_count"`
 	ErrorCode     string         `json:"error_code"`
 	StartedAt     int64          `json:"started_at"`
 	FinishedAt    int64          `json:"finished_at"`
@@ -192,13 +189,8 @@ func managedExportActorName(actorID int) string {
 }
 
 func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*model.SystemTask, error) {
-	request.ReportType = strings.TrimSpace(request.ReportType)
 	request.Source = strings.TrimSpace(request.Source)
-	accountCostReport := request.ReportType == model.ManagedExportKindAccountCosts
-	validReportType := request.ReportType == "" || accountCostReport
-	validSource := request.Source == "inventory" || (!accountCostReport && request.Source == "account_output")
-	validWindow := accountCostReport || (request.Window.Start > 0 && request.Window.End > request.Window.Start)
-	if actorID <= 0 || !validReportType || !validSource || len(request.Items) == 0 || len(request.Items) > 10000 || !validWindow || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
+	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
 		return nil, managedinstance.ErrInvalidInstance
 	}
 	if request.Window.Timezone == "" {
@@ -252,9 +244,6 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 		instance, err := managedinstance.Get(instanceID)
 		if err != nil {
 			return nil, err
-		}
-		if accountCostReport && instance.Kind != model.ManagedInstanceKindClaudeGateway {
-			return nil, managedinstance.ErrUnsupportedCapability
 		}
 		inventory := make(map[int64]managedinstance.InventoryItem)
 		accountIDAliases := make(map[string]int64)
@@ -357,8 +346,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 		}
 	}
 	snapshot := managedAccountExportSnapshot{
-		ReportType: request.ReportType,
-		Source:     request.Source, RangeKey: request.RangeKey, Window: request.Window, Locale: request.Locale,
+		Source: request.Source, RangeKey: request.RangeKey, Window: request.Window, Locale: request.Locale,
 		Search: request.Search, ExcludeSearch: request.ExcludeSearch, SortBy: request.SortBy, SortOrder: request.SortOrder,
 		FilterSnapshot: request.FilterSnapshot,
 		SelectionCount: len(selections), InstanceCount: len(requestedInstances),
@@ -367,15 +355,11 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 	if err != nil {
 		return nil, err
 	}
-	exportKind := model.ManagedExportKindAccounts
-	if accountCostReport {
-		exportKind = model.ManagedExportKindAccountCosts
-	}
-	payload := ManagedUsageExportPayload{ExportKind: exportKind, ActorID: actorID, Source: request.Source, Window: request.Window, Locale: request.Locale}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: request.Source, Window: request.Window, Locale: request.Locale}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(selections)), Stage: "queued"}
 	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
 		InstanceID: soleInstanceID, InstanceName: instanceName, InstanceKind: instanceKind,
-		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: exportKind,
+		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
 		FileFormat: model.ManagedExportFormatXLSX, Source: request.Source, Query: string(queryJSON),
 	}, payload, state, exportItems)
 	if err == nil {
@@ -401,14 +385,10 @@ func managedUsageExportView(record *model.ManagedUsageExport) *ManagedUsageExpor
 	}
 	filters := url.Values{}
 	snapshot := map[string]any{}
-	if managedAccountSelectionExport(record.ExportKind) {
+	if record.ExportKind == model.ManagedExportKindAccounts {
 		_ = json.Unmarshal([]byte(record.Query), &snapshot)
 	} else {
 		_ = json.Unmarshal([]byte(record.Query), &filters)
-	}
-	retryCount := int64(0)
-	if record.ExportKind == model.ManagedExportKindAccountCosts {
-		retryCount, _ = model.ManagedExportItemRetryCount(record.TaskID)
 	}
 	return &ManagedUsageExportView{
 		ID: record.ID, TaskID: record.TaskID, InstanceID: record.InstanceID,
@@ -418,7 +398,7 @@ func managedUsageExportView(record *model.ManagedUsageExport) *ManagedUsageExpor
 		Filters: filters, Snapshot: snapshot,
 		Status: record.Status, QueuePosition: model.ManagedUsageExportQueuePosition(record),
 		Progress: record.Progress, Processed: record.Processed, Total: record.Total,
-		FileName: record.FileName, FileSize: record.FileSize, RecordCount: record.RecordCount, WarningCount: record.WarningCount, RetryCount: retryCount,
+		FileName: record.FileName, FileSize: record.FileSize, RecordCount: record.RecordCount, WarningCount: record.WarningCount,
 		ErrorCode: record.ErrorCode, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt,
 		ExpiresAt: record.ExpiresAt, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
 	}
@@ -487,7 +467,7 @@ func RetryManagedUsageExport(taskID string, actorID int, root bool) (*model.Syst
 	if record.Status != model.ManagedUsageExportStatusFailed && record.Status != model.ManagedUsageExportStatusExpired {
 		return nil, model.ErrManagedUsageExportConflict
 	}
-	if managedAccountSelectionExport(record.ExportKind) {
+	if record.ExportKind == model.ManagedExportKindAccounts {
 		items, err := model.ListManagedExportItems(taskID)
 		if err != nil {
 			return nil, err
@@ -529,15 +509,11 @@ func enqueueManagedAccountExportSelections(actorID int, original *model.ManagedU
 	if err != nil {
 		return nil, err
 	}
-	exportKind := model.ManagedExportKindAccounts
-	if snapshot.ReportType == model.ManagedExportKindAccountCosts {
-		exportKind = model.ManagedExportKindAccountCosts
-	}
-	payload := ManagedUsageExportPayload{ExportKind: exportKind, ActorID: actorID, Source: snapshot.Source, Window: snapshot.Window, Locale: snapshot.Locale}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: snapshot.Source, Window: snapshot.Window, Locale: snapshot.Locale}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(items)), Stage: "queued"}
 	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
 		InstanceID: original.InstanceID, InstanceName: original.InstanceName, InstanceKind: original.InstanceKind,
-		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: exportKind,
+		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
 		FileFormat: model.ManagedExportFormatXLSX, Source: snapshot.Source, Query: string(queryJSON),
 	}, payload, state, items)
 	if err == nil {
@@ -571,10 +547,6 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_usage_export_payload")
 		return
 	}
-	if payload.ExportKind != model.ManagedExportKindUsageRecords && !managedAccountSelectionExport(payload.ExportKind) {
-		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_usage_export_payload")
-		return
-	}
 	if err := model.StartManagedUsageExport(task.TaskID); err != nil {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "usage_export_status_conflict")
 		return
@@ -587,7 +559,7 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 	}
 	var artifact *managedinstance.UsageRecordExportArtifact
 	var err error
-	if managedAccountSelectionExport(payload.ExportKind) {
+	if payload.ExportKind == model.ManagedExportKindAccounts {
 		items, listErr := model.ListManagedExportItems(task.TaskID)
 		if listErr != nil {
 			err = listErr
@@ -601,10 +573,8 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 				}
 				selections = append(selections, selection)
 			}
-			if err == nil && payload.ExportKind == model.ManagedExportKindAccounts {
+			if err == nil {
 				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections}, progressCallback)
-			} else if err == nil {
-				artifact, err = managedinstance.ExportClaudeGatewayAccountCostsXLSXToTaskFile(ctx, task.TaskID, payload.ActorID, payload.Locale, progressCallback)
 			}
 		}
 	} else {
@@ -630,11 +600,8 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		} else if errors.Is(err, managedinstance.ErrUsageExportIncomplete) {
 			errorCode = "usage_export_incomplete"
 		}
-		if managedAccountSelectionExport(payload.ExportKind) {
+		if payload.ExportKind == model.ManagedExportKindAccounts {
 			errorCode = "account_export_failed"
-			if payload.ExportKind == model.ManagedExportKindAccountCosts {
-				errorCode = "account_cost_export_failed"
-			}
 		}
 		if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode) == nil {
 			_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, 0, errorCode, 0)
@@ -647,10 +614,6 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 	if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, artifact, "") == nil {
 		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusSucceeded, artifact.FileName, artifact.Size, artifact.RecordCount, artifact.WarningCount, "", artifact.ExpiresAt)
 	}
-}
-
-func managedAccountSelectionExport(exportKind string) bool {
-	return exportKind == model.ManagedExportKindAccounts || exportKind == model.ManagedExportKindAccountCosts
 }
 
 func (managedInstanceProbeHandler) Type() string {

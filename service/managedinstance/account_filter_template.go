@@ -54,7 +54,7 @@ var accountFilterFieldType = map[string]string{
 	"vendor_name": "text", "vendor_email": "text",
 	"instance": "category", "platform": "category", "type": "category", "group": "category",
 	"status": "category", "source": "category", "available": "category",
-	"requests": "number", "tokens": "number", "amount": "number", "cost_excluding_today": "number", "rpm": "number",
+	"requests": "number", "tokens": "number", "amount": "number", "rpm": "number",
 	"active_sessions": "number", "utilization_5h": "number", "utilization_7d": "number",
 	"created_at": "time", "last_activity_at": "time",
 }

@@ -449,13 +449,11 @@ func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
 	now := time.Now().Unix()
 	available := true
 	unavailable := false
-	historicalCost := 93.125
-	require.NoError(t, db.Model(&model.ManagedInstance{}).Where("id = ?", visible.Id).Update("kind", model.ManagedInstanceKindClaudeGateway).Error)
 	payload, err := json.Marshal(managedinstance.InventoryPage{
 		ResourceKind: "channel",
 		Sources:      []managedinstance.InventorySource{{ID: "node-1", Name: "worker-a"}},
 		Items: []managedinstance.InventoryItem{
-			{ID: 101, IDText: "account-101", Name: "Alice", Email: "alice@example.com", VendorName: "供应商 A", VendorEmail: "vendor@example.com", Note: "owner https://internal.example password=secret-value", SourceID: "node-1", Enabled: &available, CreatedAt: now - 60, CostExcludingToday: &historicalCost},
+			{ID: 101, IDText: "account-101", Name: "Alice", Email: "alice@example.com", VendorName: "供应商 A", VendorEmail: "vendor@example.com", Note: "owner https://internal.example password=secret-value", SourceID: "node-1", Enabled: &available, CreatedAt: now - 60},
 			{ID: 102, IDText: "account-102", Name: "Bob", Email: "bob@other.test", Enabled: &unavailable, CreatedAt: now - 120},
 		},
 		Total: 2,
@@ -470,7 +468,7 @@ func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
 	require.NoError(t, err)
 	result, err := registry.Execute(t.Context(), execution, "query_managed_accounts", json.RawMessage(`{
 		"instance_ids":[`+jsonNumber(visible.Id)+`],"dataset":"inventory","match_mode":"all",
-		"rules":[{"field":"email","operator":"ends_with","values":["@example.com"],"value_mode":"any"},{"field":"vendor_name","operator":"starts_with","values":["供应商"],"value_mode":"any"},{"field":"cost_excluding_today","operator":"gte","values":["90"],"value_mode":"any"}],"sort_by":"cost_excluding_today"
+		"rules":[{"field":"email","operator":"ends_with","values":["@example.com"],"value_mode":"any"},{"field":"vendor_name","operator":"starts_with","values":["供应商"],"value_mode":"any"}]
 	}`))
 	require.NoError(t, err)
 	var output managedAccountsOutput
@@ -479,13 +477,11 @@ func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
 	require.Equal(t, "alice@example.com", output.Items[0].Email)
 	require.Equal(t, "供应商 A", output.Items[0].VendorName)
 	require.Equal(t, "vendor@example.com", output.Items[0].VendorEmail)
-	require.Equal(t, historicalCost, *output.Items[0].CostExcludingToday)
 	require.Equal(t, "worker-a", output.Items[0].SourceName)
 	require.NotContains(t, output.Items[0].Note, "https://")
 	require.NotContains(t, output.Items[0].Note, "secret-value")
 	require.Contains(t, output.Items[0].Note, "[已隐藏]")
 	require.Equal(t, 1, output.Summary.Available)
-	require.Equal(t, map[string]float64{"usd": historicalCost}, output.Summary.CostsExcludingToday)
 	require.Equal(t, tool.FreshnessSnapshot, result.Freshness.State)
 	require.Equal(t, assistantTime(now), output.Sources[0].ObservedAt)
 }

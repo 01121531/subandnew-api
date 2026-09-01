@@ -125,7 +125,6 @@ const FIELD_OPTIONS = [
   ['requests', '请求数'],
   ['tokens', '总 Token'],
   ['amount', '消费金额'],
-  ['cost_excluding_today', '历史消费（不含今日）'],
   ['rpm', 'RPM'],
   ['active_sessions', '活跃会话'],
   ['utilization_5h', '5 小时利用率'],
@@ -141,7 +140,6 @@ const SORT_OPTIONS = [
   ['requests', '请求数'],
   ['tokens', '总 Token'],
   ['amount', '消费金额'],
-  ['cost_excluding_today', '历史消费（不含今日）'],
 ] as const
 
 type DraftHandoff = Partial<AccountDataAPIInput>
@@ -905,7 +903,6 @@ function AuthorizationEditor(props: {
   const previewAmounts = preview
     ? accountAmountSummaries(preview.summary.amounts)
     : []
-  const previewHistoricalCost = preview?.summary.costs_excluding_today?.usd
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -1352,22 +1349,6 @@ function AuthorizationEditor(props: {
                         ))
                       ) : (
                         <Detail label={t('总金额')} value={t('未提供')} />
-                      )}
-                      <Detail
-                        label={t('历史消费合计（不含今日）')}
-                        value={
-                          previewHistoricalCost == null
-                            ? t('未提供')
-                            : `US$${previewHistoricalCost.toFixed(8)}`
-                        }
-                      />
-                      {preview?.summary.cost_excluding_today_partial && (
-                        <Detail
-                          label={t('历史消费完整性')}
-                          value={t('部分数据（{{count}} 个有效样本）', {
-                            count: preview.summary.cost_excluding_today_samples,
-                          })}
-                        />
                       )}
                     </div>
                     {preview.sample.length > 0 && (

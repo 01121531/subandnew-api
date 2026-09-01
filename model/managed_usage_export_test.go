@@ -161,38 +161,6 @@ func TestCreateManagedAccountExportPersistsFrozenItems(t *testing.T) {
 	require.Equal(t, ManagedExportFormatXLSX, record.FileFormat)
 }
 
-func TestManagedAccountCostExportItemsResumeAndCountRetries(t *testing.T) {
-	truncateTables(t)
-	record := &ManagedUsageExport{
-		InstanceName: "gateway", InstanceKind: ManagedInstanceKindClaudeGateway, ActorID: 10, ActorName: "admin",
-		ExportKind: ManagedExportKindAccountCosts, FileFormat: ManagedExportFormatXLSX, Query: `{}`,
-	}
-	task, err := CreateManagedUsageExportWithItems(record, map[string]any{"export_kind": ManagedExportKindAccountCosts}, map[string]any{}, []*ManagedExportItem{
-		{InstanceID: 1, ResourceID: 41, Metadata: `{}`},
-		{InstanceID: 1, ResourceID: 42, Metadata: `{}`},
-	})
-	require.NoError(t, err)
-	items, err := ListManagedExportItems(task.TaskID)
-	require.NoError(t, err)
-	require.NoError(t, MarkManagedExportItemAttempt(items[0].ID, 3))
-	require.NoError(t, FinishManagedExportItem(items[0].ID, ManagedExportItemStatusSucceeded, 3, `{"today_cost":1}`, "", ""))
-	require.NoError(t, MarkManagedExportItemAttempt(items[1].ID, 2))
-
-	processed, total, err := PrepareManagedExportItemsForResume(task.TaskID)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), processed)
-	require.Equal(t, int64(2), total)
-	retries, err := ManagedExportItemRetryCount(task.TaskID)
-	require.NoError(t, err)
-	require.Equal(t, int64(3), retries)
-
-	items, err = ListManagedExportItems(task.TaskID)
-	require.NoError(t, err)
-	require.Equal(t, ManagedExportItemStatusSucceeded, items[0].Status)
-	require.Equal(t, ManagedExportItemStatusPending, items[1].Status)
-	require.Equal(t, 2, items[1].Attempts)
-}
-
 func TestDeleteManagedUsageExportOnlyDeletesOwnedTerminalRecord(t *testing.T) {
 	truncateTables(t)
 	pendingRecord := &ManagedUsageExport{InstanceID: 1, InstanceName: "one", InstanceKind: ManagedInstanceKindSub2API, ActorID: 10, ActorName: "admin", Query: `{}`}

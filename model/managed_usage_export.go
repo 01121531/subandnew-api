@@ -10,7 +10,6 @@ import (
 const (
 	ManagedExportKindUsageRecords = "usage_records"
 	ManagedExportKindAccounts     = "accounts"
-	ManagedExportKindAccountCosts = "account_costs"
 	ManagedExportFormatCSV        = "csv"
 	ManagedExportFormatXLSX       = "xlsx"
 
@@ -20,11 +19,6 @@ const (
 	ManagedUsageExportStatusFailed    = "failed"
 	ManagedUsageExportStatusCancelled = "cancelled"
 	ManagedUsageExportStatusExpired   = "expired"
-
-	ManagedExportItemStatusPending   = "pending"
-	ManagedExportItemStatusRunning   = "running"
-	ManagedExportItemStatusSucceeded = "succeeded"
-	ManagedExportItemStatusFailed    = "failed"
 )
 
 var ErrManagedUsageExportConflict = errors.New("managed usage export status conflict")
@@ -58,30 +52,20 @@ type ManagedUsageExport struct {
 }
 
 type ManagedExportItem struct {
-	ID          int64  `json:"id" gorm:"primaryKey"`
-	TaskID      string `json:"task_id" gorm:"type:varchar(64);not null;index:idx_managed_export_item_task,priority:1"`
-	InstanceID  int64  `json:"instance_id" gorm:"not null;index;index:idx_managed_export_item_task,priority:2"`
-	ResourceID  int64  `json:"resource_id" gorm:"not null;index:idx_managed_export_item_task,priority:3"`
-	Metadata    string `json:"-" gorm:"type:text;not null"`
-	Status      string `json:"status" gorm:"type:varchar(32);not null;default:'pending';index"`
-	Attempts    int    `json:"attempts" gorm:"not null;default:0"`
-	Result      string `json:"-" gorm:"type:text"`
-	ErrorCode   string `json:"error_code,omitempty" gorm:"type:varchar(128)"`
-	ErrorDetail string `json:"-" gorm:"type:text"`
-	CreatedAt   int64  `json:"created_at" gorm:"bigint;not null"`
-	UpdatedAt   int64  `json:"updated_at" gorm:"bigint;not null;default:0"`
+	ID         int64  `json:"id" gorm:"primaryKey"`
+	TaskID     string `json:"task_id" gorm:"type:varchar(64);not null;index:idx_managed_export_item_task,priority:1"`
+	InstanceID int64  `json:"instance_id" gorm:"not null;index;index:idx_managed_export_item_task,priority:2"`
+	ResourceID int64  `json:"resource_id" gorm:"not null;index:idx_managed_export_item_task,priority:3"`
+	Metadata   string `json:"-" gorm:"type:text;not null"`
+	CreatedAt  int64  `json:"created_at" gorm:"bigint;not null"`
 }
 
 func (ManagedExportItem) TableName() string { return "managed_export_items" }
 
 func (item *ManagedExportItem) BeforeCreate(_ *gorm.DB) error {
-	if item.Status == "" {
-		item.Status = ManagedExportItemStatusPending
-	}
 	if item.CreatedAt == 0 {
 		item.CreatedAt = common.GetTimestamp()
 	}
-	item.UpdatedAt = item.CreatedAt
 	return nil
 }
 
@@ -127,8 +111,7 @@ func CreateManagedUsageExport(record *ManagedUsageExport, payload any, state any
 }
 
 func CreateManagedUsageExportWithItems(record *ManagedUsageExport, payload any, state any, items []*ManagedExportItem) (*SystemTask, error) {
-	selectionExport := record != nil && (record.ExportKind == ManagedExportKindAccounts || record.ExportKind == ManagedExportKindAccountCosts)
-	if record == nil || record.ActorID <= 0 || (!selectionExport && record.InstanceID <= 0) {
+	if record == nil || record.ActorID <= 0 || (record.ExportKind != ManagedExportKindAccounts && record.InstanceID <= 0) {
 		return nil, errors.New("invalid managed usage export")
 	}
 	taskID, err := GenerateSystemTaskID()
@@ -224,62 +207,6 @@ func ListManagedExportItems(taskID string) ([]*ManagedExportItem, error) {
 	var items []*ManagedExportItem
 	err := DB.Where("task_id = ?", taskID).Order("id ASC").Find(&items).Error
 	return items, err
-}
-
-func ManagedExportItemRetryCount(taskID string) (int64, error) {
-	var retries int64
-	err := DB.Model(&ManagedExportItem{}).
-		Where("task_id = ?", taskID).
-		Select("COALESCE(SUM(CASE WHEN attempts > 1 THEN attempts - 1 ELSE 0 END), 0)").
-		Scan(&retries).Error
-	return retries, err
-}
-
-func PrepareManagedExportItemsForResume(taskID string) (int64, int64, error) {
-	now := common.GetTimestamp()
-	if err := DB.Model(&ManagedExportItem{}).
-		Where("task_id = ? AND status = ?", taskID, ManagedExportItemStatusRunning).
-		Updates(map[string]any{"status": ManagedExportItemStatusPending, "updated_at": now}).Error; err != nil {
-		return 0, 0, err
-	}
-	var total int64
-	if err := DB.Model(&ManagedExportItem{}).Where("task_id = ?", taskID).Count(&total).Error; err != nil {
-		return 0, 0, err
-	}
-	var processed int64
-	if err := DB.Model(&ManagedExportItem{}).
-		Where("task_id = ? AND status IN ?", taskID, []string{ManagedExportItemStatusSucceeded, ManagedExportItemStatusFailed}).
-		Count(&processed).Error; err != nil {
-		return 0, 0, err
-	}
-	return processed, total, nil
-}
-
-func MarkManagedExportItemAttempt(id int64, attempts int) error {
-	return DB.Model(&ManagedExportItem{}).
-		Where("id = ? AND status = ?", id, ManagedExportItemStatusPending).
-		Updates(map[string]any{
-			"status": ManagedExportItemStatusRunning, "attempts": attempts,
-			"error_code": "", "error_detail": "", "updated_at": common.GetTimestamp(),
-		}).Error
-}
-
-func ReturnManagedExportItemToPending(id int64) error {
-	return DB.Model(&ManagedExportItem{}).
-		Where("id = ? AND status = ?", id, ManagedExportItemStatusRunning).
-		Updates(map[string]any{"status": ManagedExportItemStatusPending, "updated_at": common.GetTimestamp()}).Error
-}
-
-func FinishManagedExportItem(id int64, status string, attempts int, result string, errorCode string, errorDetail string) error {
-	if status != ManagedExportItemStatusSucceeded && status != ManagedExportItemStatusFailed {
-		return errors.New("invalid managed export item status")
-	}
-	return DB.Model(&ManagedExportItem{}).
-		Where("id = ? AND status IN ?", id, []string{ManagedExportItemStatusPending, ManagedExportItemStatusRunning}).
-		Updates(map[string]any{
-			"status": status, "attempts": attempts, "result": result,
-			"error_code": errorCode, "error_detail": errorDetail, "updated_at": common.GetTimestamp(),
-		}).Error
 }
 
 func GetManagedUsageExport(taskID string) (*ManagedUsageExport, error) {

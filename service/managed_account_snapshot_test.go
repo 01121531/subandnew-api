@@ -212,49 +212,6 @@ func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 	require.JSONEq(t, `{"match_mode":"all","rules":[{"field":"email","operator":"contains","values":["example.com"],"value_mode":"any"}]}`, string(snapshot.FilterSnapshot))
 }
 
-func TestEnqueueManagedAccountCostExportDoesNotRequireWindow(t *testing.T) {
-	truncate(t)
-	instance := &model.ManagedInstance{Name: "cost-export-source", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://cost-export.example.com"}
-	require.NoError(t, model.DB.Create(instance).Error)
-	lifetime := 13000.12345678
-	payload, err := json.Marshal(managedinstance.InventoryPage{
-		ResourceKind: "account", Total: 1,
-		Items: []managedinstance.InventoryItem{{
-			ID: 7, IDText: "b766807a-1d82-47cf-9734-27e033c909be", Name: "selected",
-			VendorName: "vendor-a", VendorEmail: "vendor@example.com", LifetimeCost: &lifetime,
-		}},
-	})
-	require.NoError(t, err)
-	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
-		InstanceID: instance.Id, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
-		RangeKey: managedAccountInventoryRangeKey, Timezone: managedAccountDefaultTimezone,
-		ObservedAt: 100, Payload: string(payload), LastAttemptAt: 100,
-		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
-	}).Error)
-
-	task, err := EnqueueManagedAccountExport(7, ManagedAccountExportRequest{
-		ReportType: model.ManagedExportKindAccountCosts, Source: "inventory", Locale: "zh-CN",
-		Items: []ManagedAccountExportItemInput{{InstanceID: instance.Id, AccountID: "b766807a-1d82-47cf-9734-27e033c909be"}},
-	})
-	require.NoError(t, err)
-	record, err := model.GetManagedUsageExport(task.TaskID)
-	require.NoError(t, err)
-	require.Equal(t, model.ManagedExportKindAccountCosts, record.ExportKind)
-	require.Equal(t, model.ManagedExportFormatXLSX, record.FileFormat)
-	var snapshot managedAccountExportSnapshot
-	require.NoError(t, json.Unmarshal([]byte(record.Query), &snapshot))
-	require.Equal(t, model.ManagedExportKindAccountCosts, snapshot.ReportType)
-	require.Equal(t, 1, snapshot.SelectionCount)
-
-	items, err := model.ListManagedExportItems(task.TaskID)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	var frozen managedinstance.AccountExportSelection
-	require.NoError(t, json.Unmarshal([]byte(items[0].Metadata), &frozen))
-	require.Equal(t, "vendor-a", frozen.Account.VendorName)
-	require.Equal(t, lifetime, *frozen.Account.LifetimeCost)
-}
-
 func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {
 	truncate(t)
 	instance := &model.ManagedInstance{Name: "output-source", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://output.example.com"}

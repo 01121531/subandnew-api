@@ -89,10 +89,6 @@ export type AccountDataAPIPreview = {
     requests: number
     tokens: number
     amounts: Record<string, number>
-    costs_excluding_today?: Record<string, number>
-    cost_excluding_today_eligible: number
-    cost_excluding_today_samples: number
-    cost_excluding_today_partial: boolean
   }
   sample: Record<string, unknown>[]
   observed_at: number

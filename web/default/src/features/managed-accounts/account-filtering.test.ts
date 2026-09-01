@@ -40,7 +40,6 @@ const account = accountFilterDocument({
   available: 'available',
   requests: 125,
   amount: 9.875,
-  cost_excluding_today: 93.125,
   utilization_5h: 82,
   created_at: 1787967000,
 })
@@ -166,13 +165,10 @@ describe('account filtering', () => {
     const created = createAccountFilterRule('created_at')
     created.operator = 'gte'
     created.values = ['2026-08-29 09:00']
-    const historicalCost = createAccountFilterRule('cost_excluding_today')
-    historicalCost.operator = 'gt'
-    historicalCost.values = ['90']
     assert.equal(
       matchesAdvancedAccountFilter(account, {
         match_mode: 'all',
-        rules: [requests, utilization, created, historicalCost],
+        rules: [requests, utilization, created],
       }),
       true
     )

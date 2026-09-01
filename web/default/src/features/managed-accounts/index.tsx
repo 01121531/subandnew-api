@@ -172,7 +172,6 @@ type AccountSortKey =
   | 'instance'
   | 'created_at'
   | 'cost'
-  | 'cost_excluding_today'
   | 'last_activity'
   | 'survival'
   | 'available'
@@ -212,12 +211,6 @@ const exactCurrency = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 4,
-})
-const exactHistoricalCurrency = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 8,
 })
 const accountDateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -381,10 +374,6 @@ function compareResourceRows(
       leftValue = left.item.cost
       rightValue = right.item.cost
       break
-    case 'cost_excluding_today':
-      leftValue = left.item.cost_excluding_today
-      rightValue = right.item.cost_excluding_today
-      break
     case 'last_activity':
       leftValue = left.item.last_activity_at
       rightValue = right.item.last_activity_at
@@ -421,10 +410,6 @@ function formatCost(item: ManagedInstanceInventoryItem) {
   if (item.cost == null) return '--'
   if (item.cost_unit === 'usd') return exactCurrency.format(item.cost)
   return exactNumber.format(item.cost)
-}
-
-function formatCostExcludingToday(value?: number) {
-  return value == null ? '--' : exactHistoricalCurrency.format(value)
 }
 
 function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
@@ -473,7 +458,6 @@ function resourceFilterDocument(row: ResourceRow): AccountFilterDocument {
     requests: item.requests,
     tokens: item.tokens,
     amount: item.cost,
-    cost_excluding_today: item.cost_excluding_today,
     rpm: item.rpm,
     active_sessions: item.active_sessions,
     utilization_5h:
@@ -516,7 +500,6 @@ function outputFilterDocument(
         : undefined,
     amount:
       output.collection_status === 'succeeded' ? output.amount : undefined,
-    cost_excluding_today: account.cost_excluding_today,
     rpm: account.rpm,
     active_sessions: account.active_sessions,
     utilization_5h:
@@ -581,7 +564,6 @@ function useAccountExportSelection(
 
 function AccountExportBar(props: {
   source: 'inventory' | 'account_output'
-  enableAccountCosts?: boolean
   rangeKey?: string
   available: AccountExportSelection[]
   selection: ReturnType<typeof useAccountExportSelection>
@@ -595,11 +577,7 @@ function AccountExportBar(props: {
   const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [costOpen, setCostOpen] = useState(false)
-  const [costSubmitting, setCostSubmitting] = useState(false)
   const selectedItems = [...props.selection.selected.values()]
-  const accountCostItems =
-    selectedItems.length > 0 ? selectedItems : props.available
   const instanceCount = new Set(selectedItems.map((item) => item.instanceId))
     .size
   const submit = async () => {
@@ -644,41 +622,6 @@ function AccountExportBar(props: {
       setSubmitting(false)
     }
   }
-  const submitAccountCosts = async () => {
-    setCostSubmitting(true)
-    try {
-      await createManagedAccountExport({
-        report_type: 'account_costs',
-        source: 'inventory',
-        locale: i18n.language || 'zh-CN',
-        search: props.search || undefined,
-        exclude_search: props.excludeSearch || undefined,
-        filter_snapshot: props.filterSnapshot,
-        sort_by: props.sortBy,
-        sort_order: props.sortOrder,
-        items: accountCostItems.map((item) => ({
-          instance_id: item.instanceId,
-          account_id: item.accountId,
-        })),
-      })
-      setCostOpen(false)
-      if (selectedItems.length > 0) props.selection.clear()
-      toast.success(t('Historical consumption export added to queue'), {
-        action: {
-          label: t('View export records'),
-          onClick: () => window.location.assign('/export-records'),
-        },
-      })
-    } catch (error) {
-      const message = (error as { response?: { data?: { message?: string } } })
-        .response?.data?.message
-      toast.error(
-        message || t('Failed to create historical consumption export')
-      )
-    } finally {
-      setCostSubmitting(false)
-    }
-  }
   return (
     <>
       <div className='border-border/70 bg-muted/20 flex min-w-0 flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center'>
@@ -712,18 +655,6 @@ function AccountExportBar(props: {
             <FileSpreadsheet />
             {t('Export Excel')}
           </Button>
-          {props.enableAccountCosts && (
-            <Button
-              size='sm'
-              variant='outline'
-              className='min-h-11 sm:min-h-0'
-              disabled={accountCostItems.length === 0}
-              onClick={() => setCostOpen(true)}
-            >
-              <CircleDollarSign />
-              {t('Export historical consumption')}
-            </Button>
-          )}
         </div>
       </div>
       <Dialog open={open} onOpenChange={(next) => !submitting && setOpen(next)}>
@@ -774,67 +705,6 @@ function AccountExportBar(props: {
             <Button disabled={submitting} onClick={() => void submit()}>
               <FileSpreadsheet />
               {submitting ? t('Submitting') : t('Add to export queue')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={costOpen}
-        onOpenChange={(next) => !costSubmitting && setCostOpen(next)}
-      >
-        <DialogContent className='max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'>
-          <DialogHeader>
-            <DialogTitle>
-              {t('Confirm historical consumption export')}
-            </DialogTitle>
-            <DialogDescription>
-              {t(
-                'The background task reads each Claude Gateway account detail and calculates cumulative consumption excluding today.'
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className='bg-muted/35 grid grid-cols-2 gap-3 rounded-md p-4 text-sm'>
-            <MobileDetail label={t('Export scope')}>
-              {t(
-                selectedItems.length > 0
-                  ? 'Selected accounts'
-                  : 'All filtered accounts'
-              )}
-            </MobileDetail>
-            <MobileDetail label={t('Accounts')}>
-              {accountCostItems.length.toLocaleString()}
-            </MobileDetail>
-            <MobileDetail label={t('Instances')}>
-              {new Set(accountCostItems.map((item) => item.instanceId)).size}
-            </MobileDetail>
-            <MobileDetail label={t('Timezone')}>Asia/Shanghai</MobileDetail>
-          </div>
-          <div className='border-border/70 bg-muted/20 space-y-2 rounded-md border p-4 text-sm'>
-            <p className='font-medium'>
-              {t(
-                'Cumulative consumption - today consumption = historical consumption excluding today'
-              )}
-            </p>
-            <p className='text-muted-foreground text-xs leading-5'>
-              {t(
-                'Each failed account is retried up to 3 times. Accounts that still fail remain in the workbook with an error reason.'
-              )}
-            </p>
-          </div>
-          <DialogFooter className='sticky bottom-0'>
-            <Button
-              variant='outline'
-              disabled={costSubmitting}
-              onClick={() => setCostOpen(false)}
-            >
-              {t('Cancel')}
-            </Button>
-            <Button
-              disabled={costSubmitting || accountCostItems.length === 0}
-              onClick={() => void submitAccountCosts()}
-            >
-              <CircleDollarSign />
-              {costSubmitting ? t('Submitting') : t('Add to export queue')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1276,15 +1146,6 @@ export function ManagedAccounts() {
           unavailableSurvival.length
       )
     : null
-  const historicalCostEligible =
-    family === 'claude_gateway' ? filteredRows.length : 0
-  const historicalCostValues = filteredRows.flatMap(({ item }) =>
-    item.cost_excluding_today == null ? [] : [item.cost_excluding_today]
-  )
-  const historicalCost = historicalCostValues.reduce(
-    (sum, value) => sum + value,
-    0
-  )
   const coverage = instances.length
     ? Math.round((collectedInstances / instances.length) * 100)
     : 0
@@ -1486,12 +1347,6 @@ export function ManagedAccounts() {
           showAverageSurvival={family !== 'new_api'}
           averageUnavailableSurvival={averageUnavailableSurvival}
           survivalSampleCount={unavailableSurvival.length}
-          showHistoricalCost={family === 'claude_gateway'}
-          historicalCost={
-            historicalCostValues.length > 0 ? historicalCost : null
-          }
-          historicalCostSamples={historicalCostValues.length}
-          historicalCostEligible={historicalCostEligible}
         />
         {vendorSnapshotWarning && (
           <div className='border-warning/30 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
@@ -1883,10 +1738,6 @@ function AccountSummary(props: {
   showAverageSurvival: boolean
   averageUnavailableSurvival: number | null
   survivalSampleCount: number
-  showHistoricalCost: boolean
-  historicalCost: number | null
-  historicalCostSamples: number
-  historicalCostEligible: number
 }) {
   const { t } = useTranslation()
   const items = [
@@ -1935,33 +1786,13 @@ function AccountSummary(props: {
       className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
     })
   }
-  if (props.showHistoricalCost) {
-    const partial =
-      props.historicalCostSamples > 0 &&
-      props.historicalCostSamples < props.historicalCostEligible
-    items.splice(3, 0, {
-      key: 'historical-cost',
-      label: t('Historical consumption total (excluding today)'),
-      value:
-        props.historicalCost == null
-          ? t('Not provided')
-          : formatCostExcludingToday(props.historicalCost),
-      hint:
-        props.historicalCostSamples === 0
-          ? t('No valid samples')
-          : t('{{count}} accounts included{{partial}}', {
-              count: props.historicalCostSamples,
-              partial: partial ? ` · ${t('Partial data')}` : '',
-            }),
-      icon: CircleDollarSign,
-      className: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-    })
-  }
-  let summaryGridClass = 'xl:grid-cols-4'
-  if (items.length === 5) summaryGridClass = 'xl:grid-cols-5'
-  if (items.length >= 6) summaryGridClass = 'xl:grid-cols-6'
   return (
-    <section className={cn('grid grid-cols-2 gap-3', summaryGridClass)}>
+    <section
+      className={cn(
+        'grid grid-cols-2 gap-3',
+        props.showAverageSurvival ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
+      )}
+    >
       {items.map((item) => (
         <Card key={item.key} className='gap-0 rounded-lg py-0 shadow-xs'>
           <CardContent className='flex min-h-28 items-start justify-between gap-3 p-4'>
@@ -2699,10 +2530,7 @@ function AccountTable(props: {
   const showsSurvival = !isChannel
   let usageColumnLabel = t('Total consumption')
   if (isChannel) usageColumnLabel = t('Used quota')
-  if (isClaudeGateway) usageColumnLabel = t('Last 30 days consumption')
-  let usageSortLabel = t('Total consumption')
-  if (isChannel) usageSortLabel = t('Used quota')
-  if (isClaudeGateway) usageSortLabel = t('Last 30 days consumption')
+  if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -2716,16 +2544,8 @@ function AccountTable(props: {
     },
     {
       value: 'cost',
-      label: usageSortLabel,
+      label: t(isChannel ? 'Used quota' : 'Total consumption'),
     },
-    ...(isClaudeGateway
-      ? [
-          {
-            value: 'cost_excluding_today' as const,
-            label: t('Historical consumption (excluding today)'),
-          },
-        ]
-      : []),
     { value: 'last_activity', label: t('Last activity') },
   ]
   if (showsSurvival) {
@@ -2741,7 +2561,7 @@ function AccountTable(props: {
   let tableMinWidth = 'min-w-[1140px]'
   if (isChannel) tableMinWidth = 'min-w-[980px]'
   else if (isConductor) tableMinWidth = 'min-w-[1280px]'
-  else if (isClaudeGateway) tableMinWidth = 'min-w-[1640px]'
+  else if (isClaudeGateway) tableMinWidth = 'min-w-[1580px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -2807,14 +2627,6 @@ function AccountTable(props: {
                               {usageColumnLabel}: {formatCost(item)}
                             </span>
                           )}
-                          {isClaudeGateway && (
-                            <span className='text-foreground font-medium'>
-                              {t('Historical consumption (excluding today)')}:{' '}
-                              {formatCostExcludingToday(
-                                item.cost_excluding_today
-                              )}
-                            </span>
-                          )}
                         </div>
                       </div>
                     </AccordionTrigger>
@@ -2864,13 +2676,6 @@ function AccountTable(props: {
                           descriptors.join(' / ') || '--'
                         )}
                       </MobileDetail>
-                      {isClaudeGateway && (
-                        <MobileDetail
-                          label={t('Historical consumption (excluding today)')}
-                        >
-                          {formatCostExcludingToday(item.cost_excluding_today)}
-                        </MobileDetail>
-                      )}
                       <MobileDetail
                         label={isConductor ? '运行负载' : usageColumnLabel}
                       >
@@ -3066,28 +2871,7 @@ function AccountTable(props: {
                             </p>
                           </>
                         ) : (
-                          <>
-                            {isClaudeGateway && (
-                              <>
-                                <p className='font-medium whitespace-nowrap'>
-                                  {t('Last 30 days consumption')}:{' '}
-                                  {formatCost(item)}
-                                </p>
-                                <p className='text-primary mt-1 text-xs font-medium whitespace-nowrap'>
-                                  {t(
-                                    'Historical consumption (excluding today)'
-                                  )}
-                                  :{' '}
-                                  {formatCostExcludingToday(
-                                    item.cost_excluding_today
-                                  )}
-                                </p>
-                              </>
-                            )}
-                            {!isClaudeGateway && (
-                              <p className='font-medium'>{formatCost(item)}</p>
-                            )}
-                          </>
+                          <p className='font-medium'>{formatCost(item)}</p>
                         )}
                         {isClaudeGateway && (
                           <>
@@ -3267,7 +3051,6 @@ function AccountTable(props: {
       )}
       <AccountExportBar
         source='inventory'
-        enableAccountCosts={isClaudeGateway}
         available={exportable}
         selection={exportSelection}
         window={props.window}

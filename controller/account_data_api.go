@@ -230,7 +230,6 @@ func GetOpenAccountData(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list", "data": items,
 		"pagination":    gin.H{"page": result.Page, "page_size": result.PageSize, "total": result.Total, "has_more": result.HasMore},
-		"summary":       portalSummary(result, auth.View.Fields),
 		"authorization": gin.H{"name": auth.View.Name, "dataset": result.Dataset, "preset_days": result.PresetDays},
 		"snapshot":      gin.H{"observed_at": accountDataTime(result.ObservedAt), "timezone": accountdataapiTimezone(), "stale": result.Stale, "partial": result.Partial, "sources": externalSourceStatuses(result.Sources)},
 	})

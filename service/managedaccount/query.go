@@ -74,39 +74,38 @@ type AccountIdentity struct {
 }
 
 type Item struct {
-	InstanceID         int64    `json:"instance_id"`
-	InstanceName       string   `json:"instance_name"`
-	Platform           string   `json:"platform"`
-	AccountID          string   `json:"account_id"`
-	Name               string   `json:"name,omitempty"`
-	Email              string   `json:"email,omitempty"`
-	Note               string   `json:"note,omitempty"`
-	Ownership          string   `json:"ownership,omitempty"`
-	VendorID           string   `json:"-"`
-	VendorName         string   `json:"vendor_name,omitempty"`
-	VendorEmail        string   `json:"vendor_email,omitempty"`
-	Type               string   `json:"type,omitempty"`
-	Group              string   `json:"group,omitempty"`
-	Status             string   `json:"status,omitempty"`
-	Available          *bool    `json:"available,omitempty"`
-	RateLimited        bool     `json:"rate_limited,omitempty"`
-	SourceID           string   `json:"source_id,omitempty"`
-	SourceName         string   `json:"source_name,omitempty"`
-	CreatedAt          int64    `json:"created_at,omitempty"`
-	LastActivityAt     int64    `json:"last_activity_at,omitempty"`
-	DisabledAt         int64    `json:"disabled_at,omitempty"`
-	ExpiresAt          int64    `json:"expires_at,omitempty"`
-	Requests           *float64 `json:"requests,omitempty"`
-	Tokens             *float64 `json:"tokens,omitempty"`
-	Amount             *float64 `json:"amount,omitempty"`
-	Currency           string   `json:"currency,omitempty"`
-	CostExcludingToday *float64 `json:"cost_excluding_today,omitempty"`
-	RPM                *int     `json:"rpm,omitempty"`
-	ActiveSessions     *int     `json:"active_sessions,omitempty"`
-	Utilization5H      *float64 `json:"utilization_5h,omitempty"`
-	Utilization7D      *float64 `json:"utilization_7d,omitempty"`
-	CollectionStatus   string   `json:"collection_status,omitempty"`
-	ErrorCode          string   `json:"error_code,omitempty"`
+	InstanceID       int64    `json:"instance_id"`
+	InstanceName     string   `json:"instance_name"`
+	Platform         string   `json:"platform"`
+	AccountID        string   `json:"account_id"`
+	Name             string   `json:"name,omitempty"`
+	Email            string   `json:"email,omitempty"`
+	Note             string   `json:"note,omitempty"`
+	Ownership        string   `json:"ownership,omitempty"`
+	VendorID         string   `json:"-"`
+	VendorName       string   `json:"vendor_name,omitempty"`
+	VendorEmail      string   `json:"vendor_email,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Group            string   `json:"group,omitempty"`
+	Status           string   `json:"status,omitempty"`
+	Available        *bool    `json:"available,omitempty"`
+	RateLimited      bool     `json:"rate_limited,omitempty"`
+	SourceID         string   `json:"source_id,omitempty"`
+	SourceName       string   `json:"source_name,omitempty"`
+	CreatedAt        int64    `json:"created_at,omitempty"`
+	LastActivityAt   int64    `json:"last_activity_at,omitempty"`
+	DisabledAt       int64    `json:"disabled_at,omitempty"`
+	ExpiresAt        int64    `json:"expires_at,omitempty"`
+	Requests         *float64 `json:"requests,omitempty"`
+	Tokens           *float64 `json:"tokens,omitempty"`
+	Amount           *float64 `json:"amount,omitempty"`
+	Currency         string   `json:"currency,omitempty"`
+	RPM              *int     `json:"rpm,omitempty"`
+	ActiveSessions   *int     `json:"active_sessions,omitempty"`
+	Utilization5H    *float64 `json:"utilization_5h,omitempty"`
+	Utilization7D    *float64 `json:"utilization_7d,omitempty"`
+	CollectionStatus string   `json:"collection_status,omitempty"`
+	ErrorCode        string   `json:"error_code,omitempty"`
 }
 
 type SourceStatus struct {
@@ -126,17 +125,13 @@ type SourceStatus struct {
 }
 
 type Summary struct {
-	Total                      int                `json:"total"`
-	Available                  int                `json:"available"`
-	Unavailable                int                `json:"unavailable"`
-	Unknown                    int                `json:"unknown"`
-	Requests                   float64            `json:"requests"`
-	Tokens                     float64            `json:"tokens"`
-	Amounts                    map[string]float64 `json:"amounts"`
-	CostsExcludingToday        map[string]float64 `json:"costs_excluding_today,omitempty"`
-	CostExcludingTodayEligible int                `json:"cost_excluding_today_eligible"`
-	CostExcludingTodaySamples  int                `json:"cost_excluding_today_samples"`
-	CostExcludingTodayPartial  bool               `json:"cost_excluding_today_partial"`
+	Total       int                `json:"total"`
+	Available   int                `json:"available"`
+	Unavailable int                `json:"unavailable"`
+	Unknown     int                `json:"unknown"`
+	Requests    float64            `json:"requests"`
+	Tokens      float64            `json:"tokens"`
+	Amounts     map[string]float64 `json:"amounts"`
 }
 
 type Result struct {
@@ -224,7 +219,7 @@ func NormalizeQuery(input Query) (Query, error) {
 	if utf8.RuneCountInString(input.Search) > 200 {
 		return input, errors.New("search is too long")
 	}
-	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true, "cost_excluding_today": true}
+	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
 	if !validSort[input.SortBy] || (input.SortOrder != "" && input.SortOrder != "asc" && input.SortOrder != "desc") {
 		return input, errors.New("invalid account sort")
 	}
@@ -434,14 +429,12 @@ func finalizeFilterOptions(options map[string]map[string]string) map[string][]st
 func inventoryRow(instance *managedinstance.InstanceView, account managedinstance.InventoryItem, sources map[string]string) row {
 	item := itemFromInventory(instance, account, sources)
 	item.Requests, item.Tokens, item.Amount, item.Currency = account.Requests, account.Tokens, account.Cost, SanitizeText(account.CostUnit)
-	item.CostExcludingToday = account.CostExcludingToday
 	item.CollectionStatus = model.ManagedInstanceCollectionSucceeded
 	return row{item: item, doc: document(item)}
 }
 
 func outputRow(instance *managedinstance.InstanceView, output managedinstance.AccountOutputItem, sources map[string]string) row {
 	item := itemFromInventory(instance, output.Account, sources)
-	item.CostExcludingToday = output.Account.CostExcludingToday
 	if output.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
 		requests, tokens, amount := output.TotalRequests, output.TotalTokens, output.Amount
 		item.Requests, item.Tokens, item.Amount = &requests, &tokens, &amount
@@ -510,7 +503,6 @@ func document(item Item) map[string][]string {
 	putFloat("requests", item.Requests, 1)
 	putFloat("tokens", item.Tokens, 1)
 	putFloat("amount", item.Amount, 1)
-	putFloat("cost_excluding_today", item.CostExcludingToday, 1)
 	putInt("rpm", item.RPM)
 	putInt("active_sessions", item.ActiveSessions)
 	putFloat("utilization_5h", item.Utilization5H, 100)
@@ -753,8 +745,6 @@ func compareItems(left, right Item, field string) int {
 		return compareNumber(left.Tokens, right.Tokens)
 	case "amount":
 		return compareNumber(left.Amount, right.Amount)
-	case "cost_excluding_today":
-		return compareNumber(left.CostExcludingToday, right.CostExcludingToday)
 	case "last_activity_at":
 		return cmpInt64(left.LastActivityAt, right.LastActivityAt)
 	default:
@@ -792,7 +782,7 @@ func cmpInt64(left, right int64) int {
 }
 
 func summarize(rows []row) Summary {
-	result := Summary{Total: len(rows), Amounts: map[string]float64{}, CostsExcludingToday: map[string]float64{}}
+	result := Summary{Total: len(rows), Amounts: map[string]float64{}}
 	for _, candidate := range rows {
 		item := candidate.item
 		if item.Available == nil {
@@ -815,15 +805,7 @@ func summarize(rows []row) Summary {
 			}
 			result.Amounts[unit] += *item.Amount
 		}
-		if item.Platform == model.ManagedInstanceKindClaudeGateway {
-			result.CostExcludingTodayEligible++
-			if item.CostExcludingToday != nil {
-				result.CostExcludingTodaySamples++
-				result.CostsExcludingToday["usd"] += *item.CostExcludingToday
-			}
-		}
 	}
-	result.CostExcludingTodayPartial = result.CostExcludingTodaySamples > 0 && result.CostExcludingTodaySamples < result.CostExcludingTodayEligible
 	return result
 }
 
@@ -1030,8 +1012,6 @@ func FieldValue(item Item, field string) (any, bool) {
 		return item.Tokens, item.Tokens != nil
 	case "amount":
 		return item.Amount, item.Amount != nil
-	case "cost_excluding_today":
-		return item.CostExcludingToday, item.CostExcludingToday != nil
 	case "currency":
 		return item.Currency, item.Currency != ""
 	case "rpm":
@@ -1057,7 +1037,7 @@ func ValidateFields(fields []string) ([]string, error) {
 		"vendor_name": true, "vendor_email": true,
 		"type": true, "group": true, "status": true, "available": true, "rate_limited": true, "source_id": true,
 		"source_name": true, "created_at": true, "last_activity_at": true, "disabled_at": true, "expires_at": true,
-		"requests": true, "tokens": true, "amount": true, "cost_excluding_today": true, "currency": true, "rpm": true, "active_sessions": true,
+		"requests": true, "tokens": true, "amount": true, "currency": true, "rpm": true, "active_sessions": true,
 		"utilization_5h": true, "utilization_7d": true, "collection_status": true, "error_code": true,
 	}
 	seen := map[string]struct{}{}

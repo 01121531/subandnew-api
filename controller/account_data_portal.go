@@ -130,12 +130,6 @@ func portalSummary(result *managedaccount.Result, fields []string) gin.H {
 	if allowed["amount"] {
 		summary["amounts"] = result.Summary.Amounts
 	}
-	if allowed["cost_excluding_today"] {
-		summary["costs_excluding_today"] = result.Summary.CostsExcludingToday
-		summary["cost_excluding_today_eligible"] = result.Summary.CostExcludingTodayEligible
-		summary["cost_excluding_today_samples"] = result.Summary.CostExcludingTodaySamples
-		summary["cost_excluding_today_partial"] = result.Summary.CostExcludingTodayPartial
-	}
 	return summary
 }
 

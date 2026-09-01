@@ -62,10 +62,6 @@ export type PortalResult = {
     requests?: number
     tokens?: number
     amounts?: Record<string, number>
-    costs_excluding_today?: Record<string, number>
-    cost_excluding_today_eligible?: number
-    cost_excluding_today_samples?: number
-    cost_excluding_today_partial?: boolean
   }
   observed_at: string
   stale: boolean

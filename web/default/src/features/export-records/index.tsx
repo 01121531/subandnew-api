@@ -92,7 +92,6 @@ const EXPORT_KIND_OPTIONS = [
   ['', '全部类型'],
   ['usage_records', '使用记录'],
   ['accounts', '账号导出'],
-  ['account_costs', '账号历史消费'],
 ] as const
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
@@ -124,8 +123,6 @@ function ExportProgress({ item }: { item: UsageRecordExportTask }) {
           <span>{item.progress}%</span>
           <span className='text-muted-foreground'>
             {item.processed.toLocaleString()} / {item.total.toLocaleString()}
-            {item.retry_count > 0 &&
-              ` · 重试 ${item.retry_count.toLocaleString()} 次`}
           </span>
         </div>
         <Progress value={item.progress} className='h-1.5' />
@@ -138,12 +135,6 @@ function ExportProgress({ item }: { item: UsageRecordExportTask }) {
         {item.record_count.toLocaleString()} 条 · {formatBytes(item.file_size)}
         {item.warning_count > 0 && (
           <span className='text-warning'> · {item.warning_count} 条警告</span>
-        )}
-        {item.retry_count > 0 && (
-          <span className='text-muted-foreground'>
-            {' '}
-            · 重试 {item.retry_count.toLocaleString()} 次
-          </span>
         )}
       </div>
     )
@@ -194,21 +185,17 @@ function ExportActionButton({
 
 function ExportKindBadge({ item }: { item: UsageRecordExportTask }) {
   const accountExport = item.export_kind === 'accounts'
-  const accountCostExport = item.export_kind === 'account_costs'
-  let label = '使用记录 · CSV'
-  if (accountCostExport) label = '账号历史消费 · XLSX'
-  else if (accountExport) label = '账号导出 · XLSX'
   return (
     <Badge
       variant='outline'
       className={cn(
         'h-5 rounded px-1.5 text-[10px] font-medium',
-        accountExport || accountCostExport
+        accountExport
           ? 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/70 dark:bg-sky-950/40 dark:text-sky-300'
           : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/70 dark:bg-violet-950/40 dark:text-violet-300'
       )}
     >
-      {label}
+      {accountExport ? '账号导出 · XLSX' : '使用记录 · CSV'}
     </Badge>
   )
 }

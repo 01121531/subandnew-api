@@ -49,7 +49,6 @@ const FILTER_LABELS: Record<string, string> = {
   sort_by: '排序字段',
   sort_order: '排序方向',
   exact_total: '精确统计总数',
-  report_type: '报表类型',
 }
 
 const TIME_KEYS = new Set([
@@ -63,7 +62,6 @@ const EXPORT_PARAMETER_KEYS = new Set([
   'sort_by',
   'sort_order',
   'exact_total',
-  'report_type',
 ])
 
 const VALUE_LABELS: Record<string, Record<string, string>> = {
@@ -94,7 +92,6 @@ const VALUE_LABELS: Record<string, Record<string, string>> = {
   sort_by: { created_at: '时间', model: '模型', id: 'ID' },
   sort_order: { asc: '升序', desc: '降序' },
   exact_total: { true: '是', false: '否' },
-  report_type: { account_costs: '账号历史消费' },
 }
 
 type FilterEntry = {
@@ -163,7 +160,6 @@ function accountExportEntries(item: UsageRecordExportTask): FilterEntry[] {
   add('exclude_search', '排除搜索', snapshot.exclude_search)
   add('sort_by', '排序字段', snapshot.sort_by)
   add('sort_order', '排序方向', snapshot.sort_order)
-  add('report_type', '报表类型', snapshot.report_type)
   add('source', '数据来源', snapshot.source)
   add('selection_count', '账号数量', snapshot.selection_count)
   add('instance_count', '实例数量', snapshot.instance_count)
@@ -226,11 +222,10 @@ function FilterSection({
 }
 
 export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
-  const accountSelectionExport =
-    item.export_kind === 'accounts' || item.export_kind === 'account_costs'
-  const entries = accountSelectionExport
-    ? accountExportEntries(item)
-    : nonEmptyFilterEntries(item.filters)
+  const entries =
+    item.export_kind === 'accounts'
+      ? accountExportEntries(item)
+      : nonEmptyFilterEntries(item.filters)
   const timeEntries = entries.filter(({ key }) => TIME_KEYS.has(key))
   const parameterEntries = entries.filter(({ key }) =>
     EXPORT_PARAMETER_KEYS.has(key)
@@ -238,18 +233,13 @@ export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
   const conditionEntries = entries.filter(
     ({ key }) => !TIME_KEYS.has(key) && !EXPORT_PARAMETER_KEYS.has(key)
   )
-  const summary = accountSelectionExport
-    ? {
-        label: `${String(item.snapshot?.selection_count ?? item.record_count ?? 0)} 个账号`,
-        count: entries.length,
-      }
-    : getFilterSummary(item.filters)
-  let dialogTitle = '筛选条件详情'
-  if (item.export_kind === 'account_costs') {
-    dialogTitle = '账号历史消费导出详情'
-  } else if (item.export_kind === 'accounts') {
-    dialogTitle = '账号导出详情'
-  }
+  const summary =
+    item.export_kind === 'accounts'
+      ? {
+          label: `${String(item.snapshot?.selection_count ?? item.record_count ?? 0)} 个账号`,
+          count: entries.length,
+        }
+      : getFilterSummary(item.filters)
 
   return (
     <Dialog>
@@ -279,7 +269,11 @@ export function FilterDetailsDialog({ item }: { item: UsageRecordExportTask }) {
             <div className='bg-primary/10 text-primary flex size-8 items-center justify-center rounded-md'>
               <Filter className='size-4' />
             </div>
-            <DialogTitle>{dialogTitle}</DialogTitle>
+            <DialogTitle>
+              {item.export_kind === 'accounts'
+                ? '账号导出详情'
+                : '筛选条件详情'}
+            </DialogTitle>
             <ExportStatusBadge status={item.status} />
           </div>
           <DialogDescription>
