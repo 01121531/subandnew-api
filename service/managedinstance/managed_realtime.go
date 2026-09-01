@@ -3,6 +3,7 @@ package managedinstance
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
@@ -214,14 +215,19 @@ func latestManagedRPMState(instanceID int64) (ManagedRealtimeState, bool) {
 		return ManagedRealtimeState{}, false
 	}
 	var history model.ManagedRPMHistory
-	query := model.DB.Where("instance_id = ? AND sample_count > 0", instanceID).Order("bucket_start desc").Limit(1).Find(&history)
-	if query.Error != nil || query.RowsAffected == 0 || history.RPMLast < 0 {
+	query := model.DB.Where(
+		"instance_id = ? AND (sample_count > 0 OR today_cost_sample_count > 0 OR cost_7d_sample_count > 0 OR cost_30d_sample_count > 0)",
+		instanceID,
+	).Order("bucket_start desc").Limit(1).Find(&history)
+	if query.Error != nil || query.RowsAffected == 0 {
 		return ManagedRealtimeState{}, false
 	}
-	rpm := history.RPMLast
 	state := ManagedRealtimeState{
 		InstanceID: instanceID, ObservedAt: history.UpdatedAt, LastAttemptAt: history.UpdatedAt,
-		StreamStatus: "cached", Stale: true, RPM: supportedMetric(rpm, "request/min"),
+		StreamStatus: "cached", Stale: true, RPM: unsupportedMetric("request/min"),
+	}
+	if history.SampleCount > 0 && history.RPMLast >= 0 {
+		state.RPM = supportedMetric(history.RPMLast, "request/min")
 	}
 	if history.SuccessRateSampleCount > 0 && history.SuccessRateLast >= 0 && history.SuccessRateLast <= 1 {
 		state.SuccessRate = supportedMetric(history.SuccessRateLast, "ratio")
@@ -237,10 +243,7 @@ func latestManagedRPMState(instanceID int64) (ManagedRealtimeState, bool) {
 		state.ConcurrencyStatus = model.ManagedInstanceCollectionSucceeded
 		state.ConcurrencyObservedAt = history.UpdatedAt
 	}
-	if history.TodayCostSampleCount > 0 {
-		state.TodayCost = supportedMetric(history.TodayCostLast, "usd")
-		state.TodayCostObservedAt = history.UpdatedAt
-	}
+	loadLatestManagedCosts(instanceID, &state)
 	if history.AccountSampleCount > 0 {
 		state.AccountsAvailable = history.AccountsAvailableLast
 		state.AccountsTotal = history.AccountsTotalLast
@@ -252,6 +255,35 @@ func latestManagedRPMState(instanceID int64) (ManagedRealtimeState, bool) {
 		state.ActiveSessionsObservedAt = history.UpdatedAt
 	}
 	return state, true
+}
+
+func loadLatestManagedCosts(instanceID int64, state *ManagedRealtimeState) {
+	if state == nil {
+		return
+	}
+	now := common.GetTimestamp()
+	staleAfter := int64((5 * time.Minute) / time.Second)
+	load := func(sampleColumn string) (model.ManagedRPMHistory, bool) {
+		var history model.ManagedRPMHistory
+		query := model.DB.Where("instance_id = ? AND "+sampleColumn+" > 0", instanceID).
+			Order("bucket_start desc").Limit(1).Find(&history)
+		return history, query.Error == nil && query.RowsAffected > 0
+	}
+	if history, ok := load("today_cost_sample_count"); ok {
+		state.TodayCost = supportedMetric(history.TodayCostLast, "usd")
+		state.TodayCostObservedAt = history.UpdatedAt
+		state.TodayCostStale = now-history.UpdatedAt > staleAfter
+	}
+	if history, ok := load("cost_7d_sample_count"); ok {
+		state.Cost7D = supportedMetric(history.Cost7DLast, "usd")
+		state.Cost7DObservedAt = history.UpdatedAt
+		state.Cost7DStale = now-history.UpdatedAt > staleAfter
+	}
+	if history, ok := load("cost_30d_sample_count"); ok {
+		state.Cost30D = supportedMetric(history.Cost30DLast, "usd")
+		state.Cost30DObservedAt = history.UpdatedAt
+		state.Cost30DStale = now-history.UpdatedAt > staleAfter
+	}
 }
 
 func storeNewAPIRealtime(state ManagedRealtimeState) {

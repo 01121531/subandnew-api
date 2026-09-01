@@ -30,6 +30,10 @@ type ManagedRPMHistory struct {
 	ConcurrencyMaxSamples  int     `json:"concurrency_max_samples" gorm:"not null;default:0"`
 	TodayCostLast          float64 `json:"today_cost_last" gorm:"not null;default:0"`
 	TodayCostSampleCount   int     `json:"today_cost_sample_count" gorm:"not null;default:0"`
+	Cost7DLast             float64 `json:"cost_7d_last" gorm:"column:cost_7d_last;not null;default:0"`
+	Cost7DSampleCount      int     `json:"cost_7d_sample_count" gorm:"column:cost_7d_sample_count;not null;default:0"`
+	Cost30DLast            float64 `json:"cost_30d_last" gorm:"column:cost_30d_last;not null;default:0"`
+	Cost30DSampleCount     int     `json:"cost_30d_sample_count" gorm:"column:cost_30d_sample_count;not null;default:0"`
 	ActiveSessionsLast     int     `json:"active_sessions_last" gorm:"not null;default:0"`
 	ActiveSessionSamples   int     `json:"active_session_samples" gorm:"not null;default:0"`
 	CreatedAt              int64   `json:"created_at" gorm:"bigint;not null"`

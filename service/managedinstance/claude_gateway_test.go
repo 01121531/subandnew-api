@@ -197,11 +197,13 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	resetNewAPIRealtimeCacheForTest()
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	summaryRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
 			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"active","health_status":"cooldown","stats":{"rpm":5,"concurrent":1,"active_sessions":1,"cooldown":true}},{"id":"three","name":"three","status":"active","health_status":"unknown","stats":{"rpm":0,"cooldown":false}},{"id":"four","name":"four","status":"disabled","health_status":"failed","stats":{"rpm":0,"cooldown":false}}]}`)
 		case "/api/admin/oauth-accounts/today-summary":
+			summaryRequests++
 			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"total_cost_30d":320.5,"request_count":100}`)
 		case "/api/admin/overview":
 			require.Equal(t, "time", request.URL.Query().Get("slice"))
@@ -218,21 +220,39 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 17.0, *state.RPM.Value)
 	require.Equal(t, 3.0, *state.ConcurrencyUsed.Value)
-	require.Equal(t, 12.34567891, *state.TodayCost.Value)
-	require.Equal(t, 80.0, *state.Cost7D.Value)
-	require.Equal(t, 320.5, *state.Cost30D.Value)
-	require.False(t, state.TodayCostStale)
-	require.False(t, state.Cost7DStale)
-	require.False(t, state.Cost30DStale)
-	require.Positive(t, state.TodayCostObservedAt)
-	require.Equal(t, state.TodayCostObservedAt, state.Cost7DObservedAt)
-	require.Equal(t, state.TodayCostObservedAt, state.Cost30DObservedAt)
+	require.Nil(t, state.TodayCost.Value)
+	require.Zero(t, summaryRequests)
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 4, state.AccountsTotal)
 	require.Equal(t, 2, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 4)
+
+	costState, err := RefreshClaudeGatewayCosts(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 1, summaryRequests)
+	require.Equal(t, 12.34567891, *costState.TodayCost.Value)
+	require.Equal(t, 80.0, *costState.Cost7D.Value)
+	require.Equal(t, 320.5, *costState.Cost30D.Value)
+	require.False(t, costState.TodayCostStale)
+	require.False(t, costState.Cost7DStale)
+	require.False(t, costState.Cost30DStale)
+	require.Positive(t, costState.TodayCostObservedAt)
+	require.Equal(t, costState.TodayCostObservedAt, costState.Cost7DObservedAt)
+	require.Equal(t, costState.TodayCostObservedAt, costState.Cost30DObservedAt)
+
+	state, err = RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 1, summaryRequests, "10-second realtime refresh must reuse cached costs")
+	require.Equal(t, 12.34567891, *state.TodayCost.Value)
+	require.Equal(t, 80.0, *state.Cost7D.Value)
+	require.Equal(t, 320.5, *state.Cost30D.Value)
+	var history model.ManagedRPMHistory
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).Order("bucket_start desc").First(&history).Error)
+	require.Equal(t, 1, history.TodayCostSampleCount)
+	require.Equal(t, 1, history.Cost7DSampleCount)
+	require.Equal(t, 1, history.Cost30DSampleCount)
 }
 
 func TestRefreshClaudeGatewayRealtimePreservesEachFailedCost(t *testing.T) {
@@ -263,13 +283,13 @@ func TestRefreshClaudeGatewayRealtimePreservesEachFailedCost(t *testing.T) {
 	defer server.Close()
 	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
 
-	first, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	first, err := RefreshClaudeGatewayCosts(context.Background(), instance.Id)
 	require.NoError(t, err)
 	require.Zero(t, *first.TodayCost.Value)
 	require.Equal(t, 7.5, *first.Cost7D.Value)
 	require.Equal(t, 30.5, *first.Cost30D.Value)
 
-	partial, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	partial, err := RefreshClaudeGatewayCosts(context.Background(), instance.Id)
 	require.NoError(t, err)
 	require.Equal(t, 2.5, *partial.TodayCost.Value)
 	require.False(t, partial.TodayCostStale)
@@ -278,8 +298,9 @@ func TestRefreshClaudeGatewayRealtimePreservesEachFailedCost(t *testing.T) {
 	require.Equal(t, 30.5, *partial.Cost30D.Value)
 	require.True(t, partial.Cost30DStale)
 
-	failed, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
-	require.NoError(t, err)
+	failed, err := RefreshClaudeGatewayCosts(context.Background(), instance.Id)
+	require.Error(t, err)
+	require.False(t, failed.Stale, "cost failures must not mark realtime metrics stale")
 	require.Equal(t, 2.5, *failed.TodayCost.Value)
 	require.True(t, failed.TodayCostStale)
 	require.Equal(t, 7.5, *failed.Cost7D.Value)
@@ -312,15 +333,13 @@ func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {
 	require.Equal(t, 78.90123456, *summary.Cost.Value)
 }
 
-func TestClaudeGatewaySummaryUsesOfficialPresetCosts(t *testing.T) {
+func TestClaudeGatewaySummaryDoesNotDuplicateOfficialCostRequest(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/usage/keys":
 			writeProbeJSON(response, `{"items":[],"summary":{"total_keys":5,"total_requests":123,"total_tokens":456,"total_cost":999},"total":5}`)
-		case "/api/admin/oauth-accounts/today-summary":
-			writeProbeJSON(response, `{"total_cost":1.25,"total_cost_7d":7.5,"total_cost_30d":30.5,"request_count":8}`)
 		default:
 			http.NotFound(response, request)
 		}
@@ -333,17 +352,14 @@ func TestClaudeGatewaySummaryUsesOfficialPresetCosts(t *testing.T) {
 	localNow := time.Now().In(location)
 	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
 	dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Second)
-	for _, test := range []struct {
-		days int
-		cost float64
-	}{{days: 1, cost: 1.25}, {days: 7, cost: 7.5}, {days: 30, cost: 30.5}} {
+	for _, days := range []int{1, 7, 30} {
 		view, collectErr := CollectSummary(context.Background(), instance.Id, TimeWindow{
-			Start: dayStart.AddDate(0, 0, -(test.days - 1)).Unix(), End: dayEnd.Unix(), Timezone: location.String(),
+			Start: dayStart.AddDate(0, 0, -(days - 1)).Unix(), End: dayEnd.Unix(), Timezone: location.String(),
 		})
 		require.NoError(t, collectErr)
 		summary := view.Data.(*SummaryResult)
 		require.Equal(t, 123.0, *summary.Requests.Value)
 		require.Equal(t, 456.0, *summary.Tokens.Value)
-		require.Equal(t, test.cost, *summary.Cost.Value)
+		require.Equal(t, 999.0, *summary.Cost.Value)
 	}
 }

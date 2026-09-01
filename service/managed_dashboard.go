@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -22,8 +21,8 @@ import (
 
 const (
 	managedDashboardTimezone        = "Asia/Shanghai"
-	managedDashboardRefreshInterval = time.Minute
-	managedDashboardRetryInterval   = 15 * time.Second
+	managedDashboardRefreshInterval = 5 * time.Minute
+	managedDashboardStaleAfter      = 2 * managedDashboardRefreshInterval
 	managedDashboardCustomRetention = 30 * 24 * time.Hour
 )
 
@@ -94,8 +93,6 @@ var (
 	managedDashboardSlots         chan struct{}
 	managedDashboardHostSlots     = map[string]*managedInstanceOperationScopedSlot{}
 	managedDashboardInFlight      sync.Map
-	managedDashboardRetryMu       sync.Mutex
-	managedDashboardRetries       = map[int64]*time.Timer{}
 	managedDashboardSubscribersMu sync.RWMutex
 	managedDashboardSubscribers   = map[*managedDashboardSubscriber]struct{}{}
 	managedDashboardTopologyMu    sync.Mutex
@@ -191,7 +188,7 @@ func loadManagedDashboardSection(instanceID int64, dashboardRange ManagedDashboa
 	section.LastAttemptAt = snapshot.LastAttemptAt
 	section.LastAttemptStatus = snapshot.LastAttemptStatus
 	section.LastErrorCode = snapshot.LastErrorCode
-	section.Stale = snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed || snapshot.ObservedAt == 0 || common.GetTimestamp()-snapshot.ObservedAt > 120
+	section.Stale = snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed || snapshot.ObservedAt == 0 || common.GetTimestamp()-snapshot.ObservedAt > int64(managedDashboardStaleAfter/time.Second)
 	if snapshot.ObservedAt > 0 && strings.TrimSpace(snapshot.Payload) != "" {
 		var summary managedinstance.SummaryResult
 		if json.Unmarshal([]byte(snapshot.Payload), &summary) == nil {
@@ -264,7 +261,7 @@ func StartManagedDashboardCollector() {
 		managedDashboardCollectorWG.Add(1)
 		go func() {
 			defer managedDashboardCollectorWG.Done()
-			collectManagedDashboardPresets(collectorCtx)
+			collectManagedDashboardPresetsIfDue(collectorCtx)
 			ticker := time.NewTicker(managedDashboardRefreshInterval)
 			cleanupTicker := time.NewTicker(24 * time.Hour)
 			defer ticker.Stop()
@@ -292,12 +289,6 @@ func StopManagedDashboardCollector(ctx context.Context) error {
 		return nil
 	}
 	cancel()
-	managedDashboardRetryMu.Lock()
-	for instanceID, timer := range managedDashboardRetries {
-		timer.Stop()
-		delete(managedDashboardRetries, instanceID)
-	}
-	managedDashboardRetryMu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		managedDashboardCollectorWG.Wait()
@@ -312,6 +303,14 @@ func StopManagedDashboardCollector(ctx context.Context) error {
 }
 
 func collectManagedDashboardPresets(ctx context.Context) {
+	collectManagedDashboardPresetsWithFreshness(ctx, false)
+}
+
+func collectManagedDashboardPresetsIfDue(ctx context.Context) {
+	collectManagedDashboardPresetsWithFreshness(ctx, true)
+}
+
+func collectManagedDashboardPresetsWithFreshness(ctx context.Context, skipFresh bool) {
 	var instances []model.ManagedInstance
 	if err := model.DB.WithContext(ctx).Order("id ASC").Find(&instances).Error; err != nil {
 		if ctx.Err() != nil {
@@ -327,6 +326,9 @@ func collectManagedDashboardPresets(ctx context.Context) {
 			continue
 		}
 		ids = append(ids, instance.Id)
+		if skipFresh && managedDashboardPresetFresh(instance.Id, common.GetTimestamp()) {
+			continue
+		}
 		managedDashboardCollectorWG.Add(1)
 		go func() {
 			defer managedDashboardCollectorWG.Done()
@@ -338,11 +340,21 @@ func collectManagedDashboardPresets(ctx context.Context) {
 					return
 				}
 				logger.LogWarn(context.Background(), fmt.Sprintf("dashboard collection failed: instance=%d err=%v", instance.Id, err))
-				scheduleManagedDashboardRetry(ctx, instance.Id)
 			}
 		}()
 	}
 	publishManagedDashboardTopology(instances, ids)
+}
+
+func managedDashboardPresetFresh(instanceID, now int64) bool {
+	var snapshot model.ManagedDashboardSnapshot
+	query := model.DB.Select("observed_at", "last_attempt_at").
+		Where("instance_id = ? AND preset_days = ?", instanceID, 1).
+		Order("updated_at desc").Limit(1).Find(&snapshot)
+	if query.Error != nil || query.RowsAffected == 0 {
+		return false
+	}
+	return now-max(snapshot.ObservedAt, snapshot.LastAttemptAt) < int64(managedDashboardRefreshInterval/time.Second)
 }
 
 func publishManagedDashboardTopology(instances []model.ManagedInstance, ids []int64) {
@@ -363,31 +375,6 @@ func publishManagedDashboardTopology(instances []model.ManagedInstance, ids []in
 	managedDashboardTopologyKey = key
 	managedDashboardTopologyMu.Unlock()
 	publishManagedDashboardEvent(ManagedDashboardEvent{Type: "topology", InstanceIDs: ids})
-}
-
-func scheduleManagedDashboardRetry(ctx context.Context, instanceID int64) {
-	if ctx.Err() != nil {
-		return
-	}
-	managedDashboardRetryMu.Lock()
-	defer managedDashboardRetryMu.Unlock()
-	if _, exists := managedDashboardRetries[instanceID]; exists {
-		return
-	}
-	managedDashboardRetries[instanceID] = time.AfterFunc(managedDashboardRetryInterval, func() {
-		managedDashboardRetryMu.Lock()
-		delete(managedDashboardRetries, instanceID)
-		managedDashboardRetryMu.Unlock()
-		if ctx.Err() != nil {
-			return
-		}
-		if err := refreshManagedDashboardPresets(ctx, instanceID, 0); err != nil {
-			if errors.Is(err, managedinstance.ErrInvalidInstance) || errors.Is(err, managedinstance.ErrInstanceNotFound) || ctx.Err() != nil {
-				return
-			}
-			scheduleManagedDashboardRetry(ctx, instanceID)
-		}
-	})
 }
 
 func refreshManagedDashboardRange(ctx context.Context, instanceID int64, actorID int, dashboardRange ManagedDashboardRange) error {
@@ -447,20 +434,29 @@ func refreshManagedDashboardPresets(ctx context.Context, instanceID int64, actor
 		return err
 	}
 	observedAt := common.GetTimestamp()
+	var todaySummary *managedinstance.SummaryResult
 	for _, days := range managedDashboardPresetDays {
 		dashboardRange, _ := NormalizeManagedDashboardRange(days, 0, 0)
 		derived := deriveManagedDashboardSummary(summary, dashboardRange)
+		if days == 1 {
+			todaySummary = derived
+		}
 		if err := saveManagedDashboardSuccess(instanceID, dashboardRange, observedAt, derived); err != nil {
 			return err
 		}
 	}
-	cancelManagedDashboardRetry(instanceID)
+	recordManagedDashboardCost(ctx, instanceID, observedAt, todaySummary)
 	return nil
 }
 
 func refreshClaudeGatewayDashboardPresets(ctx context.Context, instanceID int64, actorID int) error {
 	observedAt := common.GetTimestamp()
 	var firstErr error
+	costState, costErr := managedinstance.RefreshClaudeGatewayCosts(ctx, instanceID)
+	publishManagedRealtimeState("rpm", costState)
+	if costErr != nil {
+		firstErr = costErr
+	}
 	recovered := false
 	for _, days := range managedDashboardPresetDays {
 		dashboardRange, _ := NormalizeManagedDashboardRange(days, 0, 0)
@@ -482,6 +478,9 @@ func refreshClaudeGatewayDashboardPresets(ctx context.Context, instanceID int64,
 			}
 			continue
 		}
+		if official := claudeGatewayPresetCost(costState, days); official != nil {
+			summary.Cost = *official
+		}
 		if err := saveManagedDashboardSuccess(instanceID, dashboardRange, observedAt, summary); err != nil {
 			return err
 		}
@@ -489,17 +488,38 @@ func refreshClaudeGatewayDashboardPresets(ctx context.Context, instanceID int64,
 	if firstErr != nil {
 		return firstErr
 	}
-	cancelManagedDashboardRetry(instanceID)
 	return nil
 }
 
-func cancelManagedDashboardRetry(instanceID int64) {
-	managedDashboardRetryMu.Lock()
-	if timer := managedDashboardRetries[instanceID]; timer != nil {
-		timer.Stop()
-		delete(managedDashboardRetries, instanceID)
+func claudeGatewayPresetCost(state managedinstance.ManagedRealtimeState, days int) *managedinstance.MetricSample {
+	switch days {
+	case 1:
+		if !state.TodayCostStale && state.TodayCost.Value != nil {
+			return &state.TodayCost
+		}
+	case 7:
+		if !state.Cost7DStale && state.Cost7D.Value != nil {
+			return &state.Cost7D
+		}
+	case 30:
+		if !state.Cost30DStale && state.Cost30D.Value != nil {
+			return &state.Cost30D
+		}
 	}
-	managedDashboardRetryMu.Unlock()
+	return nil
+}
+
+func recordManagedDashboardCost(ctx context.Context, instanceID, observedAt int64, summary *managedinstance.SummaryResult) {
+	if summary == nil || summary.Cost.Value == nil || summary.Cost.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
+		return
+	}
+	value := *summary.Cost.Value
+	if value < 0 {
+		return
+	}
+	if err := managedinstance.RecordManagedRealtimeHistorySample(ctx, instanceID, observedAt, managedinstance.ManagedRealtimeHistorySample{TodayCost: &value}); err != nil {
+		managedinstance.ReportManagedRealtimeHistoryWriteError(ctx, instanceID, err)
+	}
 }
 
 func collectAndSaveManagedDashboardRange(ctx context.Context, instanceID int64, actorID int, dashboardRange ManagedDashboardRange) error {

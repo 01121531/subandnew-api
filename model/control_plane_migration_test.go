@@ -136,7 +136,8 @@ func TestMigrateDBCreatesOnlyControlPlaneTablesOnFreshSQLite(t *testing.T) {
 	for _, column := range []string{
 		"accounts_available_last", "accounts_total_last", "account_sample_count",
 		"concurrency_used_last", "concurrency_max_last", "concurrency_sample_count", "concurrency_used_samples", "concurrency_max_samples",
-		"today_cost_last", "today_cost_sample_count", "active_sessions_last", "active_session_samples",
+		"today_cost_last", "today_cost_sample_count", "cost_7d_last", "cost_7d_sample_count",
+		"cost_30d_last", "cost_30d_sample_count", "active_sessions_last", "active_session_samples",
 	} {
 		require.Truef(t, db.Migrator().HasColumn(&ManagedRPMHistory{}, column), "managed_rpm_history.%s must exist", column)
 	}

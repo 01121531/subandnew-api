@@ -321,7 +321,7 @@ interface ManagedAccountSnapshotEvent {
   range_keys: string[]
 }
 
-export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour'
+export type ManagedInstanceRPMHistoryBucket = 'minute' | 'hour' | 'day'
 
 interface ManagedInstanceRPMHistoryPoint {
   timestamp: number
@@ -333,6 +333,9 @@ interface ManagedInstanceRPMHistoryPoint {
   accounts_available: number | null
   accounts_total: number | null
   account_samples: number
+  today_cost: number | null
+  today_cost_samples: number
+  today_cost_complete: boolean
 }
 
 export interface ManagedInstanceRPMHistory {

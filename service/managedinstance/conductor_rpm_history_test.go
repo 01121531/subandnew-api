@@ -178,15 +178,15 @@ func TestManagedRealtimeHistoryStoresAuxiliaryMetricsAndRealZero(t *testing.T) {
 	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
 	require.NoError(t, db.Create(&instance).Error)
 	start := int64(1_788_000_000)
-	rpm, used, maximum, cost := 10.0, 3.0, 20.0, 4.25
+	rpm, used, maximum, cost, cost7D, cost30D := 10.0, 3.0, 20.0, 4.25, 21.5, 88.75
 	available, total, sessions := 2, 5, 7
 	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, start+10, ManagedRealtimeHistorySample{
-		RPM: &rpm, ConcurrencyUsed: &used, ConcurrencyMax: &maximum, TodayCost: &cost,
+		RPM: &rpm, ConcurrencyUsed: &used, ConcurrencyMax: &maximum, TodayCost: &cost, Cost7D: &cost7D, Cost30D: &cost30D,
 		AccountsAvailable: &available, AccountsTotal: &total, ActiveSessions: &sessions,
 	}))
 	zero, zeroCost, zeroSessions := 0.0, 0.0, 0
 	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, start+20, ManagedRealtimeHistorySample{
-		RPM: &rpm, ConcurrencyUsed: &zero, ConcurrencyMax: &maximum, TodayCost: &zeroCost,
+		RPM: &rpm, ConcurrencyUsed: &zero, ConcurrencyMax: &maximum, TodayCost: &zeroCost, Cost7D: &zeroCost, Cost30D: &zeroCost,
 		AccountsAvailable: &available, AccountsTotal: &total, ActiveSessions: &zeroSessions,
 	}))
 
@@ -203,7 +203,14 @@ func TestManagedRealtimeHistoryStoresAuxiliaryMetricsAndRealZero(t *testing.T) {
 	require.Zero(t, *point.ActiveSessions)
 	require.Equal(t, 2, point.ConcurrencySamples)
 	require.Equal(t, 2, point.TodayCostSamples)
+	require.True(t, point.TodayCostComplete)
 	require.Equal(t, 2, point.ActiveSessionSamples)
+	var stored model.ManagedRPMHistory
+	require.NoError(t, db.Where("instance_id = ?", instance.Id).First(&stored).Error)
+	require.Zero(t, stored.Cost7DLast)
+	require.Zero(t, stored.Cost30DLast)
+	require.Equal(t, 2, stored.Cost7DSampleCount)
+	require.Equal(t, 2, stored.Cost30DSampleCount)
 }
 
 func TestManagedRealtimeHistoryDayBucketsUseShanghaiMidnight(t *testing.T) {
@@ -214,12 +221,36 @@ func TestManagedRealtimeHistoryDayBucketsUseShanghaiMidnight(t *testing.T) {
 	dayStart := time.Date(2026, 8, 28, 0, 0, 0, 0, location).Unix()
 	require.NoError(t, RecordManagedRPMSample(t.Context(), instance.Id, dayStart+60, 20))
 	require.NoError(t, RecordManagedRPMSample(t.Context(), instance.Id, dayStart+3600, 40))
+	earlyCost, finalCost := 2.5, 9.75
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, dayStart+120, ManagedRealtimeHistorySample{TodayCost: &earlyCost}))
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, dayStart+7200, ManagedRealtimeHistorySample{TodayCost: &finalCost}))
 
 	history, err := GetManagedRPMHistory(t.Context(), []int64{instance.Id}, ConductorRPMBucketDay, dayStart, dayStart+86399)
 	require.NoError(t, err)
 	require.Len(t, history.Points, 1)
 	require.Equal(t, dayStart, history.Points[0].Timestamp)
 	require.Equal(t, 30.0, history.Points[0].RPM)
+	require.Equal(t, finalCost, *history.Points[0].TodayCost)
+	require.True(t, history.Points[0].TodayCostComplete)
+}
+
+func TestLatestManagedRealtimeLoadsEachCostFromItsLatestSuccessfulSample(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := model.ManagedInstance{Name: "gateway-cost-cache", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
+	require.NoError(t, db.Create(&instance).Error)
+	now := time.Now().Unix()
+	todayOld, cost7D, cost30D := 1.0, 7.0, 30.0
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, now-120, ManagedRealtimeHistorySample{
+		TodayCost: &todayOld, Cost7D: &cost7D, Cost30D: &cost30D,
+	}))
+	todayLatest := 2.5
+	require.NoError(t, RecordManagedRealtimeHistorySample(t.Context(), instance.Id, now, ManagedRealtimeHistorySample{TodayCost: &todayLatest}))
+
+	state, ok := latestManagedRPMState(instance.Id)
+	require.True(t, ok)
+	require.Equal(t, todayLatest, *state.TodayCost.Value)
+	require.Equal(t, cost7D, *state.Cost7D.Value)
+	require.Equal(t, cost30D, *state.Cost30D.Value)
 }
 
 func TestManagedRPMHistoryRejectsGenericInstances(t *testing.T) {

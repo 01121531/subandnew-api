@@ -506,44 +506,11 @@ func (adapter claudeGatewayAdapter) Summary(ctx context.Context, connector *Conn
 	if err != nil {
 		return nil, err
 	}
-	cost := float64(usage.TotalCost)
-	if presetDays := claudeGatewayCurrentPresetDays(window, time.Now()); presetDays != 0 {
-		if official, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
-			var officialCost *claudeGatewayNumber
-			switch presetDays {
-			case 1:
-				officialCost = official.TotalCost
-			case 7:
-				officialCost = official.TotalCost7D
-			case 30:
-				officialCost = official.TotalCost30D
-			}
-			if officialCost != nil {
-				cost = float64(*officialCost)
-			}
-		}
-	}
 	return &SummaryResult{
 		Window: window, Requests: supportedMetric(float64(usage.TotalRequests), "request"),
-		Tokens: supportedMetric(float64(usage.TotalTokens), "token"), Cost: supportedMetric(cost, "usd"),
+		Tokens: supportedMetric(float64(usage.TotalTokens), "token"), Cost: supportedMetric(float64(usage.TotalCost), "usd"),
 		ErrorRate: unsupportedMetric("ratio"), Latency: unsupportedMetric("ms"),
 	}, nil
-}
-
-func claudeGatewayCurrentPresetDays(window TimeWindow, now time.Time) int {
-	location, _ := summaryLocation(window.Timezone)
-	localNow := now.In(location)
-	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
-	dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Second)
-	if window.End != dayEnd.Unix() {
-		return 0
-	}
-	for _, days := range []int{1, 7, 30} {
-		if window.Start == dayStart.AddDate(0, 0, -(days-1)).Unix() {
-			return days
-		}
-	}
-	return 0
 }
 
 func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (ManagedRealtimeState, error) {
@@ -603,19 +570,14 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		ActiveSessions: sessions, ActiveSessionsObservedAt: now, ConcurrencyObservedAt: now, Accounts: page.Items,
 	}
 	previous, _ := currentNewAPIRealtime(instanceID)
-	summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential)
-	var todayCost, cost7D, cost30D *claudeGatewayNumber
-	if summaryErr == nil {
-		todayCost, cost7D, cost30D = summary.TotalCost, summary.TotalCost7D, summary.TotalCost30D
-	}
-	state.TodayCost, state.TodayCostObservedAt, state.TodayCostStale = claudeGatewayRealtimeCost(
-		todayCost, previous.TodayCost, previous.TodayCostObservedAt, now,
+	state.TodayCost, state.TodayCostObservedAt, state.TodayCostStale = cachedClaudeGatewayCost(
+		previous.TodayCost, previous.TodayCostObservedAt, previous.TodayCostStale,
 	)
-	state.Cost7D, state.Cost7DObservedAt, state.Cost7DStale = claudeGatewayRealtimeCost(
-		cost7D, previous.Cost7D, previous.Cost7DObservedAt, now,
+	state.Cost7D, state.Cost7DObservedAt, state.Cost7DStale = cachedClaudeGatewayCost(
+		previous.Cost7D, previous.Cost7DObservedAt, previous.Cost7DStale,
 	)
-	state.Cost30D, state.Cost30DObservedAt, state.Cost30DStale = claudeGatewayRealtimeCost(
-		cost30D, previous.Cost30D, previous.Cost30DObservedAt, now,
+	state.Cost30D, state.Cost30DObservedAt, state.Cost30DStale = cachedClaudeGatewayCost(
+		previous.Cost30D, previous.Cost30DObservedAt, previous.Cost30DStale,
 	)
 	if overview, overviewErr := fetchClaudeGatewayOverview(ctx, connector, credential); overviewErr == nil {
 		state.SuccessRate = supportedMetric(float64(overview.KPIs.SuccessRate), "ratio")
@@ -630,6 +592,89 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	}
 	storeNewAPIRealtime(state)
 	return state, nil
+}
+
+func RefreshClaudeGatewayCosts(ctx context.Context, instanceID int64) (ManagedRealtimeState, error) {
+	lockValue, _ := newAPIRealtimeRefreshLocks.LoadOrStore(instanceID, &sync.Mutex{})
+	refreshLock := lockValue.(*sync.Mutex)
+	refreshLock.Lock()
+	defer refreshLock.Unlock()
+
+	previous, _ := currentNewAPIRealtime(instanceID)
+	instance, _, connector, credential, err := observationClient(instanceID)
+	if err != nil {
+		state := storeClaudeGatewayCostFailure(instanceID, previous)
+		return state, err
+	}
+	if instance.Kind != model.ManagedInstanceKindClaudeGateway {
+		return ManagedRealtimeState{}, ErrUnsupportedCapability
+	}
+	summary, err := fetchClaudeGatewayTodaySummary(ctx, connector, credential)
+	if err != nil && ShouldRecoverDataConnection(err) && RecoverDataConnection(ctx, instanceID, 0) == nil {
+		_, _, connector, credential, err = observationClient(instanceID)
+		if err == nil {
+			summary, err = fetchClaudeGatewayTodaySummary(ctx, connector, credential)
+		}
+	}
+	if err != nil {
+		state := storeClaudeGatewayCostFailure(instanceID, previous)
+		return state, err
+	}
+
+	now := common.GetTimestamp()
+	state := previous
+	state.InstanceID = instanceID
+	state.LastAttemptAt = now
+	state.TodayCost, state.TodayCostObservedAt, state.TodayCostStale = claudeGatewayRealtimeCost(
+		summary.TotalCost, previous.TodayCost, previous.TodayCostObservedAt, now,
+	)
+	state.Cost7D, state.Cost7DObservedAt, state.Cost7DStale = claudeGatewayRealtimeCost(
+		summary.TotalCost7D, previous.Cost7D, previous.Cost7DObservedAt, now,
+	)
+	state.Cost30D, state.Cost30DObservedAt, state.Cost30DStale = claudeGatewayRealtimeCost(
+		summary.TotalCost30D, previous.Cost30D, previous.Cost30DObservedAt, now,
+	)
+	storeNewAPIRealtime(state)
+	sample := ManagedRealtimeHistorySample{}
+	if !state.TodayCostStale {
+		sample.TodayCost = metricHistoryValue(state.TodayCost)
+	}
+	if !state.Cost7DStale {
+		sample.Cost7D = metricHistoryValue(state.Cost7D)
+	}
+	if !state.Cost30DStale {
+		sample.Cost30D = metricHistoryValue(state.Cost30D)
+	}
+	if sample.TodayCost != nil || sample.Cost7D != nil || sample.Cost30D != nil {
+		if recordErr := RecordManagedRealtimeHistorySample(ctx, instanceID, now, sample); recordErr != nil {
+			ReportManagedRealtimeHistoryWriteError(ctx, instanceID, recordErr)
+			return state, recordErr
+		}
+	}
+	return state, nil
+}
+
+func cachedClaudeGatewayCost(value MetricSample, observedAt int64, stale bool) (MetricSample, int64, bool) {
+	if value.CollectionStatus == model.ManagedInstanceCollectionSucceeded && value.Value != nil {
+		return value, observedAt, stale
+	}
+	return unsupportedMetric("usd"), 0, true
+}
+
+func storeClaudeGatewayCostFailure(instanceID int64, previous ManagedRealtimeState) ManagedRealtimeState {
+	previous.InstanceID = instanceID
+	previous.LastAttemptAt = common.GetTimestamp()
+	previous.TodayCost, previous.TodayCostObservedAt, previous.TodayCostStale = cachedClaudeGatewayCost(
+		previous.TodayCost, previous.TodayCostObservedAt, true,
+	)
+	previous.Cost7D, previous.Cost7DObservedAt, previous.Cost7DStale = cachedClaudeGatewayCost(
+		previous.Cost7D, previous.Cost7DObservedAt, true,
+	)
+	previous.Cost30D, previous.Cost30DObservedAt, previous.Cost30DStale = cachedClaudeGatewayCost(
+		previous.Cost30D, previous.Cost30DObservedAt, true,
+	)
+	storeNewAPIRealtime(previous)
+	return previous
 }
 
 func claudeGatewayRealtimeCost(value *claudeGatewayNumber, previous MetricSample, previousObservedAt, now int64) (MetricSample, int64, bool) {

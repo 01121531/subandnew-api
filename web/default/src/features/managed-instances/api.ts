@@ -253,12 +253,14 @@ export async function refreshManagedRealtime(
 export async function getManagedInstanceRPMHistory(
   ids: number[],
   bucket: ManagedInstanceRPMHistoryBucket,
-  options?: { silent?: boolean }
+  options?: { silent?: boolean; start?: number; end?: number }
 ): Promise<ApiResponse<ManagedInstanceRPMHistory>> {
   const params = new URLSearchParams({
     ids: ids.join(','),
     bucket,
   })
+  if (options?.start) params.set('start', String(options.start))
+  if (options?.end) params.set('end', String(options.end))
   const response = await api.get(
     `/api/managed-instances/realtime-history?${params.toString()}`,
     {

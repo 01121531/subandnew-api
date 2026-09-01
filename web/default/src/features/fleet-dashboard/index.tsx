@@ -106,6 +106,11 @@ import type {
 import { useManagedDashboardEvents } from '../managed-instances/use-dashboard-events'
 import { useManagedInstanceRealtimeEvents } from '../managed-instances/use-realtime-events'
 import {
+  buildCostTrend,
+  isCostTrendPartial,
+  type CostTrendMode,
+} from './cost-trend'
+import {
   createFleetPresetRange,
   FLEET_TIME_PRESETS,
   resolveFleetTimeRange,
@@ -165,6 +170,9 @@ type RPMHistoryData = {
   accounts_available: number | null
   accounts_total: number | null
   account_samples: number
+  today_cost: number | null
+  today_cost_samples: number
+  today_cost_complete: boolean
 }
 
 type HealthData = {
@@ -175,6 +183,7 @@ type HealthData = {
 }
 
 const RPM_HISTORY_REFRESH_MS = 10_000
+const COST_HISTORY_REFRESH_MS = 5 * 60_000
 const DASHBOARD_ERROR_RETRY_MS = 15_000
 const DASHBOARD_RETRY_COUNT = 3
 const FLEET_FAMILIES: readonly FleetFamily[] = [
@@ -288,6 +297,7 @@ type FleetDashboardPreferences = {
   timeRange: FleetTimeRange
   trendMetric: TrendMetricKey
   consumptionMetric: MetricKey
+  costTrendMode: CostTrendMode
 }
 
 function defaultDashboardPreferences(): FleetDashboardPreferences {
@@ -302,6 +312,7 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
     timeRange: createFleetPresetRange(7),
     trendMetric: 'requests',
     consumptionMetric: 'requests',
+    costTrendMode: 'daily',
   }
 }
 
@@ -322,6 +333,10 @@ function isTrendMetricKey(value: unknown): value is TrendMetricKey {
   )
 }
 
+function isCostTrendMode(value: unknown): value is CostTrendMode {
+  return value === 'daily' || value === 'cumulative'
+}
+
 function isFleetPresetDays(value: unknown): value is FleetPresetDays {
   return FLEET_TIME_PRESETS.some((preset) => preset.days === value)
 }
@@ -339,6 +354,7 @@ function readDashboardPreferences(): FleetDashboardPreferences {
       metric?: unknown
       trendMetric?: unknown
       consumptionMetric?: unknown
+      costTrendMode?: unknown
     }
     const presetDays = isFleetPresetDays(parsed.timeRange?.presetDays)
       ? parsed.timeRange.presetDays
@@ -387,6 +403,9 @@ function readDashboardPreferences(): FleetDashboardPreferences {
       consumptionMetric: isMetricKey(parsed.consumptionMetric)
         ? parsed.consumptionMetric
         : legacyMetric,
+      costTrendMode: isCostTrendMode(parsed.costTrendMode)
+        ? parsed.costTrendMode
+        : fallback.costTrendMode,
     }
   } catch {
     return fallback
@@ -493,6 +512,9 @@ export function FleetDashboard() {
   const [consumptionMetric, setConsumptionMetric] = useState<MetricKey>(
     initialPreferences.consumptionMetric
   )
+  const [costTrendMode, setCostTrendMode] = useState<CostTrendMode>(
+    initialPreferences.costTrendMode
+  )
   const [rpmHistoryBucket, setRPMHistoryBucket] =
     useState<ManagedInstanceRPMHistoryBucket>('minute')
   const [refreshRequestedAt, setRefreshRequestedAt] = useState(0)
@@ -500,11 +522,12 @@ export function FleetDashboard() {
   let effectiveTrendMetric = trendMetric
   if (
     family === 'claude_gateway' &&
+    trendMetric !== 'quota' &&
     trendMetric !== 'rpm' &&
     trendMetric !== 'success_rate' &&
     trendMetric !== 'accounts'
   ) {
-    effectiveTrendMetric = 'rpm'
+    effectiveTrendMetric = 'quota'
   } else if (
     family === 'conductor' &&
     (trendMetric === 'requests' ||
@@ -521,6 +544,8 @@ export function FleetDashboard() {
   }
   const effectiveConsumptionMetric =
     family === 'conductor' ? 'quota' : consumptionMetric
+  const isClaudeCostTrend =
+    family === 'claude_gateway' && effectiveTrendMetric === 'quota'
 
   const instancesQuery = useQuery({
     queryKey: ['fleet-dashboard-instances'],
@@ -575,6 +600,15 @@ export function FleetDashboard() {
       end: Math.floor(resolved.end.getTime() / 1000),
     }
   }, [timeRange])
+  const costHistoryRange = useMemo(() => {
+    const resolved = resolveFleetTimeRange(timeRange)
+    const end = Math.floor(resolved.end.getTime() / 1000)
+    const requestedStart = Math.floor(resolved.start.getTime() / 1000)
+    return {
+      start: Math.max(requestedStart, end - (31 * 24 * 60 * 60 - 1)),
+      end,
+    }
+  }, [timeRange])
   const dashboardEvents = useManagedDashboardEvents(instanceIDs)
   const dashboardQuery = useQuery({
     queryKey: [
@@ -597,25 +631,38 @@ export function FleetDashboard() {
     queryKey: [
       'fleet-dashboard-rpm-history',
       rpmHistoryInstanceIDs.join(','),
-      rpmHistoryBucket,
+      isClaudeCostTrend ? 'day' : rpmHistoryBucket,
+      isClaudeCostTrend ? costHistoryRange.start : 0,
+      isClaudeCostTrend ? costHistoryRange.end : 0,
     ],
     queryFn: () =>
-      getManagedInstanceRPMHistory(rpmHistoryInstanceIDs, rpmHistoryBucket, {
-        silent: true,
-      }),
+      getManagedInstanceRPMHistory(
+        rpmHistoryInstanceIDs,
+        isClaudeCostTrend ? 'day' : rpmHistoryBucket,
+        {
+          silent: true,
+          start: isClaudeCostTrend ? costHistoryRange.start : undefined,
+          end: isClaudeCostTrend ? costHistoryRange.end : undefined,
+        }
+      ),
     enabled:
       (effectiveTrendMetric === 'rpm' ||
         effectiveTrendMetric === 'success_rate' ||
-        effectiveTrendMetric === 'accounts') &&
+        effectiveTrendMetric === 'accounts' ||
+        isClaudeCostTrend) &&
       rpmHistoryInstanceIDs.length > 0,
     placeholderData: keepPreviousData,
     retry: DASHBOARD_RETRY_COUNT,
     retryDelay,
-    staleTime: RPM_HISTORY_REFRESH_MS / 2,
-    refetchInterval: (query) =>
-      query.state.status === 'error'
-        ? DASHBOARD_ERROR_RETRY_MS
-        : RPM_HISTORY_REFRESH_MS,
+    staleTime:
+      (isClaudeCostTrend ? COST_HISTORY_REFRESH_MS : RPM_HISTORY_REFRESH_MS) /
+      2,
+    refetchInterval: (query) => {
+      if (query.state.status === 'error') return DASHBOARD_ERROR_RETRY_MS
+      return isClaudeCostTrend
+        ? COST_HISTORY_REFRESH_MS
+        : RPM_HISTORY_REFRESH_MS
+    },
     refetchIntervalInBackground: true,
   })
   const rows = useMemo<InstanceMetricRow[]>(
@@ -673,21 +720,21 @@ export function FleetDashboard() {
           accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
           todayCost,
           todayCostStale: usesRealtimeCosts
-            ? Boolean(realtime?.today_cost_stale || realtime?.stale)
+            ? Boolean(realtime?.today_cost_stale)
             : Boolean(todaySection?.stale),
           cost7D: usesRealtimeCosts ? metricValue(realtime?.cost_7d) : null,
           cost7DObservedAt: usesRealtimeCosts
             ? (realtime?.cost_7d_observed_at ?? 0)
             : 0,
           cost7DStale: usesRealtimeCosts
-            ? Boolean(realtime?.cost_7d_stale || realtime?.stale)
+            ? Boolean(realtime?.cost_7d_stale)
             : false,
           cost30D: usesRealtimeCosts ? metricValue(realtime?.cost_30d) : null,
           cost30DObservedAt: usesRealtimeCosts
             ? (realtime?.cost_30d_observed_at ?? 0)
             : 0,
           cost30DStale: usesRealtimeCosts
-            ? Boolean(realtime?.cost_30d_stale || realtime?.stale)
+            ? Boolean(realtime?.cost_30d_stale)
             : false,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
@@ -828,11 +875,28 @@ export function FleetDashboard() {
         })),
     [effectiveConsumptionMetric, rows]
   )
+  const claudeCostTrendData = useMemo<DailyUsageData[]>(() => {
+    if (!isClaudeCostTrend) return []
+    return buildCostTrend(
+      rpmHistoryQuery.data?.data.points ?? [],
+      costTrendMode
+    )
+  }, [costTrendMode, isClaudeCostTrend, rpmHistoryQuery.data])
+  const costTrendPartial = useMemo(() => {
+    if (!isClaudeCostTrend || !rpmHistoryQuery.data) return false
+    return isCostTrendPartial(
+      rpmHistoryQuery.data.data.points,
+      rpmHistoryQuery.data.data.start,
+      rpmHistoryQuery.data.data.end
+    )
+  }, [isClaudeCostTrend, rpmHistoryQuery.data])
   const dailyUsageData = useMemo<DailyUsageData[]>(() => {
+    if (isClaudeCostTrend) return claudeCostTrendData
     if (
       effectiveTrendMetric === 'rpm' ||
       effectiveTrendMetric === 'success_rate' ||
-      effectiveTrendMetric === 'accounts'
+      effectiveTrendMetric === 'accounts' ||
+      isClaudeCostTrend
     ) {
       return []
     }
@@ -849,16 +913,22 @@ export function FleetDashboard() {
     return [...values.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, value]) => ({ date, value }))
-  }, [effectiveTrendMetric, rows])
+  }, [claudeCostTrendData, effectiveTrendMetric, isClaudeCostTrend, rows])
   const dailyUsageLoading =
     dailyUsageData.length === 0 &&
-    (dashboardQuery.isPending ||
-      rows.some((row) => !row.collected && row.lastAttemptStatus !== 'failed'))
+    (isClaudeCostTrend
+      ? rpmHistoryQuery.isPending
+      : dashboardQuery.isPending ||
+        rows.some(
+          (row) => !row.collected && row.lastAttemptStatus !== 'failed'
+        ))
   const dailyUsageError =
     !dailyUsageLoading &&
     dailyUsageData.length === 0 &&
-    (dashboardQuery.isError ||
-      rows.some((row) => row.lastAttemptStatus === 'failed'))
+    (isClaudeCostTrend
+      ? rpmHistoryQuery.isError
+      : dashboardQuery.isError ||
+        rows.some((row) => row.lastAttemptStatus === 'failed'))
   const connectionFailed =
     dashboardQuery.isError ||
     rows.some((row) => row.lastAttemptStatus === 'failed')
@@ -938,16 +1008,33 @@ export function FleetDashboard() {
         metric: consumptionMetric,
         trendMetric,
         consumptionMetric,
+        costTrendMode,
       })
     )
-  }, [consumptionMetric, family, selectedInstances, timeRange, trendMetric])
+  }, [
+    consumptionMetric,
+    costTrendMode,
+    family,
+    selectedInstances,
+    timeRange,
+    trendMetric,
+  ])
 
   const lastObservedAt = Math.max(0, ...rows.map((row) => row.observedAt))
+  const latestCostObservedAt = Math.max(
+    0,
+    ...rows.map((row) => row.todayObservedAt)
+  )
   const refetchInstances = instancesQuery.refetch
+  const refetchHistory = rpmHistoryQuery.refetch
 
   useEffect(() => {
     if (dashboardEvents.topologyRevision > 0) void refetchInstances()
   }, [dashboardEvents.topologyRevision, refetchInstances])
+
+  useEffect(() => {
+    if (isClaudeCostTrend && latestCostObservedAt > 0) void refetchHistory()
+  }, [isClaudeCostTrend, latestCostObservedAt, refetchHistory])
 
   useEffect(() => {
     if (
@@ -978,7 +1065,8 @@ export function FleetDashboard() {
     if (
       effectiveTrendMetric === 'rpm' ||
       effectiveTrendMetric === 'success_rate' ||
-      effectiveTrendMetric === 'accounts'
+      effectiveTrendMetric === 'accounts' ||
+      isClaudeCostTrend
     ) {
       void rpmHistoryQuery.refetch()
     }
@@ -1042,6 +1130,9 @@ export function FleetDashboard() {
           dailyUsageData={dailyUsageData}
           dailyUsageLoading={dailyUsageLoading}
           dailyUsageError={dailyUsageError}
+          costTrendMode={costTrendMode}
+          onCostTrendModeChange={setCostTrendMode}
+          costTrendPartial={costTrendPartial}
           healthRate={healthRate}
           coverage={coverage}
           metricCoverage={metricCoverage}
@@ -1104,7 +1195,7 @@ export function FleetDashboard() {
                 />
                 <span className='min-w-0 break-words'>
                   {t('Auto-refreshing every {{seconds}}s', {
-                    seconds: 60,
+                    seconds: 300,
                   })}
                 </span>
               </span>
@@ -1163,6 +1254,9 @@ type DashboardContentProps = {
   dailyUsageData: DailyUsageData[]
   dailyUsageLoading: boolean
   dailyUsageError: boolean
+  costTrendMode: CostTrendMode
+  onCostTrendModeChange: (mode: CostTrendMode) => void
+  costTrendPartial: boolean
   healthRate: number
   coverage: number
   metricCoverage: number
@@ -1193,13 +1287,23 @@ function DashboardContent(props: DashboardContentProps) {
         data={props.dailyUsageData}
         loading={props.dailyUsageLoading}
         error={props.dailyUsageError}
+        costTrendMode={props.costTrendMode}
+        onCostTrendModeChange={props.onCostTrendModeChange}
+        costTrendPartial={props.costTrendPartial}
         onMetricChange={props.onTrendMetricChange}
         rpmHistoryBucket={props.rpmHistoryBucket}
         onRPMHistoryBucketChange={props.onRPMHistoryBucketChange}
         rpmHistoryData={props.rpmHistoryData}
         rpmHistoryLoading={props.rpmHistoryLoading}
         rpmHistoryError={props.rpmHistoryError}
-        observedAt={observedAt}
+        observedAt={
+          props.family === 'claude_gateway' && props.trendMetric === 'quota'
+            ? Math.max(
+                0,
+                ...props.rpmHistoryData.map((point) => point.timestamp)
+              )
+            : observedAt
+        }
       />
       <section className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]'>
         <ConsumptionPanel
@@ -1222,6 +1326,9 @@ function DailyUsagePanel(props: {
   data: DailyUsageData[]
   loading: boolean
   error: boolean
+  costTrendMode: CostTrendMode
+  onCostTrendModeChange: (mode: CostTrendMode) => void
+  costTrendPartial: boolean
   onMetricChange: (metric: TrendMetricKey) => void
   rpmHistoryBucket: ManagedInstanceRPMHistoryBucket
   onRPMHistoryBucketChange: (bucket: ManagedInstanceRPMHistoryBucket) => void
@@ -1234,6 +1341,8 @@ function DailyUsagePanel(props: {
   const isRPM = props.metric === 'rpm'
   const isSuccessRate = props.metric === 'success_rate'
   const isAccounts = props.metric === 'accounts'
+  const isClaudeCost =
+    props.family === 'claude_gateway' && props.metric === 'quota'
   const isRealtimeHistory = isRPM || isSuccessRate || isAccounts
   const usageMetric: MetricKey | null = isRealtimeHistory
     ? null
@@ -1272,7 +1381,13 @@ function DailyUsagePanel(props: {
     realtimeChartConfig = accountChartConfig
   }
   let subtitle = t('Daily totals in the selected period')
-  if (isRPM) {
+  if (isClaudeCost) {
+    subtitle = t(
+      props.costTrendMode === 'daily'
+        ? 'Last successful consumption total for each China Standard Time day'
+        : 'Running consumption total in the selected period'
+    )
+  } else if (isRPM) {
     subtitle =
       props.rpmHistoryBucket === 'minute'
         ? t('Average RPM per minute over the last 60 minutes')
@@ -1292,7 +1407,7 @@ function DailyUsagePanel(props: {
   if (props.family === 'conductor') {
     metricOptions = ['quota', 'rpm']
   } else if (props.family === 'claude_gateway') {
-    metricOptions = ['rpm', 'success_rate', 'accounts']
+    metricOptions = ['quota', 'rpm', 'success_rate', 'accounts']
   } else {
     metricOptions.push('rpm')
   }
@@ -1303,7 +1418,9 @@ function DailyUsagePanel(props: {
     return t(metricLabel(value, props.family))
   }
   let panelTitle = t('Daily usage trend')
-  if (isSuccessRate) {
+  if (isClaudeCost) {
+    panelTitle = t('Consumption trend')
+  } else if (isSuccessRate) {
     panelTitle = t('Success rate trend')
   } else if (isAccounts) {
     panelTitle = t('Account count trend')
@@ -1327,6 +1444,13 @@ function DailyUsagePanel(props: {
           <p className='text-muted-foreground mt-1 text-sm break-words'>
             {subtitle}
           </p>
+          {isClaudeCost && props.costTrendPartial && (
+            <p className='text-warning mt-1 text-xs break-words'>
+              {t(
+                'Some dates have no consumption samples and are not counted as zero'
+              )}
+            </p>
+          )}
         </div>
         <div className='grid w-full gap-2 md:flex md:w-auto md:flex-wrap md:items-center md:justify-end'>
           <NativeSelect
@@ -1352,6 +1476,45 @@ function DailyUsagePanel(props: {
               onChange={props.onMetricChange}
             />
           </div>
+          {isClaudeCost && (
+            <>
+              <NativeSelect
+                className='w-full md:hidden [&_select]:h-11'
+                name='dashboard-cost-trend-mode'
+                value={props.costTrendMode}
+                aria-label={t('Consumption trend')}
+                onChange={(event) =>
+                  props.onCostTrendModeChange(
+                    event.target.value as CostTrendMode
+                  )
+                }
+              >
+                {(['daily', 'cumulative'] as const).map((option) => (
+                  <NativeSelectOption key={option} value={option}>
+                    {t(
+                      option === 'daily'
+                        ? 'Daily consumption'
+                        : 'Cumulative consumption'
+                    )}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <div className='hidden md:block'>
+                <SegmentedControl
+                  value={props.costTrendMode}
+                  options={['daily', 'cumulative']}
+                  getLabel={(value) =>
+                    t(
+                      value === 'daily'
+                        ? 'Daily consumption'
+                        : 'Cumulative consumption'
+                    )
+                  }
+                  onChange={props.onCostTrendModeChange}
+                />
+              </div>
+            </>
+          )}
           {isRealtimeHistory && (
             <>
               <NativeSelect
@@ -1644,7 +1807,15 @@ function DailyUsagePanel(props: {
               <Line
                 type='monotone'
                 dataKey='value'
-                name={t(metricLabel(usageMetric, props.family))}
+                name={
+                  isClaudeCost
+                    ? t(
+                        props.costTrendMode === 'daily'
+                          ? 'Daily consumption'
+                          : 'Cumulative consumption'
+                      )
+                    : t(metricLabel(usageMetric, props.family))
+                }
                 stroke='var(--color-value)'
                 strokeWidth={2.25}
                 dot={props.data.length <= 14}

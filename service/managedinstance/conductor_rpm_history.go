@@ -45,6 +45,7 @@ type ConductorRPMHistoryPoint struct {
 	ConcurrencySamples   int      `json:"concurrency_samples"`
 	TodayCost            *float64 `json:"today_cost"`
 	TodayCostSamples     int      `json:"today_cost_samples"`
+	TodayCostComplete    bool     `json:"today_cost_complete"`
 	ActiveSessions       *int     `json:"active_sessions"`
 	ActiveSessionSamples int      `json:"active_session_samples"`
 	RPMComplete          bool     `json:"-"`
@@ -127,6 +128,8 @@ type ManagedRealtimeHistorySample struct {
 	ConcurrencyUsed   *float64
 	ConcurrencyMax    *float64
 	TodayCost         *float64
+	Cost7D            *float64
+	Cost30D           *float64
 	ActiveSessions    *int
 }
 
@@ -148,6 +151,8 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 	hasConcurrencyUsed := sample.ConcurrencyUsed != nil && *sample.ConcurrencyUsed >= 0
 	hasConcurrencyMax := sample.ConcurrencyMax != nil && *sample.ConcurrencyMax >= 0
 	hasTodayCost := sample.TodayCost != nil && *sample.TodayCost >= 0
+	hasCost7D := sample.Cost7D != nil && *sample.Cost7D >= 0
+	hasCost30D := sample.Cost30D != nil && *sample.Cost30D >= 0
 	hasActiveSessions := sample.ActiveSessions != nil && *sample.ActiveSessions >= 0
 	if sample.RPM != nil && !hasRPM || sample.RPMCapacity != nil && !hasCapacity || sample.SuccessRate != nil && !hasSuccessRate {
 		return ErrInvalidInstance
@@ -160,10 +165,10 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 	if sample.ConcurrencyUsed != nil && !hasConcurrencyUsed || sample.ConcurrencyMax != nil && !hasConcurrencyMax {
 		return ErrInvalidInstance
 	}
-	if sample.TodayCost != nil && !hasTodayCost || sample.ActiveSessions != nil && !hasActiveSessions {
+	if sample.TodayCost != nil && !hasTodayCost || sample.Cost7D != nil && !hasCost7D || sample.Cost30D != nil && !hasCost30D || sample.ActiveSessions != nil && !hasActiveSessions {
 		return ErrInvalidInstance
 	}
-	if !hasRPM && !hasCapacity && !hasSuccessRate && !hasAccounts && !hasConcurrencyUsed && !hasConcurrencyMax && !hasTodayCost && !hasActiveSessions {
+	if !hasRPM && !hasCapacity && !hasSuccessRate && !hasAccounts && !hasConcurrencyUsed && !hasConcurrencyMax && !hasTodayCost && !hasCost7D && !hasCost30D && !hasActiveSessions {
 		return ErrInvalidInstance
 	}
 	if hasSuccessRate && sample.SuccessRateWeight <= 0 {
@@ -208,6 +213,14 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 		if hasTodayCost {
 			updates["today_cost_last"] = *sample.TodayCost
 			updates["today_cost_sample_count"] = gorm.Expr("today_cost_sample_count + 1")
+		}
+		if hasCost7D {
+			updates["cost_7d_last"] = *sample.Cost7D
+			updates["cost_7d_sample_count"] = gorm.Expr("cost_7d_sample_count + 1")
+		}
+		if hasCost30D {
+			updates["cost_30d_last"] = *sample.Cost30D
+			updates["cost_30d_sample_count"] = gorm.Expr("cost_30d_sample_count + 1")
 		}
 		if hasActiveSessions {
 			updates["active_sessions_last"] = *sample.ActiveSessions
@@ -260,6 +273,14 @@ func recordManagedRealtimeSample(ctx context.Context, instanceID int64, observed
 	if hasTodayCost {
 		history.TodayCostLast = *sample.TodayCost
 		history.TodayCostSampleCount = 1
+	}
+	if hasCost7D {
+		history.Cost7DLast = *sample.Cost7D
+		history.Cost7DSampleCount = 1
+	}
+	if hasCost30D {
+		history.Cost30DLast = *sample.Cost30D
+		history.Cost30DSampleCount = 1
 	}
 	if hasActiveSessions {
 		history.ActiveSessionsLast = *sample.ActiveSessions
@@ -488,6 +509,7 @@ func aggregateConductorRPMHistory(rows []model.ManagedRPMHistory, bucket string,
 			point.ConcurrencySamples = auxiliary.concurrencySamples
 			point.TodayCost = auxiliary.todayCost
 			point.TodayCostSamples = auxiliary.todayCostSamples
+			point.TodayCostComplete = auxiliary.todayCost != nil
 			point.ActiveSessions = auxiliary.activeSessions
 			point.ActiveSessionSamples = auxiliary.activeSessionSamples
 		}
