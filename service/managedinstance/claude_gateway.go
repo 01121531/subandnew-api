@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/fnv"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -62,30 +63,30 @@ func (value *claudeGatewayNumber) UnmarshalJSON(data []byte) error {
 }
 
 type claudeGatewayAccount struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name"`
-	Email            string              `json:"email"`
-	AccountType      string              `json:"account_type"`
-	AuthKind         string              `json:"auth_kind"`
-	Status           string              `json:"status"`
-	HealthStatus     string              `json:"health_status"`
-	FailureKind      string              `json:"failure_kind"`
-	LastError        string              `json:"last_error"`
-	Provider         string              `json:"provider"`
-	InferenceBackend string              `json:"inference_backend"`
-	GroupName        string              `json:"group_name"`
-	OwnerUserID      string              `json:"owner_user_id"`
-	CreatedAt        string              `json:"created_at"`
-	LastUsedAt       string              `json:"last_used_at"`
-	DisabledAt       string              `json:"disabled_at"`
-	ExpiresAt        string              `json:"expires_at"`
-	TotalRequests    claudeGatewayNumber `json:"total_requests"`
-	TotalTokens      claudeGatewayNumber `json:"total_tokens"`
-	TotalCost        claudeGatewayNumber `json:"total_cost"`
-	Requests24H      claudeGatewayNumber `json:"req_24h"`
-	Successful24H    claudeGatewayNumber `json:"ok_24h"`
-	Limited24H       claudeGatewayNumber `json:"limited_24h"`
-	RecoveryState    string              `json:"recovery_state"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`
+	Email            string               `json:"email"`
+	AccountType      string               `json:"account_type"`
+	AuthKind         string               `json:"auth_kind"`
+	Status           string               `json:"status"`
+	HealthStatus     string               `json:"health_status"`
+	FailureKind      string               `json:"failure_kind"`
+	LastError        string               `json:"last_error"`
+	Provider         string               `json:"provider"`
+	InferenceBackend string               `json:"inference_backend"`
+	GroupName        string               `json:"group_name"`
+	OwnerUserID      string               `json:"owner_user_id"`
+	CreatedAt        string               `json:"created_at"`
+	LastUsedAt       string               `json:"last_used_at"`
+	DisabledAt       string               `json:"disabled_at"`
+	ExpiresAt        string               `json:"expires_at"`
+	TotalRequests    claudeGatewayNumber  `json:"total_requests"`
+	TotalTokens      claudeGatewayNumber  `json:"total_tokens"`
+	TotalCost        *claudeGatewayNumber `json:"total_cost"`
+	Requests24H      claudeGatewayNumber  `json:"req_24h"`
+	Successful24H    claudeGatewayNumber  `json:"ok_24h"`
+	Limited24H       claudeGatewayNumber  `json:"limited_24h"`
+	RecoveryState    string               `json:"recovery_state"`
 	UsageWindows     struct {
 		Requests5H  *claudeGatewayNumber `json:"req_5h"`
 		Tokens5H    *claudeGatewayNumber `json:"tokens_5h"`
@@ -98,15 +99,15 @@ type claudeGatewayAccount struct {
 		Cost30D     *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"usage_windows"`
 	Stats struct {
-		RPM               int                 `json:"rpm"`
-		Concurrent        int                 `json:"concurrent"`
-		ActiveSessions    int                 `json:"active_sessions"`
-		DailyRequests     claudeGatewayNumber `json:"daily_req"`
-		DailyTokens       claudeGatewayNumber `json:"daily_tok"`
-		DailyCost         claudeGatewayNumber `json:"daily_cost"`
-		Cooldown          bool                `json:"cooldown"`
-		CooldownReason    string              `json:"cooldown_reason"`
-		CooldownRemaining int                 `json:"cooldown_remaining_seconds"`
+		RPM               int                  `json:"rpm"`
+		Concurrent        int                  `json:"concurrent"`
+		ActiveSessions    int                  `json:"active_sessions"`
+		DailyRequests     claudeGatewayNumber  `json:"daily_req"`
+		DailyTokens       claudeGatewayNumber  `json:"daily_tok"`
+		DailyCost         *claudeGatewayNumber `json:"daily_cost"`
+		Cooldown          bool                 `json:"cooldown"`
+		CooldownReason    string               `json:"cooldown_reason"`
+		CooldownRemaining int                  `json:"cooldown_remaining_seconds"`
 	} `json:"stats"`
 }
 
@@ -675,7 +676,12 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 	status := firstNonEmpty(account.HealthStatus, account.Status)
 	rateLimited := claudeGatewayRateLimited(account)
 	enabled := claudeGatewayAccountAvailable(account)
-	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
+	requests, tokens := float64(account.TotalRequests), float64(account.TotalTokens)
+	var cost *float64
+	if account.TotalCost != nil {
+		value := float64(*account.TotalCost)
+		cost = &value
+	}
 	usageWindowDays := 0
 	if account.UsageWindows.Requests30D != nil {
 		requests = float64(*account.UsageWindows.Requests30D)
@@ -686,9 +692,11 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		usageWindowDays = 30
 	}
 	if account.UsageWindows.Cost30D != nil {
-		cost = float64(*account.UsageWindows.Cost30D)
+		value := float64(*account.UsageWindows.Cost30D)
+		cost = &value
 		usageWindowDays = 30
 	}
+	lifetimeCost, todayCost, costExcludingToday := claudeGatewayAccountCosts(account)
 	requests24H := float64(account.Requests24H)
 	successful24H := float64(account.Successful24H)
 	limited24H := float64(account.Limited24H)
@@ -709,13 +717,41 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		Platform: firstNonEmpty(account.Provider, account.InferenceBackend), Group: account.GroupName,
 		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
 		DisabledAt: parseClaudeGatewayTime(account.DisabledAt), ExpiresAt: parseClaudeGatewayTime(account.ExpiresAt),
-		Requests: &requests, Tokens: &tokens, Cost: &cost, CostUnit: "usd", UsageWindowDays: usageWindowDays,
+		Requests: &requests, Tokens: &tokens, Cost: cost, CostUnit: "usd", UsageWindowDays: usageWindowDays,
+		LifetimeCost: lifetimeCost, TodayCost: todayCost, CostExcludingToday: costExcludingToday,
 		Requests24H: &requests24H, SuccessfulRequests24H: &successful24H, LimitedRequests24H: &limited24H,
 		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
 		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
 	}
 	applyClaudeGatewayVendor(&item, vendors)
 	return item
+}
+
+func claudeGatewayAccountCosts(account claudeGatewayAccount) (*float64, *float64, *float64) {
+	var lifetimeCost, todayCost *float64
+	if account.TotalCost != nil {
+		value := float64(*account.TotalCost)
+		if !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 {
+			lifetimeCost = &value
+		}
+	}
+	if account.Stats.DailyCost != nil {
+		value := float64(*account.Stats.DailyCost)
+		if !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 {
+			todayCost = &value
+		}
+	}
+	if lifetimeCost == nil || todayCost == nil {
+		return lifetimeCost, todayCost, nil
+	}
+	difference := *lifetimeCost - *todayCost
+	if difference < -1e-8 {
+		return lifetimeCost, todayCost, nil
+	}
+	if difference < 0 {
+		difference = 0
+	}
+	return lifetimeCost, todayCost, &difference
 }
 
 func applyClaudeGatewayVendor(item *InventoryItem, vendors map[string]claudeGatewayVendor) {

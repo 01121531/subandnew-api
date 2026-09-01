@@ -258,6 +258,33 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 	require.Equal(t, 15.0, *item.LimitedRequests24H)
 }
 
+func TestClaudeGatewayAccountCosts(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		lifetime   *float64
+		today      *float64
+		historical *float64
+	}{
+		{name: "normal", payload: `{"id":"normal","total_cost":"100.25","stats":{"daily_cost":"7.125"}}`, lifetime: float64Pointer(100.25), today: float64Pointer(7.125), historical: float64Pointer(93.125)},
+		{name: "zero", payload: `{"id":"zero","total_cost":0,"stats":{"daily_cost":0}}`, lifetime: float64Pointer(0), today: float64Pointer(0), historical: float64Pointer(0)},
+		{name: "tiny inversion", payload: `{"id":"tiny","total_cost":1,"stats":{"daily_cost":1.000000005}}`, lifetime: float64Pointer(1), today: float64Pointer(1.000000005), historical: float64Pointer(0)},
+		{name: "invalid inversion", payload: `{"id":"invalid","total_cost":1,"stats":{"daily_cost":2}}`, lifetime: float64Pointer(1), today: float64Pointer(2)},
+		{name: "missing today", payload: `{"id":"missing","total_cost":1,"stats":{}}`, lifetime: float64Pointer(1)},
+		{name: "negative lifetime", payload: `{"id":"negative","total_cost":-1,"stats":{"daily_cost":0}}`, today: float64Pointer(0)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var account claudeGatewayAccount
+			require.NoError(t, json.Unmarshal([]byte(test.payload), &account))
+			item := claudeGatewayAccountItem(account, nil)
+			require.Equal(t, test.lifetime, item.LifetimeCost)
+			require.Equal(t, test.today, item.TodayCost)
+			require.Equal(t, test.historical, item.CostExcludingToday)
+		})
+	}
+}
+
 func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
 	tests := []struct {
 		name          string

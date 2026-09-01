@@ -29,7 +29,7 @@ const (
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
-	managedAccountSnapshotSchema    = 4
+	managedAccountSnapshotSchema    = 5
 	managedAccountStandardTaskMode  = "standard"
 	managedAccountCustomTaskMode    = "custom"
 )

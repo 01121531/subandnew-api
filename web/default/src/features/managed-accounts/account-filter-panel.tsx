@@ -103,6 +103,7 @@ const fieldLabels: Record<AccountFilterField, string> = {
   requests: 'Requests',
   tokens: 'Tokens',
   amount: 'Amount',
+  cost_excluding_today: 'Historical consumption (excluding today)',
   rpm: 'RPM',
   active_sessions: 'Active sessions',
   utilization_5h: '5-hour utilization (%)',

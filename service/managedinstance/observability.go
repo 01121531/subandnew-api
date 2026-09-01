@@ -63,6 +63,9 @@ type InventoryItem struct {
 	Cost                  *float64 `json:"cost,omitempty"`
 	CostUnit              string   `json:"cost_unit,omitempty"`
 	UsageWindowDays       int      `json:"usage_window_days,omitempty"`
+	LifetimeCost          *float64 `json:"lifetime_cost,omitempty"`
+	TodayCost             *float64 `json:"today_cost,omitempty"`
+	CostExcludingToday    *float64 `json:"cost_excluding_today,omitempty"`
 	Requests24H           *float64 `json:"requests_24h,omitempty"`
 	SuccessfulRequests24H *float64 `json:"successful_requests_24h,omitempty"`
 	LimitedRequests24H    *float64 `json:"limited_requests_24h,omitempty"`

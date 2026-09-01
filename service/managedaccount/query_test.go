@@ -162,6 +162,35 @@ func TestExecuteSummarizesFilteredRowsBeforePagination(t *testing.T) {
 	require.Equal(t, map[string]float64{"USD": 7.25}, filtered.Summary.Amounts)
 }
 
+func TestExecuteFiltersSortsAndSummarizesCostExcludingToday(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	low, high := 5.25, 90.125
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "low", Enabled: &available, CostExcludingToday: &low},
+		{ID: 2, Name: "missing", Enabled: &available},
+		{ID: 3, Name: "high", Enabled: &available, CostExcludingToday: &high},
+	})
+
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		MatchMode: managedinstance.AccountFilterMatchAll, Rules: []managedinstance.AccountFilterRule{{
+			Field: "cost_excluding_today", Operator: "gte", Values: []string{"5"}, ValueMode: managedinstance.AccountFilterValueAny,
+		}}, SortBy: "cost_excluding_today", SortOrder: "desc", Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Total)
+	require.Equal(t, "high", result.Items[0].Name)
+	require.Equal(t, map[string]float64{"usd": 95.375}, result.Summary.CostsExcludingToday)
+	require.Equal(t, 2, result.Summary.CostExcludingTodayEligible)
+	require.Equal(t, 2, result.Summary.CostExcludingTodaySamples)
+	require.False(t, result.Summary.CostExcludingTodayPartial)
+
+	all, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory, Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 3, all.Summary.CostExcludingTodayEligible)
+	require.Equal(t, 2, all.Summary.CostExcludingTodaySamples)
+	require.True(t, all.Summary.CostExcludingTodayPartial)
+}
+
 func TestExecuteMatchesTextPrefixSuffixAndContainsRules(t *testing.T) {
 	db, instance := setupQueryTest(t)
 	available := true

@@ -92,6 +92,7 @@ const fieldLabels: Record<string, string> = {
   requests: '请求数',
   tokens: '总 Token',
   amount: '消费金额',
+  cost_excluding_today: '历史消费（不含今日）',
   rpm: 'RPM',
   active_sessions: '活跃会话',
   utilization_5h: '5 小时利用率',
@@ -107,6 +108,7 @@ const sortableFields = new Set([
   'requests',
   'tokens',
   'amount',
+  'cost_excluding_today',
 ])
 
 function emptyQuery(pageSize: number): PortalQuery {
@@ -141,7 +143,9 @@ function formatValue(field: string, value: unknown) {
         }).format(date)
       : '--'
   }
-  if (field === 'amount') return `US$${Number(value).toFixed(8)}`
+  if (field === 'amount' || field === 'cost_excluding_today') {
+    return `US$${Number(value).toFixed(8)}`
+  }
   if (field === 'utilization_5h' || field === 'utilization_7d') {
     return `${(Number(value) * 100).toFixed(2)}%`
   }
@@ -328,6 +332,7 @@ export function AccountDataPortal({ slug }: { slug: string }) {
         'requests',
         'tokens',
         'amount',
+        'cost_excluding_today',
         'rpm',
         'active_sessions',
         'utilization_5h',
@@ -342,6 +347,12 @@ export function AccountDataPortal({ slug }: { slug: string }) {
     result?.pagination.total ?? 0
   )
   const portalAmounts = accountAmountSummaries(result?.summary.amounts)
+  const portalHistoricalCost = result?.summary.costs_excluding_today?.usd
+  let portalHistoricalCostLabel = '--'
+  if (result) portalHistoricalCostLabel = '未提供'
+  if (portalHistoricalCost != null) {
+    portalHistoricalCostLabel = `US$${portalHistoricalCost.toFixed(8)}`
+  }
 
   const selectionChecked = (item: PortalSelection) => {
     return isPortalSelectionChecked(selection, item)
@@ -448,6 +459,21 @@ export function AccountDataPortal({ slug }: { slug: string }) {
             ) : (
               <Metric title='总金额' value={result ? '未提供' : '--'} compact />
             ))}
+          {session.fields.includes('cost_excluding_today') && (
+            <Metric
+              title='历史消费合计（不含今日）'
+              value={portalHistoricalCostLabel}
+              compact
+            />
+          )}
+          {session.fields.includes('cost_excluding_today') &&
+            result?.summary.cost_excluding_today_partial && (
+              <Metric
+                title='历史消费完整性'
+                value={`部分数据 · ${result.summary.cost_excluding_today_samples ?? 0} 个有效样本`}
+                compact
+              />
+            )}
         </section>
         <section className='grid gap-3 rounded-md border p-3 sm:p-4'>
           <div className='grid gap-2 md:grid-cols-2'>

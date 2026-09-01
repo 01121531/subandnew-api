@@ -57,7 +57,7 @@ func (input managedAccountsInput) Validate() error {
 			return err
 		}
 	}
-	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true}
+	validSort := map[string]bool{"": true, "name": true, "vendor_name": true, "created_at": true, "last_activity_at": true, "status": true, "requests": true, "tokens": true, "amount": true, "cost_excluding_today": true}
 	if !validSort[input.SortBy] || (input.SortOrder != "" && input.SortOrder != "asc" && input.SortOrder != "desc") {
 		return errors.New("invalid account sort")
 	}
@@ -65,37 +65,38 @@ func (input managedAccountsInput) Validate() error {
 }
 
 type managedAccountItem struct {
-	InstanceID       int64    `json:"instance_id"`
-	InstanceName     string   `json:"instance_name"`
-	Platform         string   `json:"platform"`
-	AccountID        string   `json:"account_id"`
-	Name             string   `json:"name"`
-	Email            string   `json:"email,omitempty"`
-	Note             string   `json:"note,omitempty"`
-	Ownership        string   `json:"ownership,omitempty"`
-	VendorName       string   `json:"vendor_name,omitempty"`
-	VendorEmail      string   `json:"vendor_email,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	Group            string   `json:"group,omitempty"`
-	Status           string   `json:"status,omitempty"`
-	Available        *bool    `json:"available,omitempty"`
-	RateLimited      bool     `json:"rate_limited,omitempty"`
-	SourceID         string   `json:"source_id,omitempty"`
-	SourceName       string   `json:"source_name,omitempty"`
-	CreatedAt        string   `json:"created_at,omitempty"`
-	LastActivityAt   string   `json:"last_activity_at,omitempty"`
-	DisabledAt       string   `json:"disabled_at,omitempty"`
-	ExpiresAt        string   `json:"expires_at,omitempty"`
-	Requests         *float64 `json:"requests,omitempty"`
-	Tokens           *float64 `json:"tokens,omitempty"`
-	Amount           *float64 `json:"amount,omitempty"`
-	Currency         string   `json:"currency,omitempty"`
-	RPM              *int     `json:"rpm,omitempty"`
-	ActiveSessions   *int     `json:"active_sessions,omitempty"`
-	Utilization5H    *float64 `json:"utilization_5h,omitempty"`
-	Utilization7D    *float64 `json:"utilization_7d,omitempty"`
-	CollectionStatus string   `json:"collection_status,omitempty"`
-	ErrorCode        string   `json:"error_code,omitempty"`
+	InstanceID         int64    `json:"instance_id"`
+	InstanceName       string   `json:"instance_name"`
+	Platform           string   `json:"platform"`
+	AccountID          string   `json:"account_id"`
+	Name               string   `json:"name"`
+	Email              string   `json:"email,omitempty"`
+	Note               string   `json:"note,omitempty"`
+	Ownership          string   `json:"ownership,omitempty"`
+	VendorName         string   `json:"vendor_name,omitempty"`
+	VendorEmail        string   `json:"vendor_email,omitempty"`
+	Type               string   `json:"type,omitempty"`
+	Group              string   `json:"group,omitempty"`
+	Status             string   `json:"status,omitempty"`
+	Available          *bool    `json:"available,omitempty"`
+	RateLimited        bool     `json:"rate_limited,omitempty"`
+	SourceID           string   `json:"source_id,omitempty"`
+	SourceName         string   `json:"source_name,omitempty"`
+	CreatedAt          string   `json:"created_at,omitempty"`
+	LastActivityAt     string   `json:"last_activity_at,omitempty"`
+	DisabledAt         string   `json:"disabled_at,omitempty"`
+	ExpiresAt          string   `json:"expires_at,omitempty"`
+	Requests           *float64 `json:"requests,omitempty"`
+	Tokens             *float64 `json:"tokens,omitempty"`
+	Amount             *float64 `json:"amount,omitempty"`
+	Currency           string   `json:"currency,omitempty"`
+	CostExcludingToday *float64 `json:"cost_excluding_today,omitempty"`
+	RPM                *int     `json:"rpm,omitempty"`
+	ActiveSessions     *int     `json:"active_sessions,omitempty"`
+	Utilization5H      *float64 `json:"utilization_5h,omitempty"`
+	Utilization7D      *float64 `json:"utilization_7d,omitempty"`
+	CollectionStatus   string   `json:"collection_status,omitempty"`
+	ErrorCode          string   `json:"error_code,omitempty"`
 }
 
 type managedAccountSourceStatus struct {
@@ -115,13 +116,17 @@ type managedAccountSourceStatus struct {
 }
 
 type managedAccountSummary struct {
-	Total       int                `json:"total"`
-	Available   int                `json:"available"`
-	Unavailable int                `json:"unavailable"`
-	Unknown     int                `json:"unknown"`
-	Requests    float64            `json:"requests"`
-	Tokens      float64            `json:"tokens"`
-	Amounts     map[string]float64 `json:"amounts"`
+	Total                      int                `json:"total"`
+	Available                  int                `json:"available"`
+	Unavailable                int                `json:"unavailable"`
+	Unknown                    int                `json:"unknown"`
+	Requests                   float64            `json:"requests"`
+	Tokens                     float64            `json:"tokens"`
+	Amounts                    map[string]float64 `json:"amounts"`
+	CostsExcludingToday        map[string]float64 `json:"costs_excluding_today,omitempty"`
+	CostExcludingTodayEligible int                `json:"cost_excluding_today_eligible"`
+	CostExcludingTodaySamples  int                `json:"cost_excluding_today_samples"`
+	CostExcludingTodayPartial  bool               `json:"cost_excluding_today_partial"`
 }
 
 type managedAccountsOutput struct {
@@ -141,7 +146,7 @@ type managedAccountRow struct {
 }
 
 func registerManagedAccountQuery(registry *tool.Registry, db *gorm.DB) error {
-	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","vendor_name","vendor_email","instance","platform","type","group","status","source","available"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_contains","is_empty","is_not_empty","is","is_not"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","vendor_name","created_at","last_activity_at","status","requests","tokens","amount"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","vendor_name","vendor_email","instance","platform","type","group","status","source","available","requests","tokens","amount","cost_excluding_today","rpm","active_sessions","utilization_5h","utilization_7d","created_at","last_activity_at"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_contains","is_empty","is_not_empty","is","is_not","eq","gt","gte","lt","lte","between"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","vendor_name","created_at","last_activity_at","status","requests","tokens","amount","cost_excluding_today"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
 	return tool.Register(registry, tool.ToolSpec{
 		Name: "query_managed_accounts", Version: "v1", Description: "从账号管理后台快照查询账号明细或新增账号产出，支持高级筛选、排序和分页；不会刷新目标实例。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
@@ -174,7 +179,7 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 			Available: item.Available, RateLimited: item.RateLimited, SourceID: item.SourceID,
 			SourceName: item.SourceName, CreatedAt: assistantTime(item.CreatedAt), LastActivityAt: assistantTime(item.LastActivityAt),
 			DisabledAt: assistantTime(item.DisabledAt), ExpiresAt: assistantTime(item.ExpiresAt),
-			Requests: item.Requests, Tokens: item.Tokens, Amount: item.Amount, Currency: item.Currency,
+			Requests: item.Requests, Tokens: item.Tokens, Amount: item.Amount, Currency: item.Currency, CostExcludingToday: item.CostExcludingToday,
 			RPM: item.RPM, ActiveSessions: item.ActiveSessions, Utilization5H: item.Utilization5H,
 			Utilization7D: item.Utilization7D, CollectionStatus: item.CollectionStatus, ErrorCode: item.ErrorCode,
 		})
@@ -200,7 +205,9 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 		Data: managedAccountsOutput{Dataset: result.Dataset, PresetDays: result.PresetDays, Items: items, Total: result.Total,
 			Page: result.Page, PageSize: result.PageSize, Summary: managedAccountSummary{Total: result.Summary.Total,
 				Available: result.Summary.Available, Unavailable: result.Summary.Unavailable, Unknown: result.Summary.Unknown,
-				Requests: result.Summary.Requests, Tokens: result.Summary.Tokens, Amounts: result.Summary.Amounts}, Sources: statuses},
+				Requests: result.Summary.Requests, Tokens: result.Summary.Tokens, Amounts: result.Summary.Amounts,
+				CostsExcludingToday: result.Summary.CostsExcludingToday, CostExcludingTodayEligible: result.Summary.CostExcludingTodayEligible,
+				CostExcludingTodaySamples: result.Summary.CostExcludingTodaySamples, CostExcludingTodayPartial: result.Summary.CostExcludingTodayPartial}, Sources: statuses},
 		Provenance: provenance, Freshness: freshnessForSnapshot(result.ObservedAt, result.Stale),
 	}, nil
 }
@@ -208,6 +215,7 @@ func executeManagedAccountQuery(ctx context.Context, instanceIDs []int64, input 
 func validateManagedAccountRule(rule managedinstance.AccountFilterRule) error {
 	textFields := map[string]bool{"name": true, "email": true, "account_id": true, "note": true, "ownership": true, "vendor_name": true, "vendor_email": true}
 	categoryFields := map[string]bool{"instance": true, "platform": true, "type": true, "group": true, "status": true, "source": true, "available": true}
+	metricFields := map[string]bool{"requests": true, "tokens": true, "amount": true, "cost_excluding_today": true, "rpm": true, "active_sessions": true, "utilization_5h": true, "utilization_7d": true, "created_at": true, "last_activity_at": true}
 	empty := rule.Operator == "is_empty" || rule.Operator == "is_not_empty"
 	if textFields[rule.Field] {
 		textOperator := rule.Operator == "contains" || rule.Operator == "starts_with" ||
@@ -218,6 +226,11 @@ func validateManagedAccountRule(rule managedinstance.AccountFilterRule) error {
 	} else if categoryFields[rule.Field] {
 		if rule.Operator != "is" && rule.Operator != "is_not" && !empty {
 			return errors.New("invalid category account filter operator")
+		}
+	} else if metricFields[rule.Field] {
+		metricOperator := rule.Operator == "eq" || rule.Operator == "gt" || rule.Operator == "gte" || rule.Operator == "lt" || rule.Operator == "lte" || rule.Operator == "between"
+		if !metricOperator && !empty {
+			return errors.New("invalid metric account filter operator")
 		}
 	} else {
 		return errors.New("invalid account filter field")
@@ -230,6 +243,20 @@ func validateManagedAccountRule(rule managedinstance.AccountFilterRule) error {
 	}
 	if len(rule.Values) == 0 || len(rule.Values) > 50 {
 		return errors.New("invalid account filter values")
+	}
+	if metricFields[rule.Field] {
+		expected := 1
+		if rule.Operator == "between" {
+			expected = 2
+		}
+		if len(rule.Values) != expected {
+			return errors.New("invalid metric account filter values")
+		}
+		for _, value := range rule.Values {
+			if _, err := managedinstance.ParseAccountFilterMetricValue(rule.Field, value); err != nil {
+				return errors.New("invalid metric account filter value")
+			}
+		}
 	}
 	for _, value := range rule.Values {
 		if strings.TrimSpace(value) == "" || len([]rune(value)) > 200 {

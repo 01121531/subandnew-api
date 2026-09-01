@@ -17,19 +17,27 @@ import (
 
 func TestPortalSummaryOnlyExposesAuthorizedMetrics(t *testing.T) {
 	result := &managedaccount.Result{Summary: managedaccount.Summary{Total: 8, Available: 5, Unavailable: 3,
-		Requests: 120, Tokens: 240, Amounts: map[string]float64{"USD": 12.5}}}
+		Requests: 120, Tokens: 240, Amounts: map[string]float64{"USD": 12.5}, CostsExcludingToday: map[string]float64{"usd": 88.25},
+		CostExcludingTodayEligible: 8, CostExcludingTodaySamples: 7, CostExcludingTodayPartial: true}}
 	limited := portalSummary(result, []string{"name"})
 	require.Equal(t, 8, limited["total"])
 	require.NotContains(t, limited, "available")
 	require.NotContains(t, limited, "requests")
 	require.NotContains(t, limited, "tokens")
 	require.NotContains(t, limited, "amounts")
+	require.NotContains(t, limited, "costs_excluding_today")
 
 	allowed := portalSummary(result, []string{"available", "requests", "amount"})
 	require.Equal(t, 5, allowed["available"])
 	require.Equal(t, float64(120), allowed["requests"])
 	require.Equal(t, map[string]float64{"USD": 12.5}, allowed["amounts"])
 	require.NotContains(t, allowed, "tokens")
+	require.NotContains(t, allowed, "costs_excluding_today")
+
+	historical := portalSummary(result, []string{"cost_excluding_today"})
+	require.Equal(t, map[string]float64{"usd": 88.25}, historical["costs_excluding_today"])
+	require.Equal(t, 7, historical["cost_excluding_today_samples"])
+	require.Equal(t, true, historical["cost_excluding_today_partial"])
 }
 
 func TestPortalSessionProbeReturnsLoggedOutStateWithoutCookie(t *testing.T) {

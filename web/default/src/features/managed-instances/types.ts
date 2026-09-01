@@ -173,6 +173,9 @@ export interface ManagedInstanceInventoryItem {
   cost?: number
   cost_unit?: 'usd' | 'quota'
   usage_window_days?: number
+  lifetime_cost?: number
+  today_cost?: number
+  cost_excluding_today?: number
   requests_24h?: number
   successful_requests_24h?: number
   limited_requests_24h?: number

@@ -172,6 +172,7 @@ type AccountSortKey =
   | 'instance'
   | 'created_at'
   | 'cost'
+  | 'cost_excluding_today'
   | 'last_activity'
   | 'survival'
   | 'available'
@@ -211,6 +212,12 @@ const exactCurrency = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 4,
+})
+const exactHistoricalCurrency = new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 8,
 })
 const accountDateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -374,6 +381,10 @@ function compareResourceRows(
       leftValue = left.item.cost
       rightValue = right.item.cost
       break
+    case 'cost_excluding_today':
+      leftValue = left.item.cost_excluding_today
+      rightValue = right.item.cost_excluding_today
+      break
     case 'last_activity':
       leftValue = left.item.last_activity_at
       rightValue = right.item.last_activity_at
@@ -410,6 +421,10 @@ function formatCost(item: ManagedInstanceInventoryItem) {
   if (item.cost == null) return '--'
   if (item.cost_unit === 'usd') return exactCurrency.format(item.cost)
   return exactNumber.format(item.cost)
+}
+
+function formatCostExcludingToday(value?: number) {
+  return value == null ? '--' : exactHistoricalCurrency.format(value)
 }
 
 function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
@@ -458,6 +473,7 @@ function resourceFilterDocument(row: ResourceRow): AccountFilterDocument {
     requests: item.requests,
     tokens: item.tokens,
     amount: item.cost,
+    cost_excluding_today: item.cost_excluding_today,
     rpm: item.rpm,
     active_sessions: item.active_sessions,
     utilization_5h:
@@ -500,6 +516,7 @@ function outputFilterDocument(
         : undefined,
     amount:
       output.collection_status === 'succeeded' ? output.amount : undefined,
+    cost_excluding_today: account.cost_excluding_today,
     rpm: account.rpm,
     active_sessions: account.active_sessions,
     utilization_5h:
@@ -1146,6 +1163,15 @@ export function ManagedAccounts() {
           unavailableSurvival.length
       )
     : null
+  const historicalCostEligible =
+    family === 'claude_gateway' ? filteredRows.length : 0
+  const historicalCostValues = filteredRows.flatMap(({ item }) =>
+    item.cost_excluding_today == null ? [] : [item.cost_excluding_today]
+  )
+  const historicalCost = historicalCostValues.reduce(
+    (sum, value) => sum + value,
+    0
+  )
   const coverage = instances.length
     ? Math.round((collectedInstances / instances.length) * 100)
     : 0
@@ -1347,6 +1373,12 @@ export function ManagedAccounts() {
           showAverageSurvival={family !== 'new_api'}
           averageUnavailableSurvival={averageUnavailableSurvival}
           survivalSampleCount={unavailableSurvival.length}
+          showHistoricalCost={family === 'claude_gateway'}
+          historicalCost={
+            historicalCostValues.length > 0 ? historicalCost : null
+          }
+          historicalCostSamples={historicalCostValues.length}
+          historicalCostEligible={historicalCostEligible}
         />
         {vendorSnapshotWarning && (
           <div className='border-warning/30 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
@@ -1738,6 +1770,10 @@ function AccountSummary(props: {
   showAverageSurvival: boolean
   averageUnavailableSurvival: number | null
   survivalSampleCount: number
+  showHistoricalCost: boolean
+  historicalCost: number | null
+  historicalCostSamples: number
+  historicalCostEligible: number
 }) {
   const { t } = useTranslation()
   const items = [
@@ -1786,13 +1822,33 @@ function AccountSummary(props: {
       className: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
     })
   }
+  if (props.showHistoricalCost) {
+    const partial =
+      props.historicalCostSamples > 0 &&
+      props.historicalCostSamples < props.historicalCostEligible
+    items.splice(3, 0, {
+      key: 'historical-cost',
+      label: t('Historical consumption total (excluding today)'),
+      value:
+        props.historicalCost == null
+          ? t('Not provided')
+          : formatCostExcludingToday(props.historicalCost),
+      hint:
+        props.historicalCostSamples === 0
+          ? t('No valid samples')
+          : t('{{count}} accounts included{{partial}}', {
+              count: props.historicalCostSamples,
+              partial: partial ? ` · ${t('Partial data')}` : '',
+            }),
+      icon: CircleDollarSign,
+      className: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+    })
+  }
+  let summaryGridClass = 'xl:grid-cols-4'
+  if (items.length === 5) summaryGridClass = 'xl:grid-cols-5'
+  if (items.length >= 6) summaryGridClass = 'xl:grid-cols-6'
   return (
-    <section
-      className={cn(
-        'grid grid-cols-2 gap-3',
-        props.showAverageSurvival ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
-      )}
-    >
+    <section className={cn('grid grid-cols-2 gap-3', summaryGridClass)}>
       {items.map((item) => (
         <Card key={item.key} className='gap-0 rounded-lg py-0 shadow-xs'>
           <CardContent className='flex min-h-28 items-start justify-between gap-3 p-4'>
@@ -2530,7 +2586,10 @@ function AccountTable(props: {
   const showsSurvival = !isChannel
   let usageColumnLabel = t('Total consumption')
   if (isChannel) usageColumnLabel = t('Used quota')
-  if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
+  if (isClaudeGateway) usageColumnLabel = t('Last 30 days consumption')
+  let usageSortLabel = t('Total consumption')
+  if (isChannel) usageSortLabel = t('Used quota')
+  if (isClaudeGateway) usageSortLabel = t('Last 30 days consumption')
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -2544,8 +2603,16 @@ function AccountTable(props: {
     },
     {
       value: 'cost',
-      label: t(isChannel ? 'Used quota' : 'Total consumption'),
+      label: usageSortLabel,
     },
+    ...(isClaudeGateway
+      ? [
+          {
+            value: 'cost_excluding_today' as const,
+            label: t('Historical consumption (excluding today)'),
+          },
+        ]
+      : []),
     { value: 'last_activity', label: t('Last activity') },
   ]
   if (showsSurvival) {
@@ -2561,7 +2628,7 @@ function AccountTable(props: {
   let tableMinWidth = 'min-w-[1140px]'
   if (isChannel) tableMinWidth = 'min-w-[980px]'
   else if (isConductor) tableMinWidth = 'min-w-[1280px]'
-  else if (isClaudeGateway) tableMinWidth = 'min-w-[1580px]'
+  else if (isClaudeGateway) tableMinWidth = 'min-w-[1780px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -2627,6 +2694,14 @@ function AccountTable(props: {
                               {usageColumnLabel}: {formatCost(item)}
                             </span>
                           )}
+                          {isClaudeGateway && (
+                            <span className='text-foreground font-medium'>
+                              {t('Historical consumption (excluding today)')}:{' '}
+                              {formatCostExcludingToday(
+                                item.cost_excluding_today
+                              )}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </AccordionTrigger>
@@ -2676,6 +2751,13 @@ function AccountTable(props: {
                           descriptors.join(' / ') || '--'
                         )}
                       </MobileDetail>
+                      {isClaudeGateway && (
+                        <MobileDetail
+                          label={t('Historical consumption (excluding today)')}
+                        >
+                          {formatCostExcludingToday(item.cost_excluding_today)}
+                        </MobileDetail>
+                      )}
                       <MobileDetail
                         label={isConductor ? '运行负载' : usageColumnLabel}
                       >
@@ -2768,6 +2850,11 @@ function AccountTable(props: {
                   <TableHead className='text-right'>
                     {isConductor ? '运行负载' : usageColumnLabel}
                   </TableHead>
+                  {isClaudeGateway && (
+                    <TableHead className='text-right'>
+                      {t('Historical consumption (excluding today)')}
+                    </TableHead>
+                  )}
                   <TableHead>{t('Last activity')}</TableHead>
                   {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
                   <TableHead className='pe-6 text-right'>
@@ -2914,6 +3001,11 @@ function AccountTable(props: {
                                 </p>
                               ))}
                       </TableCell>
+                      {isClaudeGateway && (
+                        <TableCell className='text-right font-medium whitespace-nowrap tabular-nums'>
+                          {formatCostExcludingToday(item.cost_excluding_today)}
+                        </TableCell>
+                      )}
                       <TableCell className='whitespace-nowrap'>
                         <p className='text-sm'>
                           {formatTimestamp(item.last_activity_at)}

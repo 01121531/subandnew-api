@@ -346,12 +346,12 @@ func PortalFilterFields(fields []string) []string {
 			allowed["instance"] = true
 		case "source_name":
 			allowed["source"] = true
-		case "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at":
+		case "requests", "tokens", "amount", "cost_excluding_today", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at":
 			allowed[field] = true
 		}
 	}
 	result := make([]string, 0, len(allowed))
-	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "vendor_name", "vendor_email", "instance", "platform", "type", "group", "status", "source", "available", "requests", "tokens", "amount", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at"} {
+	for _, field := range []string{"name", "email", "account_id", "note", "ownership", "vendor_name", "vendor_email", "instance", "platform", "type", "group", "status", "source", "available", "requests", "tokens", "amount", "cost_excluding_today", "rpm", "active_sessions", "utilization_5h", "utilization_7d", "created_at", "last_activity_at"} {
 		if allowed[field] {
 			result = append(result, field)
 		}
@@ -564,7 +564,7 @@ var portalFieldLabels = map[string]string{
 	"vendor_name": "供应商", "vendor_email": "供应商邮箱",
 	"available": "可用状态", "rate_limited": "限流状态", "source_id": "节点 ID", "source_name": "工作节点",
 	"created_at": "录入时间", "last_activity_at": "最后活动", "disabled_at": "停用时间", "expires_at": "过期时间",
-	"requests": "请求数", "tokens": "Token", "amount": "消费金额", "currency": "币种", "rpm": "RPM",
+	"requests": "请求数", "tokens": "Token", "amount": "消费金额", "cost_excluding_today": "历史消费（不含今日）($)", "currency": "币种", "rpm": "RPM",
 	"active_sessions": "活跃会话", "utilization_5h": "5h 利用率", "utilization_7d": "7d 利用率",
 	"collection_status": "统计状态", "error_code": "错误代码",
 }
@@ -604,7 +604,7 @@ func writePortalWorkbook(fields []string, items []managedaccount.Item) ([]byte, 
 				}
 			} else {
 				_ = workbook.SetCellValue(sheet, cell, value)
-				if field == "amount" {
+				if field == "amount" || field == "cost_excluding_today" {
 					_ = workbook.SetCellStyle(sheet, cell, cell, amountStyle)
 				} else if field == "requests" || field == "tokens" {
 					_ = workbook.SetCellStyle(sheet, cell, cell, numberStyle)
