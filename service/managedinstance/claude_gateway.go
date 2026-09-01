@@ -32,6 +32,8 @@ const (
 	claudeGatewaySessionTTL           = 10 * time.Minute
 	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
 	claudeGatewayBulkRequestTimeout   = 60 * time.Second
+	claudeGatewayAccountsPageSize     = 100
+	claudeGatewayAccountsMaxPages     = managedInstanceInventoryMaxItems / claudeGatewayAccountsPageSize
 )
 
 var claudeGatewaySessions sync.Map
@@ -481,15 +483,17 @@ func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, c
 
 func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) ([]claudeGatewayAccount, error) {
 	request := claudeGatewayDoJSONWithMaxBody
+	path := "/api/admin/oauth-accounts"
 	if bulk {
 		request = claudeGatewayDoBulkJSON
+		path = claudeGatewayAccountsPagePath(1)
 	}
 	response, err := request(
 		ctx,
 		connector,
 		credential,
 		http.MethodGet,
-		"/api/admin/oauth-accounts",
+		path,
 		nil,
 		claudeGatewayAccountsMaxBodyBytes,
 	)
@@ -499,13 +503,63 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 	if err := requireHTTPStatus(response); err != nil {
 		return nil, claudeGatewayCollectionError("accounts", err)
 	}
-	var envelope struct {
-		Accounts []claudeGatewayAccount `json:"accounts"`
-	}
-	if json.Unmarshal(response.Body, &envelope) != nil || envelope.Accounts == nil || len(envelope.Accounts) > managedInstanceInventoryMaxItems {
+	envelope, err := decodeClaudeGatewayAccountPage(response.Body)
+	if err != nil || len(envelope.Accounts) > managedInstanceInventoryMaxItems {
 		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
 	}
-	return envelope.Accounts, nil
+	accounts := envelope.Accounts
+	if !bulk || envelope.Pagination.TotalPages <= 1 {
+		return accounts, nil
+	}
+	if envelope.Pagination.TotalPages > claudeGatewayAccountsMaxPages {
+		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+	}
+	for page := 2; page <= envelope.Pagination.TotalPages; page++ {
+		response, err = request(ctx, connector, credential, http.MethodGet, claudeGatewayAccountsPagePath(page), nil, claudeGatewayAccountsMaxBodyBytes)
+		if err != nil {
+			return nil, claudeGatewayCollectionError("accounts", err)
+		}
+		if err := requireHTTPStatus(response); err != nil {
+			return nil, claudeGatewayCollectionError("accounts", err)
+		}
+		next, decodeErr := decodeClaudeGatewayAccountPage(response.Body)
+		if decodeErr != nil || (next.Pagination.Page != 0 && next.Pagination.Page != page) || len(accounts)+len(next.Accounts) > managedInstanceInventoryMaxItems {
+			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
+		accounts = append(accounts, next.Accounts...)
+	}
+	return accounts, nil
+}
+
+type claudeGatewayAccountPage struct {
+	Accounts   []claudeGatewayAccount `json:"accounts"`
+	Pagination struct {
+		Page       int `json:"page"`
+		PageSize   int `json:"page_size"`
+		TotalRows  int `json:"total_rows"`
+		TotalPages int `json:"total_pages"`
+	} `json:"pagination"`
+}
+
+func decodeClaudeGatewayAccountPage(body []byte) (*claudeGatewayAccountPage, error) {
+	var envelope claudeGatewayAccountPage
+	if json.Unmarshal(body, &envelope) != nil || envelope.Accounts == nil {
+		return nil, errors.New("invalid Claude Gateway account page")
+	}
+	return &envelope, nil
+}
+
+func claudeGatewayAccountsPagePath(page int) string {
+	query := url.Values{}
+	query.Set("page_mode", "1")
+	query.Set("page", strconv.Itoa(page))
+	query.Set("page_size", strconv.Itoa(claudeGatewayAccountsPageSize))
+	query.Set("status", "all")
+	query.Set("recovery_window", "all")
+	query.Set("fable_recovery_window", "all")
+	query.Set("sort", "created_at")
+	query.Set("direction", "desc")
+	return "/api/admin/oauth-accounts?" + query.Encode()
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
@@ -807,7 +861,8 @@ func claudeGatewayAccountCosts(account claudeGatewayAccount) (*float64, *float64
 		return lifetimeCost, todayCost, nil
 	}
 	difference := *lifetimeCost - *todayCost
-	if difference < -1e-8 {
+	tolerance := math.Max(1e-8, math.Max(math.Abs(*lifetimeCost), math.Abs(*todayCost))*1e-9)
+	if difference < -tolerance {
 		return lifetimeCost, todayCost, nil
 	}
 	if difference < 0 {

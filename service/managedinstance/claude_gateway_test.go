@@ -149,6 +149,47 @@ func TestClaudeGatewayInventoryBulkRequestAndNumericVendorIDs(t *testing.T) {
 	require.Equal(t, 1, vendorRequests)
 }
 
+func TestClaudeGatewayInventoryCollectsAllPaginatedAccounts(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	accountRequests := 0
+	vendorRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			accountRequests++
+			query := request.URL.Query()
+			require.Equal(t, "1", query.Get("page_mode"))
+			require.Equal(t, "100", query.Get("page_size"))
+			require.Equal(t, "all", query.Get("status"))
+			require.Equal(t, "all", query.Get("recovery_window"))
+			require.Equal(t, "all", query.Get("fable_recovery_window"))
+			require.Equal(t, "created_at", query.Get("sort"))
+			require.Equal(t, "desc", query.Get("direction"))
+			page := query.Get("page")
+			writeProbeJSON(response, fmt.Sprintf(`{"accounts":[{"id":"account-%s","name":"account-%s","status":"active","total_cost":"%s"}],"pagination":{"page":%s,"page_size":100,"total_rows":2,"total_pages":2}}`, page, page, page, page))
+		case "/api/admin/vendors":
+			vendorRequests++
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	t.Cleanup(server.Close)
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Len(t, page.Items, 2)
+	require.Equal(t, "account-1", page.Items[0].IDText)
+	require.Equal(t, "account-2", page.Items[1].IDText)
+	require.InDelta(t, 1, *page.Items[0].LifetimeCost, 1e-10)
+	require.InDelta(t, 2, *page.Items[1].LifetimeCost, 1e-10)
+	require.Equal(t, 2, accountRequests)
+	require.Equal(t, 1, vendorRequests)
+}
+
 func TestDecodeClaudeGatewayVendorsAcceptsKnownEnvelopes(t *testing.T) {
 	for name, body := range map[string]string{
 		"array":        `[{"id":"vendor-1"}]`,
@@ -269,6 +310,7 @@ func TestClaudeGatewayAccountCosts(t *testing.T) {
 		{name: "normal", payload: `{"id":"normal","total_cost":"100.25","stats":{"daily_cost":"7.125"}}`, lifetime: float64Pointer(100.25), today: float64Pointer(7.125), historical: float64Pointer(93.125)},
 		{name: "zero", payload: `{"id":"zero","total_cost":0,"stats":{"daily_cost":0}}`, lifetime: float64Pointer(0), today: float64Pointer(0), historical: float64Pointer(0)},
 		{name: "tiny inversion", payload: `{"id":"tiny","total_cost":1,"stats":{"daily_cost":1.000000005}}`, lifetime: float64Pointer(1), today: float64Pointer(1.000000005), historical: float64Pointer(0)},
+		{name: "large value rounding", payload: `{"id":"rounded","total_cost":7576.713798,"stats":{"daily_cost":7576.71379905}}`, lifetime: float64Pointer(7576.713798), today: float64Pointer(7576.71379905), historical: float64Pointer(0)},
 		{name: "invalid inversion", payload: `{"id":"invalid","total_cost":1,"stats":{"daily_cost":2}}`, lifetime: float64Pointer(1), today: float64Pointer(2)},
 		{name: "missing today", payload: `{"id":"missing","total_cost":1,"stats":{}}`, lifetime: float64Pointer(1)},
 		{name: "top-level aliases", payload: `{"id":"aliases","lifetime_cost":"9.5","today_cost":"1.25"}`, lifetime: float64Pointer(9.5), today: float64Pointer(1.25), historical: float64Pointer(8.25)},

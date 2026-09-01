@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +17,8 @@ import (
 
 func TestDecodeClaudeGatewayAccountCostDetail(t *testing.T) {
 	detail, err := decodeClaudeGatewayAccountCostDetail([]byte(`{
-		"data":{"account":{"total_cost":"13000.12345678","usage_records":{"today":{"cost":"160","requests":15116,"tokens":"47175232"}}}}
+		"data":{"account":{"total_cost":"13000.12345678","created_at":"2026-08-31T19:51:42.314Z","usage_records":{"today":{"cost":"160","requests":15116,"tokens":"47175232"}}}},
+		"cost_windows":{"cost_30d":"13160.12345678"}
 	}`))
 	require.NoError(t, err)
 	require.InDelta(t, 13000.12345678, *detail.LifetimeCost, 1e-10)
@@ -24,6 +26,51 @@ func TestDecodeClaudeGatewayAccountCostDetail(t *testing.T) {
 	require.Equal(t, float64(15116), *detail.TodayRequests)
 	require.Equal(t, float64(47175232), *detail.TodayTokens)
 	require.Equal(t, "detail", detail.LifetimeSource)
+	require.InDelta(t, 13160.12345678, *detail.detailCost30D, 1e-10)
+	require.Equal(t, int64(1788205902), detail.accountCreatedAt)
+}
+
+func TestFetchClaudeGatewayAccountCostUsesThirtyDayTotalForNewAccount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeProbeJSON(response, `{
+			"account":{"id":"account-1","total_cost":"0.0000"},
+			"stats":{"daily_req":42724,"daily_tok":844606911,"daily_cost":7576.71379905},
+			"cost_windows":{"cost_30d":7576.713798}
+		}`)
+	}))
+	t.Cleanup(server.Close)
+	connector := testAccountCostConnector(t, server.URL)
+	result, err := fetchClaudeGatewayAccountCostDetail(context.Background(), connector, &CredentialMaterial{AuthType: "bearer_pat", Secret: "secret"}, AccountExportSelection{
+		InstanceID: 1, InstanceKind: model.ManagedInstanceKindClaudeGateway,
+		Account: InventoryItem{ID: 1, IDText: "account-1", CreatedAt: time.Now().Add(-time.Hour).Unix()},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "detail_cost_30d", result.LifetimeSource)
+	require.InDelta(t, 7576.713798, *result.LifetimeCost, 1e-10)
+	require.Zero(t, *result.CostExcludingToday)
+	require.Equal(t, float64(42724), *result.TodayRequests)
+	require.Equal(t, float64(844606911), *result.TodayTokens)
+}
+
+func TestFetchClaudeGatewayAccountCostUsesFrozenListTotalForOldAccount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		writeProbeJSON(response, `{
+			"account":{"id":"account-1","created_at":"2026-06-01T00:00:00+08:00","total_cost":"0.0000"},
+			"stats":{"daily_cost":2},
+			"cost_windows":{"cost_30d":30}
+		}`)
+	}))
+	t.Cleanup(server.Close)
+	connector := testAccountCostConnector(t, server.URL)
+	lifetime := 100.0
+	result, err := fetchClaudeGatewayAccountCostDetail(context.Background(), connector, &CredentialMaterial{AuthType: "bearer_pat", Secret: "secret"}, AccountExportSelection{
+		InstanceID: 1, InstanceKind: model.ManagedInstanceKindClaudeGateway,
+		Account: InventoryItem{ID: 1, IDText: "account-1", CreatedAt: time.Now().Add(-60 * 24 * time.Hour).Unix(), LifetimeCost: &lifetime},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "account_list", result.LifetimeSource)
+	require.InDelta(t, 100, *result.LifetimeCost, 1e-10)
+	require.InDelta(t, 98, *result.CostExcludingToday, 1e-10)
 }
 
 func TestAccountCostHTTPErrorHonorsRetryAfterCap(t *testing.T) {
@@ -125,4 +172,11 @@ func accountCostCell(t *testing.T, workbook *excelize.File, cell string) string 
 	value, err := workbook.GetCellValue("历史消费", cell, excelize.Options{RawCellValue: true})
 	require.NoError(t, err)
 	return value
+}
+
+func testAccountCostConnector(t *testing.T, baseURL string) *Connector {
+	t.Helper()
+	parsed, err := url.Parse(baseURL)
+	require.NoError(t, err)
+	return &Connector{baseURL: parsed, client: http.DefaultClient, maxBodyBytes: accountCostExportMaxBodyBytes}
 }

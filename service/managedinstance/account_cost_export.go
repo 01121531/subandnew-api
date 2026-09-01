@@ -49,6 +49,8 @@ type AccountCostExportResult struct {
 	TodayTokens        *float64 `json:"today_tokens,omitempty"`
 	ObservedAt         int64    `json:"observed_at"`
 	LifetimeSource     string   `json:"lifetime_source,omitempty"`
+	detailCost30D      *float64
+	accountCreatedAt   int64
 }
 
 type accountCostExportWork struct {
@@ -294,10 +296,19 @@ func fetchClaudeGatewayAccountCostDetail(ctx context.Context, connector *Connect
 	if err != nil {
 		return nil, &accountCostFetchError{code: "account_cost_invalid_response", detail: "invalid Claude Gateway account detail response"}
 	}
-	if detail.LifetimeCost == nil && selection.Account.LifetimeCost != nil {
+	now := common.GetTimestamp()
+	createdAt := detail.accountCreatedAt
+	if createdAt <= 0 {
+		createdAt = selection.Account.CreatedAt
+	}
+	if detail.detailCost30D != nil && createdAt > 0 && createdAt >= now-30*24*60*60 {
+		value := *detail.detailCost30D
+		detail.LifetimeCost = &value
+		detail.LifetimeSource = "detail_cost_30d"
+	} else if selection.Account.LifetimeCost != nil {
 		value := *selection.Account.LifetimeCost
 		detail.LifetimeCost = &value
-		detail.LifetimeSource = "snapshot"
+		detail.LifetimeSource = "account_list"
 	}
 	if detail.LifetimeCost == nil {
 		return nil, &accountCostFetchError{code: "account_cost_lifetime_unavailable", detail: "cumulative account cost is unavailable"}
@@ -310,14 +321,15 @@ func fetchClaudeGatewayAccountCostDetail(ctx context.Context, connector *Connect
 		return nil, &accountCostFetchError{code: "account_cost_invalid_value", detail: "account cost contains an invalid value"}
 	}
 	difference := lifetime - today
-	if difference < -1e-8 {
+	tolerance := math.Max(1e-8, math.Max(math.Abs(lifetime), math.Abs(today))*1e-9)
+	if difference < -tolerance {
 		return nil, &accountCostFetchError{code: "account_cost_inconsistent", detail: "today account cost exceeds cumulative account cost"}
 	}
 	if difference < 0 {
 		difference = 0
 	}
 	detail.CostExcludingToday = &difference
-	detail.ObservedAt = common.GetTimestamp()
+	detail.ObservedAt = now
 	return detail, nil
 }
 
@@ -343,6 +355,13 @@ func decodeClaudeGatewayAccountCostDetail(data []byte) (*AccountCostExportResult
 	}
 	result := &AccountCostExportResult{}
 	for _, candidate := range candidates {
+		if result.accountCreatedAt <= 0 {
+			result.accountCreatedAt = accountCostTimeAt(candidate, []string{"created_at"}, []string{"account", "created_at"})
+		}
+		if result.detailCost30D == nil {
+			result.detailCost30D = accountCostNumberAt(candidate,
+				[]string{"cost_windows", "cost_30d"}, []string{"usage_windows", "cost_30d"})
+		}
 		if result.LifetimeCost == nil {
 			result.LifetimeCost = accountCostNumberAt(candidate,
 				[]string{"lifetime_cost"}, []string{"total_cost"}, []string{"stats", "total_cost"}, []string{"usage", "total_cost"}, []string{"costs", "total"})
@@ -371,6 +390,42 @@ func decodeClaudeGatewayAccountCostDetail(data []byte) (*AccountCostExportResult
 		return nil, errors.New("account detail contains no usage fields")
 	}
 	return result, nil
+}
+
+func accountCostTimeAt(root map[string]json.RawMessage, paths ...[]string) int64 {
+	for _, path := range paths {
+		current := root
+		var raw json.RawMessage
+		found := true
+		for index, key := range path {
+			var exists bool
+			raw, exists = current[key]
+			if !exists {
+				found = false
+				break
+			}
+			if index < len(path)-1 && json.Unmarshal(raw, &current) != nil {
+				found = false
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		var text string
+		if json.Unmarshal(raw, &text) == nil {
+			if value := parseClaudeGatewayTime(text); value > 0 {
+				return value
+			}
+		}
+		var number json.Number
+		if json.Unmarshal(raw, &number) == nil {
+			if value := parseClaudeGatewayTime(number.String()); value > 0 {
+				return value
+			}
+		}
+	}
+	return 0
 }
 
 func accountCostNumberAt(root map[string]json.RawMessage, paths ...[]string) *float64 {
