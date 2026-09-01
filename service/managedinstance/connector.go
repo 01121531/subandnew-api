@@ -222,8 +222,45 @@ func (c *Connector) DoJSON(ctx context.Context, method string, path string, head
 }
 
 func (c *Connector) doJSONWithMaxBody(ctx context.Context, method string, path string, headers http.Header, requestBody any, maxBodyBytes int64) (*ConnectorResponse, error) {
+	return c.doJSONWithClient(ctx, c.client, method, path, headers, requestBody, maxBodyBytes)
+}
+
+func (c *Connector) doJSONWithMaxBodyAndMinTimeout(ctx context.Context, method string, path string, headers http.Header, requestBody any, maxBodyBytes int64, minimumTimeout time.Duration) (*ConnectorResponse, error) {
+	client, cleanup := c.clientWithMinTimeout(minimumTimeout)
+	defer cleanup()
+	return c.doJSONWithClient(ctx, client, method, path, headers, requestBody, maxBodyBytes)
+}
+
+func (c *Connector) clientWithMinTimeout(minimumTimeout time.Duration) (*http.Client, func()) {
+	if c == nil || c.client == nil || minimumTimeout <= 0 || c.client.Timeout >= minimumTimeout {
+		if c == nil {
+			return nil, func() {}
+		}
+		return c.client, func() {}
+	}
+	client := *c.client
+	client.Timeout = minimumTimeout
+	transport, ok := c.client.Transport.(*http.Transport)
+	if !ok {
+		return &client, func() {}
+	}
+	clonedTransport := transport.Clone()
+	if clonedTransport.ResponseHeaderTimeout < minimumTimeout {
+		clonedTransport.ResponseHeaderTimeout = minimumTimeout
+	}
+	if clonedTransport.TLSHandshakeTimeout < minimumTimeout {
+		clonedTransport.TLSHandshakeTimeout = minimumTimeout
+	}
+	client.Transport = clonedTransport
+	return &client, clonedTransport.CloseIdleConnections
+}
+
+func (c *Connector) doJSONWithClient(ctx context.Context, client *http.Client, method string, path string, headers http.Header, requestBody any, maxBodyBytes int64) (*ConnectorResponse, error) {
 	if c == nil || c.client == nil || c.baseURL == nil {
 		return nil, errors.New("managed instance connector is nil")
+	}
+	if client == nil {
+		return nil, errors.New("managed instance connector client is nil")
 	}
 	if maxBodyBytes <= 0 {
 		maxBodyBytes = c.maxBodyBytes
@@ -256,7 +293,7 @@ func (c *Connector) doJSONWithMaxBody(ctx context.Context, method string, path s
 			request.Header.Add(key, value)
 		}
 	}
-	response, err := c.client.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}

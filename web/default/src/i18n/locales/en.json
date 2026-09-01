@@ -1691,6 +1691,8 @@
     "Ownership": "Ownership",
     "Vendor": "Vendor",
     "Vendor email": "Vendor email",
+    "Vendor information refresh failed. The latest successful mapping or unknown vendor is shown; account data remains available.": "Vendor information refresh failed. The latest successful mapping or unknown vendor is shown; account data remains available.",
+    "Vendor information has not been collected yet. Vendor filters will not match until the background refresh succeeds.": "Vendor information has not been collected yet. Vendor filters will not match until the background refresh succeeds.",
     "Account type": "Account type",
     "Work node": "Work node",
     "Availability": "Availability",

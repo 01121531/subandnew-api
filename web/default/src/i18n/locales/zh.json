@@ -1691,6 +1691,8 @@
     "Ownership": "账号归属",
     "Vendor": "供应商",
     "Vendor email": "供应商邮箱",
+    "Vendor information refresh failed. The latest successful mapping or unknown vendor is shown; account data remains available.": "供应商信息本轮更新失败，当前显示上次成功映射或未知供应商；账号数据仍可正常查看。",
+    "Vendor information has not been collected yet. Vendor filters will not match until the background refresh succeeds.": "供应商信息尚未采集，后台补采成功前供应商筛选不会命中。",
     "Account type": "账号类型",
     "Work node": "工作节点",
     "Availability": "可用性",

@@ -30,12 +30,18 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 		Requests: &requests, InputTokens: &input, OutputTokens: &output,
 		CacheWriteTokens: &cacheWrite, CacheReadTokens: &cacheRead, Amount: &amount,
 		TotalTokens: &total, Status: model.ManagedInstanceCollectionSucceeded,
+	}, {
+		Selection: AccountExportSelection{
+			InstanceID: 7, InstanceName: "gateway-a", InstanceKind: model.ManagedInstanceKindClaudeGateway,
+			Account: InventoryItem{ID: 2, IDText: "account-without-vendor", Name: "unmapped"},
+		},
+		Status: model.ManagedInstanceCollectionSucceeded,
 	}}
 	artifact, err := writeAccountExportWorkbook("systask_xlsx_structure", AccountExportInput{
 		Window: TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"}, Locale: "zh-CN",
 	}, rows, 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, artifact.RecordCount)
+	require.Equal(t, 2, artifact.RecordCount)
 	require.Equal(t, 0, artifact.WarningCount)
 
 	path, _, err := accountExportTaskPaths("systask_xlsx_structure")
@@ -56,6 +62,8 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	require.Equal(t, "account@example.com", mustCell(t, workbook, "D2"))
 	require.Equal(t, "6822196335042536000", mustCell(t, workbook, "Q2"))
 	require.Equal(t, "2960.3409", mustCell(t, workbook, "N2"))
+	require.Empty(t, mustCell(t, workbook, "B3"))
+	require.Empty(t, mustCell(t, workbook, "C3"))
 	panes, err := workbook.GetPanes("账号导出")
 	require.NoError(t, err)
 	require.True(t, panes.Freeze)

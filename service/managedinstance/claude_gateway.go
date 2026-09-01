@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"hash/fnv"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,6 +30,7 @@ type claudeGatewaySession struct {
 const (
 	claudeGatewaySessionTTL           = 10 * time.Minute
 	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
+	claudeGatewayBulkRequestTimeout   = 60 * time.Second
 )
 
 var claudeGatewaySessions sync.Map
@@ -107,11 +110,68 @@ type claudeGatewayAccount struct {
 	} `json:"stats"`
 }
 
+func (account *claudeGatewayAccount) UnmarshalJSON(data []byte) error {
+	type plainAccount claudeGatewayAccount
+	decoded := struct {
+		plainAccount
+		OwnerUserID json.RawMessage `json:"owner_user_id"`
+	}{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*account = claudeGatewayAccount(decoded.plainAccount)
+	ownerUserID, err := claudeGatewayFlexibleID(decoded.OwnerUserID)
+	if err != nil {
+		return err
+	}
+	account.OwnerUserID = ownerUserID
+	return nil
+}
+
 type claudeGatewayVendor struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Status   string `json:"status"`
+}
+
+func (vendor *claudeGatewayVendor) UnmarshalJSON(data []byte) error {
+	type plainVendor claudeGatewayVendor
+	decoded := struct {
+		plainVendor
+		ID json.RawMessage `json:"id"`
+	}{}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*vendor = claudeGatewayVendor(decoded.plainVendor)
+	id, err := claudeGatewayFlexibleID(decoded.ID)
+	if err != nil {
+		return err
+	}
+	vendor.ID = id
+	return nil
+}
+
+func claudeGatewayFlexibleID(data json.RawMessage) (string, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return "", nil
+	}
+	if data[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(value), nil
+	}
+	var value json.Number
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(value.String()), nil
 }
 
 type claudeGatewayTodaySummary struct {
@@ -312,7 +372,7 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 	if resourceKind != "account" || credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
 		return nil, ErrUnsupportedCapability
 	}
-	accounts, err := fetchClaudeGatewayAccounts(ctx, connector, credential)
+	accounts, err := fetchClaudeGatewayAccountsBulk(ctx, connector, credential)
 	if err != nil {
 		return nil, err
 	}
@@ -324,6 +384,9 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 	page := claudeGatewayInventoryPage(accounts, vendors)
 	page.VendorObservedAt = vendorObservedAt
 	page.VendorCollectionStatus = model.ManagedInstanceCollectionSucceeded
+	if vendorErr == nil && claudeGatewayUnmatchedVendorCount(page.Items) > 0 {
+		page.VendorErrorCode = "claude_gateway_vendor_mapping_incomplete"
+	}
 	if vendorErr != nil {
 		page.VendorCollectionStatus = model.ManagedInstanceCollectionFailed
 		page.VendorErrorCode = managedInstanceObservationErrorCode(vendorErr)
@@ -335,8 +398,30 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 	return page, nil
 }
 
+func claudeGatewayUnmatchedVendorCount(items []InventoryItem) int {
+	count := 0
+	for _, item := range items {
+		if strings.TrimSpace(item.VendorID) != "" && item.VendorName == "未知供应商" {
+			count++
+		}
+	}
+	return count
+}
+
 func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
-	response, err := claudeGatewayDoJSONWithMaxBody(
+	return fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, false)
+}
+
+func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
+	return fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, true)
+}
+
+func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) ([]claudeGatewayAccount, error) {
+	request := claudeGatewayDoJSONWithMaxBody
+	if bulk {
+		request = claudeGatewayDoBulkJSON
+	}
+	response, err := request(
 		ctx,
 		connector,
 		credential,
@@ -346,22 +431,22 @@ func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, crede
 		claudeGatewayAccountsMaxBodyBytes,
 	)
 	if err != nil {
-		return nil, err
+		return nil, claudeGatewayCollectionError("accounts", err)
 	}
 	if err := requireHTTPStatus(response); err != nil {
-		return nil, err
+		return nil, claudeGatewayCollectionError("accounts", err)
 	}
 	var envelope struct {
 		Accounts []claudeGatewayAccount `json:"accounts"`
 	}
 	if json.Unmarshal(response.Body, &envelope) != nil || envelope.Accounts == nil || len(envelope.Accounts) > managedInstanceInventoryMaxItems {
-		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
 	}
 	return envelope.Accounts, nil
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
-	response, err := claudeGatewayDoJSONWithMaxBody(
+	response, err := claudeGatewayDoBulkJSON(
 		ctx,
 		connector,
 		credential,
@@ -371,18 +456,100 @@ func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, creden
 		claudeGatewayAccountsMaxBodyBytes,
 	)
 	if err != nil {
-		return nil, err
+		return nil, claudeGatewayCollectionError("vendors", err)
 	}
 	if err := requireHTTPStatus(response); err != nil {
+		return nil, claudeGatewayCollectionError("vendors", err)
+	}
+	items, err := decodeClaudeGatewayVendors(response.Body)
+	if err != nil || len(items) > managedInstanceInventoryMaxItems {
+		return nil, &ProbeError{Code: "claude_gateway_vendors_invalid_response", StatusCode: response.StatusCode}
+	}
+	return claudeGatewayVendorMap(items), nil
+}
+
+func claudeGatewayDoBulkJSON(ctx context.Context, connector *Connector, credential *CredentialMaterial, method string, path string, body any, maxBodyBytes int64) (*ConnectorResponse, error) {
+	headers, err := claudeGatewayAuthHeaders(ctx, connector, credential)
+	if err != nil {
 		return nil, err
 	}
-	var envelope struct {
-		Items []claudeGatewayVendor `json:"items"`
+	response, err := connector.doJSONWithMaxBodyAndMinTimeout(ctx, method, path, headers, body, maxBodyBytes, claudeGatewayBulkRequestTimeout)
+	if err != nil || credential.AuthType != "account_password" || !authenticationRejected(response) {
+		return response, err
 	}
-	if json.Unmarshal(response.Body, &envelope) != nil || envelope.Items == nil || len(envelope.Items) > managedInstanceInventoryMaxItems {
-		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	invalidateClaudeGatewaySession(connector, credential, strings.TrimPrefix(headers.Get("Authorization"), "Bearer "))
+	headers, err = claudeGatewayAuthHeaders(ctx, connector, credential)
+	if err != nil {
+		return nil, err
 	}
-	return claudeGatewayVendorMap(envelope.Items), nil
+	return connector.doJSONWithMaxBodyAndMinTimeout(ctx, method, path, headers, body, maxBodyBytes, claudeGatewayBulkRequestTimeout)
+}
+
+func decodeClaudeGatewayVendors(data []byte) ([]claudeGatewayVendor, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil, errors.New("empty Claude Gateway vendor response")
+	}
+	if data[0] == '[' {
+		var items []claudeGatewayVendor
+		if err := json.Unmarshal(data, &items); err != nil {
+			return nil, err
+		}
+		return items, nil
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"items", "vendors"} {
+		if raw, ok := envelope[key]; ok {
+			return decodeClaudeGatewayVendorArray(raw)
+		}
+	}
+	if raw, ok := envelope["data"]; ok {
+		if items, err := decodeClaudeGatewayVendorArray(raw); err == nil {
+			return items, nil
+		}
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &nested); err != nil {
+			return nil, err
+		}
+		for _, key := range []string{"items", "vendors"} {
+			if items, ok := nested[key]; ok {
+				return decodeClaudeGatewayVendorArray(items)
+			}
+		}
+	}
+	return nil, errors.New("Claude Gateway vendor list is missing")
+}
+
+func decodeClaudeGatewayVendorArray(data json.RawMessage) ([]claudeGatewayVendor, error) {
+	var items []claudeGatewayVendor
+	if err := json.Unmarshal(data, &items); err != nil || items == nil {
+		if err == nil {
+			err = errors.New("Claude Gateway vendor list is null")
+		}
+		return nil, err
+	}
+	return items, nil
+}
+
+func claudeGatewayCollectionError(stage string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var networkError net.Error
+	var probeError *ProbeError
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.As(err, &networkError) && networkError.Timeout():
+		return &ProbeError{Code: "claude_gateway_" + stage + "_timeout"}
+	case errors.Is(err, ErrConnectorResponseLarge):
+		return &ProbeError{Code: "claude_gateway_" + stage + "_response_too_large"}
+	case errors.As(err, &probeError) && probeError.Code == ProbeErrorInvalidResponse:
+		return &ProbeError{Code: "claude_gateway_" + stage + "_invalid_response", StatusCode: probeError.StatusCode}
+	default:
+		return err
+	}
 }
 
 func claudeGatewayVendorMap(items []claudeGatewayVendor) map[string]claudeGatewayVendor {

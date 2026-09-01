@@ -1523,6 +1523,8 @@
     "Ownership": "帳號歸屬",
     "Vendor": "供應商",
     "Vendor email": "供應商信箱",
+    "Vendor information refresh failed. The latest successful mapping or unknown vendor is shown; account data remains available.": "供應商資訊本輪更新失敗，目前顯示上次成功對應或未知供應商；帳號資料仍可正常查看。",
+    "Vendor information has not been collected yet. Vendor filters will not match until the background refresh succeeds.": "供應商資訊尚未採集，背景補採成功前供應商篩選不會命中。",
     "Account type": "帳號類型",
     "Work node": "工作節點",
     "Availability": "可用性",

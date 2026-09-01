@@ -6,10 +6,29 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConnectorBulkRequestCanRaiseConfiguredTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		time.Sleep(1100 * time.Millisecond)
+		writeProbeJSON(response, `{"ok":true}`)
+	}))
+	defer server.Close()
+	allowed, err := parseAllowedCIDRs("127.0.0.0/8")
+	require.NoError(t, err)
+	connector, err := NewConnector(&model.ManagedInstance{BaseURL: server.URL, RequestTimeoutSeconds: 1, TLSVerify: true}, ConnectorPolicy{AllowedCIDRs: allowed})
+	require.NoError(t, err)
+
+	_, err = connector.doJSONWithMaxBody(context.Background(), http.MethodGet, "/slow", nil, nil, defaultConnectorMaxBodyBytes)
+	require.Error(t, err)
+	response, err := connector.doJSONWithMaxBodyAndMinTimeout(context.Background(), http.MethodGet, "/slow", nil, nil, defaultConnectorMaxBodyBytes, 2*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+}
 
 type staticResolver struct {
 	addresses []net.IPAddr

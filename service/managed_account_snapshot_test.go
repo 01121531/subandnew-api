@@ -53,6 +53,24 @@ func TestManagedAccountFailedRefreshKeepsLastSuccess(t *testing.T) {
 	require.JSONEq(t, `{"total":2}`, snapshot.Payload)
 	require.Equal(t, model.ManagedInstanceCollectionFailed, snapshot.LastAttemptStatus)
 	require.Equal(t, "collection_failed", snapshot.LastErrorCode)
+	require.Equal(t, managedAccountSnapshotSchema, snapshot.SchemaVersion)
+}
+
+func TestManagedAccountFailedRefreshDoesNotAdvancePayloadSchema(t *testing.T) {
+	truncate(t)
+	accountRange, err := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Create(&model.ManagedAccountSnapshot{
+		InstanceID: 8, SnapshotKind: model.ManagedAccountSnapshotKindInventory, RangeKey: managedAccountInventoryRangeKey,
+		Timezone: managedAccountDefaultTimezone, SchemaVersion: 2, ObservedAt: 1234, Payload: `{"total":2}`,
+		LastAttemptAt: 1234, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
+	}).Error)
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindInventory, accountRange, nil, errors.New("remote failed")))
+
+	snapshot, err := findManagedAccountSnapshot(8, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	require.NoError(t, err)
+	require.Equal(t, 2, snapshot.SchemaVersion)
+	require.JSONEq(t, `{"total":2}`, snapshot.Payload)
 }
 
 func TestManagedAccountFailedRefreshRetriesAfterOneMinute(t *testing.T) {
@@ -150,6 +168,9 @@ func TestManagedAccountInventoryBackfillsLegacySnapshot(t *testing.T) {
 	require.NotNil(t, view.Inventory.Observation)
 	require.EqualValues(t, 5678, view.Inventory.Observation.ObservedAt)
 	require.Equal(t, "legacy-etag", view.Inventory.Observation.ETag)
+	snapshot, err := findManagedAccountSnapshot(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	require.NoError(t, err)
+	require.Equal(t, 1, snapshot.SchemaVersion)
 }
 
 func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
@@ -311,6 +332,43 @@ func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	}
 	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)-1))
 	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)))
+}
+
+func TestClaudeGatewayStandardSyncDueBackfillsVendorMetadata(t *testing.T) {
+	instance := &model.ManagedInstance{Id: 11, Kind: model.ManagedInstanceKindClaudeGateway}
+	now := int64(10_000)
+	latest := make(map[string]managedAccountScheduleState)
+	for _, item := range append([]struct {
+		kind string
+		key  string
+	}{{model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey}}, func() []struct {
+		kind string
+		key  string
+	} {
+		items := make([]struct {
+			kind string
+			key  string
+		}, 0, len(managedAccountPresetDays))
+		for _, days := range managedAccountPresetDays {
+			items = append(items, struct {
+				kind string
+				key  string
+			}{model.ManagedAccountSnapshotKindOutput, "preset-" + strconv.Itoa(days)})
+		}
+		return items
+	}()...) {
+		latest[managedAccountScheduleKey(instance.Id, item.kind, item.key)] = managedAccountScheduleState{
+			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
+			VendorMetadataAvailable: item.kind != model.ManagedAccountSnapshotKindInventory,
+		}
+	}
+	require.True(t, managedAccountStandardSyncDue(instance, latest, now))
+
+	inventoryKey := managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	state := latest[inventoryKey]
+	state.VendorMetadataAvailable = true
+	latest[inventoryKey] = state
+	require.False(t, managedAccountStandardSyncDue(instance, latest, now))
 }
 
 func TestManagedAccountRunningTaskCanBeRequeued(t *testing.T) {

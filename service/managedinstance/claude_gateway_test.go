@@ -3,6 +3,7 @@ package managedinstance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,6 +111,63 @@ func TestClaudeGatewayInventoryMapsAccountMetrics(t *testing.T) {
 	require.Equal(t, 1, vendorRequests)
 }
 
+func TestClaudeGatewayInventoryBulkRequestAndNumericVendorIDs(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	vendorRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			time.Sleep(1100 * time.Millisecond)
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"accounts":[`))
+			for index := range 5000 {
+				if index > 0 {
+					_, _ = response.Write([]byte(","))
+				}
+				_, _ = fmt.Fprintf(response, `{"id":"account-%d","name":"account-%d","owner_user_id":9007199254740993,"status":"active"}`, index, index)
+			}
+			_, _ = response.Write([]byte(`]}`))
+		case "/api/admin/vendors":
+			vendorRequests++
+			writeProbeJSON(response, `{"data":{"vendors":[{"id":9007199254740993,"username":"large-id-vendor","email":"xw@qq.com"}]}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+	require.NoError(t, model.DB.Model(&model.ManagedInstance{}).Where("id = ?", instance.Id).Update("request_timeout_seconds", 1).Error)
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Len(t, page.Items, 5000)
+	require.Equal(t, "9007199254740993", page.Items[0].VendorID)
+	require.Equal(t, "large-id-vendor", page.Items[0].VendorName)
+	require.Equal(t, "xw@qq.com", page.Items[0].VendorEmail)
+	require.Equal(t, 1, vendorRequests)
+}
+
+func TestDecodeClaudeGatewayVendorsAcceptsKnownEnvelopes(t *testing.T) {
+	for name, body := range map[string]string{
+		"array":        `[{"id":"vendor-1"}]`,
+		"items":        `{"items":[{"id":"vendor-1"}]}`,
+		"vendors":      `{"vendors":[{"id":"vendor-1"}]}`,
+		"data items":   `{"data":{"items":[{"id":"vendor-1"}]}}`,
+		"data vendors": `{"data":{"vendors":[{"id":"vendor-1"}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			vendors, err := decodeClaudeGatewayVendors([]byte(body))
+			require.NoError(t, err)
+			require.Len(t, vendors, 1)
+			require.Equal(t, "vendor-1", vendors[0].ID)
+		})
+	}
+	_, err := decodeClaudeGatewayVendors([]byte(`{"data":{"unknown":[]}}`))
+	require.Error(t, err)
+}
+
 func TestClaudeGatewayAccountVendorFallbackLabels(t *testing.T) {
 	platformOwned := claudeGatewayAccountItem(claudeGatewayAccount{ID: "platform", Name: "platform"}, nil)
 	require.Empty(t, platformOwned.VendorID)
@@ -120,6 +178,7 @@ func TestClaudeGatewayAccountVendorFallbackLabels(t *testing.T) {
 	require.Equal(t, "missing", unknown.VendorID)
 	require.Equal(t, "未知供应商", unknown.VendorName)
 	require.Empty(t, unknown.VendorEmail)
+	require.Equal(t, 1, claudeGatewayUnmatchedVendorCount([]InventoryItem{platformOwned, unknown}))
 }
 
 func TestClaudeGatewayInventoryKeepsPreviousVendorsWhenCollectionFails(t *testing.T) {

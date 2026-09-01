@@ -992,6 +992,12 @@ export function ManagedAccounts() {
       const page = query.data?.data.inventory.observation?.data
       return page?.vendor_collection_status === 'failed'
     })
+  const vendorSnapshotMissing =
+    family === 'claude_gateway' &&
+    snapshotQueries.some((query) => {
+      const page = query.data?.data.inventory.observation?.data
+      return Boolean(page) && !page?.vendor_collection_status
+    })
   const activeAdvancedRules = advancedFilter.rules.filter(
     isAccountFilterRuleComplete
   )
@@ -1344,7 +1350,16 @@ export function ManagedAccounts() {
         />
         {vendorSnapshotWarning && (
           <div className='border-warning/30 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
-            供应商信息本轮更新失败，当前显示上次成功映射或未知供应商；账号数据仍为最新快照。
+            {t(
+              'Vendor information refresh failed. The latest successful mapping or unknown vendor is shown; account data remains available.'
+            )}
+          </div>
+        )}
+        {vendorSnapshotMissing && (
+          <div className='border-warning/30 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
+            {t(
+              'Vendor information has not been collected yet. Vendor filters will not match until the background refresh succeeds.'
+            )}
           </div>
         )}
         <AccountOutputPanel
@@ -2248,14 +2263,14 @@ function AccountOutputTable({
                     </MobileDetail>
                     {isClaudeGateway && (
                       <MobileDetail label={t('Vendor')}>
-                        <span className='block break-words'>
-                          {output.account.vendor_name || '--'}
+                        {output.account.vendor_name || '--'}
+                      </MobileDetail>
+                    )}
+                    {isClaudeGateway && (
+                      <MobileDetail label={t('Vendor email')}>
+                        <span className='break-all'>
+                          {output.account.vendor_email || '--'}
                         </span>
-                        {output.account.vendor_email && (
-                          <span className='text-muted-foreground block text-xs break-all'>
-                            {output.account.vendor_email}
-                          </span>
-                        )}
                       </MobileDetail>
                     )}
                     <MobileDetail label={t('Requests')}>
@@ -2277,7 +2292,7 @@ function AccountOutputTable({
       ) : (
         <div className='overflow-x-auto'>
           <Table
-            className={isClaudeGateway ? 'min-w-[1080px]' : 'min-w-[860px]'}
+            className={isClaudeGateway ? 'min-w-[1240px]' : 'min-w-[860px]'}
           >
             <TableHeader className='bg-muted/35'>
               <TableRow>
@@ -2292,6 +2307,7 @@ function AccountOutputTable({
                 </TableHead>
                 {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
                 {isClaudeGateway && sortableHead('vendor', t('Vendor'))}
+                {isClaudeGateway && <TableHead>{t('Vendor email')}</TableHead>}
                 {sortableHead('instance', t('Instance'))}
                 {sortableHead(
                   'created_at',
@@ -2329,11 +2345,13 @@ function AccountOutputTable({
                         <p className='max-w-44 truncate text-sm font-medium'>
                           {output.account.vendor_name || '--'}
                         </p>
-                        {output.account.vendor_email && (
-                          <p className='text-muted-foreground max-w-52 truncate text-xs'>
-                            {output.account.vendor_email}
-                          </p>
-                        )}
+                      </TableCell>
+                    )}
+                    {isClaudeGateway && (
+                      <TableCell>
+                        <p className='max-w-56 truncate text-sm'>
+                          {output.account.vendor_email || '--'}
+                        </p>
                       </TableCell>
                     )}
                     <TableCell>{instance.name}</TableCell>
@@ -2543,7 +2561,7 @@ function AccountTable(props: {
   let tableMinWidth = 'min-w-[1140px]'
   if (isChannel) tableMinWidth = 'min-w-[980px]'
   else if (isConductor) tableMinWidth = 'min-w-[1280px]'
-  else if (isClaudeGateway) tableMinWidth = 'min-w-[1440px]'
+  else if (isClaudeGateway) tableMinWidth = 'min-w-[1580px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -2626,14 +2644,14 @@ function AccountTable(props: {
                       </MobileDetail>
                       {isClaudeGateway && (
                         <MobileDetail label={t('Vendor')}>
-                          <span className='block break-words'>
-                            {item.vendor_name || '--'}
+                          {item.vendor_name || '--'}
+                        </MobileDetail>
+                      )}
+                      {isClaudeGateway && (
+                        <MobileDetail label={t('Vendor email')}>
+                          <span className='break-all'>
+                            {item.vendor_email || '--'}
                           </span>
-                          {item.vendor_email && (
-                            <span className='text-muted-foreground block text-xs break-all'>
-                              {item.vendor_email}
-                            </span>
-                          )}
                         </MobileDetail>
                       )}
                       <MobileDetail
@@ -2735,6 +2753,9 @@ function AccountTable(props: {
                     {t(isChannel ? 'Channel' : 'Account')}
                   </TableHead>
                   {isClaudeGateway && <TableHead>{t('Vendor')}</TableHead>}
+                  {isClaudeGateway && (
+                    <TableHead>{t('Vendor email')}</TableHead>
+                  )}
                   <TableHead>{t('Instance')}</TableHead>
                   <TableHead>
                     {isConductor
@@ -2792,16 +2813,16 @@ function AccountTable(props: {
                       </TableCell>
                       {isClaudeGateway && (
                         <TableCell>
-                          <div className='max-w-52'>
-                            <p className='truncate text-sm font-medium'>
-                              {item.vendor_name || '--'}
-                            </p>
-                            {item.vendor_email && (
-                              <p className='text-muted-foreground truncate text-xs'>
-                                {item.vendor_email}
-                              </p>
-                            )}
-                          </div>
+                          <p className='max-w-48 truncate text-sm font-medium'>
+                            {item.vendor_name || '--'}
+                          </p>
+                        </TableCell>
+                      )}
+                      {isClaudeGateway && (
+                        <TableCell>
+                          <p className='max-w-56 truncate text-sm'>
+                            {item.vendor_email || '--'}
+                          </p>
                         </TableCell>
                       )}
                       <TableCell>

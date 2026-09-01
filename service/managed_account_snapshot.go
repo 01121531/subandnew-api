@@ -29,7 +29,7 @@ const (
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
-	managedAccountSnapshotSchema    = 3
+	managedAccountSnapshotSchema    = 4
 	managedAccountStandardTaskMode  = "standard"
 	managedAccountCustomTaskMode    = "custom"
 )
@@ -136,7 +136,8 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	if instanceID <= 0 || accountRange.RangeKey == "" {
 		return nil, managedinstance.ErrInvalidInstance
 	}
-	if _, err := managedinstance.Get(instanceID); err != nil {
+	instance, err := managedinstance.Get(instanceID)
+	if err != nil {
 		return nil, err
 	}
 	_ = backfillManagedAccountInventory(instanceID)
@@ -173,6 +174,9 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 		view.RefreshRecommended = output == nil || output.ObservedAt <= 0
 	} else {
 		view.RefreshRecommended = managedAccountSectionNeedsRefresh(inventory, now)
+		if instance.Kind == model.ManagedInstanceKindClaudeGateway && managedAccountVendorRefreshDue(inventory, now) {
+			view.RefreshRecommended = true
+		}
 		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
 	}
 	return view, nil
@@ -343,6 +347,29 @@ func managedAccountSectionNeedsRefresh(snapshot *model.ManagedAccountSnapshot, n
 	return now-snapshot.LastAttemptAt >= int64(cooldown/time.Second)
 }
 
+func managedAccountVendorRefreshDue(snapshot *model.ManagedAccountSnapshot, now int64) bool {
+	if managedAccountVendorMetadataAvailable(snapshot) {
+		return false
+	}
+	if snapshot == nil || snapshot.LastAttemptAt == 0 {
+		return true
+	}
+	if snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed {
+		return now-snapshot.LastAttemptAt >= int64(managedAccountFailureCooldown/time.Second)
+	}
+	return true
+}
+
+func managedAccountVendorMetadataAvailable(snapshot *model.ManagedAccountSnapshot) bool {
+	if snapshot == nil || strings.TrimSpace(snapshot.Payload) == "" {
+		return false
+	}
+	var metadata struct {
+		VendorCollectionStatus string `json:"vendor_collection_status"`
+	}
+	return json.Unmarshal([]byte(snapshot.Payload), &metadata) == nil && strings.TrimSpace(metadata.VendorCollectionStatus) != ""
+}
+
 func managedAccountTaskScope(instanceID int64, mode string, rangeKey string) string {
 	if mode == managedAccountStandardTaskMode {
 		return strconv.FormatInt(instanceID, 10) + ":standard"
@@ -439,10 +466,14 @@ func backfillManagedAccountInventory(instanceID int64) error {
 	if err != nil {
 		return err
 	}
+	schemaVersion := legacy.SchemaVersion
+	if schemaVersion <= 0 {
+		schemaVersion = 1
+	}
 	snapshot := &model.ManagedAccountSnapshot{
 		InstanceID: instanceID, SnapshotKind: model.ManagedAccountSnapshotKindInventory,
 		RangeKey: managedAccountInventoryRangeKey, Timezone: managedAccountDefaultTimezone,
-		SchemaVersion: managedAccountSnapshotSchema, ObservedAt: legacy.ObservedAt, ETag: legacy.ETag,
+		SchemaVersion: schemaVersion, ObservedAt: legacy.ObservedAt, ETag: legacy.ETag,
 		Payload: legacy.Payload, LastAttemptAt: legacy.ObservedAt,
 		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
 	}
@@ -475,7 +506,7 @@ func saveManagedAccountSnapshot(taskID string, runnerID string, instanceID int64
 	}
 	updates := map[string]any{
 		"preset_days": insert.PresetDays, "window_start": insert.WindowStart, "window_end": insert.WindowEnd,
-		"timezone": insert.Timezone, "schema_version": insert.SchemaVersion,
+		"timezone":        insert.Timezone,
 		"last_attempt_at": now, "last_attempt_status": status, "last_error_code": errorCode,
 		"updated_at": now,
 	}
@@ -490,6 +521,7 @@ func saveManagedAccountSnapshot(taskID string, runnerID string, instanceID int64
 		updates["observed_at"] = insert.ObservedAt
 		updates["etag"] = insert.ETag
 		updates["payload"] = insert.Payload
+		updates["schema_version"] = insert.SchemaVersion
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
 		if taskID != "" && runnerID != "" {
@@ -737,7 +769,7 @@ func scheduleDueManagedAccountSyncs(now int64) {
 			presetKeys = append(presetKeys, "preset-"+strconv.Itoa(days))
 		}
 		var snapshots []model.ManagedAccountSnapshot
-		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key", "last_attempt_at", "last_attempt_status").Where(
+		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key", "schema_version", "last_attempt_at", "last_attempt_status").Where(
 			"instance_id IN ? AND ((snapshot_kind = ? AND range_key = ?) OR (snapshot_kind = ? AND range_key IN ?))",
 			ids, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey,
 			model.ManagedAccountSnapshotKindOutput, presetKeys,
@@ -748,8 +780,9 @@ func scheduleDueManagedAccountSyncs(now int64) {
 		latest := make(map[string]managedAccountScheduleState, len(snapshots))
 		for _, snapshot := range snapshots {
 			latest[managedAccountScheduleKey(snapshot.InstanceID, snapshot.SnapshotKind, snapshot.RangeKey)] = managedAccountScheduleState{
-				AttemptedAt: snapshot.LastAttemptAt,
-				Status:      snapshot.LastAttemptStatus,
+				AttemptedAt:             snapshot.LastAttemptAt,
+				Status:                  snapshot.LastAttemptStatus,
+				VendorMetadataAvailable: snapshot.SnapshotKind != model.ManagedAccountSnapshotKindInventory || snapshot.SchemaVersion >= managedAccountSnapshotSchema,
 			}
 		}
 		for _, instance := range instances {
@@ -770,15 +803,26 @@ func scheduleDueManagedAccountSyncs(now int64) {
 }
 
 type managedAccountScheduleState struct {
-	AttemptedAt int64
-	Status      string
+	AttemptedAt             int64
+	Status                  string
+	VendorMetadataAvailable bool
 }
 
 func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[string]managedAccountScheduleState, now int64) bool {
 	if instance == nil {
 		return false
 	}
-	required := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
+	inventoryKey := managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		inventory := latest[inventoryKey]
+		if !inventory.VendorMetadataAvailable {
+			if inventory.Status != model.ManagedInstanceCollectionFailed {
+				return true
+			}
+			return inventory.AttemptedAt == 0 || now >= inventory.AttemptedAt+int64(managedAccountFailureCooldown/time.Second)
+		}
+	}
+	required := []string{inventoryKey}
 	for _, days := range managedAccountPresetDays {
 		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
 	}
