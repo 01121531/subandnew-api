@@ -202,7 +202,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 		case "/api/admin/oauth-accounts":
 			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"active","health_status":"cooldown","stats":{"rpm":5,"concurrent":1,"active_sessions":1,"cooldown":true}},{"id":"three","name":"three","status":"active","health_status":"unknown","stats":{"rpm":0,"cooldown":false}},{"id":"four","name":"four","status":"disabled","health_status":"failed","stats":{"rpm":0,"cooldown":false}}]}`)
 		case "/api/admin/oauth-accounts/today-summary":
-			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"request_count":100}`)
+			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"total_cost_30d":320.5,"request_count":100}`)
 		case "/api/admin/overview":
 			require.Equal(t, "time", request.URL.Query().Get("slice"))
 			require.Equal(t, "day", request.URL.Query().Get("granularity"))
@@ -219,12 +219,73 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 17.0, *state.RPM.Value)
 	require.Equal(t, 3.0, *state.ConcurrencyUsed.Value)
 	require.Equal(t, 12.34567891, *state.TodayCost.Value)
+	require.Equal(t, 80.0, *state.Cost7D.Value)
+	require.Equal(t, 320.5, *state.Cost30D.Value)
+	require.False(t, state.TodayCostStale)
+	require.False(t, state.Cost7DStale)
+	require.False(t, state.Cost30DStale)
+	require.Positive(t, state.TodayCostObservedAt)
+	require.Equal(t, state.TodayCostObservedAt, state.Cost7DObservedAt)
+	require.Equal(t, state.TodayCostObservedAt, state.Cost30DObservedAt)
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 4, state.AccountsTotal)
 	require.Equal(t, 2, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 4)
+}
+
+func TestRefreshClaudeGatewayRealtimePreservesEachFailedCost(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	resetNewAPIRealtimeCacheForTest()
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	summaryAttempt := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","stats":{"rpm":1}}]}`)
+		case "/api/admin/oauth-accounts/today-summary":
+			summaryAttempt++
+			switch summaryAttempt {
+			case 1:
+				writeProbeJSON(response, `{"total_cost":0,"total_cost_7d":7.5,"total_cost_30d":30.5}`)
+			case 2:
+				writeProbeJSON(response, `{"total_cost":2.5}`)
+			default:
+				http.Error(response, "temporary failure", http.StatusBadGateway)
+			}
+		case "/api/admin/overview":
+			writeProbeJSON(response, `{"kpis":{"total":1,"successRate":1}}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	first, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Zero(t, *first.TodayCost.Value)
+	require.Equal(t, 7.5, *first.Cost7D.Value)
+	require.Equal(t, 30.5, *first.Cost30D.Value)
+
+	partial, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 2.5, *partial.TodayCost.Value)
+	require.False(t, partial.TodayCostStale)
+	require.Equal(t, 7.5, *partial.Cost7D.Value)
+	require.True(t, partial.Cost7DStale)
+	require.Equal(t, 30.5, *partial.Cost30D.Value)
+	require.True(t, partial.Cost30DStale)
+
+	failed, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, 2.5, *failed.TodayCost.Value)
+	require.True(t, failed.TodayCostStale)
+	require.Equal(t, 7.5, *failed.Cost7D.Value)
+	require.True(t, failed.Cost7DStale)
+	require.Equal(t, 30.5, *failed.Cost30D.Value)
+	require.True(t, failed.Cost30DStale)
 }
 
 func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {

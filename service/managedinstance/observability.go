@@ -136,6 +136,8 @@ type RealtimeMetricsResult struct {
 	ConcurrencyMax           MetricSample `json:"concurrency_max"`
 	ConcurrencyStatus        string       `json:"concurrency_collection_status,omitempty"`
 	TodayCost                MetricSample `json:"today_cost"`
+	Cost7D                   MetricSample `json:"cost_7d"`
+	Cost30D                  MetricSample `json:"cost_30d"`
 	AccountsTotal            int          `json:"accounts_total,omitempty"`
 	AccountsAvailable        int          `json:"accounts_available,omitempty"`
 	AccountsRateLimited      int          `json:"accounts_rate_limited,omitempty"`

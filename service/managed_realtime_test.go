@@ -58,17 +58,27 @@ func TestManagedRealtimeSubscriptionPublishesFullState(t *testing.T) {
 
 func TestManagedRealtimeEventPayloadIsScopedByTopic(t *testing.T) {
 	rpm := 12.0
+	todayCost, cost7D, cost30D := 1.0, 7.0, 30.0
 	state := managedinstance.ManagedRealtimeState{
-		InstanceID:        7,
-		RPM:               managedinstance.MetricSample{Value: &rpm, Unit: "request/min", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
-		AccountsTotal:     2,
-		AccountsAvailable: 1,
-		Accounts:          []managedinstance.InventoryItem{{ID: 1}},
-		Sources:           []managedinstance.InventorySource{{ID: "source-1"}},
+		InstanceID:          7,
+		RPM:                 managedinstance.MetricSample{Value: &rpm, Unit: "request/min", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
+		TodayCost:           managedinstance.MetricSample{Value: &todayCost, Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
+		Cost7D:              managedinstance.MetricSample{Value: &cost7D, Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
+		Cost30D:             managedinstance.MetricSample{Value: &cost30D, Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionSucceeded},
+		TodayCostObservedAt: 101, Cost7DObservedAt: 102, Cost30DObservedAt: 103, Cost30DStale: true,
+		AccountsTotal: 2, AccountsAvailable: 1, Accounts: []managedinstance.InventoryItem{{ID: 1}},
+		Sources: []managedinstance.InventorySource{{ID: "source-1"}},
 	}
 
 	rpmPayload := ManagedRealtimeEventPayload(ManagedRealtimeEvent{Type: "rpm", State: state})
 	require.Contains(t, rpmPayload, "rpm")
+	require.Equal(t, state.TodayCost, rpmPayload["today_cost"])
+	require.Equal(t, state.Cost7D, rpmPayload["cost_7d"])
+	require.Equal(t, state.Cost30D, rpmPayload["cost_30d"])
+	require.Equal(t, int64(101), rpmPayload["today_cost_observed_at"])
+	require.Equal(t, int64(102), rpmPayload["cost_7d_observed_at"])
+	require.Equal(t, int64(103), rpmPayload["cost_30d_observed_at"])
+	require.Equal(t, true, rpmPayload["cost_30d_stale"])
 	require.NotContains(t, rpmPayload, "accounts")
 	require.NotContains(t, rpmPayload, "sources")
 

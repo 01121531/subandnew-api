@@ -602,15 +602,21 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, AccountsObservedAt: now,
 		ActiveSessions: sessions, ActiveSessionsObservedAt: now, ConcurrencyObservedAt: now, Accounts: page.Items,
 	}
-	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil && summary.TotalCost != nil {
-		state.TodayCost = supportedMetric(float64(*summary.TotalCost), "usd")
-		state.TodayCostObservedAt = now
-	} else if previous, ok := currentNewAPIRealtime(instanceID); ok {
-		state.TodayCost = previous.TodayCost
-		state.TodayCostObservedAt = previous.TodayCostObservedAt
-	} else {
-		state.TodayCost = unsupportedMetric("usd")
+	previous, _ := currentNewAPIRealtime(instanceID)
+	summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential)
+	var todayCost, cost7D, cost30D *claudeGatewayNumber
+	if summaryErr == nil {
+		todayCost, cost7D, cost30D = summary.TotalCost, summary.TotalCost7D, summary.TotalCost30D
 	}
+	state.TodayCost, state.TodayCostObservedAt, state.TodayCostStale = claudeGatewayRealtimeCost(
+		todayCost, previous.TodayCost, previous.TodayCostObservedAt, now,
+	)
+	state.Cost7D, state.Cost7DObservedAt, state.Cost7DStale = claudeGatewayRealtimeCost(
+		cost7D, previous.Cost7D, previous.Cost7DObservedAt, now,
+	)
+	state.Cost30D, state.Cost30DObservedAt, state.Cost30DStale = claudeGatewayRealtimeCost(
+		cost30D, previous.Cost30D, previous.Cost30DObservedAt, now,
+	)
 	if overview, overviewErr := fetchClaudeGatewayOverview(ctx, connector, credential); overviewErr == nil {
 		state.SuccessRate = supportedMetric(float64(overview.KPIs.SuccessRate), "ratio")
 		state.SuccessRateSampleCount = float64(overview.KPIs.Total)
@@ -624,6 +630,16 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	}
 	storeNewAPIRealtime(state)
 	return state, nil
+}
+
+func claudeGatewayRealtimeCost(value *claudeGatewayNumber, previous MetricSample, previousObservedAt, now int64) (MetricSample, int64, bool) {
+	if value != nil && *value >= 0 {
+		return supportedMetric(float64(*value), "usd"), now, false
+	}
+	if previous.CollectionStatus == model.ManagedInstanceCollectionSucceeded && previous.Value != nil {
+		return previous, previousObservedAt, true
+	}
+	return unsupportedMetric("usd"), 0, true
 }
 
 func storeClaudeGatewayRealtimeFailure(instanceID int64, err error) ManagedRealtimeState {

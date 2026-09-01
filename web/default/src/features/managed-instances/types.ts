@@ -290,6 +290,14 @@ export interface ManagedInstanceRealtimeState {
   success_rate: ManagedInstanceMetricSample
   success_rate_sample_count?: number
   today_cost?: ManagedInstanceMetricSample
+  today_cost_observed_at?: number
+  today_cost_stale?: boolean
+  cost_7d?: ManagedInstanceMetricSample
+  cost_7d_observed_at?: number
+  cost_7d_stale?: boolean
+  cost_30d?: ManagedInstanceMetricSample
+  cost_30d_observed_at?: number
+  cost_30d_stale?: boolean
   concurrency_used?: ManagedInstanceMetricSample
   concurrency_max?: ManagedInstanceMetricSample
   concurrency_collection_status?: string

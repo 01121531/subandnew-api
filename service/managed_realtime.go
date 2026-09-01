@@ -208,6 +208,14 @@ func ManagedRealtimeEventPayload(event ManagedRealtimeEvent) map[string]any {
 		payload["success_rate"] = state.SuccessRate
 		payload["success_rate_sample_count"] = state.SuccessRateSampleCount
 		payload["today_cost"] = state.TodayCost
+		payload["today_cost_observed_at"] = state.TodayCostObservedAt
+		payload["today_cost_stale"] = state.TodayCostStale
+		payload["cost_7d"] = state.Cost7D
+		payload["cost_7d_observed_at"] = state.Cost7DObservedAt
+		payload["cost_7d_stale"] = state.Cost7DStale
+		payload["cost_30d"] = state.Cost30D
+		payload["cost_30d_observed_at"] = state.Cost30DObservedAt
+		payload["cost_30d_stale"] = state.Cost30DStale
 		payload["concurrency_used"] = state.ConcurrencyUsed
 		payload["concurrency_max"] = state.ConcurrencyMax
 		payload["concurrency_collection_status"] = state.ConcurrencyStatus

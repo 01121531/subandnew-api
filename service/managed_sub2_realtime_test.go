@@ -91,6 +91,7 @@ func TestManagedPollingRealtimeCollectorRecordsGatewayAccountsOnlyOnSuccess(t *t
 	instance := model.ManagedInstance{Name: "gateway", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://gateway.example.com"}
 	require.NoError(t, model.DB.Create(&instance).Error)
 	rpm := 37.0
+	todayCost := 12.5
 	observedAt := time.Now().Unix()
 	target := managedRealtimeTarget{InstanceID: instance.Id, Kind: instance.Kind, BaseURL: instance.BaseURL}
 
@@ -106,12 +107,18 @@ func TestManagedPollingRealtimeCollectorRecordsGatewayAccountsOnlyOnSuccess(t *t
 			AccountsAvailable:        0,
 			AccountsTotal:            0,
 			AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			TodayCost: managedinstance.MetricSample{
+				Value: &todayCost, Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+			TodayCostObservedAt: observedAt,
 		}, nil
 	})
 
 	var history model.ManagedRPMHistory
 	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
 	require.Equal(t, 1, history.AccountSampleCount)
+	require.Equal(t, 1, history.TodayCostSampleCount)
+	require.Equal(t, todayCost, history.TodayCostLast)
 	require.Zero(t, history.AccountsAvailableLast)
 	require.Zero(t, history.AccountsTotalLast)
 
@@ -132,6 +139,25 @@ func TestManagedPollingRealtimeCollectorRecordsGatewayAccountsOnlyOnSuccess(t *t
 
 	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
 	require.Equal(t, 1, history.AccountSampleCount)
+	require.Equal(t, 1, history.TodayCostSampleCount)
 	require.Zero(t, history.AccountsAvailableLast)
 	require.Zero(t, history.AccountsTotalLast)
+
+	refreshManagedRealtimeTargetsWith(context.Background(), []managedRealtimeTarget{target}, func(_ context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
+		return managedinstance.ManagedRealtimeState{
+			InstanceID: target.InstanceID,
+			ObservedAt: observedAt + 20,
+			RPM: managedinstance.MetricSample{
+				Value: &rpm, Unit: "request/min", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+			TodayCost: managedinstance.MetricSample{
+				Value: &todayCost, Unit: "usd", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+			},
+			TodayCostObservedAt: observedAt,
+			TodayCostStale:      true,
+		}, nil
+	})
+
+	require.NoError(t, model.DB.Where("instance_id = ?", instance.Id).First(&history).Error)
+	require.Equal(t, 1, history.TodayCostSampleCount)
 }

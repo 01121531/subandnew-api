@@ -135,6 +135,13 @@ type InstanceMetricRow = {
   accountsAvailable: number | null
   accountsTotal: number | null
   todayCost: number | null
+  todayCostStale: boolean
+  cost7D: number | null
+  cost7DObservedAt: number
+  cost7DStale: boolean
+  cost30D: number | null
+  cost30DObservedAt: number
+  cost30DStale: boolean
   tokens: number | null
   quota: number | null
   lastAttemptAt: number
@@ -634,7 +641,12 @@ export function FleetDashboard() {
             ? Boolean(realtime?.observed_at)
             : instance.kind === 'sub2api' &&
               realtime?.accounts_collection_status === 'succeeded'
-        const todayCost = metricValue(todaySection?.observation?.data?.cost)
+        const usesRealtimeCosts = instance.kind === 'claude_gateway'
+        const todayCost = metricValue(
+          usesRealtimeCosts
+            ? realtime?.today_cost
+            : todaySection?.observation?.data?.cost
+        )
         return {
           instance,
           summary,
@@ -644,7 +656,9 @@ export function FleetDashboard() {
             realtime?.observed_at ?? 0
           ),
           summaryObservedAt: observation?.observed_at ?? 0,
-          todayObservedAt: todaySection?.observation?.observed_at ?? 0,
+          todayObservedAt: usesRealtimeCosts
+            ? (realtime?.today_cost_observed_at ?? 0)
+            : (todaySection?.observation?.observed_at ?? 0),
           collected: observation?.collection_status === 'succeeded',
           requests: metricValue(summary?.requests),
           rpm: metricValue(realtime?.rpm),
@@ -658,6 +672,23 @@ export function FleetDashboard() {
             : null,
           accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
           todayCost,
+          todayCostStale: usesRealtimeCosts
+            ? Boolean(realtime?.today_cost_stale || realtime?.stale)
+            : Boolean(todaySection?.stale),
+          cost7D: usesRealtimeCosts ? metricValue(realtime?.cost_7d) : null,
+          cost7DObservedAt: usesRealtimeCosts
+            ? (realtime?.cost_7d_observed_at ?? 0)
+            : 0,
+          cost7DStale: usesRealtimeCosts
+            ? Boolean(realtime?.cost_7d_stale || realtime?.stale)
+            : false,
+          cost30D: usesRealtimeCosts ? metricValue(realtime?.cost_30d) : null,
+          cost30DObservedAt: usesRealtimeCosts
+            ? (realtime?.cost_30d_observed_at ?? 0)
+            : 0,
+          cost30DStale: usesRealtimeCosts
+            ? Boolean(realtime?.cost_30d_stale || realtime?.stale)
+            : false,
           tokens: metricValue(summary?.tokens),
           quota: metricValue(summary?.cost),
           lastAttemptAt: Math.max(
@@ -730,6 +761,8 @@ export function FleetDashboard() {
         0
       ),
       todayCost: rows.reduce((sum, row) => sum + (row.todayCost ?? 0), 0),
+      cost7D: rows.reduce((sum, row) => sum + (row.cost7D ?? 0), 0),
+      cost30D: rows.reduce((sum, row) => sum + (row.cost30D ?? 0), 0),
       tokens: rows.reduce((sum, row) => sum + (row.tokens ?? 0), 0),
       quota: rows.reduce((sum, row) => sum + (row.quota ?? 0), 0),
       collected: rows.filter((row) => row.collected).length,
@@ -745,6 +778,8 @@ export function FleetDashboard() {
       ).length,
       accountsReady: rows.filter((row) => row.accountsTotal != null).length,
       todayCostReady: rows.filter((row) => row.todayCost != null).length,
+      cost7DReady: rows.filter((row) => row.cost7D != null).length,
+      cost30DReady: rows.filter((row) => row.cost30D != null).length,
       tokensReady: rows.filter((row) => row.tokens != null).length,
       quotaReady: rows.filter((row) => row.quota != null).length,
       healthy: instances.filter((item) => item.status === 'healthy').length,
@@ -1104,6 +1139,8 @@ type DashboardContentProps = {
     accountsAvailable: number
     accountsTotal: number
     todayCost: number
+    cost7D: number
+    cost30D: number
     tokens: number
     quota: number
     collected: number
@@ -1115,6 +1152,8 @@ type DashboardContentProps = {
     concurrencyReady: number
     accountsReady: number
     todayCostReady: number
+    cost7DReady: number
+    cost30DReady: number
     tokensReady: number
     quotaReady: number
     healthy: number
@@ -1640,8 +1679,6 @@ function SummaryGrid(props: DashboardContentProps) {
     costDetail = t('Actual cost reported by Sub2API')
   } else if (props.family === 'conductor') {
     costDetail = t('Actual cost calculated from Conductor prices')
-  } else if (props.family === 'claude_gateway') {
-    costDetail = t('Historical cost is not available from Claude Gateway')
   }
   const rpmDetail = `${t('Last 60 seconds across {{count}} instances', {
     count: props.totals.rpmReady,
@@ -1677,7 +1714,24 @@ function SummaryGrid(props: DashboardContentProps) {
     0,
     ...props.rows.map((row) => row.todayObservedAt)
   )
+  const cost7DObservedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.cost7DObservedAt)
+  )
+  const cost30DObservedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.cost30DObservedAt)
+  )
   const amountStale = props.rows.some((row) => row.stale)
+  const todayCostStale = props.rows.some(
+    (row) => row.todayCost != null && row.todayCostStale
+  )
+  const cost7DStale = props.rows.some(
+    (row) => row.cost7D != null && row.cost7DStale
+  )
+  const cost30DStale = props.rows.some(
+    (row) => row.cost30D != null && row.cost30DStale
+  )
   const successRateReady = props.totals.successRateReady > 0
   let successRateTone: MetricCardTone = 'neutral'
   if (successRateReady) {
@@ -1693,11 +1747,32 @@ function SummaryGrid(props: DashboardContentProps) {
   else if (summaryPending) resolvedCostDetail = t('Data loading')
   let todayCostDetail = t('No metric data available')
   if (props.totals.todayCostReady) {
-    todayCostDetail = t('Across {{count}} instances', {
-      count: props.totals.todayCostReady,
-    })
+    todayCostDetail =
+      props.family === 'claude_gateway' && todayCostStale
+        ? t('Refresh failed; showing the last successful data')
+        : t('Across {{count}} instances', {
+            count: props.totals.todayCostReady,
+          })
+  } else if (props.family === 'claude_gateway') {
+    todayCostDetail = t('Real-time data is connecting')
   } else if (summaryPending) {
     todayCostDetail = t('Data loading')
+  }
+  let cost7DDetail = t('Real-time data is connecting')
+  if (cost7DStale) {
+    cost7DDetail = t('Refresh failed; showing the last successful data')
+  } else if (props.totals.cost7DReady) {
+    cost7DDetail = t('Across {{count}} instances', {
+      count: props.totals.cost7DReady,
+    })
+  }
+  let cost30DDetail = t('Real-time data is connecting')
+  if (cost30DStale) {
+    cost30DDetail = t('Refresh failed; showing the last successful data')
+  } else if (props.totals.cost30DReady) {
+    cost30DDetail = t('Across {{count}} instances', {
+      count: props.totals.cost30DReady,
+    })
   }
 
   return (
@@ -1707,7 +1782,7 @@ function SummaryGrid(props: DashboardContentProps) {
         'bg-border border-border/80 grid grid-cols-1 gap-px overflow-hidden rounded-lg border shadow-xs min-[420px]:grid-cols-2 md:grid-cols-3',
         props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
-        props.family === 'claude_gateway' && 'xl:grid-cols-4 2xl:grid-cols-8',
+        props.family === 'claude_gateway' && 'xl:grid-cols-5 2xl:grid-cols-9',
         props.family === 'new_api' && 'xl:grid-cols-6'
       )}
     >
@@ -1851,24 +1926,26 @@ function SummaryGrid(props: DashboardContentProps) {
           tone='violet'
         />
       )}
-      <MetricCard
-        icon={CircleDollarSign}
-        label={costLabel}
-        value={formatUsageMetric(
-          'quota',
-          props.totals.quotaReady ? props.totals.quota : null,
-          props.family
-        )}
-        detail={resolvedCostDetail}
-        tone='amber'
-        exactValue={
-          props.family !== 'new_api' && props.totals.quotaReady
-            ? `US$${exactDecimal.format(props.totals.quota)}`
-            : undefined
-        }
-        observedAt={costObservedAt}
-        stale={amountStale}
-      />
+      {props.family !== 'claude_gateway' && (
+        <MetricCard
+          icon={CircleDollarSign}
+          label={costLabel}
+          value={formatUsageMetric(
+            'quota',
+            props.totals.quotaReady ? props.totals.quota : null,
+            props.family
+          )}
+          detail={resolvedCostDetail}
+          tone='amber'
+          exactValue={
+            props.family !== 'new_api' && props.totals.quotaReady
+              ? `US$${exactDecimal.format(props.totals.quota)}`
+              : undefined
+          }
+          observedAt={costObservedAt}
+          stale={amountStale}
+        />
+      )}
       {props.family !== 'new_api' && (
         <MetricCard
           icon={CircleDollarSign}
@@ -1886,7 +1963,49 @@ function SummaryGrid(props: DashboardContentProps) {
               : undefined
           }
           observedAt={todayObservedAt}
-          stale={amountStale}
+          stale={
+            props.family === 'claude_gateway' ? todayCostStale : amountStale
+          }
+        />
+      )}
+      {props.family === 'claude_gateway' && (
+        <MetricCard
+          icon={CircleDollarSign}
+          label={t('7-day actual consumption')}
+          value={formatUsageMetric(
+            'quota',
+            props.totals.cost7DReady ? props.totals.cost7D : null,
+            props.family
+          )}
+          detail={cost7DDetail}
+          tone='blue'
+          exactValue={
+            props.totals.cost7DReady
+              ? `US$${exactDecimal.format(props.totals.cost7D)}`
+              : undefined
+          }
+          observedAt={cost7DObservedAt}
+          stale={cost7DStale}
+        />
+      )}
+      {props.family === 'claude_gateway' && (
+        <MetricCard
+          icon={CircleDollarSign}
+          label={t('30-day actual consumption')}
+          value={formatUsageMetric(
+            'quota',
+            props.totals.cost30DReady ? props.totals.cost30D : null,
+            props.family
+          )}
+          detail={cost30DDetail}
+          tone='amber'
+          exactValue={
+            props.totals.cost30DReady
+              ? `US$${exactDecimal.format(props.totals.cost30D)}`
+              : undefined
+          }
+          observedAt={cost30DObservedAt}
+          stale={cost30DStale}
         />
       )}
       <MetricCard

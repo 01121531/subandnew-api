@@ -239,7 +239,7 @@ func runManagedRealtimeTargetAcquiredWith(ctx context.Context, target managedRea
 			sample.ConcurrencyUsed = metricValueForHistory(state.ConcurrencyUsed)
 			sample.ConcurrencyMax = metricValueForHistory(state.ConcurrencyMax)
 		}
-		if state.TodayCostObservedAt == 0 || state.TodayCostObservedAt == observedAt {
+		if !state.TodayCostStale && (state.TodayCostObservedAt == 0 || state.TodayCostObservedAt == observedAt) {
 			sample.TodayCost = metricValueForHistory(state.TodayCost)
 		}
 		if state.SuccessRateObservedAt == observedAt {

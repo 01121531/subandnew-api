@@ -25,7 +25,14 @@ type ManagedRealtimeState struct {
 	ConcurrencyStatus        string            `json:"concurrency_collection_status,omitempty"`
 	ConcurrencyObservedAt    int64             `json:"-"`
 	TodayCost                MetricSample      `json:"today_cost"`
-	TodayCostObservedAt      int64             `json:"-"`
+	TodayCostObservedAt      int64             `json:"today_cost_observed_at,omitempty"`
+	TodayCostStale           bool              `json:"today_cost_stale,omitempty"`
+	Cost7D                   MetricSample      `json:"cost_7d"`
+	Cost7DObservedAt         int64             `json:"cost_7d_observed_at,omitempty"`
+	Cost7DStale              bool              `json:"cost_7d_stale,omitempty"`
+	Cost30D                  MetricSample      `json:"cost_30d"`
+	Cost30DObservedAt        int64             `json:"cost_30d_observed_at,omitempty"`
+	Cost30DStale             bool              `json:"cost_30d_stale,omitempty"`
 	AccountsTotal            int               `json:"accounts_total,omitempty"`
 	AccountsAvailable        int               `json:"accounts_available,omitempty"`
 	AccountsRateLimited      int               `json:"accounts_rate_limited,omitempty"`
@@ -180,7 +187,8 @@ func (state ManagedRealtimeState) Metrics() *RealtimeMetricsResult {
 		RPM: state.RPM, RPMCapacity: state.RPMCapacity, SuccessRate: state.SuccessRate,
 		SuccessRateSampleCount: state.SuccessRateSampleCount,
 		ConcurrencyUsed:        state.ConcurrencyUsed, ConcurrencyMax: state.ConcurrencyMax, ConcurrencyStatus: state.ConcurrencyStatus,
-		TodayCost: state.TodayCost, AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
+		TodayCost: state.TodayCost, Cost7D: state.Cost7D, Cost30D: state.Cost30D,
+		AccountsTotal: state.AccountsTotal, AccountsAvailable: state.AccountsAvailable,
 		AccountsRateLimited: state.AccountsRateLimited, AccountsCollectionStatus: state.AccountsCollectionStatus,
 		AccountsReporting: state.AccountsReporting, ActiveSessions: state.ActiveSessions,
 		StreamStatus: state.StreamStatus, Stale: state.Stale,
