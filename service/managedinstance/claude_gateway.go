@@ -83,15 +83,15 @@ type claudeGatewayAccount struct {
 	Limited24H       claudeGatewayNumber `json:"limited_24h"`
 	RecoveryState    string              `json:"recovery_state"`
 	UsageWindows     struct {
-		Requests5H  claudeGatewayNumber `json:"req_5h"`
-		Tokens5H    claudeGatewayNumber `json:"tokens_5h"`
-		Cost5H      claudeGatewayNumber `json:"cost_5h"`
-		Requests7D  claudeGatewayNumber `json:"req_7d"`
-		Tokens7D    claudeGatewayNumber `json:"tokens_7d"`
-		Cost7D      claudeGatewayNumber `json:"cost_7d"`
-		Requests30D claudeGatewayNumber `json:"req_30d"`
-		Tokens30D   claudeGatewayNumber `json:"tokens_30d"`
-		Cost30D     claudeGatewayNumber `json:"cost_30d"`
+		Requests5H  *claudeGatewayNumber `json:"req_5h"`
+		Tokens5H    *claudeGatewayNumber `json:"tokens_5h"`
+		Cost5H      *claudeGatewayNumber `json:"cost_5h"`
+		Requests7D  *claudeGatewayNumber `json:"req_7d"`
+		Tokens7D    *claudeGatewayNumber `json:"tokens_7d"`
+		Cost7D      *claudeGatewayNumber `json:"cost_7d"`
+		Requests30D *claudeGatewayNumber `json:"req_30d"`
+		Tokens30D   *claudeGatewayNumber `json:"tokens_30d"`
+		Cost30D     *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"usage_windows"`
 	Stats struct {
 		RPM               int                 `json:"rpm"`
@@ -107,9 +107,10 @@ type claudeGatewayAccount struct {
 }
 
 type claudeGatewayTodaySummary struct {
-	TotalCost    claudeGatewayNumber `json:"total_cost"`
-	TotalCost7D  claudeGatewayNumber `json:"total_cost_7d"`
-	RequestCount claudeGatewayNumber `json:"request_count"`
+	TotalCost    *claudeGatewayNumber `json:"total_cost"`
+	TotalCost7D  *claudeGatewayNumber `json:"total_cost_7d"`
+	TotalCost30D *claudeGatewayNumber `json:"total_cost_30d"`
+	RequestCount claudeGatewayNumber  `json:"request_count"`
 }
 
 type claudeGatewayOverview struct {
@@ -414,19 +415,16 @@ func claudeGatewayAccountItem(account claudeGatewayAccount) InventoryItem {
 	enabled := claudeGatewayAccountAvailable(account)
 	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
 	usageWindowDays := 0
-	windowRequests := float64(account.UsageWindows.Requests30D)
-	windowTokens := float64(account.UsageWindows.Tokens30D)
-	windowCost := float64(account.UsageWindows.Cost30D)
-	if requests == 0 && windowRequests != 0 {
-		requests = windowRequests
+	if account.UsageWindows.Requests30D != nil {
+		requests = float64(*account.UsageWindows.Requests30D)
 		usageWindowDays = 30
 	}
-	if tokens == 0 && windowTokens != 0 {
-		tokens = windowTokens
+	if account.UsageWindows.Tokens30D != nil {
+		tokens = float64(*account.UsageWindows.Tokens30D)
 		usageWindowDays = 30
 	}
-	if cost == 0 && windowCost != 0 {
-		cost = windowCost
+	if account.UsageWindows.Cost30D != nil {
+		cost = float64(*account.UsageWindows.Cost30D)
 		usageWindowDays = 30
 	}
 	requests24H := float64(account.Requests24H)
@@ -508,11 +506,44 @@ func (adapter claudeGatewayAdapter) Summary(ctx context.Context, connector *Conn
 	if err != nil {
 		return nil, err
 	}
+	cost := float64(usage.TotalCost)
+	if presetDays := claudeGatewayCurrentPresetDays(window, time.Now()); presetDays != 0 {
+		if official, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
+			var officialCost *claudeGatewayNumber
+			switch presetDays {
+			case 1:
+				officialCost = official.TotalCost
+			case 7:
+				officialCost = official.TotalCost7D
+			case 30:
+				officialCost = official.TotalCost30D
+			}
+			if officialCost != nil {
+				cost = float64(*officialCost)
+			}
+		}
+	}
 	return &SummaryResult{
 		Window: window, Requests: supportedMetric(float64(usage.TotalRequests), "request"),
-		Tokens: supportedMetric(float64(usage.TotalTokens), "token"), Cost: supportedMetric(float64(usage.TotalCost), "usd"),
+		Tokens: supportedMetric(float64(usage.TotalTokens), "token"), Cost: supportedMetric(cost, "usd"),
 		ErrorRate: unsupportedMetric("ratio"), Latency: unsupportedMetric("ms"),
 	}, nil
+}
+
+func claudeGatewayCurrentPresetDays(window TimeWindow, now time.Time) int {
+	location, _ := summaryLocation(window.Timezone)
+	localNow := now.In(location)
+	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Second)
+	if window.End != dayEnd.Unix() {
+		return 0
+	}
+	for _, days := range []int{1, 7, 30} {
+		if window.Start == dayStart.AddDate(0, 0, -(days-1)).Unix() {
+			return days
+		}
+	}
+	return 0
 }
 
 func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (ManagedRealtimeState, error) {
@@ -571,8 +602,8 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, AccountsObservedAt: now,
 		ActiveSessions: sessions, ActiveSessionsObservedAt: now, ConcurrencyObservedAt: now, Accounts: page.Items,
 	}
-	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil {
-		state.TodayCost = supportedMetric(float64(summary.TotalCost), "usd")
+	if summary, summaryErr := fetchClaudeGatewayTodaySummary(ctx, connector, credential); summaryErr == nil && summary.TotalCost != nil {
+		state.TodayCost = supportedMetric(float64(*summary.TotalCost), "usd")
 		state.TodayCostObservedAt = now
 	} else if previous, ok := currentNewAPIRealtime(instanceID); ok {
 		state.TodayCost = previous.TodayCost

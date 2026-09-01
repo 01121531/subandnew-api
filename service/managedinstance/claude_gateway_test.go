@@ -110,9 +110,9 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 		"last_used_at":"",
 		"disabled_at":"2026-08-25T09:30:00Z",
 		"expires_at":"1787721160537",
-		"total_requests":"0",
-		"total_tokens":"0",
-		"total_cost":"0.0000",
+		"total_requests":"999",
+		"total_tokens":"9999",
+		"total_cost":"99.9999",
 		"req_24h":120,
 		"ok_24h":100,
 		"limited_24h":15,
@@ -249,4 +249,40 @@ func TestClaudeGatewaySummaryUsesExactCustomRange(t *testing.T) {
 	require.Equal(t, 123.0, *summary.Requests.Value)
 	require.Equal(t, 456.0, *summary.Tokens.Value)
 	require.Equal(t, 78.90123456, *summary.Cost.Value)
+}
+
+func TestClaudeGatewaySummaryUsesOfficialPresetCosts(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/usage/keys":
+			writeProbeJSON(response, `{"items":[],"summary":{"total_keys":5,"total_requests":123,"total_tokens":456,"total_cost":999},"total":5}`)
+		case "/api/admin/oauth-accounts/today-summary":
+			writeProbeJSON(response, `{"total_cost":1.25,"total_cost_7d":7.5,"total_cost_30d":30.5,"request_count":8}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	location, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	localNow := time.Now().In(location)
+	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location)
+	dayEnd := dayStart.AddDate(0, 0, 1).Add(-time.Second)
+	for _, test := range []struct {
+		days int
+		cost float64
+	}{{days: 1, cost: 1.25}, {days: 7, cost: 7.5}, {days: 30, cost: 30.5}} {
+		view, collectErr := CollectSummary(context.Background(), instance.Id, TimeWindow{
+			Start: dayStart.AddDate(0, 0, -(test.days - 1)).Unix(), End: dayEnd.Unix(), Timezone: location.String(),
+		})
+		require.NoError(t, collectErr)
+		summary := view.Data.(*SummaryResult)
+		require.Equal(t, 123.0, *summary.Requests.Value)
+		require.Equal(t, 456.0, *summary.Tokens.Value)
+		require.Equal(t, test.cost, *summary.Cost.Value)
+	}
 }
