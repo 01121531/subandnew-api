@@ -2628,7 +2628,7 @@ function AccountTable(props: {
   let tableMinWidth = 'min-w-[1140px]'
   if (isChannel) tableMinWidth = 'min-w-[980px]'
   else if (isConductor) tableMinWidth = 'min-w-[1280px]'
-  else if (isClaudeGateway) tableMinWidth = 'min-w-[1780px]'
+  else if (isClaudeGateway) tableMinWidth = 'min-w-[1640px]'
   let content: ReactNode
   if (props.loading && props.total === 0) {
     content = <TableSkeleton wide={!isChannel} />
@@ -2850,11 +2850,6 @@ function AccountTable(props: {
                   <TableHead className='text-right'>
                     {isConductor ? '运行负载' : usageColumnLabel}
                   </TableHead>
-                  {isClaudeGateway && (
-                    <TableHead className='text-right'>
-                      {t('Historical consumption (excluding today)')}
-                    </TableHead>
-                  )}
                   <TableHead>{t('Last activity')}</TableHead>
                   {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
                   <TableHead className='pe-6 text-right'>
@@ -2958,7 +2953,28 @@ function AccountTable(props: {
                             </p>
                           </>
                         ) : (
-                          <p className='font-medium'>{formatCost(item)}</p>
+                          <>
+                            {isClaudeGateway && (
+                              <>
+                                <p className='font-medium whitespace-nowrap'>
+                                  {t('Last 30 days consumption')}:{' '}
+                                  {formatCost(item)}
+                                </p>
+                                <p className='text-primary mt-1 text-xs font-medium whitespace-nowrap'>
+                                  {t(
+                                    'Historical consumption (excluding today)'
+                                  )}
+                                  :{' '}
+                                  {formatCostExcludingToday(
+                                    item.cost_excluding_today
+                                  )}
+                                </p>
+                              </>
+                            )}
+                            {!isClaudeGateway && (
+                              <p className='font-medium'>{formatCost(item)}</p>
+                            )}
+                          </>
                         )}
                         {isClaudeGateway && (
                           <>
@@ -3001,11 +3017,6 @@ function AccountTable(props: {
                                 </p>
                               ))}
                       </TableCell>
-                      {isClaudeGateway && (
-                        <TableCell className='text-right font-medium whitespace-nowrap tabular-nums'>
-                          {formatCostExcludingToday(item.cost_excluding_today)}
-                        </TableCell>
-                      )}
                       <TableCell className='whitespace-nowrap'>
                         <p className='text-sm'>
                           {formatTimestamp(item.last_activity_at)}

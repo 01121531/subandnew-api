@@ -16,7 +16,7 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	t.Setenv("MANAGED_USAGE_EXPORT_DIR", t.TempDir())
 	enabled := false
 	requests, input, output := 15116.0, 47175232.0, 14599531.0
-	cacheWrite, cacheRead, amount, historicalCost := 338279171.0, 478948958.0, 2960.3409, 12840.12345678
+	cacheWrite, cacheRead, amount, lifetimeCost, todayCost := 338279171.0, 478948958.0, 2960.3409, 13000.12345678, 160.0
 	total := input + output + cacheWrite + cacheRead
 	rows := []AccountExportRow{{
 		Selection: AccountExportSelection{
@@ -24,7 +24,7 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 			SourceName: "root-direct", Account: InventoryItem{
 				ID: 6822196335042536000, IDText: "6822196335042536000", Name: "allen-0811-m01",
 				Email: "account@example.com", VendorName: "供应商 A", VendorEmail: "vendor@example.com",
-				Type: "Max", CreatedAt: 1786468440, Enabled: &enabled, CostExcludingToday: &historicalCost,
+				Type: "Max", CreatedAt: 1786468440, Enabled: &enabled, LifetimeCost: &lifetimeCost, TodayCost: &todayCost,
 			},
 		},
 		Requests: &requests, InputTokens: &input, OutputTokens: &output,
@@ -53,7 +53,7 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	require.Equal(t, "供应商", mustCell(t, workbook, "B1"))
 	require.Equal(t, "供应商邮箱", mustCell(t, workbook, "C1"))
 	require.Equal(t, "消费金额 ($)", mustCell(t, workbook, "N1"))
-	require.Equal(t, "历史消费（不含今日）($)", mustCell(t, workbook, "O1"))
+	require.Equal(t, "累计消费（不含今日）($)", mustCell(t, workbook, "O1"))
 	require.Equal(t, "实例", mustCell(t, workbook, "P1"))
 	require.Equal(t, "平台", mustCell(t, workbook, "Q1"))
 	require.Equal(t, "统计状态", mustCell(t, workbook, "U1"))

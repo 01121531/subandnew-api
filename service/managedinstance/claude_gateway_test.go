@@ -271,6 +271,9 @@ func TestClaudeGatewayAccountCosts(t *testing.T) {
 		{name: "tiny inversion", payload: `{"id":"tiny","total_cost":1,"stats":{"daily_cost":1.000000005}}`, lifetime: float64Pointer(1), today: float64Pointer(1.000000005), historical: float64Pointer(0)},
 		{name: "invalid inversion", payload: `{"id":"invalid","total_cost":1,"stats":{"daily_cost":2}}`, lifetime: float64Pointer(1), today: float64Pointer(2)},
 		{name: "missing today", payload: `{"id":"missing","total_cost":1,"stats":{}}`, lifetime: float64Pointer(1)},
+		{name: "top-level aliases", payload: `{"id":"aliases","lifetime_cost":"9.5","today_cost":"1.25"}`, lifetime: float64Pointer(9.5), today: float64Pointer(1.25), historical: float64Pointer(8.25)},
+		{name: "nested aliases", payload: `{"id":"nested","stats":{"total_cost":"20","today_cost":"3"}}`, lifetime: float64Pointer(20), today: float64Pointer(3), historical: float64Pointer(17)},
+		{name: "usage aliases", payload: `{"id":"usage","usage":{"total_cost":12,"daily_cost":2}}`, lifetime: float64Pointer(12), today: float64Pointer(2), historical: float64Pointer(10)},
 		{name: "negative lifetime", payload: `{"id":"negative","total_cost":-1,"stats":{"daily_cost":0}}`, today: float64Pointer(0)},
 	}
 	for _, test := range tests {

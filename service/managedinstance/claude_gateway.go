@@ -126,7 +126,69 @@ func (account *claudeGatewayAccount) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	account.OwnerUserID = ownerUserID
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if account.TotalCost == nil {
+		account.TotalCost, err = claudeGatewayNumberAt(fields,
+			[]string{"lifetime_cost"},
+			[]string{"stats", "total_cost"},
+			[]string{"usage", "total_cost"},
+			[]string{"costs", "total"},
+		)
+		if err != nil {
+			return err
+		}
+	}
+	if account.Stats.DailyCost == nil {
+		account.Stats.DailyCost, err = claudeGatewayNumberAt(fields,
+			[]string{"today_cost"},
+			[]string{"daily_cost"},
+			[]string{"stats", "today_cost"},
+			[]string{"usage", "today_cost"},
+			[]string{"usage", "daily_cost"},
+			[]string{"costs", "today"},
+		)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func claudeGatewayNumberAt(root map[string]json.RawMessage, paths ...[]string) (*claudeGatewayNumber, error) {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		current := root
+		var raw json.RawMessage
+		found := true
+		for index, key := range path {
+			var exists bool
+			raw, exists = current[key]
+			if !exists {
+				found = false
+				break
+			}
+			if index < len(path)-1 {
+				if err := json.Unmarshal(raw, &current); err != nil {
+					return nil, err
+				}
+			}
+		}
+		trimmed := bytes.TrimSpace(raw)
+		if !found || len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || bytes.Equal(trimmed, []byte(`""`)) {
+			continue
+		}
+		var value claudeGatewayNumber
+		if err := json.Unmarshal(trimmed, &value); err != nil {
+			return nil, err
+		}
+		return &value, nil
+	}
+	return nil, nil
 }
 
 type claudeGatewayVendor struct {

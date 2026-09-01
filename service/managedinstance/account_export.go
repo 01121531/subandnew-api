@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -371,7 +372,7 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	defer workbook.Close()
 	const sheet = "账号导出"
 	workbook.SetSheetName("Sheet1", sheet)
-	headers := []string{"账号归属", "供应商", "供应商邮箱", "账号 Email", "账号类型", "录入时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "历史消费（不含今日）($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
+	headers := []string{"账号归属", "供应商", "供应商邮箱", "账号 Email", "账号类型", "录入时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "累计消费（不含今日）($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
 	for column, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = workbook.SetCellValue(sheet, cell, header)
@@ -459,9 +460,31 @@ func accountExportCellValues(row AccountExportRow, window TimeWindow, location *
 	}
 	return []any{
 		ownership, item.VendorName, item.VendorEmail, item.Email, accountType, createdAt, accountExportSurvival(item, window.End), note,
-		optionalFloat(row.Requests), optionalFloat(row.InputTokens), optionalFloat(row.OutputTokens), optionalFloat(row.CacheWriteTokens), optionalFloat(row.CacheReadTokens), optionalFloat(row.Amount), optionalFloat(item.CostExcludingToday),
+		optionalFloat(row.Requests), optionalFloat(row.InputTokens), optionalFloat(row.OutputTokens), optionalFloat(row.CacheWriteTokens), optionalFloat(row.CacheReadTokens), optionalFloat(row.Amount), optionalFloat(accountCostExcludingToday(item)),
 		row.Selection.InstanceName, row.Selection.InstanceKind, firstNonEmpty(item.IDText, strconv.FormatInt(item.ID, 10)), available, optionalFloat(row.TotalTokens), status, row.ErrorCode,
 	}
+}
+
+func accountCostExcludingToday(item InventoryItem) *float64 {
+	if item.CostExcludingToday != nil {
+		return item.CostExcludingToday
+	}
+	if item.LifetimeCost == nil || item.TodayCost == nil {
+		return nil
+	}
+	lifetime, today := *item.LifetimeCost, *item.TodayCost
+	if math.IsNaN(lifetime) || math.IsInf(lifetime, 0) || lifetime < 0 ||
+		math.IsNaN(today) || math.IsInf(today, 0) || today < 0 {
+		return nil
+	}
+	difference := lifetime - today
+	if difference < -1e-8 {
+		return nil
+	}
+	if difference < 0 {
+		difference = 0
+	}
+	return &difference
 }
 
 func accountExportSurvival(item InventoryItem, settlement int64) string {
