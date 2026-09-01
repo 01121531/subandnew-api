@@ -39,7 +39,7 @@ export type UsageRecordExportTask = {
   instance_kind: string
   actor_id: number
   actor_name: string
-  export_kind: 'usage_records' | 'accounts'
+  export_kind: 'usage_records' | 'accounts' | 'account_costs'
   file_format: 'csv' | 'xlsx'
   source?: 'inventory' | 'account_output'
   filters: Record<string, string[]>
@@ -59,6 +59,7 @@ export type UsageRecordExportTask = {
   file_size: number
   record_count: number
   warning_count: number
+  retry_count: number
   error_code: string
   started_at: number
   finished_at: number
@@ -68,9 +69,10 @@ export type UsageRecordExportTask = {
 }
 
 export type ManagedAccountExportRequest = {
+  report_type?: 'account_costs'
   source: 'inventory' | 'account_output'
   range_key?: string
-  window: { start: number; end: number; timezone: string }
+  window?: { start: number; end: number; timezone: string }
   locale: string
   search?: string
   exclude_search?: string

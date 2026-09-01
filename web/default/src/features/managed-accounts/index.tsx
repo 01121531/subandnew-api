@@ -581,6 +581,7 @@ function useAccountExportSelection(
 
 function AccountExportBar(props: {
   source: 'inventory' | 'account_output'
+  enableAccountCosts?: boolean
   rangeKey?: string
   available: AccountExportSelection[]
   selection: ReturnType<typeof useAccountExportSelection>
@@ -594,7 +595,11 @@ function AccountExportBar(props: {
   const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [costOpen, setCostOpen] = useState(false)
+  const [costSubmitting, setCostSubmitting] = useState(false)
   const selectedItems = [...props.selection.selected.values()]
+  const accountCostItems =
+    selectedItems.length > 0 ? selectedItems : props.available
   const instanceCount = new Set(selectedItems.map((item) => item.instanceId))
     .size
   const submit = async () => {
@@ -639,6 +644,41 @@ function AccountExportBar(props: {
       setSubmitting(false)
     }
   }
+  const submitAccountCosts = async () => {
+    setCostSubmitting(true)
+    try {
+      await createManagedAccountExport({
+        report_type: 'account_costs',
+        source: 'inventory',
+        locale: i18n.language || 'zh-CN',
+        search: props.search || undefined,
+        exclude_search: props.excludeSearch || undefined,
+        filter_snapshot: props.filterSnapshot,
+        sort_by: props.sortBy,
+        sort_order: props.sortOrder,
+        items: accountCostItems.map((item) => ({
+          instance_id: item.instanceId,
+          account_id: item.accountId,
+        })),
+      })
+      setCostOpen(false)
+      if (selectedItems.length > 0) props.selection.clear()
+      toast.success(t('Historical consumption export added to queue'), {
+        action: {
+          label: t('View export records'),
+          onClick: () => window.location.assign('/export-records'),
+        },
+      })
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } } })
+        .response?.data?.message
+      toast.error(
+        message || t('Failed to create historical consumption export')
+      )
+    } finally {
+      setCostSubmitting(false)
+    }
+  }
   return (
     <>
       <div className='border-border/70 bg-muted/20 flex min-w-0 flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center'>
@@ -672,6 +712,18 @@ function AccountExportBar(props: {
             <FileSpreadsheet />
             {t('Export Excel')}
           </Button>
+          {props.enableAccountCosts && (
+            <Button
+              size='sm'
+              variant='outline'
+              className='min-h-11 sm:min-h-0'
+              disabled={accountCostItems.length === 0}
+              onClick={() => setCostOpen(true)}
+            >
+              <CircleDollarSign />
+              {t('Export historical consumption')}
+            </Button>
+          )}
         </div>
       </div>
       <Dialog open={open} onOpenChange={(next) => !submitting && setOpen(next)}>
@@ -722,6 +774,67 @@ function AccountExportBar(props: {
             <Button disabled={submitting} onClick={() => void submit()}>
               <FileSpreadsheet />
               {submitting ? t('Submitting') : t('Add to export queue')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={costOpen}
+        onOpenChange={(next) => !costSubmitting && setCostOpen(next)}
+      >
+        <DialogContent className='max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle>
+              {t('Confirm historical consumption export')}
+            </DialogTitle>
+            <DialogDescription>
+              {t(
+                'The background task reads each Claude Gateway account detail and calculates cumulative consumption excluding today.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className='bg-muted/35 grid grid-cols-2 gap-3 rounded-md p-4 text-sm'>
+            <MobileDetail label={t('Export scope')}>
+              {t(
+                selectedItems.length > 0
+                  ? 'Selected accounts'
+                  : 'All filtered accounts'
+              )}
+            </MobileDetail>
+            <MobileDetail label={t('Accounts')}>
+              {accountCostItems.length.toLocaleString()}
+            </MobileDetail>
+            <MobileDetail label={t('Instances')}>
+              {new Set(accountCostItems.map((item) => item.instanceId)).size}
+            </MobileDetail>
+            <MobileDetail label={t('Timezone')}>Asia/Shanghai</MobileDetail>
+          </div>
+          <div className='border-border/70 bg-muted/20 space-y-2 rounded-md border p-4 text-sm'>
+            <p className='font-medium'>
+              {t(
+                'Cumulative consumption - today consumption = historical consumption excluding today'
+              )}
+            </p>
+            <p className='text-muted-foreground text-xs leading-5'>
+              {t(
+                'Each failed account is retried up to 3 times. Accounts that still fail remain in the workbook with an error reason.'
+              )}
+            </p>
+          </div>
+          <DialogFooter className='sticky bottom-0'>
+            <Button
+              variant='outline'
+              disabled={costSubmitting}
+              onClick={() => setCostOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              disabled={costSubmitting || accountCostItems.length === 0}
+              onClick={() => void submitAccountCosts()}
+            >
+              <CircleDollarSign />
+              {costSubmitting ? t('Submitting') : t('Add to export queue')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3154,6 +3267,7 @@ function AccountTable(props: {
       )}
       <AccountExportBar
         source='inventory'
+        enableAccountCosts={isClaudeGateway}
         available={exportable}
         selection={exportSelection}
         window={props.window}
