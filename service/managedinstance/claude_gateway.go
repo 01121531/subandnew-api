@@ -181,6 +181,15 @@ type claudeGatewayTodaySummary struct {
 	RequestCount claudeGatewayNumber  `json:"request_count"`
 }
 
+type claudeGatewayAccountSummary struct {
+	RPM *claudeGatewayNumber `json:"rpm"`
+}
+
+type claudeGatewayAccountsPage struct {
+	Accounts []claudeGatewayAccount      `json:"accounts"`
+	Summary  claudeGatewayAccountSummary `json:"summary"`
+}
+
 type claudeGatewayOverview struct {
 	KPIs struct {
 		Total       claudeGatewayNumber `json:"total"`
@@ -408,25 +417,31 @@ func claudeGatewayUnmatchedVendorCount(items []InventoryItem) int {
 	return count
 }
 
-func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
+func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, credential *CredentialMaterial) (*claudeGatewayAccountsPage, error) {
 	return fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, false)
 }
 
 func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
-	return fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, true)
+	page, err := fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, true)
+	if err != nil {
+		return nil, err
+	}
+	return page.Accounts, nil
 }
 
-func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) ([]claudeGatewayAccount, error) {
+func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) (*claudeGatewayAccountsPage, error) {
 	request := claudeGatewayDoJSONWithMaxBody
+	endpoint := "/api/admin/oauth-accounts?page_mode=1&page=1&page_size=20&status=all&recovery_window=all&fable_recovery_window=all&sort=today_cost&direction=desc"
 	if bulk {
 		request = claudeGatewayDoBulkJSON
+		endpoint = "/api/admin/oauth-accounts"
 	}
 	response, err := request(
 		ctx,
 		connector,
 		credential,
 		http.MethodGet,
-		"/api/admin/oauth-accounts",
+		endpoint,
 		nil,
 		claudeGatewayAccountsMaxBodyBytes,
 	)
@@ -436,13 +451,11 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 	if err := requireHTTPStatus(response); err != nil {
 		return nil, claudeGatewayCollectionError("accounts", err)
 	}
-	var envelope struct {
-		Accounts []claudeGatewayAccount `json:"accounts"`
-	}
-	if json.Unmarshal(response.Body, &envelope) != nil || envelope.Accounts == nil || len(envelope.Accounts) > managedInstanceInventoryMaxItems {
+	var page claudeGatewayAccountsPage
+	if json.Unmarshal(response.Body, &page) != nil || page.Accounts == nil || len(page.Accounts) > managedInstanceInventoryMaxItems {
 		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
 	}
-	return envelope.Accounts, nil
+	return &page, nil
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
@@ -813,23 +826,24 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	if instance.Kind != model.ManagedInstanceKindClaudeGateway {
 		return ManagedRealtimeState{}, ErrUnsupportedCapability
 	}
-	accounts, err := fetchClaudeGatewayAccounts(ctx, connector, credential)
+	accountsPage, err := fetchClaudeGatewayAccounts(ctx, connector, credential)
 	if err != nil {
 		if ShouldRecoverDataConnection(err) && RecoverDataConnection(ctx, instanceID, 0) == nil {
 			instance, _, connector, credential, err = observationClient(instanceID)
 			if err == nil {
-				accounts, err = fetchClaudeGatewayAccounts(ctx, connector, credential)
+				accountsPage, err = fetchClaudeGatewayAccounts(ctx, connector, credential)
 			}
 		}
 		if err != nil {
 			return storeClaudeGatewayRealtimeFailure(instanceID, err), err
 		}
 	}
+	accounts := accountsPage.Accounts
 	page := claudeGatewayInventoryPage(accounts, nil)
-	rpm, concurrency, sessions, available, reporting := 0.0, 0.0, 0, 0, 0
+	accountRPM, concurrency, sessions, available, reporting := 0.0, 0.0, 0, 0, 0
 	for index, account := range accounts {
 		if account.Stats.RPM >= 0 {
-			rpm += float64(account.Stats.RPM)
+			accountRPM += float64(account.Stats.RPM)
 			reporting++
 		}
 		if account.Stats.Concurrent > 0 {
@@ -841,6 +855,10 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		if page.Items[index].Enabled != nil && *page.Items[index].Enabled {
 			available++
 		}
+	}
+	rpm := accountRPM
+	if accountsPage.Summary.RPM != nil && *accountsPage.Summary.RPM >= 0 {
+		rpm = float64(*accountsPage.Summary.RPM)
 	}
 	now := common.GetTimestamp()
 	state := ManagedRealtimeState{

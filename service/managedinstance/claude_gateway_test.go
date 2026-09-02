@@ -327,10 +327,21 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	resetNewAPIRealtimeCacheForTest()
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	summaryRequests := 0
+	accountRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
-			writeProbeJSON(response, `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"active","health_status":"cooldown","stats":{"rpm":5,"concurrent":1,"active_sessions":1,"cooldown":true}},{"id":"three","name":"three","status":"active","health_status":"unknown","stats":{"rpm":0,"cooldown":false}},{"id":"four","name":"four","status":"disabled","health_status":"failed","stats":{"rpm":0,"cooldown":false}}]}`)
+			accountRequests++
+			require.Equal(t, "1", request.URL.Query().Get("page_mode"))
+			require.Equal(t, "20", request.URL.Query().Get("page_size"))
+			require.Equal(t, "all", request.URL.Query().Get("status"))
+			require.Equal(t, "today_cost", request.URL.Query().Get("sort"))
+			require.Equal(t, "desc", request.URL.Query().Get("direction"))
+			body := `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"active","health_status":"cooldown","stats":{"rpm":5,"concurrent":1,"active_sessions":1,"cooldown":true}},{"id":"three","name":"three","status":"active","health_status":"unknown","stats":{"rpm":0,"cooldown":false}},{"id":"four","name":"four","status":"disabled","health_status":"failed","stats":{"rpm":0,"cooldown":false}}]}`
+			if accountRequests == 1 {
+				body = strings.TrimSuffix(body, "}") + `,"summary":{"rpm":"23"}}`
+			}
+			writeProbeJSON(response, body)
 		case "/api/admin/oauth-accounts/today-summary":
 			summaryRequests++
 			writeProbeJSON(response, `{"total_cost":12.34567891,"total_cost_7d":80,"total_cost_30d":320.5,"request_count":100}`)
@@ -347,7 +358,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 
 	state, err := RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
 	require.NoError(t, err)
-	require.Equal(t, 17.0, *state.RPM.Value)
+	require.Equal(t, 23.0, *state.RPM.Value)
 	require.Equal(t, 3.0, *state.ConcurrencyUsed.Value)
 	require.Nil(t, state.TodayCost.Value)
 	require.Zero(t, summaryRequests)
@@ -373,6 +384,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 
 	state, err = RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
 	require.NoError(t, err)
+	require.Equal(t, 17.0, *state.RPM.Value, "older gateways without summary.rpm must retain the account-level fallback")
 	require.Equal(t, 1, summaryRequests, "10-second realtime refresh must reuse cached costs")
 	require.Equal(t, 12.34567891, *state.TodayCost.Value)
 	require.Equal(t, 80.0, *state.Cost7D.Value)
