@@ -529,11 +529,57 @@ func saveManagedAccountSnapshot(taskID string, runnerID string, instanceID int64
 				return err
 			}
 		}
-		return tx.Clauses(clause.OnConflict{
+		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "instance_id"}, {Name: "snapshot_kind"}, {Name: "range_key"}},
 			DoUpdates: clause.Assignments(updates),
-		}).Create(insert).Error
+		}).Create(insert).Error; err != nil {
+			return err
+		}
+		if status == model.ManagedInstanceCollectionSucceeded && observation != nil {
+			return archiveManagedAccountDailySnapshot(tx, insert, now)
+		}
+		return nil
 	})
+}
+
+func archiveManagedAccountDailySnapshot(tx *gorm.DB, snapshot *model.ManagedAccountSnapshot, capturedAt int64) error {
+	if tx == nil || snapshot == nil || !managedAccountDailyArchiveEligible(snapshot.SnapshotKind, snapshot.RangeKey) || snapshot.ObservedAt <= 0 || snapshot.Payload == "" {
+		return nil
+	}
+	snapshotDate, boundaryAt := managedAccountArchiveDay(snapshot.ObservedAt)
+	archive := &model.ManagedAccountDailySnapshot{
+		InstanceID: snapshot.InstanceID, SnapshotKind: snapshot.SnapshotKind, RangeKey: snapshot.RangeKey,
+		SnapshotDate: snapshotDate, BoundaryAt: boundaryAt,
+		PresetDays: snapshot.PresetDays, WindowStart: snapshot.WindowStart, WindowEnd: snapshot.WindowEnd,
+		Timezone: snapshot.Timezone, SchemaVersion: snapshot.SchemaVersion,
+		ObservedAt: snapshot.ObservedAt, CapturedAt: capturedAt, ETag: snapshot.ETag, Payload: snapshot.Payload,
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "instance_id"}, {Name: "snapshot_kind"}, {Name: "range_key"}, {Name: "snapshot_date"}},
+		DoNothing: true,
+	}).Create(archive).Error
+}
+
+func managedAccountDailyArchiveEligible(kind string, rangeKey string) bool {
+	if kind == model.ManagedAccountSnapshotKindInventory {
+		return rangeKey == managedAccountInventoryRangeKey
+	}
+	if kind != model.ManagedAccountSnapshotKindOutput {
+		return false
+	}
+	for _, days := range managedAccountPresetDays {
+		if rangeKey == "preset-"+strconv.Itoa(days) {
+			return true
+		}
+	}
+	return false
+}
+
+func managedAccountArchiveDay(timestamp int64) (string, int64) {
+	location := time.FixedZone(managedAccountDefaultTimezone, 8*60*60)
+	observed := time.Unix(timestamp, 0).In(location)
+	boundary := time.Date(observed.Year(), observed.Month(), observed.Day(), 0, 0, 0, 0, location)
+	return boundary.Format("2006-01-02"), boundary.Unix()
 }
 
 func managedAccountErrorCode(err error) string {
@@ -754,6 +800,7 @@ func getManagedAccountSlots() chan struct{} {
 }
 
 func scheduleDueManagedAccountSyncs(now int64) {
+	archiveDate, archiveBoundary := managedAccountArchiveDay(now)
 	forEachManagedInstanceBatch(func(instances []*model.ManagedInstance) bool {
 		ids := make([]int64, 0, len(instances))
 		for _, instance := range instances {
@@ -785,11 +832,22 @@ func scheduleDueManagedAccountSyncs(now int64) {
 				VendorMetadataAvailable: snapshot.SnapshotKind != model.ManagedAccountSnapshotKindInventory || snapshot.SchemaVersion >= managedAccountSnapshotSchema,
 			}
 		}
+		var archives []model.ManagedAccountDailySnapshot
+		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key").Where(
+			"instance_id IN ? AND snapshot_date = ?", ids, archiveDate,
+		).Find(&archives).Error; err != nil {
+			logger.LogWarn(context.Background(), fmt.Sprintf("managed account scheduler daily archive query failed: %v", err))
+			return false
+		}
+		dailyArchived := make(map[string]bool, len(archives))
+		for _, archive := range archives {
+			dailyArchived[managedAccountScheduleKey(archive.InstanceID, archive.SnapshotKind, archive.RangeKey)] = true
+		}
 		for _, instance := range instances {
 			if !managedAccountKindSupported(instance.Kind) {
 				continue
 			}
-			if !managedAccountStandardSyncDue(instance, latest, now) {
+			if !managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, archiveBoundary, now) && !managedAccountStandardSyncDue(instance, latest, now) {
 				continue
 			}
 			accountRange, _ := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
@@ -800,6 +858,33 @@ func scheduleDueManagedAccountSyncs(now int64) {
 		}
 		return true
 	})
+}
+
+func managedAccountDailyArchiveSyncDue(instance *model.ManagedInstance, latest map[string]managedAccountScheduleState, dailyArchived map[string]bool, boundaryAt int64, now int64) bool {
+	if instance == nil {
+		return false
+	}
+	required := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
+	for _, days := range managedAccountPresetDays {
+		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+	}
+	for _, key := range required {
+		if dailyArchived[key] {
+			continue
+		}
+		state := latest[key]
+		if state.AttemptedAt == 0 || state.AttemptedAt < boundaryAt {
+			return true
+		}
+		cooldown := managedAccountSyncInterval
+		if state.Status == model.ManagedInstanceCollectionFailed {
+			cooldown = managedAccountFailureCooldown
+		}
+		if now >= state.AttemptedAt+int64(cooldown/time.Second) {
+			return true
+		}
+	}
+	return false
 }
 
 type managedAccountScheduleState struct {

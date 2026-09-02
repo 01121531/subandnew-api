@@ -56,6 +56,67 @@ func TestManagedAccountFailedRefreshKeepsLastSuccess(t *testing.T) {
 	require.Equal(t, managedAccountSnapshotSchema, snapshot.SchemaVersion)
 }
 
+func TestManagedAccountDailySnapshotKeepsFirstSuccessfulStandardCapture(t *testing.T) {
+	truncate(t)
+	location := time.FixedZone(managedAccountDefaultTimezone, 8*60*60)
+	firstObservedAt := time.Date(2026, time.September, 3, 0, 0, 5, 0, location).Unix()
+	accountRange, err := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
+	require.NoError(t, err)
+
+	first := &managedinstance.ObservationView{
+		SourceInstanceID: 8, ObservedAt: firstObservedAt,
+		CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		Data:             map[string]any{"total": 1},
+	}
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindOutput, accountRange, first, nil))
+
+	second := &managedinstance.ObservationView{
+		SourceInstanceID: 8, ObservedAt: firstObservedAt + int64((12*time.Hour)/time.Second),
+		CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		Data:             map[string]any{"total": 2},
+	}
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindOutput, accountRange, second, nil))
+
+	var archive model.ManagedAccountDailySnapshot
+	require.NoError(t, model.DB.Where(
+		"instance_id = ? AND snapshot_kind = ? AND range_key = ? AND snapshot_date = ?",
+		8, model.ManagedAccountSnapshotKindOutput, accountRange.RangeKey, "2026-09-03",
+	).First(&archive).Error)
+	require.EqualValues(t, firstObservedAt, archive.ObservedAt)
+	require.EqualValues(t, time.Date(2026, time.September, 3, 0, 0, 0, 0, location).Unix(), archive.BoundaryAt)
+	require.JSONEq(t, `{"total":1}`, archive.Payload)
+
+	nextDay := &managedinstance.ObservationView{
+		SourceInstanceID: 8, ObservedAt: time.Date(2026, time.September, 4, 0, 0, 4, 0, location).Unix(),
+		CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		Data:             map[string]any{"total": 3},
+	}
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindOutput, accountRange, nextDay, nil))
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ManagedAccountDailySnapshot{}).Where("instance_id = ?", 8).Count(&count).Error)
+	require.EqualValues(t, 2, count)
+}
+
+func TestManagedAccountDailySnapshotSkipsCustomRangesAndFailures(t *testing.T) {
+	truncate(t)
+	customRange, err := NormalizeManagedAccountRange(0, 100, 200, managedAccountDefaultTimezone)
+	require.NoError(t, err)
+	observation := &managedinstance.ObservationView{
+		SourceInstanceID: 8, ObservedAt: time.Date(2026, time.September, 3, 0, 0, 5, 0, time.FixedZone(managedAccountDefaultTimezone, 8*60*60)).Unix(),
+		CollectionStatus: model.ManagedInstanceCollectionSucceeded,
+		Data:             map[string]any{"total": 1},
+	}
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindOutput, customRange, observation, nil))
+
+	presetRange, err := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
+	require.NoError(t, err)
+	require.NoError(t, saveManagedAccountSnapshot("", "", 8, model.ManagedAccountSnapshotKindOutput, presetRange, nil, errors.New("remote failed")))
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.ManagedAccountDailySnapshot{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestManagedAccountFailedRefreshDoesNotAdvancePayloadSchema(t *testing.T) {
 	truncate(t)
 	accountRange, err := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
@@ -332,6 +393,33 @@ func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	}
 	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)-1))
 	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)))
+}
+
+func TestManagedAccountDailyArchiveForcesMidnightSyncWithFailureCooldown(t *testing.T) {
+	instance := &model.ManagedInstance{Id: 12, Kind: model.ManagedInstanceKindClaudeGateway}
+	location := time.FixedZone(managedAccountDefaultTimezone, 8*60*60)
+	boundary := time.Date(2026, time.September, 3, 0, 0, 0, 0, location).Unix()
+	latest := make(map[string]managedAccountScheduleState)
+	dailyArchived := make(map[string]bool)
+	keys := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
+	for _, days := range managedAccountPresetDays {
+		keys = append(keys, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+	}
+	for _, key := range keys {
+		latest[key] = managedAccountScheduleState{AttemptedAt: boundary - 1, Status: model.ManagedInstanceCollectionSucceeded}
+	}
+	require.True(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary))
+
+	for _, key := range keys {
+		dailyArchived[key] = true
+	}
+	require.False(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary))
+
+	missingKey := keys[len(keys)-1]
+	dailyArchived[missingKey] = false
+	latest[missingKey] = managedAccountScheduleState{AttemptedAt: boundary + 10, Status: model.ManagedInstanceCollectionFailed}
+	require.False(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+int64(managedAccountFailureCooldown/time.Second)-1))
+	require.True(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+int64(managedAccountFailureCooldown/time.Second)))
 }
 
 func TestClaudeGatewayStandardSyncDueBackfillsVendorMetadata(t *testing.T) {
