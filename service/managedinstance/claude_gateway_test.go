@@ -339,7 +339,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 			require.Equal(t, "desc", request.URL.Query().Get("direction"))
 			body := `{"accounts":[{"id":"one","name":"one","status":"active","health_status":"healthy","stats":{"rpm":12,"concurrent":2,"active_sessions":3}},{"id":"two","name":"two","status":"active","health_status":"cooldown","stats":{"rpm":5,"concurrent":1,"active_sessions":1,"cooldown":true}},{"id":"three","name":"three","status":"active","health_status":"unknown","stats":{"rpm":0,"cooldown":false}},{"id":"four","name":"four","status":"disabled","health_status":"failed","stats":{"rpm":0,"cooldown":false}}]}`
 			if accountRequests == 1 {
-				body = strings.TrimSuffix(body, "}") + `,"summary":{"rpm":"23"}}`
+				body = strings.TrimSuffix(body, "}") + `,"summary":{"rpm":"23","available_accounts":"987"}}`
 			}
 			writeProbeJSON(response, body)
 		case "/api/admin/oauth-accounts/today-summary":
@@ -365,7 +365,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	require.Equal(t, 0.975, *state.SuccessRate.Value)
 	require.Equal(t, 200.0, state.SuccessRateSampleCount)
 	require.Equal(t, 4, state.AccountsTotal)
-	require.Equal(t, 2, state.AccountsAvailable)
+	require.Equal(t, 987, state.AccountsAvailable)
 	require.Equal(t, 4, state.ActiveSessions)
 	require.Len(t, state.Accounts, 4)
 
@@ -385,6 +385,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 	state, err = RefreshClaudeGatewayRealtime(context.Background(), instance.Id)
 	require.NoError(t, err)
 	require.Equal(t, 17.0, *state.RPM.Value, "older gateways without summary.rpm must retain the account-level fallback")
+	require.Equal(t, 2, state.AccountsAvailable, "older gateways without summary.available_accounts must retain the account-level fallback")
 	require.Equal(t, 1, summaryRequests, "10-second realtime refresh must reuse cached costs")
 	require.Equal(t, 12.34567891, *state.TodayCost.Value)
 	require.Equal(t, 80.0, *state.Cost7D.Value)

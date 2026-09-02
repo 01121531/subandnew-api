@@ -182,7 +182,8 @@ type claudeGatewayTodaySummary struct {
 }
 
 type claudeGatewayAccountSummary struct {
-	RPM *claudeGatewayNumber `json:"rpm"`
+	RPM               *claudeGatewayNumber `json:"rpm"`
+	AvailableAccounts *claudeGatewayNumber `json:"available_accounts"`
 }
 
 type claudeGatewayAccountsPage struct {
@@ -859,6 +860,9 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	rpm := accountRPM
 	if accountsPage.Summary.RPM != nil && *accountsPage.Summary.RPM >= 0 {
 		rpm = float64(*accountsPage.Summary.RPM)
+	}
+	if accountsPage.Summary.AvailableAccounts != nil && *accountsPage.Summary.AvailableAccounts >= 0 {
+		available = int(*accountsPage.Summary.AvailableAccounts)
 	}
 	now := common.GetTimestamp()
 	state := ManagedRealtimeState{
