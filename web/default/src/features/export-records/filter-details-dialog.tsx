@@ -20,6 +20,7 @@ import {
 import type { UsageRecordExportTask } from '@/features/usage-records/api'
 import { cn } from '@/lib/utils'
 
+import { normalizedFilterEntries } from './filter-details-data'
 import { EXPORT_STATUS_META, exportInstanceKindLabel } from './status-meta'
 
 const FILTER_LABELS: Record<string, string> = {
@@ -105,14 +106,12 @@ const fullDateTime = new Intl.DateTimeFormat(undefined, {
   timeStyle: 'medium',
 })
 
-function nonEmptyFilterEntries(filters: Record<string, string[]>) {
-  return Object.entries(filters)
-    .filter(([, values]) => values.length > 0)
-    .map(([key, values]) => ({
-      key,
-      label: FILTER_LABELS[key] ?? key,
-      values,
-    }))
+function nonEmptyFilterEntries(filters: unknown) {
+  return normalizedFilterEntries(filters).map(({ key, values }) => ({
+    key,
+    label: FILTER_LABELS[key] ?? key,
+    values,
+  }))
 }
 
 function formatFilterValue(key: string, value: string) {
@@ -126,7 +125,7 @@ function formatFilterValue(key: string, value: string) {
   return label && label !== value ? `${label} (${value})` : value
 }
 
-function getFilterSummary(filters: Record<string, string[]>) {
+function getFilterSummary(filters: unknown) {
   const entries = nonEmptyFilterEntries(filters)
   const visible = entries.filter(({ key }) => !EXPORT_PARAMETER_KEYS.has(key))
   const hasTimeRange = visible.some(({ key }) => TIME_KEYS.has(key))

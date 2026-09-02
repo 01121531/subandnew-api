@@ -42,7 +42,7 @@ export type UsageRecordExportTask = {
   export_kind: 'usage_records' | 'accounts'
   file_format: 'csv' | 'xlsx'
   source?: 'inventory' | 'account_output'
-  filters: Record<string, string[]>
+  filters: Record<string, string[] | null> | null
   snapshot?: Record<string, unknown>
   status:
     | 'pending'

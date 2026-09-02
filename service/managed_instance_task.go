@@ -389,6 +389,11 @@ func managedUsageExportView(record *model.ManagedUsageExport) *ManagedUsageExpor
 		_ = json.Unmarshal([]byte(record.Query), &snapshot)
 	} else {
 		_ = json.Unmarshal([]byte(record.Query), &filters)
+		for key, values := range filters {
+			if values == nil {
+				delete(filters, key)
+			}
+		}
 	}
 	return &ManagedUsageExportView{
 		ID: record.ID, TaskID: record.TaskID, InstanceID: record.InstanceID,

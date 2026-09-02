@@ -59,3 +59,16 @@ func TestBatchCoordinatorPersistsNeedsReconciliationWithoutClientPoll(t *testing
 	require.Equal(t, model.ManagedInstanceBatchStatusNeedsReconcile, reloaded.Status)
 	require.NotZero(t, reloaded.FinishedAt)
 }
+
+func TestManagedUsageExportViewDropsNullLegacyFilters(t *testing.T) {
+	record := &model.ManagedUsageExport{
+		ExportKind: model.ManagedExportKindUsageRecords,
+		Query:      `{"username":null,"model":["claude-sonnet"]}`,
+	}
+
+	view := managedUsageExportView(record)
+
+	require.NotNil(t, view)
+	require.NotContains(t, view.Filters, "username")
+	require.Equal(t, []string{"claude-sonnet"}, view.Filters["model"])
+}
