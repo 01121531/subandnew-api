@@ -184,6 +184,7 @@ type claudeGatewayTodaySummary struct {
 type claudeGatewayAccountSummary struct {
 	RPM               *claudeGatewayNumber `json:"rpm"`
 	AvailableAccounts *claudeGatewayNumber `json:"available_accounts"`
+	TotalRows         *claudeGatewayNumber `json:"total_rows"`
 }
 
 type claudeGatewayAccountsPage struct {
@@ -864,12 +865,16 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	if accountsPage.Summary.AvailableAccounts != nil && *accountsPage.Summary.AvailableAccounts >= 0 {
 		available = int(*accountsPage.Summary.AvailableAccounts)
 	}
+	totalAccounts := len(accounts)
+	if accountsPage.Summary.TotalRows != nil && *accountsPage.Summary.TotalRows >= 0 {
+		totalAccounts = int(*accountsPage.Summary.TotalRows)
+	}
 	now := common.GetTimestamp()
 	state := ManagedRealtimeState{
 		InstanceID: instanceID, ObservedAt: now, LastAttemptAt: now, StreamStatus: "connected",
 		RPM: supportedMetric(rpm, "request/min"), ConcurrencyUsed: supportedMetric(concurrency, "concurrency"),
 		ConcurrencyMax: unsupportedMetric("concurrency"), ConcurrencyStatus: model.ManagedInstanceCollectionSucceeded,
-		AccountsTotal: len(accounts), AccountsAvailable: available, AccountsReporting: reporting,
+		AccountsTotal: totalAccounts, AccountsAvailable: available, AccountsReporting: reporting,
 		AccountsCollectionStatus: model.ManagedInstanceCollectionSucceeded, AccountsObservedAt: now,
 		ActiveSessions: sessions, ActiveSessionsObservedAt: now, ConcurrencyObservedAt: now, Accounts: page.Items,
 	}
