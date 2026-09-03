@@ -127,6 +127,7 @@ type InstanceMetricRow = {
   instance: ManagedInstance
   summary?: ManagedInstanceSummary
   observedAt: number
+  realtimeObservedAt: number
   summaryObservedAt: number
   todayObservedAt: number
   collected: boolean
@@ -152,7 +153,8 @@ type InstanceMetricRow = {
   lastAttemptAt: number
   lastAttemptStatus: string
   lastErrorCode: string
-  stale: boolean
+  summaryStale: boolean
+  realtimeStale: boolean
 }
 
 type DailyUsageData = {
@@ -217,6 +219,9 @@ const compactNumber = new Intl.NumberFormat(undefined, {
 })
 const exactNumber = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 2,
+})
+const exactInteger = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 0,
 })
 const compactCurrency = new Intl.NumberFormat(undefined, {
   style: 'currency',
@@ -415,6 +420,21 @@ function readDashboardPreferences(): FleetDashboardPreferences {
 function formatMetric(value: number | null, compact = true) {
   if (value == null) return '--'
   return (compact ? compactNumber : exactNumber).format(value)
+}
+
+function formatExactInteger(value: number | null): string | undefined {
+  return value == null ? undefined : exactInteger.format(value)
+}
+
+function formatExactNumber(
+  value: number | null,
+  suffix = ''
+): string | undefined {
+  return value == null ? undefined : `${exactNumber.format(value)}${suffix}`
+}
+
+function formatExactPercent(value: number | null): string | undefined {
+  return value == null ? undefined : `${value.toFixed(2)}%`
 }
 
 function formatUsageMetric(
@@ -702,6 +722,7 @@ export function FleetDashboard() {
             todaySection?.observation?.observed_at ?? 0,
             realtime?.observed_at ?? 0
           ),
+          realtimeObservedAt: realtime?.observed_at ?? 0,
           summaryObservedAt: observation?.observed_at ?? 0,
           todayObservedAt: usesRealtimeCosts
             ? (realtime?.today_cost_observed_at ?? 0)
@@ -751,11 +772,8 @@ export function FleetDashboard() {
             summarySection?.last_error_code ??
             todaySection?.last_error_code ??
             '',
-          stale: Boolean(
-            summarySection?.stale ||
-            todaySection?.stale ||
-            (instance.kind === 'claude_gateway' && realtime?.stale)
-          ),
+          summaryStale: Boolean(summarySection?.stale),
+          realtimeStale: Boolean(realtime?.stale),
         }
       }),
     [
@@ -1893,7 +1911,36 @@ function SummaryGrid(props: DashboardContentProps) {
     0,
     ...props.rows.map((row) => row.cost30DObservedAt)
   )
-  const amountStale = props.rows.some((row) => row.stale)
+  const realtimeObservedAt = Math.max(
+    0,
+    ...props.rows.map((row) => row.realtimeObservedAt)
+  )
+  const healthObservedAt = Math.max(
+    0,
+    ...props.instances.map((instance) => instance.last_seen_at ?? 0)
+  )
+  const summaryStale = props.rows.some((row) => row.summaryStale)
+  const requestsStale = props.rows.some(
+    (row) => row.requests != null && row.summaryStale
+  )
+  const tokensStale = props.rows.some(
+    (row) => row.tokens != null && row.summaryStale
+  )
+  const quotaStale = props.rows.some(
+    (row) => row.quota != null && row.summaryStale
+  )
+  const rpmStale = props.rows.some(
+    (row) => row.rpm != null && row.realtimeStale
+  )
+  const concurrencyStale = props.rows.some(
+    (row) =>
+      row.concurrencyUsed != null &&
+      row.concurrencyMax != null &&
+      row.realtimeStale
+  )
+  const accountsStale = props.rows.some(
+    (row) => row.accountsTotal != null && row.realtimeStale
+  )
   const todayCostStale = props.rows.some(
     (row) => row.todayCost != null && row.todayCostStale
   )
@@ -1945,6 +1992,38 @@ function SummaryGrid(props: DashboardContentProps) {
       count: props.totals.cost30DReady,
     })
   }
+  const healthExactValue = props.instances.length
+    ? formatExactPercent((props.totals.healthy / props.instances.length) * 100)
+    : undefined
+  const rpmExactValue = (() => {
+    if (props.family !== 'conductor') {
+      return props.totals.rpmReady
+        ? formatExactNumber(props.totals.rpm, ' RPM')
+        : undefined
+    }
+    if (!props.totals.rpmReady && !capacityReady) return undefined
+    const rpm = props.totals.rpmReady
+      ? exactNumber.format(props.totals.rpm)
+      : '--'
+    const capacity = capacityReady
+      ? exactNumber.format(props.totals.rpmCapacity)
+      : '--'
+    return `${rpm} / ${capacity} RPM`
+  })()
+  const metricCoverageReady =
+    props.family === 'conductor'
+      ? props.totals.quotaReady
+      : props.totals.metricReady
+  const metricCoverageExactValue = props.instances.length
+    ? formatExactPercent((metricCoverageReady / props.instances.length) * 100)
+    : undefined
+  let quotaExactValue: string | undefined
+  if (props.totals.quotaReady) {
+    quotaExactValue =
+      props.family === 'new_api'
+        ? exactNumber.format(props.totals.quota)
+        : `US$${exactDecimal.format(props.totals.quota)}`
+  }
 
   return (
     <section
@@ -1966,6 +2045,8 @@ function SummaryGrid(props: DashboardContentProps) {
           total: props.instances.length,
         })}
         tone={availabilityTone}
+        exactValue={healthExactValue}
+        observedAt={healthObservedAt}
       />
       {props.family === 'new_api' && (
         <MetricCard
@@ -1978,6 +2059,13 @@ function SummaryGrid(props: DashboardContentProps) {
             count: props.totals.requestsReady,
           })}
           tone='blue'
+          exactValue={
+            props.totals.requestsReady
+              ? formatExactInteger(props.totals.requests)
+              : undefined
+          }
+          observedAt={costObservedAt}
+          stale={requestsStale}
         />
       )}
       {props.family === 'sub2api' && (
@@ -1991,6 +2079,13 @@ function SummaryGrid(props: DashboardContentProps) {
           }
           detail={t('Sub2API group {{id}}', { id: 49 })}
           tone='amber'
+          exactValue={
+            props.totals.concurrencyReady === props.instances.length
+              ? `${exactInteger.format(props.totals.concurrencyUsed)} / ${exactInteger.format(props.totals.concurrencyMax)}`
+              : undefined
+          }
+          observedAt={realtimeObservedAt}
+          stale={concurrencyStale}
           action={
             <Button
               variant='ghost'
@@ -2017,6 +2112,9 @@ function SummaryGrid(props: DashboardContentProps) {
         }
         detail={props.family === 'conductor' ? rpmCapacityDetail : rpmDetail}
         tone='success'
+        exactValue={rpmExactValue}
+        observedAt={realtimeObservedAt}
+        stale={rpmStale}
         action={
           <Button
             variant='ghost'
@@ -2052,8 +2150,15 @@ function SummaryGrid(props: DashboardContentProps) {
               : t('Real-time data is connecting')
           }
           tone={successRateTone}
-          observedAt={Math.max(0, ...props.rows.map((row) => row.observedAt))}
-          stale={props.rows.some((row) => row.successRate != null && row.stale)}
+          exactValue={
+            successRateReady
+              ? formatExactPercent(props.totals.successRate * 100)
+              : undefined
+          }
+          observedAt={realtimeObservedAt}
+          stale={props.rows.some(
+            (row) => row.successRate != null && row.realtimeStale
+          )}
         />
       )}
       {showsAccountMetrics && (
@@ -2068,6 +2173,13 @@ function SummaryGrid(props: DashboardContentProps) {
             count: props.totals.accountsReady,
           })}
           tone='success'
+          exactValue={
+            props.totals.accountsReady
+              ? formatExactInteger(props.totals.accountsAvailable)
+              : undefined
+          }
+          observedAt={realtimeObservedAt}
+          stale={accountsStale}
         />
       )}
       {showsAccountMetrics && (
@@ -2082,6 +2194,13 @@ function SummaryGrid(props: DashboardContentProps) {
             count: props.totals.accountsReady,
           })}
           tone='blue'
+          exactValue={
+            props.totals.accountsReady
+              ? formatExactInteger(props.totals.accountsTotal)
+              : undefined
+          }
+          observedAt={realtimeObservedAt}
+          stale={accountsStale}
         />
       )}
       {props.family === 'new_api' && (
@@ -2095,6 +2214,13 @@ function SummaryGrid(props: DashboardContentProps) {
             count: props.totals.tokensReady,
           })}
           tone='violet'
+          exactValue={
+            props.totals.tokensReady
+              ? formatExactInteger(props.totals.tokens)
+              : undefined
+          }
+          observedAt={costObservedAt}
+          stale={tokensStale}
         />
       )}
       {props.family !== 'claude_gateway' && (
@@ -2108,13 +2234,9 @@ function SummaryGrid(props: DashboardContentProps) {
           )}
           detail={resolvedCostDetail}
           tone='amber'
-          exactValue={
-            props.family !== 'new_api' && props.totals.quotaReady
-              ? `US$${exactDecimal.format(props.totals.quota)}`
-              : undefined
-          }
+          exactValue={quotaExactValue}
           observedAt={costObservedAt}
-          stale={amountStale}
+          stale={quotaStale}
         />
       )}
       {props.family !== 'new_api' && (
@@ -2134,9 +2256,7 @@ function SummaryGrid(props: DashboardContentProps) {
               : undefined
           }
           observedAt={todayObservedAt}
-          stale={
-            props.family === 'claude_gateway' ? todayCostStale : amountStale
-          }
+          stale={todayCostStale}
         />
       )}
       {props.family === 'claude_gateway' && (
@@ -2190,6 +2310,9 @@ function SummaryGrid(props: DashboardContentProps) {
               : props.totals.metricReady,
         })}
         tone='neutral'
+        exactValue={metricCoverageExactValue}
+        observedAt={costObservedAt}
+        stale={summaryStale}
       />
     </section>
   )
@@ -2783,12 +2906,14 @@ function MetricCard(props: {
           </span>
         </div>
       </div>
-      {props.exactValue ? (
+      {props.exactValue !== undefined ? (
         <Tooltip>
           <TooltipTrigger
+            closeOnClick={false}
             render={
               <button
                 type='button'
+                aria-label={`${props.label}: ${props.exactValue}`}
                 className={cn(
                   'focus-visible:ring-ring mt-2 block max-w-full cursor-help break-words text-left font-mono leading-tight font-semibold tracking-tight tabular-nums outline-none focus-visible:ring-2',
                   'min-h-11 py-1',
@@ -2799,8 +2924,10 @@ function MetricCard(props: {
           >
             {props.value}
           </TooltipTrigger>
-          <TooltipContent className='grid gap-1'>
-            <span className='font-mono tabular-nums'>{props.exactValue}</span>
+          <TooltipContent className='grid max-w-[calc(100vw-2rem)] gap-1'>
+            <span className='font-mono break-all tabular-nums'>
+              {props.exactValue}
+            </span>
             {props.observedAt ? (
               <span className='text-xs opacity-80'>
                 {props.stale
