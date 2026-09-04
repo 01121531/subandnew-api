@@ -746,7 +746,7 @@ export function ManagedAccounts() {
   const [sortKey, setSortKey] = useState<AccountSortKey>('available')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
-    createFleetPresetRange(7)
+    createFleetPresetRange(30)
   )
   const handledSnapshotEvents = useRef(new Map<number, number>())
   const [submittingRefreshes, setSubmittingRefreshes] = useState<Set<number>>(
