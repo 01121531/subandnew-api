@@ -148,6 +148,9 @@ func metricValue(instance model.ManagedInstance, state managedinstance.ManagedRe
 		}
 		return dashboardTodayCost(instance.Id)
 	}
+	if metric == "requests" || metric == "tokens" {
+		return dashboardMetricValue(instance.Id, metric)
+	}
 	if !stateOK || state.Stale || state.ObservedAt <= 0 {
 		return 0, state.ObservedAt, false
 	}
@@ -249,15 +252,26 @@ func aggregateMetric(instances []model.ManagedInstance, states []managedinstance
 }
 
 func dashboardTodayCost(instanceID int64) (float64, int64, bool) {
+	return dashboardMetricValue(instanceID, "today_cost")
+}
+
+func dashboardMetricValue(instanceID int64, metric string) (float64, int64, bool) {
 	var snapshot model.ManagedDashboardSnapshot
-	if err := model.DB.Where("instance_id = ? AND range_key = ?", instanceID, "preset-1").First(&snapshot).Error; err != nil || snapshot.ObservedAt <= 0 || snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed || common.GetTimestamp()-snapshot.ObservedAt > 180 {
+	if err := model.DB.Where("instance_id = ? AND range_key = ?", instanceID, "preset-1").First(&snapshot).Error; err != nil || snapshot.ObservedAt <= 0 || snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed || common.GetTimestamp()-snapshot.ObservedAt > 360 {
 		return 0, snapshot.ObservedAt, false
 	}
 	var summary managedinstance.SummaryResult
 	if json.Unmarshal([]byte(snapshot.Payload), &summary) != nil {
 		return 0, snapshot.ObservedAt, false
 	}
-	value, ok := sampleValue(summary.Cost)
+	sample := summary.Cost
+	switch metric {
+	case "requests":
+		sample = summary.Requests
+	case "tokens":
+		sample = summary.Tokens
+	}
+	value, ok := sampleValue(sample)
 	return value, snapshot.ObservedAt, ok
 }
 

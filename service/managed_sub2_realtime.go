@@ -111,7 +111,7 @@ func managedPollingRealtimeTargets(ctx context.Context) []managedRealtimeTarget 
 	}
 	var instances []model.ManagedInstance
 	if err := model.DB.WithContext(ctx).
-		Where("kind IN ?", []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindClaudeGateway}).
+		Where("kind IN ?", []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindClaudeGateway}).
 		Order("id asc").Find(&instances).Error; err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("managed polling realtime collector reconcile failed: %v", err))
 		return nil
@@ -269,7 +269,7 @@ func metricValueForHistory(sample managedinstance.MetricSample) *float64 {
 func refreshManagedRealtimeTarget(ctx context.Context, target managedRealtimeTarget) (managedinstance.ManagedRealtimeState, error) {
 	var refreshErr error
 	switch target.Kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan:
 		state, err := managedinstance.RefreshNewAPIRealtime(ctx, target.InstanceID)
 		return state, err
 	case model.ManagedInstanceKindSub2API:

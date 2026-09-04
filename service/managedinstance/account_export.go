@@ -88,7 +88,7 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 		switch kind {
 		case model.ManagedInstanceKindConductor:
 			results, collectionErr = collectConductorAccountExportMetrics(ctx, instanceID, input.ActorID, input.Window)
-		case model.ManagedInstanceKindSub2API, model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+		case model.ManagedInstanceKindSub2API, model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindMercerRouter:
 			results, failures, collectionErr = collectPagedAccountExportMetrics(ctx, instanceID, input.ActorID, indexes, input.Selected, input.Window)
 		case model.ManagedInstanceKindClaudeGateway:
 			results = collectClaudeGatewayAccountExportMetrics(indexes, input.Selected, input.Source, input.Window)
@@ -318,6 +318,13 @@ func collectAccountUsagePages(ctx context.Context, client *usageRecordClient, ac
 				result.cacheWrite += value("cache_creation_tokens")
 				result.amount += value("actual_cost")
 				result.hasAmount = true
+			} else if client.instance.Kind == model.ManagedInstanceKindMercerRouter {
+				result.input += value("prompt_tokens")
+				result.output += value("completion_tokens")
+				if amount, ok := firstJSONFloat64Raw(item, "amount_usd"); ok {
+					result.amount += amount
+					result.hasAmount = true
+				}
 			} else {
 				result.input += value("prompt_tokens")
 				result.output += value("completion_tokens")
@@ -328,12 +335,20 @@ func collectAccountUsagePages(ctx context.Context, client *usageRecordClient, ac
 			break
 		}
 	}
-	if client.instance.Kind != model.ManagedInstanceKindSub2API {
+	if client.instance.Kind != model.ManagedInstanceKindSub2API && client.instance.Kind != model.ManagedInstanceKindMercerRouter {
 		amount, currency := client.newAPIQuotaAmount(ctx, result.amount)
 		result.amount = amount
 		result.hasAmount = strings.EqualFold(currency, "usd")
 	}
 	return result, nil
+}
+
+func firstJSONFloat64Raw(item map[string]any, key string) (float64, bool) {
+	value, exists := item[key]
+	if !exists || value == nil {
+		return 0, false
+	}
+	return usageNumber(value)
 }
 
 func retryAccountExport(ctx context.Context, instanceID int64, actorID int, operation func() error) error {

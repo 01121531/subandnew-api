@@ -414,6 +414,17 @@ export function AccountDataPortal({ slug }: { slug: string }) {
               : '当前展示最后一次成功采集的数据。'}
           </div>
         )}
+        {result?.vendor_options_status === 'not_collected' && (
+          <div className='border-warning/40 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
+            供应商信息尚未采集，快照更新后会自动提供筛选选项；当前仍可手动输入。
+          </div>
+        )}
+        {(result?.vendor_options_status === 'stale' ||
+          result?.vendor_options_status === 'partial') && (
+          <div className='border-warning/40 bg-warning/5 text-warning rounded-md border px-4 py-3 text-sm'>
+            当前供应商列表来自最近一次成功快照，部分供应商信息可能尚未更新。
+          </div>
+        )}
         <section className='grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5'>
           <Metric title='匹配账号' value={result?.pagination.total ?? '--'} />
           {session.fields.includes('available') && (

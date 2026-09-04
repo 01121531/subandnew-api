@@ -558,6 +558,46 @@ func PortalFilterOptions(options map[string][]string, fields []string) map[strin
 	return result
 }
 
+func PortalVendorOptionsStatus(result *managedaccount.Result, fields []string) string {
+	if result == nil || (!containsString(fields, "vendor_name") && !containsString(fields, "vendor_email")) {
+		return ""
+	}
+	relevant := 0
+	succeeded := 0
+	failed := 0
+	missing := 0
+	for _, source := range result.Sources {
+		if source.Platform != model.ManagedInstanceKindClaudeGateway {
+			continue
+		}
+		relevant++
+		switch source.VendorCollectionStatus {
+		case model.ManagedInstanceCollectionSucceeded:
+			succeeded++
+		case model.ManagedInstanceCollectionFailed:
+			failed++
+		default:
+			missing++
+		}
+	}
+	if relevant == 0 {
+		return ""
+	}
+	if succeeded == relevant {
+		return "ready"
+	}
+	if succeeded > 0 {
+		return "partial"
+	}
+	if failed > 0 {
+		return "stale"
+	}
+	if missing > 0 {
+		return "not_collected"
+	}
+	return ""
+}
+
 var portalFieldLabels = map[string]string{
 	"instance_id": "实例 ID", "account_id": "账号 ID", "instance_name": "实例", "platform": "平台", "name": "名称",
 	"email": "邮箱", "note": "备注", "ownership": "账号归属", "type": "账号类型", "group": "分组", "status": "状态",

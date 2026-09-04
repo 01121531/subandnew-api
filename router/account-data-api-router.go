@@ -12,6 +12,7 @@ func registerAccountDataAPIRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	management.Use(middleware.AdminAuth())
 	management.GET("", middleware.RequirePermission(authz.ManagedAccountAPIView), controller.ListAccountDataAPIs)
 	management.GET("/instances", middleware.RequirePermission(authz.ManagedAccountAPIView), controller.ListAccountDataAPIInstanceOptions)
+	management.POST("/filter-options", middleware.RequirePermission(authz.ManagedAccountAPIManage), controller.GetAccountDataAPIFilterOptions)
 	management.GET("/:id", middleware.RequirePermission(authz.ManagedAccountAPIView), controller.GetAccountDataAPI)
 	management.POST("", middleware.RequirePermission(authz.ManagedAccountAPIManage), controller.CreateAccountDataAPI)
 	management.PUT("/:id", middleware.RequirePermission(authz.ManagedAccountAPIManage), controller.UpdateAccountDataAPI)

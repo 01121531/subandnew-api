@@ -66,6 +66,7 @@ export type PortalResult = {
   observed_at: string
   stale: boolean
   partial: boolean
+  vendor_options_status?: 'ready' | 'stale' | 'partial' | 'not_collected'
   filter_options?: Record<
     string,
     Array<string | { value: string; label?: string }>

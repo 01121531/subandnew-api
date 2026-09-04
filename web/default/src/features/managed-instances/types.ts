@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 type ManagedInstanceKind =
   | 'new_api'
+  | 'mercer_router'
   | 'huichuan'
   | 'sub2api'
   | 'conductor'
@@ -32,7 +33,7 @@ export type ManagedInstanceStatus =
 
 export interface ManagedInstanceCredential {
   auth_type: string
-  access_scope: 'admin' | 'user'
+  access_scope: 'admin' | 'user' | 'channel_admin'
   fingerprint: string
   expires_at: number
   last_verified_at: number
@@ -78,7 +79,7 @@ export interface ManagedInstanceInput {
 
 export interface ManagedInstanceCredentialInput {
   auth_type: string
-  access_scope: 'admin' | 'user'
+  access_scope: 'admin' | 'user' | 'channel_admin'
   secret: string
   user_id: string
   expires_at: number

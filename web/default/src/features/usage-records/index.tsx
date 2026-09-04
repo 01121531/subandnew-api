@@ -180,7 +180,7 @@ const CONDUCTOR_FILTERS: FilterDefinition[] = [
 ]
 
 function usesDateOnly(system: UsageSystem) {
-  return system !== 'new_api'
+  return system === 'sub2api' || system === 'conductor'
 }
 
 function localDateTime(date: Date) {
@@ -241,7 +241,10 @@ function requestFilters(
   }
   Object.entries(filters).forEach(([key, value]) => {
     if (!value || (Array.isArray(value) && value.length === 0)) return
-    if (system === 'new_api' && (key === 'start_time' || key === 'end_time')) {
+    if (
+      (system === 'new_api' || system === 'mercer_router') &&
+      (key === 'start_time' || key === 'end_time')
+    ) {
       const timestamp = Math.floor(
         new Date(scalarFilter(value)).getTime() / 1000
       )
@@ -298,6 +301,7 @@ function usageFilterError(
 }
 
 function belongsToSystem(instance: ManagedInstance, system: UsageSystem) {
+  if (system === 'mercer_router') return instance.kind === 'mercer_router'
   if (system === 'sub2api') return instance.kind === 'sub2api'
   if (system === 'conductor') return instance.kind === 'conductor'
   return instance.kind === 'new_api' || instance.kind === 'huichuan'
@@ -310,6 +314,7 @@ function filtersForSystem(system: UsageSystem) {
 }
 
 function usageSystemLabel(system: UsageSystem) {
+  if (system === 'mercer_router') return 'MercerRouter'
   if (system === 'sub2api') return 'Sub2API'
   if (system === 'conductor') return 'Conductor'
   return 'New API'
@@ -321,7 +326,7 @@ function withUsageSort(
   sortKey: UsageSortKey,
   sortDirection: SortDirection
 ) {
-  if (system === 'new_api') return filters
+  if (system === 'new_api' || system === 'mercer_router') return filters
   return { ...filters, sort_by: sortKey, sort_order: sortDirection }
 }
 
@@ -591,7 +596,9 @@ export function UsageRecords() {
         <div className='grid gap-4'>
           <div className='border-border bg-card grid min-w-0 gap-2 rounded-lg border p-2 shadow-xs sm:flex sm:flex-wrap sm:items-center'>
             <div className='bg-muted flex h-11 w-full min-w-0 items-center overflow-x-auto rounded-md p-0.5 sm:h-8 sm:w-auto'>
-              {(['new_api', 'sub2api', 'conductor'] as const).map((value) => (
+              {(
+                ['new_api', 'mercer_router', 'sub2api', 'conductor'] as const
+              ).map((value) => (
                 <button
                   key={value}
                   type='button'
@@ -1012,10 +1019,21 @@ function UsageDesktopTable(props: {
   if (props.system === 'conductor') {
     return <ConductorTable records={props.records} />
   }
-  return <NewAPITable records={props.records} />
+  return (
+    <NewAPITable
+      records={props.records}
+      showActualCost={props.system === 'mercer_router'}
+    />
+  )
 }
 
-function NewAPITable({ records }: { records: UsageRecord[] }) {
+function NewAPITable({
+  records,
+  showActualCost,
+}: {
+  records: UsageRecord[]
+  showActualCost: boolean
+}) {
   return (
     <Table className='min-w-[1180px]'>
       <TableHeader>
@@ -1028,7 +1046,7 @@ function NewAPITable({ records }: { records: UsageRecord[] }) {
             '模型',
             '渠道',
             '输入 / 输出',
-            '额度',
+            showActualCost ? '实际消费' : '额度',
             '耗时',
             '请求 ID',
           ].map((label) => (
@@ -1058,7 +1076,9 @@ function NewAPITable({ records }: { records: UsageRecord[] }) {
               {formatNumber(number(record, 'completion_tokens'))}
             </TableCell>
             <TableCell className='font-mono tabular-nums'>
-              {formatNumber(number(record, 'quota'))}
+              {showActualCost
+                ? formatCurrency(number(record, 'amount_usd'))
+                : formatNumber(number(record, 'quota'))}
             </TableCell>
             <TableCell className='font-mono tabular-nums'>
               {formatDuration(number(record, 'use_time'), 's')}
@@ -1207,6 +1227,7 @@ function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
   const record = props.record
   const sub2 = props.system === 'sub2api'
   const conductor = props.system === 'conductor'
+  const mercerRouter = props.system === 'mercer_router'
   const user = sub2
     ? text(record, 'user.email') || text(record, 'user_id')
     : text(record, 'username')
@@ -1225,6 +1246,12 @@ function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
   const recordDetail = conductor
     ? `${formatNumber(number(record, 'requests'))} 次请求 · ${formatNumber(number(record, 'total_tokens'))} Token`
     : text(record, 'request_id') || '无请求 ID'
+  let billingValue = formatNumber(number(record, 'quota'))
+  if (sub2 || conductor) {
+    billingValue = formatCurrency(number(record, 'actual_cost'))
+  } else if (mercerRouter) {
+    billingValue = formatCurrency(number(record, 'amount_usd'))
+  }
   return (
     <div className='grid gap-2 p-3'>
       <div className='flex min-w-0 items-start justify-between gap-3'>
@@ -1242,12 +1269,8 @@ function UsageMobileRow(props: { system: UsageSystem; record: UsageRecord }) {
         <Metric label='输入' value={formatNumber(input)} />
         <Metric label='输出' value={formatNumber(output)} />
         <Metric
-          label={sub2 || conductor ? '计费' : '额度'}
-          value={
-            sub2 || conductor
-              ? formatCurrency(number(record, 'actual_cost'))
-              : formatNumber(number(record, 'quota'))
-          }
+          label={sub2 || conductor || mercerRouter ? '计费' : '额度'}
+          value={billingValue}
         />
       </div>
       <div
@@ -1355,6 +1378,9 @@ function formatTokenTotal(input: number | undefined) {
 
 function formatSummaryAmount(summary: UsageRecordSummary | undefined) {
   if (!summary) return '--'
+  if (summary.amount_status === 'unsupported' || !summary.currency) {
+    return '未提供'
+  }
   return summary.currency === 'USD'
     ? formatCurrency(summary.amount)
     : formatNumber(summary.amount)

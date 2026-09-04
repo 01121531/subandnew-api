@@ -139,11 +139,17 @@ func Create(input CreateInput) (*InstanceView, error) {
 			return nil, err
 		}
 		instance.Kind = input.Preflight.Kind
+		if instance.Kind == model.ManagedInstanceKindMercerRouter {
+			instance.ManagementMode = model.ManagedInstanceModeObserve
+		}
 		instance.Version = input.Preflight.Version
 		instance.Capabilities = string(capabilities)
 		instance.Status = model.ManagedInstanceStatusHealthy
 		instance.LastSeenAt = input.Preflight.CheckedAt
 		instance.LastCheckedAt = input.Preflight.CheckedAt
+	}
+	if instance.Kind == model.ManagedInstanceKindMercerRouter && (input.Credential == nil || input.Credential.AuthType != "account_password") {
+		return nil, fmt.Errorf("%w: MercerRouter requires account_password", ErrInvalidInstance)
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		var duplicateCount int64
@@ -159,7 +165,11 @@ func Create(input CreateInput) (*InstanceView, error) {
 			return err
 		}
 		if input.Credential != nil {
-			credential, err := buildCredential(instance.Id, *input.Credential, input.ActorID)
+			credentialInput := *input.Credential
+			if input.Preflight != nil && strings.TrimSpace(input.Preflight.AccessScope) != "" {
+				credentialInput.AccessScope = input.Preflight.AccessScope
+			}
+			credential, err := buildCredential(instance.Id, credentialInput, input.ActorID)
 			if err != nil {
 				return err
 			}
@@ -342,16 +352,19 @@ func RotateCredential(instanceID int64, input CredentialInput, actorID int) (*Cr
 	if instanceID <= 0 {
 		return nil, ErrInvalidInstance
 	}
+	var instance model.ManagedInstance
+	if err := model.DB.Select("id", "kind").First(&instance, instanceID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrInstanceNotFound
+		}
+		return nil, err
+	}
+	if instance.Kind == model.ManagedInstanceKindMercerRouter && input.AuthType != "account_password" {
+		return nil, fmt.Errorf("%w: MercerRouter requires account_password", ErrInvalidInstance)
+	}
 	credential, err := buildCredential(instanceID, input, actorID)
 	if err != nil {
 		return nil, err
-	}
-	var count int64
-	if err := model.DB.Model(&model.ManagedInstance{}).Where("id = ?", instanceID).Count(&count).Error; err != nil {
-		return nil, err
-	}
-	if count == 0 {
-		return nil, ErrInstanceNotFound
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := ensureNoActiveConfigApply(tx, instanceID); err != nil {
@@ -428,6 +441,9 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 	if !validEnvironment(environment) || !validManagementMode(managementMode) {
 		return nil, ErrInvalidInstance
 	}
+	if kind == model.ManagedInstanceKindMercerRouter {
+		managementMode = model.ManagedInstanceModeObserve
+	}
 	if requestTimeout == 0 {
 		requestTimeout = 10
 	}
@@ -501,7 +517,7 @@ func NormalizeBaseURL(raw string) (string, error) {
 
 func validKind(kind string) bool {
 	switch kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway, model.ManagedInstanceKindGeneric:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway, model.ManagedInstanceKindGeneric:
 		return true
 	default:
 		return false
@@ -537,7 +553,7 @@ func validAuthType(authType string) bool {
 
 func validAccessScope(scope string) bool {
 	switch scope {
-	case model.ManagedInstanceAccessAdmin, model.ManagedInstanceAccessUser:
+	case model.ManagedInstanceAccessAdmin, model.ManagedInstanceAccessUser, model.ManagedInstanceAccessChannelAdmin:
 		return true
 	default:
 		return false
@@ -545,10 +561,14 @@ func validAccessScope(scope string) bool {
 }
 
 func normalizedAccessScope(scope string) string {
-	if strings.TrimSpace(scope) == model.ManagedInstanceAccessUser {
+	switch strings.TrimSpace(scope) {
+	case model.ManagedInstanceAccessUser:
 		return model.ManagedInstanceAccessUser
+	case model.ManagedInstanceAccessChannelAdmin:
+		return model.ManagedInstanceAccessChannelAdmin
+	default:
+		return model.ManagedInstanceAccessAdmin
 	}
-	return model.ManagedInstanceAccessAdmin
 }
 
 func newInstanceView(instance *model.ManagedInstance, credential *model.ManagedInstanceCredential) *InstanceView {

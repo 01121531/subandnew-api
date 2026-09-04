@@ -7,6 +7,7 @@ import (
 
 const (
 	ManagedInstanceKindNewAPI        = "new_api"
+	ManagedInstanceKindMercerRouter  = "mercer_router"
 	ManagedInstanceKindHuichuan      = "huichuan"
 	ManagedInstanceKindSub2API       = "sub2api"
 	ManagedInstanceKindConductor     = "conductor"
@@ -23,8 +24,9 @@ const (
 	ManagedInstanceStatusOffline    = "offline"
 	ManagedInstanceStatusAuthFailed = "auth_failed"
 
-	ManagedInstanceAccessAdmin = "admin"
-	ManagedInstanceAccessUser  = "user"
+	ManagedInstanceAccessAdmin        = "admin"
+	ManagedInstanceAccessUser         = "user"
+	ManagedInstanceAccessChannelAdmin = "channel_admin"
 )
 
 type ManagedInstance struct {

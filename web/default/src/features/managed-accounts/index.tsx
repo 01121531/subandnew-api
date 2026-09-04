@@ -138,7 +138,12 @@ import {
 } from './account-filtering'
 import { useBatchedAccountSnapshots } from './use-batched-account-snapshots'
 
-type AccountFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
+type AccountFamily =
+  | 'new_api'
+  | 'mercer_router'
+  | 'sub2api'
+  | 'conductor'
+  | 'claude_gateway'
 type ResourceRow = {
   instance: ManagedInstance
   item: ManagedInstanceInventoryItem
@@ -186,6 +191,7 @@ type AccountPreferences = {
 
 const ACCOUNT_FAMILIES: readonly AccountFamily[] = [
   'new_api',
+  'mercer_router',
   'sub2api',
   'conductor',
   'claude_gateway',
@@ -222,6 +228,7 @@ function defaultPreferences(): AccountPreferences {
     family: 'new_api',
     selectedInstances: {
       new_api: ALL_SITES_VALUE,
+      mercer_router: ALL_SITES_VALUE,
       sub2api: ALL_SITES_VALUE,
       conductor: ALL_SITES_VALUE,
       claude_gateway: ALL_SITES_VALUE,
@@ -268,6 +275,7 @@ function readPreferences(): AccountPreferences {
 }
 
 function belongsToFamily(instance: ManagedInstance, family: AccountFamily) {
+  if (family === 'mercer_router') return instance.kind === 'mercer_router'
   if (family === 'sub2api') return instance.kind === 'sub2api'
   if (family === 'conductor') return instance.kind === 'conductor'
   if (family === 'claude_gateway') return instance.kind === 'claude_gateway'
@@ -275,6 +283,7 @@ function belongsToFamily(instance: ManagedInstance, family: AccountFamily) {
 }
 
 function familyLabel(family: AccountFamily) {
+  if (family === 'mercer_router') return 'MercerRouter'
   if (family === 'sub2api') return 'Sub2API'
   if (family === 'conductor') return 'Conductor'
   if (family === 'claude_gateway') return 'Claude Gateway'
@@ -790,6 +799,9 @@ export function ManagedAccounts() {
     () => ({
       new_api: allInstances.filter((item) => belongsToFamily(item, 'new_api'))
         .length,
+      mercer_router: allInstances.filter((item) =>
+        belongsToFamily(item, 'mercer_router')
+      ).length,
       sub2api: allInstances.filter((item) => belongsToFamily(item, 'sub2api'))
         .length,
       conductor: allInstances.filter((item) =>
@@ -953,6 +965,8 @@ export function ManagedAccounts() {
   )
   const filterOptions = useMemo(() => {
     const categoryFields: AccountFilterField[] = [
+      'vendor_name',
+      'vendor_email',
       'instance',
       'platform',
       'type',
@@ -967,16 +981,21 @@ export function ManagedAccounts() {
     ]
     return Object.fromEntries(
       categoryFields.map((field) => {
-        const values = [
-          ...new Set(documents.flatMap((document) => document[field])),
-        ]
+        const uniqueValues = new Map<string, string>()
+        documents
+          .flatMap((document) => document[field])
+          .map((value) => value.trim())
           .filter(Boolean)
-          .sort((left, right) =>
-            left.localeCompare(right, undefined, {
-              numeric: true,
-              sensitivity: 'base',
-            })
-          )
+          .forEach((value) => {
+            const key = value.toLocaleLowerCase()
+            if (!uniqueValues.has(key)) uniqueValues.set(key, value)
+          })
+        const values = [...uniqueValues.values()].sort((left, right) =>
+          left.localeCompare(right, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          })
+        )
         const options: MultiSelectOption[] = values.map((value) => ({
           value,
           label: filterOptionLabel(field, value, t),
@@ -1344,7 +1363,9 @@ export function ManagedAccounts() {
           unavailable={unavailable}
           unknown={unknown}
           coverage={coverage}
-          showAverageSurvival={family !== 'new_api'}
+          showAverageSurvival={
+            family !== 'new_api' && family !== 'mercer_router'
+          }
           averageUnavailableSurvival={averageUnavailableSurvival}
           survivalSampleCount={unavailableSurvival.length}
         />
@@ -1443,7 +1464,10 @@ export function ManagedAccounts() {
               }
               onChange={(value) => {
                 setFamily(value)
-                if (value === 'new_api' && sortKey === 'survival') {
+                if (
+                  (value === 'new_api' || value === 'mercer_router') &&
+                  sortKey === 'survival'
+                ) {
                   setSortKey('available')
                 }
               }}
@@ -1987,7 +2011,7 @@ function AccountOutputTable({
   onPageSizeChange: (pageSize: number) => void
 }) {
   const { t } = useTranslation()
-  const isChannel = family === 'new_api'
+  const isChannel = family === 'new_api' || family === 'mercer_router'
   const isClaudeGateway = family === 'claude_gateway'
   const [sortKey, setSortKey] = useState<OutputSortKey>('created_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -2524,12 +2548,17 @@ function AccountTable(props: {
   useEffect(() => {
     setPageIndex((current) => Math.min(current, totalPages - 1))
   }, [totalPages])
-  const isChannel = props.family === 'new_api'
+  const isChannel =
+    props.family === 'new_api' || props.family === 'mercer_router'
+  const isQuotaChannel = props.family === 'new_api'
   const isConductor = props.family === 'conductor'
   const isClaudeGateway = props.family === 'claude_gateway'
   const showsSurvival = !isChannel
   let usageColumnLabel = t('Total consumption')
-  if (isChannel) usageColumnLabel = t('Used quota')
+  if (isQuotaChannel) usageColumnLabel = t('Used quota')
+  if (props.family === 'mercer_router') {
+    usageColumnLabel = t('Actual consumption')
+  }
   if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
@@ -2544,7 +2573,7 @@ function AccountTable(props: {
     },
     {
       value: 'cost',
-      label: t(isChannel ? 'Used quota' : 'Total consumption'),
+      label: usageColumnLabel,
     },
     { value: 'last_activity', label: t('Last activity') },
   ]

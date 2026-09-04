@@ -73,16 +73,16 @@ func RefreshNewAPIRealtime(ctx context.Context, instanceID int64) (ManagedRealti
 		storeNewAPIRealtime(state)
 		return state, err
 	}
-	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindHuichuan {
+	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindMercerRouter && instance.Kind != model.ManagedInstanceKindHuichuan {
 		return ManagedRealtimeState{}, ErrUnsupportedCapability
 	}
 
-	sample, collectionErr := newAPICurrentRPM(ctx, connector, instance.Kind, credential)
+	sample, collectionErr := managedPollingCurrentRPM(ctx, connector, instance.Kind, credential)
 	if collectionErr != nil && ShouldRecoverDataConnection(collectionErr) {
 		if RecoverDataConnection(ctx, instanceID, 0) == nil {
 			instance, _, connector, credential, err = observationClient(instanceID)
 			if err == nil {
-				sample, collectionErr = newAPICurrentRPM(ctx, connector, instance.Kind, credential)
+				sample, collectionErr = managedPollingCurrentRPM(ctx, connector, instance.Kind, credential)
 			}
 		}
 	}
@@ -109,6 +109,13 @@ func RefreshNewAPIRealtime(ctx context.Context, instanceID int64) (ManagedRealti
 	return state, collectionErr
 }
 
+func managedPollingCurrentRPM(ctx context.Context, connector *Connector, kind string, credential *CredentialMaterial) (MetricSample, error) {
+	if kind == model.ManagedInstanceKindMercerRouter {
+		return mercerRouterCurrentRPM(ctx, connector, credential)
+	}
+	return newAPICurrentRPM(ctx, connector, kind, credential)
+}
+
 func markManagedRealtimeFailure(instanceID int64, state ManagedRealtimeState, err error) ManagedRealtimeState {
 	state.InstanceID = instanceID
 	state.LastAttemptAt = common.GetTimestamp()
@@ -130,7 +137,7 @@ func CurrentManagedRealtime(instanceID int64) (ManagedRealtimeState, bool, error
 		return ManagedRealtimeState{}, false, err
 	}
 	switch instance.Kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan:
 		state, ok := currentNewAPIRealtime(instanceID)
 		return state, ok, nil
 	case model.ManagedInstanceKindSub2API:

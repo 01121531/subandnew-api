@@ -65,6 +65,7 @@ describe('portal filter options', () => {
       ],
       filter_options: {
         status: ['all-pages', { value: 'disabled', label: '已停用' }],
+        vendor_name: ['All Pages Supplier'],
       },
       pagination: { page: 1, page_size: 50, total: 1, has_more: false },
       summary: { total: 1 },
@@ -73,13 +74,20 @@ describe('portal filter options', () => {
       partial: false,
     }
 
-    const options = portalFilterOptions(result, ['status', 'group'])
+    const options = portalFilterOptions(result, [
+      'status',
+      'group',
+      'vendor_name',
+    ])
     expect(options.status).toEqual([
       { value: 'all-pages', label: 'all-pages' },
       { value: 'disabled', label: '已停用' },
     ])
     expect(options.group).toEqual([
       { value: 'page-group', label: 'page-group' },
+    ])
+    expect(options.vendor_name).toEqual([
+      { value: 'All Pages Supplier', label: 'All Pages Supplier' },
     ])
   })
 })

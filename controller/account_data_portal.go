@@ -106,7 +106,8 @@ func QueryAccountDataPortal(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{
 		"items": items, "pagination": gin.H{"page": result.Page, "page_size": result.PageSize, "total": result.Total, "has_more": result.HasMore},
 		"summary": portalSummary(result, auth.View.Fields), "observed_at": accountDataTime(result.ObservedAt), "stale": result.Stale, "partial": result.Partial,
-		"filter_options": accountdataapi.PortalFilterOptions(result.FilterOptions, accountdataapi.PortalFilterFields(auth.View.Fields)),
+		"filter_options":        accountdataapi.PortalFilterOptions(result.FilterOptions, accountdataapi.PortalFilterFields(auth.View.Fields)),
+		"vendor_options_status": accountdataapi.PortalVendorOptionsStatus(result, auth.View.Fields),
 	}})
 }
 

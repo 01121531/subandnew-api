@@ -192,6 +192,13 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
     resolver: zodResolver(managedInstanceFormSchema),
     defaultValues,
   })
+  const selectedKind = form.watch('kind')
+
+  useEffect(() => {
+    if (selectedKind === 'mercer_router') {
+      form.setValue('management_mode', 'observe')
+    }
+  }, [form, selectedKind])
 
   useEffect(() => {
     if (!props.open) return
@@ -337,12 +344,12 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
                       <NativeSelect
                         className='w-full'
                         {...field}
-                        disabled={!isRoot}
+                        disabled={!isRoot || selectedKind === 'mercer_router'}
                       >
                         <NativeSelectOption value='observe'>
                           {t('Observe')}
                         </NativeSelectOption>
-                        {isRoot && (
+                        {isRoot && selectedKind !== 'mercer_router' && (
                           <>
                             <NativeSelectOption value='operate'>
                               {t('Operate')}

@@ -168,6 +168,7 @@ type usageSummaryItem struct {
 	TotalTokens   *float64 `json:"total_tokens,omitempty"`
 	Amount        *float64 `json:"amount,omitempty"`
 	Currency      string   `json:"currency,omitempty"`
+	AmountStatus  string   `json:"amount_status,omitempty"`
 	ObservedAt    string   `json:"observed_at,omitempty"`
 }
 type usageSummaryTotals struct {
@@ -373,8 +374,11 @@ func executeUsageSummary(ctx context.Context, instanceIDs []int64, input usageSu
 			item.Status = "succeeded"
 			item.TotalRequests = &summary.TotalRequests
 			item.TotalTokens = &summary.TotalTokens
-			item.Amount = &summary.Amount
-			item.Currency = summary.Currency
+			item.AmountStatus = summary.AmountStatus
+			if summary.AmountStatus != model.ManagedInstanceCollectionUnsupported {
+				item.Amount = &summary.Amount
+				item.Currency = summary.Currency
+			}
 			item.ObservedAt = now.Format(time.RFC3339)
 			output.Items[index] = item
 		}(index, instanceID)
@@ -388,11 +392,13 @@ func executeUsageSummary(ctx context.Context, instanceIDs []int64, input usageSu
 		}
 		output.Totals.TotalRequests += *item.TotalRequests
 		output.Totals.TotalTokens += *item.TotalTokens
-		unit := item.Currency
-		if unit == "" {
-			unit = "unknown"
+		if item.Amount != nil {
+			unit := item.Currency
+			if unit == "" {
+				unit = "unknown"
+			}
+			output.Totals.Amounts[unit] += *item.Amount
 		}
-		output.Totals.Amounts[unit] += *item.Amount
 		parsed, _ := time.Parse(time.RFC3339, item.ObservedAt)
 		observedAt = conservativeTimestamp(observedAt, parsed.Unix())
 		provenance = append(provenance, tool.Provenance{Source: "managed_usage_records", Resource: "instance:" + strconv.FormatInt(item.InstanceID, 10), ObservedAt: parsed})
@@ -454,7 +460,7 @@ func assistantUsageValues(kind string, start, end time.Time, filters usageQueryF
 		}
 	}
 	switch kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan:
 		add("username", filters.Usernames)
 		add("token_name", filters.TokenNames)
 		add("model_name", filters.Models)
@@ -517,7 +523,7 @@ func usageFiltersBeyondConductor(f usageQueryFilters) bool {
 	return len(f.Usernames)+len(f.TokenNames)+len(f.Channels)+len(f.Groups)+len(f.RequestIDs)+len(f.APIKeyIDs)+len(f.AccountIDs)+len(f.GroupIDs)+len(f.RequestTypes)+len(f.BillingTypes)+len(f.BillingModes) > 0 || f.Stream != nil || f.UpstreamModelMismatch != nil
 }
 func assistantUsageSupported(kind string) bool {
-	return kind == model.ManagedInstanceKindNewAPI || kind == model.ManagedInstanceKindHuichuan || kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor
+	return kind == model.ManagedInstanceKindNewAPI || kind == model.ManagedInstanceKindMercerRouter || kind == model.ManagedInstanceKindHuichuan || kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor
 }
 func pageFieldForAssistant(kind string) string {
 	if kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor {
@@ -608,8 +614,17 @@ func assistantUsageRecordFromRaw(kind string, raw json.RawMessage) (assistantUsa
 		result.InputTokens = usageNumberPointer(item["prompt_tokens"])
 		result.OutputTokens = usageNumberPointer(item["completion_tokens"])
 		result.TotalTokens = sumUsagePointers(result.InputTokens, result.OutputTokens)
-		result.Amount = usageNumberPointer(item["quota"])
-		result.AmountUnit = "quota"
+		if kind == model.ManagedInstanceKindMercerRouter {
+			result.Amount = usageNumberPointer(item["amount_usd"])
+			result.AmountUnit = "USD"
+			if result.Amount == nil {
+				result.Amount = usageNumberPointer(item["quota"])
+				result.AmountUnit = "quota"
+			}
+		} else {
+			result.Amount = usageNumberPointer(item["quota"])
+			result.AmountUnit = "quota"
+		}
 		if seconds := usageNumberPointer(item["use_time"]); seconds != nil {
 			value := *seconds * 1000
 			result.DurationMS = &value

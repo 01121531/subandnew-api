@@ -103,6 +103,13 @@ export type AccountDataAPIPreview = {
   }>
 }
 
+export type AccountDataAPIFilterOptions = {
+  filter_options: Record<string, string[]>
+  observed_at: number
+  stale: boolean
+  partial: boolean
+}
+
 export type AccountDataAPIAccessLog = {
   id: number
   api_id: number

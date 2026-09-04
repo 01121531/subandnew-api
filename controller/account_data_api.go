@@ -115,6 +115,20 @@ func PreviewAccountDataAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
 
+func GetAccountDataAPIFilterOptions(c *gin.Context) {
+	var request accountdataapi.FilterOptionsInput
+	if err := c.ShouldBindJSON(&request); err != nil {
+		accountDataAPIError(c, accountdataapi.ErrInvalid)
+		return
+	}
+	result, err := accountdataapi.FilterOptions(c.Request.Context(), request)
+	if err != nil {
+		accountDataAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+}
+
 func CreateAccountDataAPIKey(c *gin.Context) {
 	id, ok := accountDataAPIID(c)
 	if !ok {

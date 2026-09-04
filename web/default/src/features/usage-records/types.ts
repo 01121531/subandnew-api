@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ManagedInstance } from '@/features/managed-instances/types'
 
-export type UsageSystem = 'new_api' | 'sub2api' | 'conductor'
+export type UsageSystem = 'new_api' | 'mercer_router' | 'sub2api' | 'conductor'
 
 export type UsageRecord = Record<string, unknown> & { id?: number }
 
@@ -39,7 +39,8 @@ export interface UsageRecordSummary {
   total_requests: number
   total_tokens: number
   amount: number
-  currency: 'USD' | 'quota'
+  currency: 'USD' | 'quota' | ''
+  amount_status?: 'succeeded' | 'unsupported'
 }
 
 type UsageRecordFilterValue = string | string[]

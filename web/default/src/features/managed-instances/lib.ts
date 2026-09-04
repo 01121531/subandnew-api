@@ -20,6 +20,7 @@ import type { ManagedInstance } from './types'
 
 export const MANAGED_INSTANCE_KINDS = [
   { value: 'new_api', label: 'New API' },
+  { value: 'mercer_router', label: 'MercerRouter' },
   { value: 'huichuan', label: 'HUICHUAN-AI' },
   { value: 'sub2api', label: 'Sub2API' },
   { value: 'conductor', label: 'Conductor' },

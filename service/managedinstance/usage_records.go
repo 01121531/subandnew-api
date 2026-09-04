@@ -52,6 +52,7 @@ type UsageRecordSummary struct {
 	TotalTokens      float64 `json:"total_tokens"`
 	Amount           float64 `json:"amount"`
 	Currency         string  `json:"currency"`
+	AmountStatus     string  `json:"amount_status,omitempty"`
 }
 
 type UsageRecordFilterOption struct {
@@ -385,7 +386,7 @@ func newUsageRecordClient(instanceID int64) (*usageRecordClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindHuichuan && instance.Kind != model.ManagedInstanceKindSub2API && instance.Kind != model.ManagedInstanceKindConductor {
+	if instance.Kind != model.ManagedInstanceKindNewAPI && instance.Kind != model.ManagedInstanceKindMercerRouter && instance.Kind != model.ManagedInstanceKindHuichuan && instance.Kind != model.ManagedInstanceKindSub2API && instance.Kind != model.ManagedInstanceKindConductor {
 		return nil, ErrUnsupportedCapability
 	}
 	return &usageRecordClient{instance: instance, connector: connector, credential: credential}, nil
@@ -495,6 +496,9 @@ func (client *usageRecordClient) listTarget(ctx context.Context, query url.Value
 			endpoint = "/api/v1/usage?" + query.Encode()
 		}
 		response, err = sub2APIDoJSON(ctx, client.connector, client.credential, http.MethodGet, endpoint, nil)
+	} else if client.instance.Kind == model.ManagedInstanceKindMercerRouter {
+		endpoint = mercerRouterUsageEndpoint(client.credential, false) + "?" + query.Encode()
+		response, err = newAPIDoJSON(ctx, client.connector, client.instance.Kind, client.credential, http.MethodGet, endpoint, nil)
 	} else {
 		endpoint = "/api/log/?" + query.Encode()
 		if credentialAccessScope(client.credential) == model.ManagedInstanceAccessUser {
@@ -508,7 +512,12 @@ func (client *usageRecordClient) listTarget(ctx context.Context, query url.Value
 	if err := requireHTTPStatus(response); err != nil {
 		return nil, err
 	}
-	page, err := decodeUsageRecordPage(client.instance.Kind, response.Body)
+	var page *UsageRecordPage
+	if client.instance.Kind == model.ManagedInstanceKindMercerRouter {
+		page, err = decodeMercerRouterUsageRecordPage(response.Body, integerValue(query.Get("p"), 1), integerValue(query.Get("page_size"), usageRecordPageSize))
+	} else {
+		page, err = decodeUsageRecordPage(client.instance.Kind, response.Body)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +529,9 @@ func (client *usageRecordClient) listTarget(ctx context.Context, query url.Value
 }
 
 func (client *usageRecordClient) summary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	if client.instance.Kind == model.ManagedInstanceKindMercerRouter {
+		return client.mercerRouterUsageSummary(ctx, query)
+	}
 	if client.instance.Kind == model.ManagedInstanceKindSub2API {
 		if sub2StatsSupportsQuery(query) {
 			summary, err := client.sub2StatsSummary(ctx, query)
@@ -639,7 +651,72 @@ func usageRecordTotals(kind string, raw json.RawMessage) (float64, float64, erro
 	if kind == model.ManagedInstanceKindConductor {
 		return value("total_tokens"), value("actual_cost"), nil
 	}
+	if kind == model.ManagedInstanceKindMercerRouter {
+		if amount, ok := usageNumber(item["amount_usd"]); ok {
+			return value("prompt_tokens") + value("completion_tokens"), amount, nil
+		}
+	}
 	return value("prompt_tokens") + value("completion_tokens"), value("quota"), nil
+}
+
+func mercerRouterUsageEndpoint(credential *CredentialMaterial, summary bool) string {
+	endpoint := "/api/log/"
+	if credentialAccessScope(credential) == model.ManagedInstanceAccessChannelAdmin {
+		endpoint = "/api/maas/channel-admin/usage-logs"
+	}
+	if summary {
+		return strings.TrimRight(endpoint, "/") + "/stat"
+	}
+	return endpoint
+}
+
+func (client *usageRecordClient) mercerRouterUsageSummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
+	statQuery := cloneURLValues(query)
+	for _, key := range []string{"p", "page", "page_size", "sort_by", "sort_order", "exact_total"} {
+		statQuery.Del(key)
+	}
+	statQuery.Set("p", "1")
+	statQuery.Set("page_size", "1")
+	response, err := newAPIDoJSON(ctx, client.connector, client.instance.Kind, client.credential, http.MethodGet, mercerRouterUsageEndpoint(client.credential, true)+"?"+statQuery.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	data, err := newAPIEnvelopeData(response)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) != nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	requests, hasRequests := firstJSONFloat64(fields, "rpm", "count", "total_count", "requests")
+	tokens, hasTokens := firstJSONFloat64(fields, "tpm", "token_used", "total_tokens", "tokens")
+	if !hasRequests || !hasTokens || requests < 0 || tokens < 0 {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	result := &UsageRecordSummary{
+		SourceInstanceID: client.instance.Id, Kind: client.instance.Kind,
+		TotalRequests: requests, TotalTokens: tokens, Currency: "USD",
+		AmountStatus: model.ManagedInstanceCollectionSucceeded,
+	}
+	if mercerRouterCostHidden(response.Body) {
+		result.Currency = ""
+		result.AmountStatus = model.ManagedInstanceCollectionUnsupported
+		return result, nil
+	}
+	if amount, ok := firstJSONFloat64(fields, "amount_usd"); ok && amount >= 0 {
+		result.Amount = amount
+		return result, nil
+	}
+	quota, hasQuota := firstJSONFloat64(fields, "quota")
+	quotaPerUnit, hasQuotaPerUnit := mercerRouterQuotaPerUnit(ctx, client.connector, client.credential)
+	if !hasQuota || quota < 0 || !hasQuotaPerUnit {
+		result.Currency = ""
+		result.AmountStatus = model.ManagedInstanceCollectionUnsupported
+		return result, nil
+	}
+	result.Amount = quota / quotaPerUnit
+	return result, nil
 }
 
 func (client *usageRecordClient) newAPISummary(ctx context.Context, query url.Values) (*UsageRecordSummary, error) {
@@ -932,6 +1009,55 @@ func decodeUsageRecordPage(kind string, body []byte) (*UsageRecordPage, error) {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
 	}
 	return &UsageRecordPage{Items: data.Items, Total: data.Total, Page: data.Page, PageSize: data.PageSize, pages: data.Pages}, nil
+}
+
+func decodeMercerRouterUsageRecordPage(body []byte, requestedPage int, requestedSize int) (*UsageRecordPage, error) {
+	var envelope struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || !envelope.Success || len(envelope.Data) == 0 {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	var data struct {
+		Items    []json.RawMessage `json:"items"`
+		Data     []json.RawMessage `json:"data"`
+		Total    *int64            `json:"total"`
+		Page     int               `json:"page"`
+		P        int               `json:"p"`
+		PageSize int               `json:"page_size"`
+		Pages    int               `json:"pages"`
+	}
+	if json.Unmarshal(envelope.Data, &data) != nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	items := data.Items
+	if items == nil {
+		items = data.Data
+	}
+	if items == nil {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse}
+	}
+	page := data.Page
+	if page <= 0 {
+		page = data.P
+	}
+	if page <= 0 {
+		page = requestedPage
+	}
+	pageSize := data.PageSize
+	if pageSize <= 0 {
+		pageSize = requestedSize
+	}
+	total := int64(len(items))
+	if data.Total != nil && *data.Total >= 0 {
+		total = *data.Total
+	}
+	pages := data.Pages
+	if pages <= 0 && pageSize > 0 && total > 0 {
+		pages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	}
+	return &UsageRecordPage{Items: items, Total: total, Page: page, PageSize: pageSize, pages: pages}, nil
 }
 
 func normalizeUsageRecordQuery(kind string, input url.Values) (url.Values, error) {
@@ -1293,6 +1419,12 @@ func usageCSVSchema(kind string) ([]string, []usageCSVField) {
 			field("model"), field("upstream_model", "model"), field("upstream_response_model"), field("upstream_model_mismatch"), field("group.name", "group_id"), field("request_type"),
 			field("input_tokens"), field("output_tokens"), field("cache_read_tokens"), field("cache_creation_tokens"), field("total_cost"), field("actual_cost"), derivedField("account_billed_cost"),
 			field("first_token_ms"), field("duration_ms"), field("request_id"), field("ip_address"),
+		}
+	}
+	if kind == model.ManagedInstanceKindMercerRouter {
+		return []string{"时间", "用户", "类型", "令牌", "模型", "渠道", "分组", "提示Token", "补全Token", "额度", "实际消费(USD)", "耗时(秒)", "流式", "请求ID", "上游请求ID"}, []usageCSVField{
+			field("created_at"), field("username"), field("type"), field("token_name"), field("model_name"), field("channel_name", "channel"), field("group"),
+			field("prompt_tokens"), field("completion_tokens"), field("quota"), field("amount_usd"), field("use_time"), field("is_stream"), field("request_id"), field("upstream_request_id"),
 		}
 	}
 	return []string{"时间", "用户", "类型", "令牌", "模型", "渠道", "分组", "提示Token", "补全Token", "额度", "耗时(秒)", "流式", "请求ID", "上游请求ID", "内容"}, []usageCSVField{

@@ -115,6 +115,17 @@ func TestCreateDefaultsToVendorNameWithoutVendorEmail(t *testing.T) {
 	require.NotContains(t, created.API.Fields, "vendor_email")
 }
 
+func TestFilterOptionsReturnsVendorsFromTheCompleteSnapshot(t *testing.T) {
+	_, instance := setupAPIServiceTest(t)
+	result, err := FilterOptions(t.Context(), FilterOptionsInput{
+		Dataset: managedaccount.DatasetInventory, PresetDays: 7, InstanceIDs: []int64{instance.Id},
+	})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"供应商 A", "供应商 B"}, result.FilterOptions["vendor_name"])
+	require.ElementsMatch(t, []string{"vendor-a@example.com", "vendor-b@example.com"}, result.FilterOptions["vendor_email"])
+	require.False(t, result.Partial)
+}
+
 func TestViewForNormalizesLegacyNullCollections(t *testing.T) {
 	db, instance := setupAPIServiceTest(t)
 	entry := model.ManagedAccountAPI{Name: "legacy", Status: model.ManagedAccountAPIEnabled, Dataset: managedaccount.DatasetInventory,

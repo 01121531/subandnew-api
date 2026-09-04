@@ -332,8 +332,11 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 				sourceNames := sourceNameMap(inventory)
 				for _, account := range inventory.Items {
 					candidate := inventoryRow(instance, account, sourceNames)
-					if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
-						addFilterOptions(filterOptionSets, candidate.doc)
+					if !matchesBase(candidate.doc, input) {
+						continue
+					}
+					addFilterOptions(filterOptionSets, candidate.doc)
+					if matchesNarrow(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
 						rows = append(rows, row{item: candidate.item})
 					}
 				}
@@ -356,8 +359,11 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 			}
 			for _, account := range output.Items {
 				candidate := outputRow(instance, account, sourceNames)
-				if matches(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
-					addFilterOptions(filterOptionSets, candidate.doc)
+				if !matchesBase(candidate.doc, input) {
+					continue
+				}
+				addFilterOptions(filterOptionSets, candidate.doc)
+				if matchesNarrow(candidate.doc, input) && selectedAccountMatches(candidate.item, input.SelectedAccounts) {
 					rows = append(rows, row{item: candidate.item})
 				}
 			}
@@ -387,7 +393,7 @@ func newFilterOptionSets(fields []string) map[string]map[string]string {
 	result := make(map[string]map[string]string)
 	for _, field := range fields {
 		switch field {
-		case "ownership", "instance", "platform", "type", "group", "status", "source", "available":
+		case "ownership", "vendor_name", "vendor_email", "instance", "platform", "type", "group", "status", "source", "available":
 			result[field] = make(map[string]string)
 		}
 	}
@@ -517,6 +523,10 @@ func document(item Item) map[string][]string {
 }
 
 func matches(doc map[string][]string, input Query) bool {
+	return matchesBase(doc, input) && matchesNarrow(doc, input)
+}
+
+func matchesBase(doc map[string][]string, input Query) bool {
 	if !matchesFilter(doc, input.IncludeTerms, input.ExcludeTerms, input.MatchMode, input.Rules) {
 		return false
 	}
@@ -524,6 +534,10 @@ func matches(doc map[string][]string, input Query) bool {
 	if input.Search != "" && !strings.Contains(searchable, strings.ToLower(input.Search)) {
 		return false
 	}
+	return true
+}
+
+func matchesNarrow(doc map[string][]string, input Query) bool {
 	narrowDocument := restrictDocument(doc, input.NarrowFields)
 	narrowSearchable := strings.ToLower(strings.Join(flatten(narrowDocument), " "))
 	if input.NarrowSearch != "" && !strings.Contains(narrowSearchable, strings.ToLower(input.NarrowSearch)) {

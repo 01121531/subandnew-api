@@ -134,6 +134,20 @@ type PreviewResult struct {
 	Partial    bool                          `json:"partial"`
 }
 
+type FilterOptionsInput struct {
+	Dataset     string  `json:"dataset"`
+	PresetDays  int     `json:"preset_days"`
+	InstanceIDs []int64 `json:"instance_ids"`
+}
+
+type FilterOptionsResult struct {
+	FilterOptions map[string][]string           `json:"filter_options"`
+	Sources       []managedaccount.SourceStatus `json:"sources"`
+	ObservedAt    int64                         `json:"observed_at"`
+	Stale         bool                          `json:"stale"`
+	Partial       bool                          `json:"partial"`
+}
+
 type ListResult struct {
 	Items    []*View `json:"items"`
 	Total    int64   `json:"total"`
@@ -277,6 +291,40 @@ func Preview(ctx context.Context, input ConfigInput) (*PreviewResult, error) {
 		sample = append(sample, Project(item, fields))
 	}
 	return &PreviewResult{Total: result.Total, Summary: result.Summary, Sample: sample, Sources: result.Sources, ObservedAt: result.ObservedAt, Stale: result.Stale, Partial: result.Partial}, nil
+}
+
+func FilterOptions(ctx context.Context, input FilterOptionsInput) (*FilterOptionsResult, error) {
+	query, err := managedaccount.NormalizeQuery(managedaccount.Query{
+		InstanceIDs: input.InstanceIDs,
+		Dataset:     input.Dataset,
+		PresetDays:  input.PresetDays,
+		NarrowFields: []string{
+			"vendor_name",
+			"vendor_email",
+		},
+		Page: 1, PageSize: 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	var instanceCount int64
+	if err := model.DB.Model(&model.ManagedInstance{}).Where("id IN ?", query.InstanceIDs).Count(&instanceCount).Error; err != nil {
+		return nil, err
+	}
+	if instanceCount != int64(len(query.InstanceIDs)) {
+		return nil, fmt.Errorf("%w: one or more managed instances do not exist", ErrInvalid)
+	}
+	result, err := managedaccount.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return &FilterOptionsResult{
+		FilterOptions: result.FilterOptions,
+		Sources:       result.Sources,
+		ObservedAt:    result.ObservedAt,
+		Stale:         result.Stale,
+		Partial:       result.Partial,
+	}, nil
 }
 
 func Get(id int64) (*View, error) {

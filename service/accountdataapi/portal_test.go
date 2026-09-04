@@ -79,6 +79,23 @@ func TestPortalFilterFieldsIncludeOpenedMetrics(t *testing.T) {
 	require.ElementsMatch(t, []string{"account_id", "name", "vendor_name", "vendor_email", "requests", "amount", "rpm", "active_sessions", "utilization_5h", "created_at"}, fields)
 }
 
+func TestPortalVendorOptionsStatus(t *testing.T) {
+	fields := []string{"vendor_name"}
+	result := &managedaccount.Result{Sources: []managedaccount.SourceStatus{{
+		Platform: model.ManagedInstanceKindClaudeGateway,
+	}}}
+	require.Equal(t, "not_collected", PortalVendorOptionsStatus(result, fields))
+
+	result.Sources[0].VendorCollectionStatus = model.ManagedInstanceCollectionSucceeded
+	require.Equal(t, "ready", PortalVendorOptionsStatus(result, fields))
+
+	result.Sources = append(result.Sources, managedaccount.SourceStatus{
+		Platform: model.ManagedInstanceKindClaudeGateway, VendorCollectionStatus: model.ManagedInstanceCollectionFailed,
+	})
+	require.Equal(t, "partial", PortalVendorOptionsStatus(result, fields))
+	require.Empty(t, PortalVendorOptionsStatus(result, []string{"name"}))
+}
+
 func TestPortalRequiresPasswordAndHonorsCIDR(t *testing.T) {
 	_, instance := setupAPIServiceTest(t)
 	input := apiInput(instance.Id)

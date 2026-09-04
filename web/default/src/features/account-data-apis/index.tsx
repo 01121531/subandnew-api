@@ -80,6 +80,7 @@ import {
   createAccountDataAPI,
   createAccountDataAPIKey,
   deleteAccountDataAPI,
+  getAccountDataAPIFilterOptions,
   listAccountDataAPIAccessLogs,
   listAccountDataAPIInstances,
   listAccountDataAPIs,
@@ -813,14 +814,46 @@ function AuthorizationEditor(props: {
       })),
     [instances]
   )
+  const selectedInstanceKinds = useMemo(
+    () =>
+      new Set(
+        instances
+          .filter((instance) => input.instance_ids.includes(instance.id))
+          .map((instance) => instance.kind)
+      ),
+    [input.instance_ids, instances]
+  )
+  const supplierOptionsQuery = useQuery({
+    queryKey: [
+      'account-data-api-filter-options',
+      input.dataset,
+      input.preset_days,
+      [...input.instance_ids].sort((left, right) => left - right),
+    ],
+    queryFn: () =>
+      getAccountDataAPIFilterOptions({
+        instance_ids: input.instance_ids,
+        dataset: input.dataset,
+        preset_days: input.preset_days,
+      }),
+    enabled: props.open && input.instance_ids.length > 0,
+    staleTime: 60_000,
+    retry: false,
+  })
   const filterOptions = useMemo(
     () => ({
       instance: instanceOptions,
       platform: [...new Set(instances.map((item) => item.kind))].map(
         (value) => ({ value, label: value })
       ),
+      vendor_name: (
+        supplierOptionsQuery.data?.data.filter_options.vendor_name ?? []
+      ).map((value) => ({ value, label: value })),
+      vendor_email: (
+        supplierOptionsQuery.data?.data.filter_options.vendor_email ?? []
+      ).map((value) => ({ value, label: value })),
     }),
-    [instanceOptions, instances]
+    [instanceOptions, instances, supplierOptionsQuery.data?.data]
   )
   const previewMutation = useMutation({
     mutationFn: previewAccountDataAPI,
@@ -1085,6 +1118,26 @@ function AuthorizationEditor(props: {
                 options={filterOptions}
                 templatesEnabled={false}
               />
+              {selectedInstanceKinds.has('claude_gateway') &&
+                supplierOptionsQuery.isPending && (
+                  <p className='text-muted-foreground text-sm'>
+                    {t('正在读取供应商筛选选项…')}
+                  </p>
+                )}
+              {selectedInstanceKinds.has('claude_gateway') &&
+                supplierOptionsQuery.isError && (
+                  <p className='text-warning text-sm'>
+                    {t('供应商列表暂时无法读取，仍可手动输入筛选值。')}
+                  </p>
+                )}
+              {selectedInstanceKinds.has('claude_gateway') &&
+                supplierOptionsQuery.isSuccess &&
+                (filterOptions.vendor_name?.length ?? 0) === 0 &&
+                (filterOptions.vendor_email?.length ?? 0) === 0 && (
+                  <p className='text-warning text-sm'>
+                    {t('供应商信息尚未采集，后台快照更新后会自动提供选项。')}
+                  </p>
+                )}
             </div>
           )}
           {step === 2 && (

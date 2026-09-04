@@ -13,6 +13,7 @@ import type {
   AccountDataAPIAccessLogList,
   AccountDataAPICreateResult,
   AccountDataAPIInput,
+  AccountDataAPIFilterOptions,
   AccountDataAPIInstance,
   AccountDataAPIKey,
   AccountDataAPIList,
@@ -44,6 +45,19 @@ export async function listAccountDataAPIs(input: {
 export async function listAccountDataAPIInstances() {
   const response = await api.get<Response<AccountDataAPIInstance[]>>(
     '/api/account-data-apis/instances'
+  )
+  return response.data
+}
+
+export async function getAccountDataAPIFilterOptions(input: {
+  instance_ids: number[]
+  dataset: AccountDataAPIInput['dataset']
+  preset_days: number
+}) {
+  const response = await api.post<Response<AccountDataAPIFilterOptions>>(
+    '/api/account-data-apis/filter-options',
+    input,
+    { disableDuplicate: true, skipErrorHandler: true }
   )
   return response.data
 }

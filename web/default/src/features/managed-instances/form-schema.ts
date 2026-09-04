@@ -29,6 +29,7 @@ export const managedInstanceFormSchema = z.object({
   name: z.string().trim().min(1),
   kind: z.enum([
     'new_api',
+    'mercer_router',
     'huichuan',
     'sub2api',
     'conductor',
@@ -44,7 +45,7 @@ export const managedInstanceFormSchema = z.object({
   alert_failure_threshold: z.number().int().min(0).max(100),
   labels: z.string(),
   auth_type: z.string(),
-  access_scope: z.enum(['admin', 'user']),
+  access_scope: z.enum(['admin', 'user', 'channel_admin']),
   secret: z.string(),
   user_id: z.string(),
 })

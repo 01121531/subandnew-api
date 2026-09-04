@@ -139,7 +139,9 @@ type BillingInstance = {
   status?: string
 }
 
-const SYSTEM_LABELS: Record<UsageSystem, string> = {
+type BillingUsageSystem = Exclude<UsageSystem, 'mercer_router'>
+
+const SYSTEM_LABELS: Record<BillingUsageSystem, string> = {
   new_api: 'New API',
   sub2api: 'Sub2API',
   conductor: 'Conductor',
@@ -224,13 +226,13 @@ const CONDUCTOR_TEMPLATE_FILTERS: FilterDefinition[] = [
   { key: 'model', label: '模型', placeholder: '选择或输入模型' },
 ]
 
-function systemForInstance(kind: string): UsageSystem | null {
+function systemForInstance(kind: string): BillingUsageSystem | null {
   if (kind === 'new_api' || kind === 'huichuan') return 'new_api'
   if (kind === 'sub2api' || kind === 'conductor') return kind
   return null
 }
 
-function filtersForTemplate(system: UsageSystem) {
+function filtersForTemplate(system: BillingUsageSystem) {
   if (system === 'sub2api') return SUB2_TEMPLATE_FILTERS
   if (system === 'conductor') return CONDUCTOR_TEMPLATE_FILTERS
   return NEW_API_TEMPLATE_FILTERS
@@ -240,7 +242,7 @@ function inferTemplateSystem(
   template: BillingTemplate | null,
   instances: BillingInstance[],
   rules: BillingRule[]
-): UsageSystem {
+): BillingUsageSystem {
   if (
     template?.system_kind === 'new_api' ||
     template?.system_kind === 'sub2api' ||
@@ -278,7 +280,7 @@ function inferTemplateSystem(
 
 function compatibleInstances(
   instances: BillingInstance[],
-  system: UsageSystem | ''
+  system: BillingUsageSystem | ''
 ) {
   if (!system) return instances
   return instances.filter(
@@ -345,7 +347,7 @@ function TemplateDialog({
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [system, setSystem] = useState<UsageSystem>('new_api')
+  const [system, setSystem] = useState<BillingUsageSystem>('new_api')
   const [referenceInstanceId, setReferenceInstanceId] = useState('')
   const [filters, setFilters] = useState<BillingFilters>({})
   const [busy, setBusy] = useState(false)
@@ -403,7 +405,7 @@ function TemplateDialog({
     }
   }, [availableInstances, open, referenceInstanceId])
 
-  const changeSystem = (nextSystem: UsageSystem) => {
+  const changeSystem = (nextSystem: BillingUsageSystem) => {
     const nextInstances = compatibleInstances(instances, nextSystem)
     setSystem(nextSystem)
     setReferenceInstanceId(
@@ -491,7 +493,7 @@ function TemplateDialog({
               <NativeSelect
                 value={system}
                 onChange={(event) =>
-                  changeSystem(event.target.value as UsageSystem)
+                  changeSystem(event.target.value as BillingUsageSystem)
                 }
               >
                 <NativeSelectOption value='new_api'>New API</NativeSelectOption>

@@ -121,7 +121,12 @@ import { FleetTimeRangeFilter } from './time-range-filter'
 
 type MetricKey = 'requests' | 'tokens' | 'quota'
 type TrendMetricKey = MetricKey | 'rpm' | 'success_rate' | 'accounts'
-type FleetFamily = 'new_api' | 'sub2api' | 'conductor' | 'claude_gateway'
+type FleetFamily =
+  | 'new_api'
+  | 'mercer_router'
+  | 'sub2api'
+  | 'conductor'
+  | 'claude_gateway'
 
 type InstanceMetricRow = {
   instance: ManagedInstance
@@ -190,6 +195,7 @@ const DASHBOARD_ERROR_RETRY_MS = 15_000
 const DASHBOARD_RETRY_COUNT = 3
 const FLEET_FAMILIES: readonly FleetFamily[] = [
   'new_api',
+  'mercer_router',
   'sub2api',
   'conductor',
   'claude_gateway',
@@ -310,6 +316,7 @@ function defaultDashboardPreferences(): FleetDashboardPreferences {
     family: 'new_api',
     selectedInstances: {
       new_api: ALL_SITES_VALUE,
+      mercer_router: ALL_SITES_VALUE,
       sub2api: ALL_SITES_VALUE,
       conductor: ALL_SITES_VALUE,
       claude_gateway: ALL_SITES_VALUE,
@@ -387,6 +394,10 @@ function readDashboardPreferences(): FleetDashboardPreferences {
         new_api:
           typeof parsed.selectedInstances?.new_api === 'string'
             ? parsed.selectedInstances.new_api
+            : ALL_SITES_VALUE,
+        mercer_router:
+          typeof parsed.selectedInstances?.mercer_router === 'string'
+            ? parsed.selectedInstances.mercer_router
             : ALL_SITES_VALUE,
         sub2api:
           typeof parsed.selectedInstances?.sub2api === 'string'
@@ -495,6 +506,7 @@ function metricLabel(metric: MetricKey, family: FleetFamily) {
 }
 
 function familyLabel(family: FleetFamily) {
+  if (family === 'mercer_router') return 'MercerRouter'
   if (family === 'sub2api') return 'Sub2API'
   if (family === 'conductor') return 'Conductor'
   if (family === 'claude_gateway') return 'Claude Gateway'
@@ -502,6 +514,7 @@ function familyLabel(family: FleetFamily) {
 }
 
 function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
+  if (family === 'mercer_router') return instance.kind === 'mercer_router'
   if (family === 'sub2api') return instance.kind === 'sub2api'
   if (family === 'conductor') return instance.kind === 'conductor'
   if (family === 'claude_gateway') return instance.kind === 'claude_gateway'
@@ -509,6 +522,7 @@ function belongsToFamily(instance: ManagedInstance, family: FleetFamily) {
 }
 
 function instanceFamily(instance: ManagedInstance): FleetFamily | null {
+  if (instance.kind === 'mercer_router') return 'mercer_router'
   if (instance.kind === 'sub2api') return 'sub2api'
   if (instance.kind === 'conductor') return 'conductor'
   if (instance.kind === 'claude_gateway') return 'claude_gateway'
@@ -972,6 +986,9 @@ export function FleetDashboard() {
     () => ({
       new_api: allInstances.filter((instance) =>
         belongsToFamily(instance, 'new_api')
+      ).length,
+      mercer_router: allInstances.filter((instance) =>
+        belongsToFamily(instance, 'mercer_router')
       ).length,
       sub2api: allInstances.filter((instance) =>
         belongsToFamily(instance, 'sub2api')
@@ -1895,6 +1912,10 @@ function SummaryGrid(props: DashboardContentProps) {
     props.family === 'conductor' ||
     props.family === 'sub2api' ||
     props.family === 'claude_gateway'
+  const showsChannelUsageMetrics =
+    props.family === 'new_api' || props.family === 'mercer_router'
+  const showsTodayCost =
+    props.family !== 'new_api' && props.family !== 'mercer_router'
   const costObservedAt = Math.max(
     0,
     ...props.rows.map((row) => row.summaryObservedAt)
@@ -2033,7 +2054,8 @@ function SummaryGrid(props: DashboardContentProps) {
         props.family === 'conductor' && 'xl:grid-cols-7',
         props.family === 'sub2api' && 'xl:grid-cols-4 2xl:grid-cols-8',
         props.family === 'claude_gateway' && 'xl:grid-cols-5 2xl:grid-cols-9',
-        props.family === 'new_api' && 'xl:grid-cols-6'
+        (props.family === 'new_api' || props.family === 'mercer_router') &&
+          'xl:grid-cols-6'
       )}
     >
       <MetricCard
@@ -2048,7 +2070,7 @@ function SummaryGrid(props: DashboardContentProps) {
         exactValue={healthExactValue}
         observedAt={healthObservedAt}
       />
-      {props.family === 'new_api' && (
+      {showsChannelUsageMetrics && (
         <MetricCard
           icon={Activity}
           label={t('Requests')}
@@ -2203,7 +2225,7 @@ function SummaryGrid(props: DashboardContentProps) {
           stale={accountsStale}
         />
       )}
-      {props.family === 'new_api' && (
+      {showsChannelUsageMetrics && (
         <MetricCard
           icon={DatabaseZap}
           label={t('Tokens')}
@@ -2239,7 +2261,7 @@ function SummaryGrid(props: DashboardContentProps) {
           stale={quotaStale}
         />
       )}
-      {props.family !== 'new_api' && (
+      {showsTodayCost && (
         <MetricCard
           icon={CircleDollarSign}
           label={t('Today consumption')}
@@ -2516,7 +2538,10 @@ function PerformanceTable({
   rows: InstanceMetricRow[]
 }) {
   const { t } = useTranslation()
-  const sortMetric = family === 'new_api' ? 'requests' : 'quota'
+  const showsChannelUsageMetrics =
+    family === 'new_api' || family === 'mercer_router'
+  const showsTodayCost = family !== 'new_api' && family !== 'mercer_router'
+  const sortMetric = showsChannelUsageMetrics ? 'requests' : 'quota'
   const showsAccountMetrics =
     family === 'conductor' ||
     family === 'sub2api' ||
@@ -2560,7 +2585,7 @@ function PerformanceTable({
               <TableRow>
                 <TableHead className='ps-6'>{t('Instance')}</TableHead>
                 <TableHead>{t('Status')}</TableHead>
-                {family === 'new_api' && (
+                {showsChannelUsageMetrics && (
                   <TableHead className='text-right'>{t('Requests')}</TableHead>
                 )}
                 {family !== 'sub2api' && (
@@ -2586,13 +2611,13 @@ function PerformanceTable({
                     {t('Total accounts')}
                   </TableHead>
                 )}
-                {family === 'new_api' && (
+                {showsChannelUsageMetrics && (
                   <TableHead className='text-right'>{t('Tokens')}</TableHead>
                 )}
                 <TableHead className='text-right'>
                   {t(metricLabel('quota', family))}
                 </TableHead>
-                {family !== 'new_api' && (
+                {showsTodayCost && (
                   <TableHead className='text-right'>
                     {t('Today consumption')}
                   </TableHead>
@@ -2623,7 +2648,7 @@ function PerformanceTable({
                   <TableCell>
                     <StatusBadge status={row.instance.status} />
                   </TableCell>
-                  {family === 'new_api' && (
+                  {showsChannelUsageMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.requests, false)}
                     </TableCell>
@@ -2657,7 +2682,7 @@ function PerformanceTable({
                       {formatMetric(row.accountsTotal, false)}
                     </TableCell>
                   )}
-                  {family === 'new_api' && (
+                  {showsChannelUsageMetrics && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatMetric(row.tokens, false)}
                     </TableCell>
@@ -2665,7 +2690,7 @@ function PerformanceTable({
                   <TableCell className='text-right font-mono text-xs tabular-nums'>
                     {formatUsageMetric('quota', row.quota, family, false)}
                   </TableCell>
-                  {family !== 'new_api' && (
+                  {showsTodayCost && (
                     <TableCell className='text-right font-mono text-xs tabular-nums'>
                       {formatUsageMetric('quota', row.todayCost, family, false)}
                     </TableCell>
@@ -2700,9 +2725,13 @@ function MobilePerformanceList(props: {
     props.family === 'conductor' ||
     props.family === 'sub2api' ||
     props.family === 'claude_gateway'
+  const showsChannelUsageMetrics =
+    props.family === 'new_api' || props.family === 'mercer_router'
+  const showsTodayCost =
+    props.family !== 'new_api' && props.family !== 'mercer_router'
 
   const summaryMetrics = (row: InstanceMetricRow) => {
-    if (props.family === 'new_api') {
+    if (showsChannelUsageMetrics) {
       return [
         [t('Requests'), formatMetric(row.requests, false)],
         ['RPM', formatMetric(row.rpm, false)],
@@ -2741,7 +2770,7 @@ function MobilePerformanceList(props: {
 
   const detailMetrics = (row: InstanceMetricRow) => {
     const details: { label: string; value: string }[] = []
-    if (props.family === 'new_api') {
+    if (showsChannelUsageMetrics) {
       details.push(
         { label: t('Requests'), value: formatMetric(row.requests, false) },
         { label: t('Tokens'), value: formatMetric(row.tokens, false) }
@@ -2784,7 +2813,7 @@ function MobilePerformanceList(props: {
       label: t(metricLabel('quota', props.family)),
       value: formatUsageMetric('quota', row.quota, props.family, false),
     })
-    if (props.family !== 'new_api') {
+    if (showsTodayCost) {
       details.push({
         label: t('Today consumption'),
         value: formatUsageMetric('quota', row.todayCost, props.family, false),

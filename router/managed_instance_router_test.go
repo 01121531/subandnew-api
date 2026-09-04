@@ -140,6 +140,7 @@ func TestAccountDataAPIRoutesAreRegistered(t *testing.T) {
 	for _, route := range []string{
 		"GET /api/account-data-apis",
 		"GET /api/account-data-apis/instances",
+		"POST /api/account-data-apis/filter-options",
 		"GET /api/account-data-apis/:id",
 		"POST /api/account-data-apis",
 		"PUT /api/account-data-apis/:id",

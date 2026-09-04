@@ -107,6 +107,85 @@ func TestProbeGenericDetectsNewAPIAndLogsInWithAccountPassword(t *testing.T) {
 	require.Equal(t, "v1.2.3", result.Version)
 }
 
+func TestProbeGenericDetectsMercerRouterBeforeStandardAdminProbe(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var standardProbeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/status":
+			writeProbeJSON(response, `{"success":true,"data":{"system_name":"MercerRouter","start_time":10}}`)
+		case "/api/user/login":
+			require.Equal(t, http.MethodPost, request.Method)
+			var input map[string]string
+			require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+			require.Equal(t, "channel-admin", input["username"])
+			require.Equal(t, "password", input["password"])
+			http.SetCookie(response, &http.Cookie{Name: "session", Value: "mercer-session", Path: "/"})
+			writeProbeJSON(response, `{"success":true,"data":{"id":1075}}`)
+		case "/api/user/self":
+			assertMercerSession(t, request)
+			writeProbeJSON(response, `{"success":true,"data":{"id":1075,"role":5}}`)
+		case "/api/channel/":
+			assertMercerSession(t, request)
+			require.Equal(t, "false", request.URL.Query().Get("tag_mode"))
+			require.Equal(t, "1", request.URL.Query().Get("p"))
+			writeProbeJSON(response, `{"success":true,"data":{"items":[{"id":1,"name":"primary","status":1},{"id":2,"name":"backup","status":2}],"total":2}}`)
+		case "/api/data/self":
+			assertMercerSession(t, request)
+			require.Equal(t, "hour", request.URL.Query().Get("default_time"))
+			writeProbeJSON(response, `{"success":true,"data":[{"created_at":"2026-09-04T10:00:00+08:00","count":12,"token_used":34,"amount_usd":1.25}]}`)
+		case "/api/status/test":
+			standardProbeCalls.Add(1)
+			http.Error(response, "must not be called", http.StatusInternalServerError)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "channel-admin",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindMercerRouter, result.Kind)
+	require.Equal(t, model.ManagedInstanceAccessChannelAdmin, result.AccessScope)
+	require.Zero(t, standardProbeCalls.Load())
+
+	stored, err := Get(instance.Id)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindMercerRouter, stored.Kind)
+	require.Equal(t, model.ManagedInstanceModeObserve, stored.ManagementMode)
+	require.Equal(t, model.ManagedInstanceAccessChannelAdmin, stored.Credential.AccessScope)
+
+	inventoryView, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	inventory := inventoryView.Data.(*InventoryPage)
+	require.Equal(t, "channel", inventory.ResourceKind)
+	require.Len(t, inventory.Items, 2)
+
+	start := time.Date(2026, time.September, 4, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60)).Unix()
+	summaryView, err := CollectSummary(context.Background(), instance.Id, TimeWindow{Start: start, End: start + int64(time.Hour/time.Second), Timezone: "Asia/Shanghai"})
+	require.NoError(t, err)
+	summary := summaryView.Data.(*SummaryResult)
+	require.NotNil(t, summary.Requests.Value)
+	require.NotNil(t, summary.Tokens.Value)
+	require.NotNil(t, summary.Cost.Value)
+	require.Equal(t, 12.0, *summary.Requests.Value)
+	require.Equal(t, 34.0, *summary.Tokens.Value)
+	require.Equal(t, 1.25, *summary.Cost.Value)
+	require.Zero(t, standardProbeCalls.Load())
+}
+
+func assertMercerSession(t *testing.T, request *http.Request) {
+	t.Helper()
+	cookie, err := request.Cookie("session")
+	require.NoError(t, err)
+	require.Equal(t, "mercer-session", cookie.Value)
+	require.Equal(t, "1075", request.Header.Get("New-Api-User"))
+}
+
 func TestProbeGenericDetectsSub2APIAndUsesAPIKey(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")

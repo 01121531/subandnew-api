@@ -70,6 +70,8 @@ type MetricDefinition struct {
 
 var metricDefinitions = []MetricDefinition{
 	{Key: "rpm", Label: "RPM", Unit: "RPM", Kinds: realtimeKinds(), Aggregatable: true},
+	{Key: "requests", Label: "请求数", Unit: "个", Kinds: []string{model.ManagedInstanceKindMercerRouter}, Aggregatable: true},
+	{Key: "tokens", Label: "Token", Unit: "Token", Kinds: []string{model.ManagedInstanceKindMercerRouter}, Aggregatable: true},
 	{Key: "rpm_capacity", Label: "RPM 最大容量", Unit: "RPM", Kinds: []string{model.ManagedInstanceKindConductor}, Aggregatable: true},
 	{Key: "rpm_utilization", Label: "RPM 容量使用率", Unit: "%", Kinds: []string{model.ManagedInstanceKindConductor}, Aggregatable: true},
 	{Key: "accounts_available", Label: "可用账号", Unit: "个", Kinds: accountKinds(), Aggregatable: true},
@@ -86,7 +88,7 @@ var metricDefinitions = []MetricDefinition{
 }
 
 func realtimeKinds() []string {
-	return []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway}
+	return []string{model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway}
 }
 
 func accountKinds() []string {

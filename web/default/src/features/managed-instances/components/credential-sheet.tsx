@@ -51,14 +51,20 @@ type CredentialSheetProps = {
 export function CredentialSheet(props: CredentialSheetProps) {
   const { t } = useTranslation()
   const [authType, setAuthType] = useState('bearer_pat')
-  const [accessScope, setAccessScope] = useState<'admin' | 'user'>('admin')
+  const [accessScope, setAccessScope] = useState<
+    'admin' | 'user' | 'channel_admin'
+  >('admin')
   const [secret, setSecret] = useState('')
   const [userId, setUserId] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (!props.instance) return
-    setAuthType(props.instance.credential?.auth_type || 'bearer_pat')
+    setAuthType(
+      props.instance.kind === 'mercer_router'
+        ? 'account_password'
+        : props.instance.credential?.auth_type || 'bearer_pat'
+    )
     setAccessScope(props.instance.credential?.access_scope || 'admin')
     setSecret('')
     setUserId('')
@@ -104,50 +110,57 @@ export function CredentialSheet(props: CredentialSheetProps) {
           </SheetDescription>
         </SheetHeader>
         <div className='flex flex-1 flex-col gap-4 overflow-auto px-4 py-4'>
-          <div className='grid gap-2'>
-            <Label htmlFor='credential-auth-type'>{t('Authentication')}</Label>
-            <NativeSelect
-              id='credential-auth-type'
-              className='w-full'
-              value={authType}
-              onChange={(event) => setAuthType(event.target.value)}
-            >
-              <NativeSelectOption value='bearer_pat'>
-                Bearer PAT
-              </NativeSelectOption>
-              <NativeSelectOption value='admin_token'>
-                {t('Admin token')}
-              </NativeSelectOption>
-              <NativeSelectOption value='legacy_access_token'>
-                {t('Legacy access token')}
-              </NativeSelectOption>
-              <NativeSelectOption value='account_password'>
-                {t('Account and password')}
-              </NativeSelectOption>
-            </NativeSelect>
-          </div>
-          {authType === 'account_password' && (
+          {props.instance?.kind !== 'mercer_router' && (
             <div className='grid gap-2'>
-              <Label htmlFor='credential-access-scope'>
-                {t('Account permissions')}
+              <Label htmlFor='credential-auth-type'>
+                {t('Authentication')}
               </Label>
               <NativeSelect
-                id='credential-access-scope'
+                id='credential-auth-type'
                 className='w-full'
-                value={accessScope}
-                onChange={(event) =>
-                  setAccessScope(event.target.value as 'admin' | 'user')
-                }
+                value={authType}
+                onChange={(event) => setAuthType(event.target.value)}
               >
-                <NativeSelectOption value='admin'>
-                  {t('Administrator account (site-wide data)')}
+                <NativeSelectOption value='bearer_pat'>
+                  Bearer PAT
                 </NativeSelectOption>
-                <NativeSelectOption value='user'>
-                  {t('Regular account (own data only)')}
+                <NativeSelectOption value='admin_token'>
+                  {t('Admin token')}
+                </NativeSelectOption>
+                <NativeSelectOption value='legacy_access_token'>
+                  {t('Legacy access token')}
+                </NativeSelectOption>
+                <NativeSelectOption value='account_password'>
+                  {t('Account and password')}
                 </NativeSelectOption>
               </NativeSelect>
             </div>
           )}
+          {authType === 'account_password' &&
+            props.instance?.kind !== 'mercer_router' && (
+              <div className='grid gap-2'>
+                <Label htmlFor='credential-access-scope'>
+                  {t('Account permissions')}
+                </Label>
+                <NativeSelect
+                  id='credential-access-scope'
+                  className='w-full'
+                  value={accessScope}
+                  onChange={(event) =>
+                    setAccessScope(
+                      event.target.value as 'admin' | 'user' | 'channel_admin'
+                    )
+                  }
+                >
+                  <NativeSelectOption value='admin'>
+                    {t('Administrator account (site-wide data)')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='user'>
+                    {t('Regular account (own data only)')}
+                  </NativeSelectOption>
+                </NativeSelect>
+              </div>
+            )}
           <div className='grid gap-2'>
             <Label htmlFor='credential-user-id'>
               {t(

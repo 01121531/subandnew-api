@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -89,11 +90,18 @@ func probe(ctx context.Context, instanceID int64, actorID int, guard CommitGuard
 			"status": model.ManagedInstanceStatusHealthy, "last_seen_at": checkedAt,
 			"last_checked_at": checkedAt, "consecutive_failures": 0, "updated_at": checkedAt,
 		}
+		if result.Kind == model.ManagedInstanceKindMercerRouter {
+			updates["management_mode"] = model.ManagedInstanceModeObserve
+		}
 		if err := tx.Model(&model.ManagedInstance{}).Where("id = ?", instanceID).Updates(updates).Error; err != nil {
 			return err
 		}
+		credentialUpdates := map[string]any{"last_verified_at": checkedAt, "updated_at": checkedAt}
+		if strings.TrimSpace(result.AccessScope) != "" {
+			credentialUpdates["access_scope"] = result.AccessScope
+		}
 		if err := tx.Model(&model.ManagedInstanceCredential{}).Where("instance_id = ?", instanceID).
-			Updates(map[string]any{"last_verified_at": checkedAt, "updated_at": checkedAt}).Error; err != nil {
+			Updates(credentialUpdates).Error; err != nil {
 			return err
 		}
 		return writeAuditOutcome(tx, instanceID, actorID, "check", "succeeded", map[string]any{

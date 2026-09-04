@@ -44,6 +44,7 @@ type CredentialMaterial struct {
 
 type ProbeResult struct {
 	Kind         string   `json:"kind"`
+	AccessScope  string   `json:"access_scope,omitempty"`
 	Version      string   `json:"version"`
 	SystemName   string   `json:"system_name"`
 	StartTime    int64    `json:"start_time"`
@@ -64,6 +65,8 @@ func adapterForKind(kind string) (InstanceAdapter, error) {
 	switch kind {
 	case model.ManagedInstanceKindNewAPI:
 		return newAPIAdapter{configuredKind: kind}, nil
+	case model.ManagedInstanceKindMercerRouter:
+		return mercerRouterAdapter{}, nil
 	case model.ManagedInstanceKindHuichuan:
 		return newAPIAdapter{configuredKind: kind}, nil
 	case model.ManagedInstanceKindSub2API:
@@ -114,7 +117,13 @@ func (adapter newAPIAdapter) Probe(ctx context.Context, connector *Connector, cr
 		return nil, probeHTTPError(response.StatusCode)
 	}
 	var status newAPIStatusResponse
-	if err := json.Unmarshal(response.Body, &status); err != nil || !status.Success || strings.TrimSpace(status.Data.Version) == "" {
+	if err := json.Unmarshal(response.Body, &status); err != nil || !status.Success {
+		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
+	}
+	if isMercerRouterSystem(status.Data.SystemName) {
+		return (mercerRouterAdapter{}).probeWithStatus(ctx, connector, credential, status)
+	}
+	if strings.TrimSpace(status.Data.Version) == "" {
 		return nil, &ProbeError{Code: ProbeErrorInvalidResponse, StatusCode: response.StatusCode}
 	}
 	detectedKind := adapter.configuredKind
@@ -186,6 +195,9 @@ func newAPIAuthHeaders(ctx context.Context, connector *Connector, kind string, c
 	}
 	if credential.AuthType == "account_password" {
 		return loginNewAPI(ctx, connector, kind, credential)
+	}
+	if kind == model.ManagedInstanceKindMercerRouter {
+		return nil, &ProbeError{Code: ProbeErrorAuthentication}
 	}
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+credential.Secret)
@@ -305,7 +317,7 @@ func invalidateAccountPasswordSession(connector *Connector, kind string, credent
 		return
 	}
 	switch kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindHuichuan:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan:
 		invalidateNewAPISession(connector, credential)
 	case model.ManagedInstanceKindSub2API:
 		invalidateSub2APISession(connector, credential, "")
@@ -449,8 +461,13 @@ func probeSub2AccountAccess(ctx context.Context, connector *Connector, credentia
 }
 
 func credentialAccessScope(credential *CredentialMaterial) string {
-	if credential != nil && credential.AccessScope == model.ManagedInstanceAccessUser {
-		return model.ManagedInstanceAccessUser
+	if credential != nil {
+		switch credential.AccessScope {
+		case model.ManagedInstanceAccessUser:
+			return model.ManagedInstanceAccessUser
+		case model.ManagedInstanceAccessChannelAdmin:
+			return model.ManagedInstanceAccessChannelAdmin
+		}
 	}
 	return model.ManagedInstanceAccessAdmin
 }

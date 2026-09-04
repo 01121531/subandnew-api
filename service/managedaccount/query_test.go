@@ -205,6 +205,26 @@ func TestExecuteReturnsFilterOptionsFromAllMatchingPages(t *testing.T) {
 	require.ElementsMatch(t, []string{"active", "paused"}, result.FilterOptions["status"])
 }
 
+func TestExecuteReturnsVendorOptionsBeforeNarrowFilters(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	available := true
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "first", VendorName: "Acme Supply", VendorEmail: "owner@acme.test", Enabled: &available},
+		{ID: 2, Name: "second", VendorName: "Beta Supply", VendorEmail: "owner@beta.test", Enabled: &available},
+		{ID: 3, Name: "third", VendorName: "acme supply", VendorEmail: "OWNER@ACME.TEST", Enabled: &available},
+		{ID: 4, Name: "fourth", VendorName: "平台自有", Enabled: &available},
+		{ID: 5, Name: "fifth", VendorName: "未知供应商", Enabled: &available},
+	})
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		NarrowFields: []string{"vendor_name", "vendor_email"}, NarrowRules: []managedinstance.AccountFilterRule{{
+			Field: "vendor_name", Operator: "is", Values: []string{"Acme Supply"}, ValueMode: managedinstance.AccountFilterValueAny,
+		}}, Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Total)
+	require.ElementsMatch(t, []string{"Acme Supply", "Beta Supply", "平台自有", "未知供应商"}, result.FilterOptions["vendor_name"])
+	require.ElementsMatch(t, []string{"owner@acme.test", "owner@beta.test"}, result.FilterOptions["vendor_email"])
+}
+
 func TestSanitizeSensitiveTextRemovesIPv6AndHighEntropyCredentials(t *testing.T) {
 	value := SanitizeSensitiveText("node 2409:8a55:3c14:19a1:ea08:73f4:323b:3d10 key AKIAABCDEFGHIJKLMNOP token 8xJ2mP9qR4sT7vW1yZ3aB6cD0eF5gH8jK2mN9pQ")
 	require.NotContains(t, value, "2409:8a55")

@@ -580,7 +580,7 @@ func metricSupportedByInstance(metric, kind string) bool {
 	case "active_sessions":
 		return kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
 	case "today_cost":
-		return kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
+		return kind == model.ManagedInstanceKindMercerRouter || kind == model.ManagedInstanceKindSub2API || kind == model.ManagedInstanceKindConductor || kind == model.ManagedInstanceKindClaudeGateway
 	default:
 		return false
 	}
@@ -750,7 +750,7 @@ func metricSupportedByAnyInstance(metric string, instances []instanceSummary) bo
 				return true
 			}
 		case "today_cost":
-			if instance.Kind == model.ManagedInstanceKindSub2API || instance.Kind == model.ManagedInstanceKindConductor || instance.Kind == model.ManagedInstanceKindClaudeGateway {
+			if instance.Kind == model.ManagedInstanceKindMercerRouter || instance.Kind == model.ManagedInstanceKindSub2API || instance.Kind == model.ManagedInstanceKindConductor || instance.Kind == model.ManagedInstanceKindClaudeGateway {
 				return true
 			}
 		}
