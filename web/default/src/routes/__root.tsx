@@ -22,6 +22,7 @@ import {
   createRootRouteWithContext,
   Outlet,
   redirect,
+  useLocation,
 } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
@@ -35,19 +36,24 @@ import { useSystemConfig } from '@/hooks/use-system-config'
 
 function RootComponent() {
   // Load system configuration (logo, system name, etc.) from backend
-  useSystemConfig({ autoLoad: true })
+  const pathname = useLocation({ select: (location) => location.pathname })
+  useSystemConfig({
+    autoLoad: pathname !== '/supplier' && !pathname.startsWith('/supplier/'),
+  })
 
   return (
     <ThemeCustomizationProvider>
       <NavigationProgress />
       <Outlet />
       <Toaster closeButton duration={5000} position='top-center' richColors />
-      {import.meta.env.MODE === 'development' && (
-        <>
-          <ReactQueryDevtools buttonPosition='bottom-left' />
-          <TanStackRouterDevtools position='bottom-right' />
-        </>
-      )}
+      {import.meta.env.MODE === 'development' &&
+        pathname !== '/supplier' &&
+        !pathname.startsWith('/supplier/') && (
+          <>
+            <ReactQueryDevtools buttonPosition='bottom-left' />
+            <TanStackRouterDevtools position='bottom-right' />
+          </>
+        )}
     </ThemeCustomizationProvider>
   )
 }
@@ -90,6 +96,7 @@ export const Route = createRootRouteWithContext<{
   // 应用初始化与路由解析前统一校验会话
   beforeLoad: async ({ location }) => {
     const pathname = location?.pathname || ''
+    if (pathname === '/supplier' || pathname.startsWith('/supplier/')) return
     const needsSetupCheck =
       !setupStatusChecked && !pathname.startsWith('/setup')
 

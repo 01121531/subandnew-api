@@ -18,6 +18,7 @@ export default defineConfig(({ envMode }) => {
   const isProd = envMode === 'production'
   const devProxy = {
     '/api': { target: serverUrl, changeOrigin: true },
+    '/supplier-api': { target: serverUrl, changeOrigin: true },
   }
 
   return {

@@ -29,6 +29,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
   BILLING_ALERT: 'billing_alert',
   ASSISTANT: 'assistant',
   MANAGED_ACCOUNT_API: 'managed_account_api',
+  SUPPLIER: 'supplier',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {

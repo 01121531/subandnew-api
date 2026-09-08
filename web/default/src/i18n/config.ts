@@ -28,10 +28,11 @@ import ru from './locales/ru.json'
 import vi from './locales/vi.json'
 import zhTW from './locales/zh-TW.json'
 import zhCN from './locales/zh.json'
+import { supplierEn, supplierZh } from './supplier'
 
 const resources = {
-  en,
-  zhCN,
+  en: { ...en, translation: { ...en.translation, supplier: supplierEn } },
+  zhCN: { ...zhCN, translation: { ...zhCN.translation, supplier: supplierZh } },
   fr,
   ru,
   ja,

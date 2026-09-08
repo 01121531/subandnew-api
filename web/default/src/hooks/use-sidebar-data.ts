@@ -127,6 +127,13 @@ export function useSidebarData(): SidebarData {
                 },
               ]
             : []),
+          ...(hasPermission(
+            user,
+            ADMIN_PERMISSION_RESOURCES.SUPPLIER,
+            ADMIN_PERMISSION_ACTIONS.VIEW
+          )
+            ? [{ title: t('supplier.title'), url: '/suppliers', icon: Users }]
+            : []),
           {
             title: t('System Info'),
             url: '/system-info',

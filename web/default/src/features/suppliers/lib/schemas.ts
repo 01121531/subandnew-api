@@ -1,0 +1,75 @@
+import { z } from 'zod'
+
+export const loginSchema = z.object({
+  username: z.string().trim().min(1),
+  password: z.string().min(1),
+})
+export const passwordSchema = z
+  .object({
+    current_password: z.string().min(1),
+    password: z.string().min(8),
+    confirm: z.string().min(8),
+  })
+  .refine((v) => v.password === v.confirm, { path: ['confirm'] })
+export const supplierSchema = z.object({
+  name: z.string().trim().min(1),
+  username: z.string().trim().min(1),
+  password: z.string(),
+  enabled: z.boolean(),
+  view_accounts: z.boolean(),
+  view_usage: z.boolean(),
+  manage_proxies: z.boolean(),
+  upload_accounts: z.boolean(),
+})
+export const supplierDefaults = {
+  name: '',
+  username: '',
+  password: '',
+  enabled: true,
+  view_accounts: true,
+  view_usage: true,
+  manage_proxies: false,
+  upload_accounts: false,
+}
+export const bindingSchema = z.object({
+  instance_id: z.number().int().positive(),
+  identifier: z.string().trim(),
+  password: z.string(),
+  enabled: z.boolean(),
+})
+export const uploadSchema = z
+  .object({
+    binding_id: z.number().int().positive(),
+    name: z.string().trim().min(1).max(64),
+    outbound_proxy_mode: z.enum(['direct', 'manual', 'auto']),
+    outbound_proxy_id: z.string(),
+    group_ids: z.array(z.string().min(1)).max(100),
+    policy_template_id: z.string(),
+    cc_template_id: z.string(),
+    max_rpm: z.number().int().min(0).max(1_000_000),
+    max_tpm: z.number().int().min(0).max(1_000_000_000),
+    max_concurrent: z.number().int().min(0).max(100_000),
+    max_sessions: z.number().int().min(0).max(100_000),
+  })
+  .refine(
+    (v) => v.outbound_proxy_mode !== 'manual' || v.outbound_proxy_id.length > 0,
+    { path: ['outbound_proxy_id'] }
+  )
+
+export function safeOAuthUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.username && !url.password
+      ? url.href
+      : null
+  } catch {
+    return null
+  }
+}
+
+export function timestampMs(value: string | number): number {
+  if (typeof value === 'number') {
+    return value < 100_000_000_000 ? value * 1000 : value
+  }
+  return Date.parse(value)
+}

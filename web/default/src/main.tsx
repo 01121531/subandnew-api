@@ -128,6 +128,13 @@ if (!rootElement) {
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
+    if (
+      window.location.pathname === '/supplier' ||
+      window.location.pathname.startsWith('/supplier/')
+    ) {
+      document.title = 'Claude Gateway'
+      return
+    }
     const apply = (name: string) => {
       document.title = name
       const metaTitle = document.querySelector(

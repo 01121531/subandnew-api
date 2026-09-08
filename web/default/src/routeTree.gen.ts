@@ -9,10 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SupplierRouteRouteImport } from './routes/supplier/route'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as authRouteRouteImport } from './routes/(auth)/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SupplierIndexRouteImport } from './routes/supplier/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
+import { Route as SupplierSignInRouteImport } from './routes/supplier/sign-in'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
 import { Route as AccountDataSlugRouteImport } from './routes/account-data/$slug'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
@@ -28,6 +31,7 @@ import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedUsageRecordsIndexRouteImport } from './routes/_authenticated/usage-records/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
+import { Route as AuthenticatedSuppliersIndexRouteImport } from './routes/_authenticated/suppliers/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedInterfaceManagementIndexRouteImport } from './routes/_authenticated/interface-management/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
@@ -45,6 +49,11 @@ import { Route as AuthenticatedSystemSettingsAuthIndexRouteImport } from './rout
 import { Route as AuthenticatedSystemSettingsSiteSectionRouteImport } from './routes/_authenticated/system-settings/site/$section'
 import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './routes/_authenticated/system-settings/auth/$section'
 
+const SupplierRouteRoute = SupplierRouteRouteImport.update({
+  id: '/supplier',
+  path: '/supplier',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
@@ -58,10 +67,20 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SupplierIndexRoute = SupplierIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SupplierRouteRoute,
+} as any)
 const SetupIndexRoute = SetupIndexRouteImport.update({
   id: '/setup/',
   path: '/setup/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const SupplierSignInRoute = SupplierSignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => SupplierRouteRoute,
 } as any)
 const OauthProviderRoute = OauthProviderRouteImport.update({
   id: '/oauth/$provider',
@@ -140,6 +159,12 @@ const AuthenticatedSystemInfoIndexRoute =
   AuthenticatedSystemInfoIndexRouteImport.update({
     id: '/system-info/',
     path: '/system-info/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedSuppliersIndexRoute =
+  AuthenticatedSuppliersIndexRouteImport.update({
+    id: '/suppliers/',
+    path: '/suppliers/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedProfileIndexRoute =
@@ -241,6 +266,7 @@ const AuthenticatedSystemSettingsAuthSectionRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/supplier': typeof SupplierRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/oauth': typeof authOauthRoute
   '/otp': typeof authOtpRoute
@@ -252,7 +278,9 @@ export interface FileRoutesByFullPath {
   '/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
   '/oauth/$provider': typeof OauthProviderRoute
+  '/supplier/sign-in': typeof SupplierSignInRoute
   '/setup/': typeof SetupIndexRoute
+  '/supplier/': typeof SupplierIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
@@ -265,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
+  '/suppliers/': typeof AuthenticatedSuppliersIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
   '/usage-records/': typeof AuthenticatedUsageRecordsIndexRoute
@@ -286,7 +315,9 @@ export interface FileRoutesByTo {
   '/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
   '/oauth/$provider': typeof OauthProviderRoute
+  '/supplier/sign-in': typeof SupplierSignInRoute
   '/setup': typeof SetupIndexRoute
+  '/supplier': typeof SupplierIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
@@ -299,6 +330,7 @@ export interface FileRoutesByTo {
   '/instances': typeof AuthenticatedInstancesIndexRoute
   '/interface-management': typeof AuthenticatedInterfaceManagementIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
+  '/suppliers': typeof AuthenticatedSuppliersIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
   '/usage-records': typeof AuthenticatedUsageRecordsIndexRoute
@@ -313,6 +345,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/(auth)': typeof authRouteRouteWithChildren
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/supplier': typeof SupplierRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/oauth': typeof authOauthRoute
   '/(auth)/otp': typeof authOtpRoute
@@ -324,7 +357,9 @@ export interface FileRoutesById {
   '/(errors)/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
   '/oauth/$provider': typeof OauthProviderRoute
+  '/supplier/sign-in': typeof SupplierSignInRoute
   '/setup/': typeof SetupIndexRoute
+  '/supplier/': typeof SupplierIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/instances/$id': typeof AuthenticatedInstancesIdRoute
   '/_authenticated/system-settings/inspection-alerts': typeof AuthenticatedSystemSettingsInspectionAlertsRoute
@@ -337,6 +372,7 @@ export interface FileRoutesById {
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
+  '/_authenticated/suppliers/': typeof AuthenticatedSuppliersIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
   '/_authenticated/usage-records/': typeof AuthenticatedUsageRecordsIndexRoute
@@ -350,6 +386,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/supplier'
     | '/system-settings'
     | '/oauth'
     | '/otp'
@@ -361,7 +398,9 @@ export interface FileRouteTypes {
     | '/503'
     | '/account-data/$slug'
     | '/oauth/$provider'
+    | '/supplier/sign-in'
     | '/setup/'
+    | '/supplier/'
     | '/errors/$error'
     | '/instances/$id'
     | '/system-settings/inspection-alerts'
@@ -374,6 +413,7 @@ export interface FileRouteTypes {
     | '/instances/'
     | '/interface-management/'
     | '/profile/'
+    | '/suppliers/'
     | '/system-info/'
     | '/system-settings/'
     | '/usage-records/'
@@ -395,7 +435,9 @@ export interface FileRouteTypes {
     | '/503'
     | '/account-data/$slug'
     | '/oauth/$provider'
+    | '/supplier/sign-in'
     | '/setup'
+    | '/supplier'
     | '/errors/$error'
     | '/instances/$id'
     | '/system-settings/inspection-alerts'
@@ -408,6 +450,7 @@ export interface FileRouteTypes {
     | '/instances'
     | '/interface-management'
     | '/profile'
+    | '/suppliers'
     | '/system-info'
     | '/system-settings'
     | '/usage-records'
@@ -421,6 +464,7 @@ export interface FileRouteTypes {
     | '/'
     | '/(auth)'
     | '/_authenticated'
+    | '/supplier'
     | '/_authenticated/system-settings'
     | '/(auth)/oauth'
     | '/(auth)/otp'
@@ -432,7 +476,9 @@ export interface FileRouteTypes {
     | '/(errors)/503'
     | '/account-data/$slug'
     | '/oauth/$provider'
+    | '/supplier/sign-in'
     | '/setup/'
+    | '/supplier/'
     | '/_authenticated/errors/$error'
     | '/_authenticated/instances/$id'
     | '/_authenticated/system-settings/inspection-alerts'
@@ -445,6 +491,7 @@ export interface FileRouteTypes {
     | '/_authenticated/instances/'
     | '/_authenticated/interface-management/'
     | '/_authenticated/profile/'
+    | '/_authenticated/suppliers/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
     | '/_authenticated/usage-records/'
@@ -459,6 +506,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   authRouteRoute: typeof authRouteRouteWithChildren
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  SupplierRouteRoute: typeof SupplierRouteRouteWithChildren
   errors401Route: typeof errors401Route
   errors403Route: typeof errors403Route
   errors404Route: typeof errors404Route
@@ -471,6 +519,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/supplier': {
+      id: '/supplier'
+      path: '/supplier'
+      fullPath: '/supplier'
+      preLoaderRoute: typeof SupplierRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
@@ -492,12 +547,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/supplier/': {
+      id: '/supplier/'
+      path: '/'
+      fullPath: '/supplier/'
+      preLoaderRoute: typeof SupplierIndexRouteImport
+      parentRoute: typeof SupplierRouteRoute
+    }
     '/setup/': {
       id: '/setup/'
       path: '/setup'
       fullPath: '/setup/'
       preLoaderRoute: typeof SetupIndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/supplier/sign-in': {
+      id: '/supplier/sign-in'
+      path: '/sign-in'
+      fullPath: '/supplier/sign-in'
+      preLoaderRoute: typeof SupplierSignInRouteImport
+      parentRoute: typeof SupplierRouteRoute
     }
     '/oauth/$provider': {
       id: '/oauth/$provider'
@@ -602,6 +671,13 @@ declare module '@tanstack/react-router' {
       path: '/system-info'
       fullPath: '/system-info/'
       preLoaderRoute: typeof AuthenticatedSystemInfoIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/suppliers/': {
+      id: '/_authenticated/suppliers/'
+      path: '/suppliers'
+      fullPath: '/suppliers/'
+      preLoaderRoute: typeof AuthenticatedSuppliersIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/profile/': {
@@ -778,6 +854,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedInterfaceManagementIndexRoute: typeof AuthenticatedInterfaceManagementIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
+  AuthenticatedSuppliersIndexRoute: typeof AuthenticatedSuppliersIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
   AuthenticatedUsageRecordsIndexRoute: typeof AuthenticatedUsageRecordsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
@@ -800,6 +877,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInterfaceManagementIndexRoute:
     AuthenticatedInterfaceManagementIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
+  AuthenticatedSuppliersIndexRoute: AuthenticatedSuppliersIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
   AuthenticatedUsageRecordsIndexRoute: AuthenticatedUsageRecordsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
@@ -808,10 +886,25 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
+interface SupplierRouteRouteChildren {
+  SupplierSignInRoute: typeof SupplierSignInRoute
+  SupplierIndexRoute: typeof SupplierIndexRoute
+}
+
+const SupplierRouteRouteChildren: SupplierRouteRouteChildren = {
+  SupplierSignInRoute: SupplierSignInRoute,
+  SupplierIndexRoute: SupplierIndexRoute,
+}
+
+const SupplierRouteRouteWithChildren = SupplierRouteRoute._addFileChildren(
+  SupplierRouteRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   authRouteRoute: authRouteRouteWithChildren,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  SupplierRouteRoute: SupplierRouteRouteWithChildren,
   errors401Route: errors401Route,
   errors403Route: errors403Route,
   errors404Route: errors404Route,
