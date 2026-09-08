@@ -111,6 +111,9 @@ func (r *remoteClient) Write(ctx context.Context, method, resource string, body 
 		if action == "status" {
 			owner, reason := remoteProxyOwnership(proxy, s.identity.ID)
 			if owner != true {
+				if reason == "proxy_ownership_conflict" {
+					return nil, remoteErr(403, "resource_ownership_conflict")
+				}
 				if reason == "proxy_ownership_unknown" {
 					return nil, remoteErr(403, "resource_ownership_unknown")
 				}

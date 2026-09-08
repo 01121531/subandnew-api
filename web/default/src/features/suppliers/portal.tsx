@@ -1,32 +1,27 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate } from '@tanstack/react-router'
-import {
-  BarChart3,
-  KeyRound,
-  LogOut,
-  Network,
-  ShieldCheck,
-  Upload,
-  Users,
-} from 'lucide-react'
+import { LogOut, Menu, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
-import { NativeSelectOption } from '@/components/ui/native-select'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 
 import { Accounts } from './components/accounts'
-import { QueryState, SelectField } from './components/common'
+import { QueryState } from './components/common'
 import { PasswordForm } from './components/password-form'
+import { PortalNavigation } from './components/portal-navigation'
 import { Proxies } from './components/proxies'
 import { UploadWizard } from './components/upload-wizard'
 import { UsageView } from './components/usage'
 import { usePortalQuery, useSupplierMutation } from './hooks/use-portal-query'
+import { portalViews } from './lib/portal-views'
 import { portalApi } from './portal-api'
 import { clearSupplierSession, sessionOptions } from './session'
 import type { AuthSession } from './types'
+
+import '@/styles/supplier-portal.css'
 
 export function SupplierPortal() {
   const session = useQuery(sessionOptions)
@@ -53,32 +48,69 @@ function PortalContent(props: { session: AuthSession }) {
   )
   const [bindingId, setBindingId] = useState(0)
   const [view, setView] = useState('')
+  const [drawer, setDrawer] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
   const logout = useSupplierMutation(
     () => portalApi.logout(props.session.csrf_token),
     clearSupplierSession
   )
   const supplier = props.session.supplier
-  const available = bindings.data?.filter((binding) => binding.enabled) ?? []
+  const available = bindings.data?.filter((item) => item.enabled) ?? []
   const binding =
     available.find((item) => item.id === bindingId) ??
     (available.length === 1 ? available[0] : undefined)
-  const tabs = [
-    { id: 'accounts', allowed: supplier.view_accounts, icon: Users },
-    { id: 'usage', allowed: supplier.view_usage, icon: BarChart3 },
-    { id: 'proxies', allowed: supplier.manage_proxies, icon: Network },
-    { id: 'upload', allowed: supplier.upload_accounts, icon: Upload },
-    { id: 'security', allowed: true, icon: KeyRound },
-  ].filter((tab) => tab.allowed)
-  const current = tabs.find((tab) => tab.id === view)?.id ?? tabs[0].id
+  const views = portalViews(supplier)
+  const current = views.find((item) => item.id === view)?.id ?? views[0].id
+  const navigation = (mobile: boolean) => (
+    <PortalNavigation
+      mobile={mobile}
+      name={supplier.name}
+      views={views}
+      current={current}
+      bindings={available}
+      bindingId={binding?.id ?? 0}
+      disabled={uploadOpen}
+      onBinding={setBindingId}
+      onView={(next) => {
+        setView(next)
+        setDrawer(false)
+      }}
+    />
+  )
   return (
-    <main className='bg-background text-foreground min-h-dvh min-w-0'>
-      <header className='border-b'>
-        <div className='mx-auto flex max-w-[1440px] flex-wrap items-center gap-3 px-4 py-4 sm:px-6'>
-          <ShieldCheck className='size-8 shrink-0 text-emerald-600 dark:text-emerald-400' />
+    <div className='supplier-portal bg-background text-foreground min-h-dvh min-w-0 lg:grid lg:grid-cols-[224px_minmax(0,1fr)]'>
+      <aside className='bg-muted/30 sticky top-0 hidden h-dvh min-w-0 border-r lg:block'>
+        {navigation(false)}
+      </aside>
+      <Sheet open={drawer} onOpenChange={setDrawer}>
+        <SheetContent
+          side='left'
+          className='supplier-portal w-72 max-w-[85vw] gap-0'
+          aria-describedby={undefined}
+        >
+          <SheetTitle className='sr-only'>
+            {t('supplier.navigation')}
+          </SheetTitle>
+          {navigation(true)}
+        </SheetContent>
+      </Sheet>
+      <div className='min-w-0'>
+        <header className='bg-background/95 flex min-h-16 items-center gap-3 border-b px-4 lg:px-6'>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='lg:hidden'
+            aria-label={t('supplier.navigation')}
+            onClick={() => setDrawer(true)}
+          >
+            <Menu />
+          </Button>
           <div className='min-w-0 flex-1'>
-            <h1 className='text-xl font-semibold'>Claude Gateway</h1>
-            <p className='text-muted-foreground truncate text-xs'>
-              {t('supplier.portal')} / {supplier.name}
+            <p className='text-muted-foreground text-xs'>
+              {t('supplier.portal')}
+            </p>
+            <p className='truncate text-sm font-medium'>
+              {binding?.instance_name ?? supplier.name}
             </p>
           </div>
           <ThemeSwitch />
@@ -87,93 +119,80 @@ function PortalContent(props: { session: AuthSession }) {
             size='icon'
             aria-label={t('supplier.logout')}
             title={t('supplier.logout')}
-            disabled={logout.isPending}
+            disabled={logout.isPending || uploadOpen}
             onClick={() => logout.mutate()}
           >
             <LogOut />
           </Button>
-        </div>
-      </header>
-      <div className='mx-auto grid max-w-[1440px] min-w-0 gap-6 p-4 sm:p-6'>
-        <QueryState
-          pending={bindings.isPending}
-          error={bindings.error}
-          retry={bindings.refresh}
-        >
-          <div className='flex flex-wrap items-end justify-between gap-4'>
-            <div className='w-full sm:w-80'>
-              <SelectField
-                id='portal-binding'
-                label={t('supplier.binding')}
-                value={binding?.id ?? 0}
-                onChange={(value) => setBindingId(Number(value))}
+        </header>
+        <main className='mx-auto grid max-w-[1600px] min-w-0 gap-5 p-4 sm:p-6'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <h1 className='text-xl font-semibold'>
+              {t(`supplier.${current}`)}
+            </h1>
+            {current === 'accounts' && supplier.upload_accounts && (
+              <Button
+                disabled={!binding || uploadOpen}
+                onClick={() => setUploadOpen(true)}
               >
-                <NativeSelectOption value={0}>
-                  {t('supplier.chooseBinding')}
-                </NativeSelectOption>
-                {available.map((item) => (
-                  <NativeSelectOption key={item.id} value={item.id}>
-                    {item.instance_name}
-                  </NativeSelectOption>
-                ))}
-              </SelectField>
-            </div>
-            {!supplier.manage_proxies && !supplier.upload_accounts && (
-              <span className='text-muted-foreground text-xs'>
-                {t('supplier.readonly')}
-              </span>
+                <Upload />
+                {t('supplier.uploadAccounts')}
+              </Button>
             )}
           </div>
-          {!available.length && (
-            <p className='text-muted-foreground text-sm'>
-              {t('supplier.noBindings')}
-            </p>
-          )}
-        </QueryState>
-        <Tabs
-          value={current}
-          onValueChange={(value) => setView(String(value))}
-          className='min-w-0'
-        >
-          <div className='overflow-x-auto border-b pb-2'>
-            <TabsList className='w-max'>
-              {tabs.map((tab) => (
-                <TabsTrigger key={tab.id} value={tab.id}>
-                  <tab.icon className='size-4' />
-                  {t(`supplier.${tab.id}`)}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-        </Tabs>
-        <section
-          key={`${binding?.id ?? 0}-${current}`}
-          aria-label={t(`supplier.${current}`)}
-          className='min-w-0'
-        >
-          {current === 'security' && <PasswordForm session={props.session} />}
-          {current !== 'security' && !binding && (
-            <p className='text-muted-foreground py-16 text-center text-sm'>
-              {t('supplier.chooseBinding')}
-            </p>
-          )}
-          {binding && current === 'accounts' && (
-            <Accounts bindingId={binding.id} />
-          )}
-          {binding && current === 'usage' && (
-            <UsageView bindingId={binding.id} />
-          )}
-          {binding && current === 'proxies' && (
-            <Proxies bindingId={binding.id} csrf={props.session.csrf_token} />
-          )}
-          {binding && current === 'upload' && (
-            <UploadWizard
-              bindingId={binding.id}
-              csrf={props.session.csrf_token}
-            />
-          )}
-        </section>
+          <QueryState
+            pending={bindings.isPending}
+            error={bindings.error}
+            retry={bindings.refresh}
+          >
+            <section
+              key={`${binding?.id ?? 0}-${current}`}
+              aria-label={t(`supplier.${current}`)}
+              className='min-w-0'
+            >
+              {current === 'security' && (
+                <PasswordForm session={props.session} />
+              )}
+              {current !== 'security' && !binding && (
+                <p className='text-muted-foreground py-16 text-center text-sm'>
+                  {t(
+                    available.length
+                      ? 'supplier.chooseBinding'
+                      : 'supplier.noBindings'
+                  )}
+                </p>
+              )}
+              {binding && current === 'accounts' && supplier.view_accounts && (
+                <Accounts bindingId={binding.id} />
+              )}
+              {binding && current === 'accounts' && !supplier.view_accounts && (
+                <p className='text-muted-foreground border-y py-12 text-center text-sm'>
+                  {t('supplier.accountsNotPermitted')}
+                </p>
+              )}
+              {binding && current === 'usage' && (
+                <UsageView bindingId={binding.id} />
+              )}
+              {binding && current === 'proxies' && (
+                <Proxies
+                  bindingId={binding.id}
+                  csrf={props.session.csrf_token}
+                />
+              )}
+            </section>
+          </QueryState>
+        </main>
       </div>
-    </main>
+      {uploadOpen && binding && supplier.upload_accounts && (
+        <UploadWizard
+          key={binding.id}
+          supplierId={supplier.id}
+          bindingId={binding.id}
+          bindingName={binding.instance_name}
+          csrf={props.session.csrf_token}
+          onClose={() => setUploadOpen(false)}
+        />
+      )}
+    </div>
   )
 }

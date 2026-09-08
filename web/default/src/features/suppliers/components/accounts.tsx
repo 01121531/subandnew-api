@@ -220,7 +220,7 @@ export function Accounts(props: { bindingId: number }) {
         ) : (
           <>
             <AccountCards accounts={query.data.items} />
-            <div className='hidden md:block'>
+            <div className='hidden min-w-0 md:block'>
               <Table>
                 <TableHeader>
                   <TableRow>

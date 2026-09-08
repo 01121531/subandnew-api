@@ -1,6 +1,24 @@
 export const supplierZh = {
+  navigation: '门户导航',
+  accountsNotPermitted: '当前未开放账号查看权限。',
+  noBindableProxies: '暂无可绑定代理，请先导入可用代理。',
+  generateAuthorization: '生成授权链接',
+  authorizationUrl: '授权链接',
+  copyLink: '复制授权链接',
+  linkCopied: '授权链接已复制',
+  linkCopyFailed: '复制失败，请选中链接手动复制。',
+  continueUpload: '继续上传',
+  done: '完成',
+  discardUpload: '放弃本次上传？',
+  discardUploadConfirm:
+    '关闭后将清除本次填写内容。已生成的授权流程仍按原有效期过期。',
+  assigned: '已分配',
+  ownershipConflict: '归属信息冲突',
+  proxyOwnershipConflict:
+    '上游归属标记与用户身份不一致，已禁止启停，请联系管理员核对。',
   ownershipUnknown: '归属未确认',
-  proxyNotOwned: '共享代理不能在此启停，请联系代理所有者。',
+  proxyNotOwned:
+    '此代理仅分配给当前供货商使用，不能在此启停，请联系代理所有者。',
   proxyOwnershipUnknown: '上游未提供可确认的归属信息，请刷新或联系管理员核对。',
   deleteSupplierConfirm:
     '确认删除该供货商？门户访问及所有会话将失效，审计记录会保留。',
@@ -21,7 +39,7 @@ export const supplierZh = {
   copied: '密码已复制',
   copyFailed: '复制失败，请重试。',
   proxyUnbindConfirm:
-    '确认移除此共享代理的授权关联？使用该代理的账号可能受到影响。',
+    '确认移除此已分配代理的授权关联？使用该代理的账号可能受到影响。',
   upstreamAuthFailed: '上游认证失败，请联系管理员检查实例绑定凭据。',
   currentPasswordIncorrect: '当前密码不正确。',
   rateLimited: '请求过于频繁，请稍后重试。',
@@ -175,9 +193,26 @@ export const supplierZh = {
   permissionConfirm: '确认授予写入权限？供货商将可以执行所选管理操作。',
 }
 export const supplierEn: Record<keyof typeof supplierZh, string> = {
+  navigation: 'Portal navigation',
+  accountsNotPermitted: 'Account viewing is not permitted.',
+  noBindableProxies: 'No bindable proxies. Import an available proxy first.',
+  generateAuthorization: 'Generate authorization link',
+  authorizationUrl: 'Authorization link',
+  copyLink: 'Copy authorization link',
+  linkCopied: 'Authorization link copied',
+  linkCopyFailed: 'Could not copy. Select the link and copy it manually.',
+  continueUpload: 'Upload another',
+  done: 'Done',
+  discardUpload: 'Discard this upload?',
+  discardUploadConfirm:
+    'Closing clears this draft. An existing authorization flow retains its original expiry.',
+  assigned: 'Assigned',
+  ownershipConflict: 'Conflicting ownership',
+  proxyOwnershipConflict:
+    'Upstream ownership flags conflict with the owner identity. Status changes are blocked. Contact an administrator.',
   ownershipUnknown: 'Ownership unconfirmed',
   proxyNotOwned:
-    'Shared proxies cannot be enabled or disabled here. Contact the owner.',
+    'This proxy is assigned for use only. Contact its owner to change its status.',
   proxyOwnershipUnknown:
     'Upstream ownership cannot be verified. Refresh or contact an administrator.',
   deleteSupplierConfirm:
@@ -201,7 +236,7 @@ export const supplierEn: Record<keyof typeof supplierZh, string> = {
   copied: 'Password copied',
   copyFailed: 'Could not copy. Please try again.',
   proxyUnbindConfirm:
-    'Remove access to this shared proxy? Accounts using it may be affected.',
+    'Remove access to this assigned proxy? Accounts using it may be affected.',
   upstreamAuthFailed:
     'Upstream authentication failed. Ask your administrator to check binding credentials.',
   currentPasswordIncorrect: 'Current password is incorrect.',

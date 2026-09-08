@@ -11,8 +11,11 @@ import type { Proxy } from '../types'
 export function ProxyOwnership(props: { proxy: Proxy }) {
   const { t } = useTranslation()
   let label = t('supplier.ownershipUnknown')
-  if (props.proxy.is_owner === true) label = t('supplier.owner')
-  if (props.proxy.is_owner === false) label = t('supplier.shared')
+  if (props.proxy.ownership === 'owned') label = t('supplier.owner')
+  if (props.proxy.ownership === 'assigned') label = t('supplier.assigned')
+  if (props.proxy.ownership === 'conflict') {
+    label = t('supplier.ownershipConflict')
+  }
   return <Badge variant='outline'>{label}</Badge>
 }
 
@@ -26,10 +29,13 @@ export function ProxyControls(props: {
 }) {
   const { t } = useTranslation()
   const allowed = props.proxy.can_update_status === true
-  const reason =
-    props.proxy.status_update_reason === 'proxy_not_owned'
-      ? t('supplier.proxyNotOwned')
-      : t('supplier.proxyOwnershipUnknown')
+  let reason = t('supplier.proxyOwnershipUnknown')
+  if (props.proxy.status_update_reason === 'proxy_not_owned') {
+    reason = t('supplier.proxyNotOwned')
+  }
+  if (props.proxy.status_update_reason === 'proxy_ownership_conflict') {
+    reason = t('supplier.proxyOwnershipConflict')
+  }
   return (
     <div className='grid min-w-0 gap-2'>
       <div className='flex flex-wrap items-center gap-3'>

@@ -2,6 +2,9 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (error.code === 'supplier_upstream_resource_ownership_conflict') {
+      return 'supplier.proxyOwnershipConflict'
+    }
     if (error.code === 'supplier_upstream_resource_ownership_unknown') {
       return 'supplier.proxyOwnershipUnknown'
     }

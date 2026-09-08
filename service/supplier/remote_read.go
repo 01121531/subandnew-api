@@ -361,6 +361,15 @@ func remoteProxy(m map[string]any, identityID string) map[string]any {
 	out["is_owner"] = owner
 	out["can_update_status"] = owner == true
 	out["status_update_reason"] = reason
+	ownership := "unknown"
+	if reason == "proxy_ownership_conflict" {
+		ownership = "conflict"
+	} else if owner == true {
+		ownership = "owned"
+	} else if owner == false {
+		ownership = "assigned"
+	}
+	out["ownership"] = ownership
 	return out
 }
 
@@ -392,6 +401,9 @@ func remoteProxyOwnership(m map[string]any, identityID string) (any, string) {
 		}
 	default:
 		return nil, "proxy_ownership_unknown"
+	}
+	if ownerID := remoteID(m["owner_user_id"]); ownerID != "" && validRemoteID(identityID) && owner != (ownerID == identityID) {
+		return nil, "proxy_ownership_conflict"
 	}
 	if !owner {
 		return false, "proxy_not_owned"

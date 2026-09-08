@@ -280,7 +280,7 @@ func TestRemoteSummaryUsageProxyNormalization(t *testing.T) {
 	proxies, err := r.Read(context.Background(), "proxies", nil)
 	require.NoError(t, err)
 	items := proxies["items"].([]map[string]any)
-	require.Len(t, items[0], 11)
+	require.Len(t, items[0], 12)
 	require.Equal(t, "enabled", items[0]["status"])
 	require.Equal(t, 3.5, items[0]["latency_ms"])
 	require.Nil(t, items[1]["host"])
@@ -374,7 +374,7 @@ func TestRemoteOptionsAndUploadAuthorization(t *testing.T) {
 	for key, list := range options {
 		fields := 2
 		if key == "proxies" {
-			fields = 11
+			fields = 12
 		} else if key == "policies" {
 			fields = 3
 		}

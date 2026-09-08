@@ -29,7 +29,9 @@ func TestRemoteProxyOwnershipWireFormats(t *testing.T) {
 		{"owner-id-number", `"owner_user_id":9007199254740993`, true, ""},
 		{"owner-id-string", `"is_owner":null,"owner_user_id":"9007199254740993"`, true, ""},
 		{"foreign-id", `"owner_user_id":"other"`, false, "proxy_not_owned"},
-		{"explicit-denial", `"is_owner":false,"owner_user_id":"9007199254740993"`, false, "proxy_not_owned"},
+		{"conflicting-denial", `"is_owner":false,"owner_user_id":"9007199254740993"`, nil, "proxy_ownership_conflict"},
+		{"conflicting-allow", `"is_owner":true,"owner_user_id":"another"`, nil, "proxy_ownership_conflict"},
+		{"matching-denial", `"is_owner":false,"owner_user_id":"another"`, false, "proxy_not_owned"},
 		{"missing", `"name":"unknown"`, nil, "proxy_ownership_unknown"},
 		{"null", `"is_owner":null`, nil, "proxy_ownership_unknown"},
 		{"malformed", `"is_owner":"yes","owner_user_id":"9007199254740993"`, nil, "proxy_ownership_unknown"},
@@ -61,6 +63,15 @@ func TestRemoteProxyOwnershipWireFormats(t *testing.T) {
 			require.Equal(t, tc.owner, row["is_owner"])
 			require.Equal(t, tc.owner == true, row["can_update_status"])
 			require.Equal(t, tc.reason, row["status_update_reason"])
+			expectedOwnership := "unknown"
+			if tc.reason == "proxy_ownership_conflict" {
+				expectedOwnership = "conflict"
+			} else if tc.owner == true {
+				expectedOwnership = "owned"
+			} else if tc.owner == false {
+				expectedOwnership = "assigned"
+			}
+			require.Equal(t, expectedOwnership, row["ownership"])
 			require.NotContains(t, row, "owner_user_id")
 			_, err = r.Write(context.Background(), "PATCH", "proxies/p1", map[string]any{"status": "disabled"})
 			if tc.owner == true {

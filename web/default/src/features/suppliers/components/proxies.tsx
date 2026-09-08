@@ -166,7 +166,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
                 </article>
               ))}
             </div>
-            <div className='hidden md:block'>
+            <div className='hidden min-w-0 md:block'>
               <Table>
                 <TableHeader>
                   <TableRow>

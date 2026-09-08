@@ -109,6 +109,7 @@ export interface Proxy {
   health_status: string
   latency_ms: number | null
   is_owner: boolean | null
+  ownership: 'owned' | 'assigned' | 'unknown' | 'conflict'
   can_update_status: boolean
   status_update_reason: string
 }
@@ -129,7 +130,7 @@ export interface PolicyTemplate {
     number | null
   >
 }
-export interface UploadOptions {
+export interface UploadOptions extends Snapshot {
   groups: Array<{ id: string; name: string }>
   policies: PolicyTemplate[]
   templates: Array<{ id: string; name: string }>
