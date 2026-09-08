@@ -1,11 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import type { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelectOption } from '@/components/ui/native-select'
 
+import { policyValues } from '../lib/policy'
 import { uploadSchema } from '../lib/schemas'
 import type { UploadInput, UploadOptions } from '../types'
 import { Field, SelectField } from './common'
@@ -17,7 +19,7 @@ export function UploadConfig(props: {
   onSubmit: (data: UploadInput) => void
 }) {
   const { t } = useTranslation()
-  const form = useForm<UploadInput>({
+  const form = useForm<z.input<typeof uploadSchema>, unknown, UploadInput>({
     resolver: zodResolver(uploadSchema),
     defaultValues: {
       binding_id: props.bindingId,
@@ -97,7 +99,20 @@ export function UploadConfig(props: {
           id='upload-policy'
           label={t('supplier.policy')}
           value={form.watch('policy_template_id')}
-          onChange={(value) => form.setValue('policy_template_id', value)}
+          onChange={(value) => {
+            form.setValue('policy_template_id', value)
+            const template = props.options.policies.find(
+              (item) => item.id === value
+            )
+            if (template) {
+              for (const [field, limit] of policyValues(template)) {
+                form.setValue(field, limit, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }
+            }
+          }}
         >
           <NativeSelectOption value=''>{t('supplier.none')}</NativeSelectOption>
           {props.options.policies.map((item) => (
@@ -162,7 +177,10 @@ export function UploadConfig(props: {
               type='number'
               min={0}
               step={1}
-              {...form.register(key, { valueAsNumber: true })}
+              {...form.register(key, {
+                setValueAs: (value: string | number) =>
+                  value === '' ? '' : Number(value),
+              })}
             />
           </Field>
         ))}

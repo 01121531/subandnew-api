@@ -1,4 +1,7 @@
 export const supplierZh = {
+  ownershipUnknown: '归属未确认',
+  proxyNotOwned: '共享代理不能在此启停，请联系代理所有者。',
+  proxyOwnershipUnknown: '上游未提供可确认的归属信息，请刷新或联系管理员核对。',
   deleteSupplierConfirm:
     '确认删除该供货商？门户访问及所有会话将失效，审计记录会保留。',
   bindingConflict: '此实例或远端身份已被绑定，请检查现有绑定。',
@@ -172,6 +175,11 @@ export const supplierZh = {
   permissionConfirm: '确认授予写入权限？供货商将可以执行所选管理操作。',
 }
 export const supplierEn: Record<keyof typeof supplierZh, string> = {
+  ownershipUnknown: 'Ownership unconfirmed',
+  proxyNotOwned:
+    'Shared proxies cannot be enabled or disabled here. Contact the owner.',
+  proxyOwnershipUnknown:
+    'Upstream ownership cannot be verified. Refresh or contact an administrator.',
   deleteSupplierConfirm:
     'Delete this supplier? Portal access and all sessions will be revoked. Audit records are retained.',
   bindingConflict:

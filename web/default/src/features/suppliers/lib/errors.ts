@@ -2,6 +2,12 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (error.code === 'supplier_upstream_resource_ownership_unknown') {
+      return 'supplier.proxyOwnershipUnknown'
+    }
+    if (error.code === 'supplier_upstream_resource_not_owned') {
+      return 'supplier.proxyNotOwned'
+    }
     if (error.code === 'supplier_binding_conflict') {
       return 'supplier.bindingConflict'
     }
@@ -27,10 +33,7 @@ export function errorKey(error: unknown): string {
     ) {
       return 'supplier.rateLimited'
     }
-    if (
-      error.code === 'supplier_upstream_resource_not_owned' ||
-      error.code === 'supplier_upstream_resource_not_authorized'
-    ) {
+    if (error.code === 'supplier_upstream_resource_not_authorized') {
       return 'supplier.forbidden'
     }
     if (

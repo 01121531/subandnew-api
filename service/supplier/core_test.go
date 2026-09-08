@@ -757,6 +757,9 @@ func TestSupplierCoreOAuthFrozenSingleUseAndSessionBound(t *testing.T) {
 	p, _ := f.login(t, s.Username)
 	p2, _ := f.login(t, s.Username)
 	input := coreUpload(b.ID)
+	input.MaxRPM, input.MaxSessions = 99, 0
+	expected := input.payload()
+	expected["group_ids"] = []string{"group-1"}
 	response, err := f.s.StartUpload(context.Background(), p, input)
 	require.NoError(t, err)
 	raw := response["flow_id"].(string)
@@ -770,6 +773,7 @@ func TestSupplierCoreOAuthFrozenSingleUseAndSessionBound(t *testing.T) {
 	require.NotContains(t, flow.Ciphertext, "Frozen account")
 	input.Name = "tampered"
 	input.GroupIDs[0] = "tampered-group"
+	input.PolicyID, input.MaxRPM, input.MaxTPM, input.MaxConcurrent, input.MaxSessions = "tampered-policy", 0, 0, 0, 50
 	_, err = f.s.Exchange(context.Background(), p2, raw, "code#test-state")
 	requireCoreError(t, err, 409, "supplier_oauth_flow_expired_or_used")
 	_, err = f.s.Exchange(context.Background(), p, raw, "code#wrong-state")
@@ -778,7 +782,6 @@ func TestSupplierCoreOAuthFrozenSingleUseAndSessionBound(t *testing.T) {
 	_, err = f.s.Exchange(context.Background(), p, raw, "https://oauth.invalid/callback?code=oauth-code&state=test-state")
 	require.NoError(t, err)
 	require.Equal(t, "account-upload/exchange", f.r.resource)
-	expected := coreUpload(b.ID).payload()
 	expected["code"], expected["pending_state"] = "oauth-code", "test-state"
 	encoded, err := json.Marshal(expected)
 	require.NoError(t, err)

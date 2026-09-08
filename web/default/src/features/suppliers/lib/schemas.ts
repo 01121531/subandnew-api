@@ -37,6 +37,17 @@ export const bindingSchema = z.object({
   password: z.string(),
   enabled: z.boolean(),
 })
+function uploadLimit(max: number) {
+  return z
+    .union([z.number().int().min(0).max(max), z.literal('')])
+    .transform((value, ctx) => {
+      if (value === '') {
+        ctx.addIssue({ code: 'custom', message: 'Required' })
+        return z.NEVER
+      }
+      return value
+    })
+}
 export const uploadSchema = z
   .object({
     binding_id: z.number().int().positive(),
@@ -46,10 +57,10 @@ export const uploadSchema = z
     group_ids: z.array(z.string().min(1)).max(100),
     policy_template_id: z.string(),
     cc_template_id: z.string(),
-    max_rpm: z.number().int().min(0).max(1_000_000),
-    max_tpm: z.number().int().min(0).max(1_000_000_000),
-    max_concurrent: z.number().int().min(0).max(100_000),
-    max_sessions: z.number().int().min(0).max(100_000),
+    max_rpm: uploadLimit(1_000_000),
+    max_tpm: uploadLimit(1_000_000_000),
+    max_concurrent: uploadLimit(100_000),
+    max_sessions: uploadLimit(100_000),
   })
   .refine(
     (v) => v.outbound_proxy_mode !== 'manual' || v.outbound_proxy_id.length > 0,

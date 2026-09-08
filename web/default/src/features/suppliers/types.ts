@@ -108,7 +108,9 @@ export interface Proxy {
   status: string
   health_status: string
   latency_ms: number | null
-  is_owner: boolean
+  is_owner: boolean | null
+  can_update_status: boolean
+  status_update_reason: string
 }
 export interface ProxyPage extends Items<Proxy>, Snapshot {}
 export interface TestResult {
@@ -119,9 +121,17 @@ export interface ImportResult {
   imported: number
   failed: number
 }
+export interface PolicyTemplate {
+  id: string
+  name: string
+  policy: Record<
+    'max_rpm' | 'max_tpm' | 'max_concurrent' | 'max_sessions',
+    number | null
+  >
+}
 export interface UploadOptions {
   groups: Array<{ id: string; name: string }>
-  policies: Array<{ id: string; name: string }>
+  policies: PolicyTemplate[]
   templates: Array<{ id: string; name: string }>
   proxies: Array<{ id: string; name: string; host: string; port: number }>
 }

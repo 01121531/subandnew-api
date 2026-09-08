@@ -108,8 +108,14 @@ func (r *remoteClient) Write(ctx context.Context, method, resource string, body 
 		if proxy == nil {
 			return nil, remoteErr(403, "resource_not_authorized")
 		}
-		if action == "status" && proxy["is_owner"] != true {
-			return nil, remoteErr(403, "resource_not_owned")
+		if action == "status" {
+			owner, reason := remoteProxyOwnership(proxy, s.identity.ID)
+			if owner != true {
+				if reason == "proxy_ownership_unknown" {
+					return nil, remoteErr(403, "resource_ownership_unknown")
+				}
+				return nil, remoteErr(403, "resource_not_owned")
+			}
 		}
 	}
 	if action == "auth-url" || action == "exchange" {

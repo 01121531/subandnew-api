@@ -1,9 +1,8 @@
-import { Activity, Plus, Power, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -28,6 +27,7 @@ import {
   Pagination,
   QueryState,
 } from './common'
+import { ProxyControls, ProxyOwnership } from './proxy-controls'
 
 export function Proxies(props: { bindingId: number; csrf: string }) {
   const { t } = useTranslation()
@@ -73,7 +73,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
           action.proxy.id
         )
       }
-      if (!action.proxy.is_owner) return
+      if (action.proxy.can_update_status !== true) return
       return portalApi.setProxy(
         props.csrf,
         props.bindingId,
@@ -88,10 +88,21 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
   )
   let confirmationText = t('supplier.proxyStatusConfirm')
   if (action?.type === 'delete') {
-    confirmationText = action.proxy.is_owner
-      ? t('supplier.proxyDeleteConfirm')
-      : t('supplier.proxyUnbindConfirm')
+    confirmationText =
+      action.proxy.is_owner === false
+        ? t('supplier.proxyUnbindConfirm')
+        : t('supplier.proxyDeleteConfirm')
   }
+  const controls = (proxy: Proxy) => (
+    <ProxyControls
+      proxy={proxy}
+      pending={mutation.isPending}
+      testing={test.isPending}
+      onTest={() => test.mutate(proxy.id)}
+      onStatus={() => setAction({ proxy, type: 'status' })}
+      onDelete={() => setAction({ proxy, type: 'delete' })}
+    />
+  )
   return (
     <div className='grid min-w-0 gap-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
@@ -113,94 +124,103 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
         {!query.data?.items.length ? (
           <Empty />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {['name', 'host', 'status', 'health', 'latency', 'actions'].map(
-                  (key) => (
-                    <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
-                  )
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <>
+            <div className='grid gap-3 md:hidden'>
               {query.data.items.map((proxy) => (
-                <TableRow key={proxy.id}>
-                  <TableCell>
-                    <div className='flex items-center gap-2'>
-                      <span className='max-w-40 truncate' title={proxy.name}>
-                        {proxy.name}
-                      </span>
-                      <Badge variant='outline'>
-                        {proxy.is_owner
-                          ? t('supplier.owner')
-                          : t('supplier.shared')}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell className='font-mono text-xs'>
+                <article
+                  key={proxy.id}
+                  className='grid min-w-0 gap-3 rounded-md border p-3'
+                >
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span className='min-w-0 font-medium break-words'>
+                      {proxy.name}
+                    </span>
+                    <ProxyOwnership proxy={proxy} />
+                  </div>
+                  <p className='font-mono text-xs break-all'>
                     {proxy.scheme}://{proxy.host}:{proxy.port}
-                  </TableCell>
-                  <TableCell>
-                    {t(`supplier.${proxy.status}`, {
-                      defaultValue: proxy.status,
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    {t(`supplier.${proxy.health_status}`, {
-                      defaultValue: proxy.health_status,
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    {proxy.latency_ms == null ? '--' : `${proxy.latency_ms} ms`}
-                  </TableCell>
-                  <TableCell>
-                    <div className='flex gap-1'>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        disabled={test.isPending}
-                        aria-label={t('supplier.test')}
-                        title={t('supplier.test')}
-                        onClick={() => test.mutate(proxy.id)}
-                      >
-                        <Activity />
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        disabled={!proxy.is_owner || mutation.isPending}
-                        aria-label={
-                          proxyEnabled(proxy.status)
-                            ? t('supplier.disabled')
-                            : t('supplier.enabled')
-                        }
-                        title={
-                          proxyEnabled(proxy.status)
-                            ? t('supplier.disabled')
-                            : t('supplier.enabled')
-                        }
-                        onClick={() => setAction({ proxy, type: 'status' })}
-                      >
-                        <Power />
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='text-destructive'
-                        disabled={mutation.isPending}
-                        aria-label={t('supplier.delete')}
-                        title={t('supplier.delete')}
-                        onClick={() => setAction({ proxy, type: 'delete' })}
-                      >
-                        <Trash2 />
-                      </Button>
+                  </p>
+                  <dl className='grid grid-cols-2 gap-3 text-sm'>
+                    <div>
+                      <dt className='text-muted-foreground text-xs'>
+                        {t('supplier.health')}
+                      </dt>
+                      <dd>
+                        {t(`supplier.${proxy.health_status}`, {
+                          defaultValue: proxy.health_status ?? '--',
+                        })}
+                      </dd>
                     </div>
-                  </TableCell>
-                </TableRow>
+                    <div>
+                      <dt className='text-muted-foreground text-xs'>
+                        {t('supplier.latency')}
+                      </dt>
+                      <dd>
+                        {proxy.latency_ms == null
+                          ? '--'
+                          : `${proxy.latency_ms} ms`}
+                      </dd>
+                    </div>
+                  </dl>
+                  {controls(proxy)}
+                </article>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+            <div className='hidden md:block'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {[
+                      'name',
+                      'host',
+                      'status',
+                      'health',
+                      'latency',
+                      'actions',
+                    ].map((key) => (
+                      <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {query.data.items.map((proxy) => (
+                    <TableRow key={proxy.id}>
+                      <TableCell>
+                        <div className='flex items-center gap-2'>
+                          <span
+                            className='max-w-40 truncate'
+                            title={proxy.name}
+                          >
+                            {proxy.name}
+                          </span>
+                          <ProxyOwnership proxy={proxy} />
+                        </div>
+                      </TableCell>
+                      <TableCell className='font-mono text-xs'>
+                        {proxy.scheme}://{proxy.host}:{proxy.port}
+                      </TableCell>
+                      <TableCell>
+                        {t(`supplier.${proxy.status}`, {
+                          defaultValue: proxy.status,
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        {t(`supplier.${proxy.health_status}`, {
+                          defaultValue: proxy.health_status,
+                        })}
+                      </TableCell>
+                      <TableCell>
+                        {proxy.latency_ms == null
+                          ? '--'
+                          : `${proxy.latency_ms} ms`}
+                      </TableCell>
+                      <TableCell>{controls(proxy)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
         <Pagination
           page={page}

@@ -253,7 +253,7 @@ func (r *remoteClient) Read(ctx context.Context, resource string, query url.Valu
 		items := make([]map[string]any, 0, len(list))
 		for _, item := range list {
 			if resource == "proxies" {
-				items = append(items, remoteProxy(item))
+				items = append(items, remoteProxy(item, s.identity.ID))
 			} else {
 				n := remoteFields(item, "id name email status created_at group_name", "total_cost today_cost total_requests total_tokens")
 				if n["today_cost"] == nil {
@@ -340,7 +340,7 @@ func (r *remoteClient) Read(ctx context.Context, resource string, query url.Valu
 	return result, nil
 }
 
-func remoteProxy(m map[string]any) map[string]any {
+func remoteProxy(m map[string]any, identityID string) map[string]any {
 	out := remoteFields(m, "id name scheme host status health_status", "port latency_ms")
 	if out["latency_ms"] == nil {
 		out["latency_ms"] = remoteNumber(m["last_health_latency_ms"])
@@ -357,10 +357,59 @@ func remoteProxy(m map[string]any) map[string]any {
 	if port, ok := out["port"].(float64); ok && (port < 1 || port > 65535 || math.Trunc(port) != port) {
 		out["port"] = nil
 	}
-	out["is_owner"] = nil
-	if owner, ok := m["is_owner"].(bool); ok {
-		out["is_owner"] = owner
+	owner, reason := remoteProxyOwnership(m, identityID)
+	out["is_owner"] = owner
+	out["can_update_status"] = owner == true
+	out["status_update_reason"] = reason
+	return out
+}
+
+func remoteProxyOwnership(m map[string]any, identityID string) (any, string) {
+	value, exists := m["is_owner"]
+	if !exists || value == nil {
+		ownerID := remoteID(m["owner_user_id"])
+		if ownerID == "" || !validRemoteID(identityID) {
+			return nil, "proxy_ownership_unknown"
+		}
+		value = ownerID == identityID
 	}
+	var owner bool
+	switch v := value.(type) {
+	case bool:
+		owner = v
+	case json.Number:
+		if v.String() != "0" && v.String() != "1" {
+			return nil, "proxy_ownership_unknown"
+		}
+		owner = v.String() == "1"
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1":
+			owner = true
+		case "false", "0":
+		default:
+			return nil, "proxy_ownership_unknown"
+		}
+	default:
+		return nil, "proxy_ownership_unknown"
+	}
+	if !owner {
+		return false, "proxy_not_owned"
+	}
+	return true, ""
+}
+
+func remotePolicy(m map[string]any) map[string]any {
+	out := remoteFields(m, "id name", "")
+	policy, _ := m["policy"].(map[string]any)
+	limits := map[string]any{}
+	for key, max := range map[string]float64{"max_rpm": 1000000, "max_tpm": 1000000000, "max_concurrent": 100000, "max_sessions": 100000} {
+		limits[key] = nil
+		if value, ok := remoteNumber(policy[key]).(float64); ok && value >= 0 && value <= max && math.Trunc(value) == value {
+			limits[key] = value
+		}
+	}
+	out["policy"] = limits
 	return out
 }
 
@@ -449,7 +498,9 @@ func (r *remoteClient) options(ctx context.Context, s *remoteSession) (map[strin
 		list := make([]map[string]any, 0, len(items))
 		for _, item := range items {
 			if key == "proxies" {
-				list = append(list, remoteProxy(item))
+				list = append(list, remoteProxy(item, s.identity.ID))
+			} else if key == "policies" {
+				list = append(list, remotePolicy(item))
 			} else {
 				list = append(list, remoteFields(item, "id name", ""))
 			}
