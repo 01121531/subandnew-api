@@ -2,6 +2,12 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (error.code === 'supplier_upstream_import_result_unconfirmed') {
+      return 'supplier.importStatus_unknown'
+    }
+    if (error.code === 'supplier_invalid_session_keys') {
+      return 'supplier.sessionKeysInvalid'
+    }
     if (error.code === 'supplier_upstream_resource_ownership_conflict') {
       return 'supplier.proxyOwnershipConflict'
     }

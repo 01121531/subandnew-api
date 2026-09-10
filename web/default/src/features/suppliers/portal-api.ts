@@ -1,4 +1,6 @@
 import type {
+  AccountImportCredentials,
+  AccountImportResult,
   AccountPage,
   AccountQuery,
   AccountSummary,
@@ -89,6 +91,16 @@ function params(values: object, refresh = false): string {
 }
 
 export const portalApi = {
+  importAccounts: (
+    csrf: string,
+    method: 'rt' | 'sk',
+    body: UploadInput & AccountImportCredentials
+  ) =>
+    request<AccountImportResult>(`/account-upload/import-${method}`, {
+      method: 'POST',
+      csrf,
+      body,
+    }),
   session: (signal?: AbortSignal) =>
     request<Session>('/auth/session', { signal }),
   login: (body: { username: string; password: string }) =>

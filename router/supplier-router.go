@@ -45,4 +45,6 @@ func registerSupplierRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	portal.GET("/account-upload/options", controller.ReadSupplierPortal("account-upload/options"))
 	portal.POST("/account-upload/auth-url", controller.StartSupplierPortalUpload)
 	portal.POST("/account-upload/exchange", controller.ExchangeSupplierPortalUpload)
+	portal.POST("/account-upload/import-rt", controller.ImportSupplierPortalAccounts("rt"))
+	portal.POST("/account-upload/import-sk", controller.ImportSupplierPortalAccounts("sk"))
 }

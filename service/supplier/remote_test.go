@@ -402,7 +402,7 @@ func TestRemoteInvalidResourcesAndFrozenParametersNeverSend(t *testing.T) {
 		requireRemoteError(t, err, 400, "")
 	}
 	for _, p := range []map[string]any{
-		{"provider": "openai"}, {"oauth_flow": "setup_token"}, {"inference_backend": "docker"}, {"overwrite": true}, {"owner_user_id": "other"}, {"options": map[string]any{"secret": true}},
+		{"provider": "openai"}, {"oauth_flow": "unsupported"}, {"inference_backend": "docker"}, {"overwrite": true}, {"owner_user_id": "other"}, {"options": map[string]any{"secret": true}},
 		{"group_ids": []string{"../bad"}}, {"group_ids": []string{"g1", "g1"}}, {"outbound_proxy_mode": "manual"}, {"outbound_proxy_id": "p1"}, {"max_rpm": "NaN"}, {"cc_template_id": "a/b"},
 	} {
 		_, err := r.Write(context.Background(), "POST", "account-upload/auth-url", p)

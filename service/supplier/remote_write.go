@@ -44,6 +44,10 @@ func (r *remoteClient) Write(ctx context.Context, method, resource string, body 
 		path, action = remoteAccountsPath+"/auth-url", "auth-url"
 	case resource == "account-upload/exchange" && method == http.MethodPost:
 		path, action = remoteAccountsPath+"/exchange", "exchange"
+	case resource == "account-upload/import-rt" && method == http.MethodPost:
+		path, action = remoteAccountsPath+"/import-rt", "import-rt"
+	case resource == "account-upload/import-sk" && method == http.MethodPost:
+		path, action = remoteAccountsPath+"/import-by-session-key/batch", "import-sk"
 	default:
 		return nil, remoteErr(400, "invalid_resource")
 	}
@@ -78,9 +82,15 @@ func (r *remoteClient) Write(ctx context.Context, method, resource string, body 
 		if err != nil {
 			return nil, err
 		}
+	case "import-rt", "import-sk":
+		payload, err = remoteImportBody(m, action)
+		if err != nil {
+			return nil, err
+		}
 	}
+	accountImport := action == "import-rt" || action == "import-sk"
 	timeout := 30 * time.Second
-	if action == "auth-url" || action == "exchange" || action == "import" {
+	if action == "auth-url" || action == "exchange" || action == "import" || accountImport {
 		timeout = 60 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -121,14 +131,29 @@ func (r *remoteClient) Write(ctx context.Context, method, resource string, body 
 			}
 		}
 	}
-	if action == "auth-url" || action == "exchange" {
+	if action == "auth-url" || action == "exchange" || accountImport {
 		if err := r.authorizeUpload(ctx, s, payload); err != nil {
 			return nil, err
 		}
 	}
+	if action == "import-sk" {
+		payload = remoteSKPayload(payload)
+	}
 	value, err := r.request(ctx, s, method, path, payload)
 	if err != nil {
+		if accountImport {
+			if e, ok := err.(*RemoteError); !ok || (e.Status != 400 && e.Status != 401 && e.Status != 403 && e.Status != 429) {
+				return nil, remoteErr(502, "import_result_unconfirmed")
+			}
+		}
 		return nil, err
+	}
+	if accountImport {
+		count := 1
+		if action == "import-sk" {
+			count = len(payload["session_keys"].([]string))
+		}
+		return remoteImportResult(value, action, count), nil
 	}
 	response, err := remoteObject(value)
 	if err != nil {
@@ -183,7 +208,12 @@ func remoteUploadBody(m map[string]any, exchange bool) (map[string]any, error) {
 	result := map[string]any{"provider": "anthropic", "oauth_flow": "login", "inference_backend": "native", "overwrite": false, "overwrite_existing": false, "outbound_proxy_mode": "direct", "outbound_proxy_id": nil}
 	for key, value := range m {
 		switch key {
-		case "provider", "oauth_flow", "inference_backend", "overwrite", "overwrite_existing":
+		case "oauth_flow":
+			if value != "login" && value != "setup_token" {
+				return nil, remoteErr(400, "invalid_parameters")
+			}
+			result[key] = value
+		case "provider", "inference_backend", "overwrite", "overwrite_existing":
 			if value != result[key] {
 				return nil, remoteErr(400, "invalid_parameters")
 			}

@@ -43,6 +43,8 @@ const auditActions: Record<string, string> = {
   'GET /supplier-api/v1/account-upload/options': 'configure',
   'POST /supplier-api/v1/account-upload/auth-url': 'authorize',
   'POST /supplier-api/v1/account-upload/exchange': 'exchange',
+  'POST /supplier-api/v1/account-upload/import-rt': 'method_rt',
+  'POST /supplier-api/v1/account-upload/import-sk': 'method_sk',
 }
 
 export function auditLabelKey(action: string | undefined): string {

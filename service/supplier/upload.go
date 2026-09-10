@@ -17,6 +17,7 @@ import (
 var resourceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type UploadInput struct {
+	OAuthFlow     string   `json:"oauth_flow,omitempty"`
 	BindingID     int64    `json:"binding_id"`
 	Name          string   `json:"name"`
 	ProxyMode     string   `json:"outbound_proxy_mode"`
@@ -35,6 +36,9 @@ type frozenUpload struct {
 }
 
 func (in UploadInput) valid() bool {
+	if in.OAuthFlow != "" && in.OAuthFlow != "login" && in.OAuthFlow != "setup_token" {
+		return false
+	}
 	if strings.TrimSpace(in.Name) == "" || utf8.RuneCountInString(in.Name) > 64 || len(in.GroupIDs) > 100 {
 		return false
 	}
@@ -53,6 +57,9 @@ func (in UploadInput) valid() bool {
 }
 func (in UploadInput) payload() map[string]any {
 	body := map[string]any{"name": strings.TrimSpace(in.Name), "provider": "anthropic", "oauth_flow": "login", "inference_backend": "native", "overwrite_existing": false, "outbound_proxy_mode": in.ProxyMode, "group_ids": in.GroupIDs, "max_rpm": in.MaxRPM, "max_tpm": in.MaxTPM, "max_concurrent": in.MaxConcurrent, "max_sessions": in.MaxSessions}
+	if in.OAuthFlow != "" {
+		body["oauth_flow"] = in.OAuthFlow
+	}
 	if in.ProxyMode == "manual" {
 		body["outbound_proxy_id"] = in.ProxyID
 	}

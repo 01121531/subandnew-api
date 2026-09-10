@@ -6,12 +6,18 @@ import type { z } from 'zod'
 
 import { Input } from '@/components/ui/input'
 import { NativeSelectOption } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
 import { useSupplierUploadPreferences } from '@/stores/supplier-upload-preferences'
 
+import { parseSessionKeys, uploadFormSchema } from '../lib/import-input'
 import { policyValues } from '../lib/policy'
-import { uploadSchema } from '../lib/schemas'
 import { uploadDefaults } from '../lib/upload-defaults'
-import type { UploadInput, UploadOptions } from '../types'
+import type {
+  AccountImportCredentials,
+  UploadInput,
+  UploadMethod,
+  UploadOptions,
+} from '../types'
 import { Field, SelectField } from './common'
 
 export function UploadConfig(props: {
@@ -19,19 +25,33 @@ export function UploadConfig(props: {
   supplierId: number
   options: UploadOptions
   pending: boolean
+  method: UploadMethod
+  initial?: UploadInput
+  onMethodChange: (method: UploadMethod) => void
   onDirtyChange: (dirty: boolean) => void
-  onSubmit: (data: UploadInput) => void
+  onSubmit: (data: UploadInput, credentials: AccountImportCredentials) => void
 }) {
   const { t } = useTranslation()
-  const form = useForm<z.input<typeof uploadSchema>, unknown, UploadInput>({
-    resolver: zodResolver(uploadSchema),
-    defaultValues: uploadDefaults(
-      props.bindingId,
-      props.options,
-      useSupplierUploadPreferences.getState().choices?.[
-        `${props.supplierId}:${props.bindingId}`
-      ]
-    ),
+  const schema = uploadFormSchema(props.method)
+  const form = useForm<
+    z.input<typeof schema>,
+    unknown,
+    z.output<typeof schema>
+  >({
+    resolver: zodResolver(schema),
+    defaultValues: {
+      ...uploadDefaults(
+        props.bindingId,
+        props.options,
+        useSupplierUploadPreferences.getState().choices?.[
+          `${props.supplierId}:${props.bindingId}`
+        ]
+      ),
+      ...props.initial,
+      refresh_token: '',
+      access_token: '',
+      session_keys_text: '',
+    },
   })
   const dirty = form.formState.isDirty
   const onDirtyChange = props.onDirtyChange
@@ -41,17 +61,102 @@ export function UploadConfig(props: {
   return (
     <form
       id='supplier-upload-config'
-      onSubmit={form.handleSubmit(props.onSubmit)}
+      onSubmit={form.handleSubmit(
+        ({ refresh_token, access_token, session_keys_text, ...data }) => {
+          let credentials: AccountImportCredentials = {}
+          if (props.method === 'rt') {
+            credentials = {
+              refresh_token: refresh_token.trim(),
+              ...(access_token.trim()
+                ? { access_token: access_token.trim() }
+                : {}),
+            }
+          } else if (props.method === 'sk') {
+            credentials = { session_keys: parseSessionKeys(session_keys_text) }
+          }
+          form.resetField('refresh_token')
+          form.resetField('access_token')
+          form.resetField('session_keys_text')
+          props.onSubmit(data, credentials)
+        }
+      )}
       className='grid min-w-0 gap-5'
     >
       <fieldset disabled={props.pending} className='grid min-w-0 gap-5'>
+        <SelectField
+          id='upload-method'
+          label={t('supplier.addMethod')}
+          value={props.method}
+          onChange={(method) => {
+            if (!['login', 'setup_token', 'rt', 'sk'].includes(method)) return
+            form.resetField('refresh_token')
+            form.resetField('access_token')
+            form.resetField('session_keys_text')
+            props.onMethodChange(method as UploadMethod)
+          }}
+        >
+          {(['login', 'setup_token', 'rt', 'sk'] as const).map((method) => (
+            <NativeSelectOption key={method} value={method}>
+              {t(`supplier.method_${method}`)}
+            </NativeSelectOption>
+          ))}
+        </SelectField>
         <Field
           id='upload-name'
-          label={t('supplier.name')}
+          label={t(
+            props.method === 'sk' ? 'supplier.namePrefix' : 'supplier.name'
+          )}
           error={!!form.formState.errors.name}
         >
           <Input id='upload-name' maxLength={64} {...form.register('name')} />
         </Field>
+        {props.method === 'rt' && (
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <Field
+              id='upload-rt'
+              label={t('supplier.refreshToken')}
+              error={!!form.formState.errors.refresh_token}
+            >
+              <Input
+                id='upload-rt'
+                type='password'
+                autoComplete='off'
+                spellCheck={false}
+                {...form.register('refresh_token')}
+              />
+            </Field>
+            <Field
+              id='upload-at'
+              label={t('supplier.accessTokenOptional')}
+              error={!!form.formState.errors.access_token}
+            >
+              <Input
+                id='upload-at'
+                type='password'
+                autoComplete='off'
+                spellCheck={false}
+                {...form.register('access_token')}
+              />
+            </Field>
+          </div>
+        )}
+        {props.method === 'sk' && (
+          <Field id='upload-sk' label={t('supplier.sessionKeys')}>
+            <Textarea
+              id='upload-sk'
+              autoComplete='off'
+              spellCheck={false}
+              rows={4}
+              className='max-h-48 resize-y font-mono text-xs'
+              {...form.register('session_keys_text')}
+            />
+            {form.formState.errors.session_keys_text && (
+              <p role='alert' className='text-destructive text-xs'>
+                {t('supplier.sessionKeysInvalid')}
+              </p>
+            )}
+          </Field>
+        )}
         <div className='grid gap-4 sm:grid-cols-2'>
           <SelectField
             id='upload-mode'

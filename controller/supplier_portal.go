@@ -195,3 +195,23 @@ func ExchangeSupplierPortalUpload(c *gin.Context) {
 	}
 	supplierSuccess(c, data)
 }
+
+func ImportSupplierPortalAccounts(kind string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := supplierPrincipal(c, true)
+		if !ok {
+			return
+		}
+		var in supplier.ImportAccountInput
+		if !supplierDecode(c, &in) {
+			return
+		}
+		c.Set("supplier_binding_id", in.BindingID)
+		data, err := supplierService().ImportAccounts(c.Request.Context(), p, kind, in)
+		if err != nil {
+			supplierFailure(c, err)
+			return
+		}
+		supplierSuccess(c, data)
+	}
+}

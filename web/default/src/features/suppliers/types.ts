@@ -137,6 +137,7 @@ export interface UploadOptions extends Snapshot {
   proxies: Array<{ id: string; name: string; host: string; port: number }>
 }
 export interface UploadInput {
+  oauth_flow?: 'login' | 'setup_token'
   binding_id: number
   name: string
   outbound_proxy_mode: 'direct' | 'manual' | 'auto'
@@ -148,6 +149,29 @@ export interface UploadInput {
   max_tpm: number
   max_concurrent: number
   max_sessions: number
+}
+export type UploadMethod = 'login' | 'setup_token' | 'rt' | 'sk'
+export interface AccountImportCredentials {
+  refresh_token?: string
+  access_token?: string
+  session_keys?: string[]
+}
+type AccountImportStatus =
+  | 'imported'
+  | 'duplicate'
+  | 'failed'
+  | 'proxy_failed'
+  | 'quota_blocked'
+  | 'sk_invalid'
+  | 'reauth_required'
+  | 'unknown'
+export interface AccountImportResult {
+  total: number
+  ok: number
+  duplicate: number
+  failed: number
+  unknown: number
+  results: Array<{ index: number; status: AccountImportStatus }>
 }
 export interface OAuthFlow {
   flow_id: string
