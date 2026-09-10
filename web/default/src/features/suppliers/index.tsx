@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { Plus, RefreshCw } from 'lucide-react'
+import { Copy, ExternalLink, Plus, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import {
   Table,
@@ -40,6 +40,15 @@ export function Suppliers() {
   const user = useAuthStore((state) => state.auth.user)
   const canManage = hasPermission(user, 'supplier', 'manage')
   const canAudit = hasPermission(user, 'supplier', 'audit')
+  const loginUrl = new URL('/supplier/sign-in', window.location.origin).href
+  const copyLoginUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(loginUrl)
+      toast.success(t('supplier.loginLinkCopied'))
+    } catch {
+      toast.error(t('supplier.loginLinkCopyFailed'))
+    }
+  }
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<Supplier | 'new' | null>(null)
   const [detail, setDetail] = useState<{
@@ -87,7 +96,28 @@ export function Suppliers() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('supplier.title')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
+      <SectionPageLayout.Actions className='w-full justify-start sm:w-auto sm:justify-end'>
+        <div className='flex items-center gap-1'>
+          <a
+            href={loginUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            referrerPolicy='no-referrer'
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            <ExternalLink />
+            {t('supplier.loginEntry')}
+          </a>
+          <Button
+            variant='ghost'
+            size='icon'
+            title={t('supplier.copyLoginLink')}
+            aria-label={t('supplier.copyLoginLink')}
+            onClick={() => void copyLoginUrl()}
+          >
+            <Copy />
+          </Button>
+        </div>
         <Button
           variant='ghost'
           size='icon'
