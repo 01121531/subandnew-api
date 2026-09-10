@@ -1,4 +1,9 @@
 export const supplierZh = {
+  ui_choiceSelected: '已选：{{name}}',
+  ui_choiceSearch: '搜索{{name}}',
+  ui_choiceClear: '清空搜索',
+  ui_choiceNoResults: '没有匹配的选项',
+  ui_proxyUnselected: '未选择',
   ui_binding_account_summary: '当前实例账号汇总',
   ui_account_filters: '筛选账号',
   ui_reset_filters: '重置筛选',
@@ -261,6 +266,11 @@ export const supplierZh = {
   permissionConfirm: '确认授予写入权限？供货商将可以执行所选管理操作。',
 }
 export const supplierEn: Record<keyof typeof supplierZh, string> = {
+  ui_choiceSelected: 'Selected: {{name}}',
+  ui_choiceSearch: 'Search {{name}}',
+  ui_choiceClear: 'Clear search',
+  ui_choiceNoResults: 'No matching options',
+  ui_proxyUnselected: 'Not selected',
   ui_binding_account_summary: 'Current instance account summary',
   ui_account_filters: 'Account filters',
   ui_reset_filters: 'Reset filters',

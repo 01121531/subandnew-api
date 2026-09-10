@@ -121,6 +121,49 @@
 }
 
 /* Portal-only surfaces: management pages keep the shared styles above. */
+.supplier-experience .supplier-upload-choice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: var(--supplier-surface);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.supplier-experience .supplier-upload-choice:hover {
+  background: var(--supplier-subtle);
+}
+
+.supplier-experience .supplier-upload-choice[data-selected='true'] {
+  border-color: var(--primary);
+  background: var(--supplier-selected);
+}
+
+.supplier-experience .supplier-upload-choice:has(:focus-visible) {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.supplier-experience .supplier-upload-choice[data-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.supplier-experience .supplier-upload-choice-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 .supplier-experience {
   --supplier-canvas: #f5f6f8;
   --supplier-sidebar: #f0f2f5;

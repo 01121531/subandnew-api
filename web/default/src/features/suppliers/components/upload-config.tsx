@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import type { z } from 'zod'
 
 import { Input } from '@/components/ui/input'
-import { NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { useSupplierUploadPreferences } from '@/stores/supplier-upload-preferences'
 
@@ -18,7 +17,8 @@ import type {
   UploadMethod,
   UploadOptions,
 } from '../types'
-import { Field, SelectField } from './common'
+import { Field } from './common'
+import { UploadChoiceField } from './upload-choice-field'
 
 export function UploadConfig(props: {
   bindingId: number
@@ -84,9 +84,16 @@ export function UploadConfig(props: {
       className='grid min-w-0 gap-5'
     >
       <fieldset disabled={props.pending} className='grid min-w-0 gap-5'>
-        <SelectField
+        <UploadChoiceField
           id='upload-method'
           label={t('supplier.addMethod')}
+          layout='methods'
+          options={(['login', 'setup_token', 'rt', 'sk'] as const).map(
+            (method) => ({
+              value: method,
+              label: t(`supplier.method_${method}`),
+            })
+          )}
           value={props.method}
           disabled={props.pending}
           onChange={(method) => {
@@ -95,13 +102,7 @@ export function UploadConfig(props: {
             form.resetField('session_keys_text')
             props.onMethodChange(method as UploadMethod)
           }}
-        >
-          {(['login', 'setup_token', 'rt', 'sk'] as const).map((method) => (
-            <NativeSelectOption key={method} value={method}>
-              {t(`supplier.method_${method}`)}
-            </NativeSelectOption>
-          ))}
-        </SelectField>
+        />
         <fieldset className='supplier-form-section'>
           <legend>{t('supplier.ui_accountInfo')}</legend>
           <Field
@@ -177,10 +178,17 @@ export function UploadConfig(props: {
         </fieldset>
         <fieldset className='supplier-form-section'>
           <legend>{t('supplier.ui_connection')}</legend>
-          <div className='grid gap-4 sm:grid-cols-2'>
-            <SelectField
+          <div className='grid min-w-0 gap-5'>
+            <UploadChoiceField
               id='upload-mode'
               label={t('supplier.proxyMode')}
+              layout='modes'
+              disabled={props.pending}
+              options={[
+                { value: 'direct', label: t('supplier.direct') },
+                { value: 'manual', label: t('supplier.proxy') },
+                { value: 'auto', label: t('supplier.auto') },
+              ]}
               value={mode}
               onChange={(value) => {
                 if (
@@ -200,22 +208,18 @@ export function UploadConfig(props: {
                   { shouldDirty: true }
                 )
               }}
-            >
-              <NativeSelectOption value='direct'>
-                {t('supplier.direct')}
-              </NativeSelectOption>
-              <NativeSelectOption value='manual'>
-                {t('supplier.proxy')}
-              </NativeSelectOption>
-              <NativeSelectOption value='auto'>
-                {t('supplier.auto')}
-              </NativeSelectOption>
-            </SelectField>
+            />
             {mode === 'manual' && (
               <div>
-                <SelectField
+                <UploadChoiceField
                   id='upload-proxy'
                   label={t('supplier.proxy')}
+                  disabled={props.pending}
+                  emptyLabel={t('supplier.ui_proxyUnselected')}
+                  options={props.options.proxies.map((item) => ({
+                    value: item.id,
+                    label: `${item.name} (${item.host}:${item.port})`,
+                  }))}
                   inputRef={form.register('outbound_proxy_id').ref}
                   error={
                     form.formState.errors.outbound_proxy_id &&
@@ -225,18 +229,10 @@ export function UploadConfig(props: {
                   onChange={(value) =>
                     form.setValue('outbound_proxy_id', value, {
                       shouldDirty: true,
+                      shouldValidate: true,
                     })
                   }
-                >
-                  <NativeSelectOption value=''>
-                    {t('supplier.none')}
-                  </NativeSelectOption>
-                  {props.options.proxies.map((item) => (
-                    <NativeSelectOption key={item.id} value={item.id}>
-                      {item.name} ({item.host}:{item.port})
-                    </NativeSelectOption>
-                  ))}
-                </SelectField>
+                />
                 {!props.options.proxies.length && (
                   <p
                     role='status'
@@ -251,10 +247,16 @@ export function UploadConfig(props: {
         </fieldset>
         <fieldset className='supplier-form-section'>
           <legend>{t('supplier.ui_templates')}</legend>
-          <div className='grid gap-4 sm:grid-cols-2'>
-            <SelectField
+          <div className='grid min-w-0 gap-5'>
+            <UploadChoiceField
               id='upload-policy'
               label={t('supplier.policy')}
+              disabled={props.pending}
+              emptyLabel={t('supplier.none')}
+              options={props.options.policies.map((item) => ({
+                value: item.id,
+                label: item.name,
+              }))}
               value={form.watch('policy_template_id')}
               onChange={(value) => {
                 form.setValue('policy_template_id', value, {
@@ -272,33 +274,21 @@ export function UploadConfig(props: {
                   }
                 }
               }}
-            >
-              <NativeSelectOption value=''>
-                {t('supplier.none')}
-              </NativeSelectOption>
-              {props.options.policies.map((item) => (
-                <NativeSelectOption key={item.id} value={item.id}>
-                  {item.name}
-                </NativeSelectOption>
-              ))}
-            </SelectField>
-            <SelectField
+            />
+            <UploadChoiceField
               id='upload-template'
               label={t('supplier.template')}
+              disabled={props.pending}
+              emptyLabel={t('supplier.none')}
+              options={props.options.templates.map((item) => ({
+                value: item.id,
+                label: item.name,
+              }))}
               value={form.watch('cc_template_id')}
               onChange={(value) =>
                 form.setValue('cc_template_id', value, { shouldDirty: true })
               }
-            >
-              <NativeSelectOption value=''>
-                {t('supplier.none')}
-              </NativeSelectOption>
-              {props.options.templates.map((item) => (
-                <NativeSelectOption key={item.id} value={item.id}>
-                  {item.name}
-                </NativeSelectOption>
-              ))}
-            </SelectField>
+            />
           </div>
           <fieldset className='grid min-w-0 gap-3'>
             <legend className='text-sm font-medium'>
