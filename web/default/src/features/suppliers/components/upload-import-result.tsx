@@ -1,6 +1,14 @@
+import { CheckCircle2, CircleHelp, CopyCheck, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { AccountImportResult } from '../types'
+
+const resultStyles = {
+  ok: { icon: CheckCircle2, color: 'text-emerald-700 dark:text-emerald-400' },
+  duplicate: { icon: CopyCheck, color: 'text-muted-foreground' },
+  failed: { icon: XCircle, color: 'text-red-700 dark:text-red-400' },
+  unknown: { icon: CircleHelp, color: 'text-amber-700 dark:text-amber-400' },
+}
 
 export function ImportResultView({ result }: { result: AccountImportResult }) {
   const { t } = useTranslation()
@@ -10,16 +18,22 @@ export function ImportResultView({ result }: { result: AccountImportResult }) {
         {t('supplier.accountImportResult')}
       </h2>
       <dl className='grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4'>
-        {(['ok', 'duplicate', 'failed', 'unknown'] as const).map((key) => (
-          <div key={key}>
-            <dt className='text-muted-foreground text-xs'>
-              {t(`supplier.importCount_${key}`)}
-            </dt>
-            <dd className='mt-1 text-xl font-semibold tabular-nums'>
-              {result[key]}
-            </dd>
-          </div>
-        ))}
+        {(['ok', 'duplicate', 'failed', 'unknown'] as const).map((key) => {
+          const Icon = resultStyles[key].icon
+          return (
+            <div key={key}>
+              <dt
+                className={`flex items-center gap-2 text-xs ${resultStyles[key].color}`}
+              >
+                <Icon className='size-4' aria-hidden='true' />
+                {t(`supplier.importCount_${key}`)}
+              </dt>
+              <dd className='mt-1 text-xl font-semibold tabular-nums'>
+                {result[key]}
+              </dd>
+            </div>
+          )
+        })}
       </dl>
       {result.unknown > 0 && (
         <p role='status' className='text-sm text-amber-700 dark:text-amber-400'>

@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -27,6 +28,7 @@ import { portalApi } from '../portal-api'
 import type { UsageMetrics } from '../types'
 import { Metric } from './accounts'
 import { Empty, Freshness, QueryState } from './common'
+import { CostValue } from './cost-value'
 
 export function UsageView(props: { bindingId: number }) {
   const { t } = useTranslation()
@@ -39,7 +41,7 @@ export function UsageView(props: { bindingId: number }) {
   const total = aggregateUsage(query.data?.days)
   const colors = { cost: '#059669', requests: '#0284c7', tokens: '#d97706' }
   return (
-    <div className='grid min-w-0 gap-5'>
+    <div className='supplier-portal grid min-w-0 gap-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <Tabs
           value={String(days)}
@@ -63,11 +65,17 @@ export function UsageView(props: { bindingId: number }) {
         pending={query.isPending}
         error={query.error}
         retry={query.refresh}
+        hasData={!!query.data}
       >
-        <dl className='grid gap-4 border-y py-5 min-[420px]:grid-cols-3'>
+        <h2 className='text-sm font-semibold'>
+          {t('supplier.ui_period_totals', {
+            period: t('supplier.days', { count: days }),
+          })}
+        </h2>
+        <dl className='grid gap-4 border-y py-3 min-[420px]:grid-cols-3'>
           <Metric
             label={t('supplier.cost')}
-            value={formatCost(total.cost.value)}
+            value={<CostValue value={total.cost.value} />}
             note={total.cost.partial ? t('supplier.partialData') : undefined}
           />
           <Metric
@@ -84,7 +92,7 @@ export function UsageView(props: { bindingId: number }) {
           />
         </dl>
         <div className='flex flex-wrap items-center justify-between gap-3'>
-          <h2 className='font-semibold'>{t('supplier.trend')}</h2>
+          <h2 className='text-sm font-semibold'>{t('supplier.trend')}</h2>
           <Tabs
             value={metric}
             onValueChange={(value) => {
@@ -97,7 +105,7 @@ export function UsageView(props: { bindingId: number }) {
               }
             }}
           >
-            <TabsList>
+            <TabsList aria-label={t('supplier.trend')}>
               {(['cost', 'requests', 'tokens'] as const).map((value) => (
                 <TabsTrigger key={value} value={value}>
                   {t(`supplier.${value}`)}
@@ -111,8 +119,8 @@ export function UsageView(props: { bindingId: number }) {
         ) : (
           <div
             className='h-72 min-w-0'
-            role='img'
-            aria-label={t('supplier.trend')}
+            role='group'
+            aria-label={`${t('supplier.trend')}: ${t(`supplier.${metric}`)}`}
           >
             <ResponsiveContainer width='100%' height='100%'>
               <BarChart
@@ -159,33 +167,127 @@ export function UsageView(props: { bindingId: number }) {
             </ResponsiveContainer>
           </div>
         )}
-        <h2 className='font-semibold'>{t('supplier.accountUsage')}</h2>
+        {!!query.data?.days.length && (
+          <details className='group min-w-0 border-y'>
+            <summary className='flex cursor-pointer list-none items-center justify-between gap-2 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600'>
+              {t('supplier.ui_daily_usage')}
+              <ChevronDown
+                className='size-4 shrink-0 transition-transform group-open:rotate-180'
+                aria-hidden='true'
+              />
+            </summary>
+            <UsageBreakdown
+              label={t('supplier.ui_daily_usage')}
+              nameLabel={t('supplier.ui_date')}
+              items={query.data.days.map((day) => ({
+                ...day,
+                id: day.date,
+                label: day.date,
+              }))}
+            />
+          </details>
+        )}
+        <h2 className='text-sm font-semibold'>{t('supplier.accountUsage')}</h2>
         {!query.data?.accounts?.length ? (
           <Empty />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {['name', 'requests', 'tokens', 'cost'].map((key) => (
-                  <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {query.data.accounts.map((account) => (
-                <TableRow key={account.id}>
-                  <TableCell className='max-w-64 truncate'>
-                    {account.name}
-                  </TableCell>
-                  <TableCell>{formatNumber(account.requests)}</TableCell>
-                  <TableCell>{formatNumber(account.tokens)}</TableCell>
-                  <TableCell>{formatCost(account.cost)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <UsageBreakdown
+            label={t('supplier.accountUsage')}
+            nameLabel={t('supplier.name')}
+            items={query.data.accounts.map((account) => ({
+              ...account,
+              label: account.name || '--',
+            }))}
+          />
         )}
       </QueryState>
+    </div>
+  )
+}
+
+function UsageBreakdown(props: {
+  label: string
+  nameLabel: string
+  items: Array<UsageMetrics & { id: string; label: string }>
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className='min-w-0'>
+      <div
+        className='grid min-w-0 gap-3 pb-3 md:hidden'
+        role='list'
+        aria-label={props.label}
+      >
+        {props.items.map((item) => (
+          <article
+            key={item.id}
+            role='listitem'
+            className='min-w-0 rounded-md border p-3'
+          >
+            <h3 className='text-sm font-medium [overflow-wrap:anywhere]'>
+              {item.label}
+            </h3>
+            <dl className='mt-3 grid min-w-0 grid-cols-2 gap-3 text-sm'>
+              <div className='col-span-2 min-w-0'>
+                <dt className='text-muted-foreground text-xs'>
+                  {t('supplier.cost')}
+                </dt>
+                <dd className='font-medium [overflow-wrap:anywhere] tabular-nums'>
+                  <CostValue value={item.cost} />
+                </dd>
+              </div>
+              <div className='min-w-0'>
+                <dt className='text-muted-foreground text-xs'>
+                  {t('supplier.requests')}
+                </dt>
+                <dd className='[overflow-wrap:anywhere] tabular-nums'>
+                  {formatNumber(item.requests)}
+                </dd>
+              </div>
+              <div className='min-w-0'>
+                <dt className='text-muted-foreground text-xs'>
+                  {t('supplier.tokens')}
+                </dt>
+                <dd className='[overflow-wrap:anywhere] tabular-nums'>
+                  {formatNumber(item.tokens)}
+                </dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+      <div className='hidden min-w-0 md:block'>
+        <Table aria-label={props.label}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope='col'>{props.nameLabel}</TableHead>
+              {['requests', 'tokens', 'cost'].map((key) => (
+                <TableHead key={key} scope='col' className='text-right'>
+                  {t(`supplier.${key}`)}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {props.items.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell className='max-w-64 font-medium break-all whitespace-normal'>
+                  {item.label}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  {formatNumber(item.requests)}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  {formatNumber(item.tokens)}
+                </TableCell>
+                <TableCell className='text-right tabular-nums'>
+                  <CostValue value={item.cost} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 
 import { Accounts } from './components/accounts'
-import { QueryState } from './components/common'
+import { Empty, QueryState } from './components/common'
 import { PasswordForm } from './components/password-form'
 import { PortalNavigation } from './components/portal-navigation'
 import { Proxies } from './components/proxies'
@@ -95,7 +95,7 @@ function PortalContent(props: { session: AuthSession }) {
         </SheetContent>
       </Sheet>
       <div className='min-w-0'>
-        <header className='bg-background/95 flex min-h-16 items-center gap-3 border-b px-4 lg:px-6'>
+        <header className='bg-background/95 sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b px-4 backdrop-blur-sm lg:px-6'>
           <Button
             variant='ghost'
             size='icon'
@@ -109,7 +109,7 @@ function PortalContent(props: { session: AuthSession }) {
             <p className='text-muted-foreground text-xs'>
               {t('supplier.portal')}
             </p>
-            <p className='truncate text-sm font-medium'>
+            <p className='text-sm font-medium [overflow-wrap:anywhere] break-words'>
               {binding?.instance_name ?? supplier.name}
             </p>
           </div>
@@ -125,7 +125,7 @@ function PortalContent(props: { session: AuthSession }) {
             <LogOut />
           </Button>
         </header>
-        <main className='mx-auto grid max-w-[1600px] min-w-0 gap-5 p-4 sm:p-6'>
+        <main className='mx-auto grid max-w-[1600px] min-w-0 gap-6 p-4 sm:p-6'>
           <div className='flex flex-wrap items-center justify-between gap-3'>
             <h1 className='text-xl font-semibold'>
               {t(`supplier.${current}`)}
@@ -154,21 +154,19 @@ function PortalContent(props: { session: AuthSession }) {
                 <PasswordForm session={props.session} />
               )}
               {current !== 'security' && !binding && (
-                <p className='text-muted-foreground py-16 text-center text-sm'>
-                  {t(
+                <Empty
+                  message={t(
                     available.length
                       ? 'supplier.chooseBinding'
                       : 'supplier.noBindings'
                   )}
-                </p>
+                />
               )}
               {binding && current === 'accounts' && supplier.view_accounts && (
                 <Accounts bindingId={binding.id} />
               )}
               {binding && current === 'accounts' && !supplier.view_accounts && (
-                <p className='text-muted-foreground border-y py-12 text-center text-sm'>
-                  {t('supplier.accountsNotPermitted')}
-                </p>
+                <Empty message={t('supplier.accountsNotPermitted')} />
               )}
               {binding && current === 'usage' && (
                 <UsageView bindingId={binding.id} />

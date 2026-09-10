@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, useNavigate } from '@tanstack/react-router'
-import { ShieldCheck } from 'lucide-react'
+import { Eye, EyeOff, LogIn, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -16,10 +17,13 @@ import { loginSchema } from './lib/schemas'
 import { portalApi } from './portal-api'
 import { sessionOptions, supplierClient } from './session'
 
+import '@/styles/supplier-portal.css'
+
 export function SupplierSignIn() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const session = useQuery(sessionOptions)
+  const [showPassword, setShowPassword] = useState(false)
   const form = useForm({
     resolver: zodResolver(loginSchema),
     defaultValues: { username: '', password: '' },
@@ -32,16 +36,21 @@ export function SupplierSignIn() {
   })
   if (session.data?.authenticated) return <Navigate to='/supplier' replace />
   return (
-    <main className='bg-background text-foreground flex min-h-dvh flex-col'>
-      <header className='flex items-center justify-between gap-3 border-b px-5 py-3'>
+    <main className='supplier-portal bg-background text-foreground flex min-h-dvh flex-col'>
+      <header className='flex items-center justify-between gap-3 border-b px-5 py-3 sm:px-8'>
         <span className='flex items-center gap-2 font-semibold'>
-          <ShieldCheck className='size-5 text-emerald-600 dark:text-emerald-400' />
+          <ShieldCheck className='text-primary size-5' />
           Claude Gateway
         </span>
         <ThemeSwitch />
       </header>
-      <div className='m-auto w-full max-w-sm px-5 py-12'>
-        <h1 className='mb-8 text-2xl font-semibold'>{t('supplier.signIn')}</h1>
+      <div className='m-auto w-full max-w-[400px] px-6 py-12 sm:py-16'>
+        <div className='mb-8 grid gap-3'>
+          <p className='text-muted-foreground text-sm'>
+            {t('supplier.portal')}
+          </p>
+          <h1 className='text-2xl font-semibold'>{t('supplier.signIn')}</h1>
+        </div>
         <QueryState
           pending={session.isPending}
           error={session.error}
@@ -49,39 +58,86 @@ export function SupplierSignIn() {
         >
           <form
             className='grid gap-5'
-            onSubmit={form.handleSubmit((data) => login.mutate(data))}
+            noValidate
+            onSubmit={form.handleSubmit((data) => {
+              if (!login.isPending) login.mutate(data)
+            })}
           >
-            <Field
-              id='supplier-username'
-              label={t('supplier.username')}
-              error={!!form.formState.errors.username}
-            >
-              <Input
+            <fieldset disabled={login.isPending} className='grid min-w-0 gap-5'>
+              <Field
                 id='supplier-username'
-                autoComplete='username'
-                {...form.register('username')}
-              />
-            </Field>
-            <Field
-              id='supplier-password'
-              label={t('supplier.password')}
-              error={!!form.formState.errors.password}
-            >
-              <Input
+                label={t('supplier.username')}
+                error={!!form.formState.errors.username}
+              >
+                <Input
+                  id='supplier-username'
+                  autoComplete='username'
+                  autoCapitalize='none'
+                  spellCheck={false}
+                  aria-invalid={!!form.formState.errors.username}
+                  aria-describedby={
+                    form.formState.errors.username
+                      ? 'supplier-username-error'
+                      : undefined
+                  }
+                  {...form.register('username')}
+                />
+              </Field>
+              <Field
                 id='supplier-password'
-                type='password'
-                autoComplete='current-password'
-                {...form.register('password')}
-              />
-            </Field>
-            {login.error && (
-              <p role='alert' className='text-destructive text-sm'>
-                {t(errorKey(login.error))}
-              </p>
-            )}
-            <Button type='submit' disabled={login.isPending}>
-              {login.isPending ? t('supplier.loading') : t('supplier.signIn')}
-            </Button>
+                label={t('supplier.password')}
+                error={!!form.formState.errors.password}
+              >
+                <div className='relative'>
+                  <Input
+                    id='supplier-password'
+                    type={showPassword ? 'text' : 'password'}
+                    className='pr-12'
+                    autoComplete='current-password'
+                    aria-invalid={!!form.formState.errors.password}
+                    aria-describedby={
+                      form.formState.errors.password
+                        ? 'supplier-password-error'
+                        : undefined
+                    }
+                    {...form.register('password')}
+                  />
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className='absolute top-0 right-0'
+                    aria-label={t(
+                      showPassword
+                        ? 'supplier.ui_hidePassword'
+                        : 'supplier.ui_showPassword'
+                    )}
+                    title={t(
+                      showPassword
+                        ? 'supplier.ui_hidePassword'
+                        : 'supplier.ui_showPassword'
+                    )}
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword((value) => !value)}
+                  >
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </Button>
+                </div>
+              </Field>
+              {login.error && (
+                <p role='alert' className='text-destructive text-sm'>
+                  {t(errorKey(login.error))}
+                </p>
+              )}
+              <Button
+                type='submit'
+                className='mt-1 w-full'
+                disabled={login.isPending}
+              >
+                <LogIn className='size-4' />
+                {login.isPending ? t('supplier.loading') : t('supplier.signIn')}
+              </Button>
+            </fieldset>
           </form>
         </QueryState>
       </div>

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import {
   Table,
   TableBody,
@@ -13,6 +14,7 @@ import {
 
 import { adminApi } from '../admin-api'
 import { auditLabelKey } from '../lib/display'
+import type { Audit } from '../types'
 import { Empty, Pagination, QueryState, Time } from './common'
 
 export function Audits(props: { supplierId: number }) {
@@ -22,71 +24,135 @@ export function Audits(props: { supplierId: number }) {
     queryKey: ['supplier-admin', props.supplierId, 'audits', page],
     queryFn: () => adminApi.audits(props.supplierId, page),
   })
+  const result = (item: Audit) => (
+    <Badge variant={item.status_code < 400 ? 'secondary' : 'destructive'}>
+      {item.status_code < 400 ? t('supplier.success') : t('supplier.failed')} (
+      {item.status_code})
+    </Badge>
+  )
+  const errorCode = (item: Audit) =>
+    item.error_code &&
+    /^[a-zA-Z][a-zA-Z0-9_]{0,95}$/.test(item.error_code) && (
+      <div className='text-muted-foreground mt-1 font-mono text-xs break-all'>
+        {item.error_code}
+      </div>
+    )
   return (
-    <QueryState
-      pending={query.isPending}
-      error={query.error}
-      retry={() => void query.refetch()}
-    >
-      {!query.data?.items.length ? (
-        <Empty />
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {[
-                'createdAt',
-                'auditAction',
-                'admin',
-                'binding',
-                'result',
-                'duration',
-              ].map((key) => (
-                <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {query.data.items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
-                  <Time value={item.created_at} />
-                  {item.ip_address && (
-                    <div className='text-muted-foreground mt-1 max-w-48 text-xs break-all whitespace-normal'>
-                      IP: {item.ip_address}
+    <div className='grid min-w-0 gap-4'>
+      <QueryState
+        pending={query.isPending}
+        error={query.error}
+        hasData={query.data !== undefined}
+        retry={() => void query.refetch()}
+      >
+        {!query.data?.items.length ? (
+          <Empty />
+        ) : (
+          <>
+            <div className='grid gap-3 md:hidden'>
+              {query.data.items.map((item) => (
+                <article
+                  key={item.id}
+                  className='min-w-0 rounded-md border p-3'
+                >
+                  <div className='flex flex-wrap items-start justify-between gap-2'>
+                    <h3 className='min-w-0 flex-1 text-sm font-semibold [overflow-wrap:anywhere]'>
+                      {t(auditLabelKey(item.action))}
+                    </h3>
+                    {result(item)}
+                  </div>
+                  {errorCode(item)}
+                  <dl className='mt-3 grid grid-cols-2 gap-3 text-xs'>
+                    <div className='col-span-2 min-w-0'>
+                      <dt className='text-muted-foreground'>
+                        {t('supplier.createdAt')}
+                      </dt>
+                      <dd className='mt-1'>
+                        <Time value={item.created_at} />
+                      </dd>
                     </div>
-                  )}
-                </TableCell>
-                <TableCell className='max-w-72 whitespace-normal'>
-                  {t(auditLabelKey(item.action))}
-                  {item.error_code &&
-                    /^[a-zA-Z][a-zA-Z0-9_]{0,95}$/.test(item.error_code) && (
-                      <div className='text-muted-foreground mt-1 font-mono text-xs break-all'>
-                        {item.error_code}
+                    {item.ip_address && (
+                      <div className='col-span-2 min-w-0'>
+                        <dt className='text-muted-foreground'>IP</dt>
+                        <dd className='mt-1 break-all'>{item.ip_address}</dd>
                       </div>
                     )}
-                </TableCell>
-                <TableCell>{item.admin_id || '--'}</TableCell>
-                <TableCell>{item.binding_id || '--'}</TableCell>
-                <TableCell>
-                  {item.status_code < 400
-                    ? t('supplier.success')
-                    : t('supplier.failed')}{' '}
-                  ({item.status_code})
-                </TableCell>
-                <TableCell>{item.duration_ms} ms</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      <Pagination
-        page={page}
-        size={20}
-        total={query.data?.total ?? 0}
-        onPage={setPage}
-        pending={query.isFetching}
-      />
-    </QueryState>
+                    <div>
+                      <dt className='text-muted-foreground'>
+                        {t('supplier.admin')}
+                      </dt>
+                      <dd className='mt-1 break-all'>
+                        {item.admin_id || '--'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className='text-muted-foreground'>
+                        {t('supplier.binding')}
+                      </dt>
+                      <dd className='mt-1 break-all'>
+                        {item.binding_id || '--'}
+                      </dd>
+                    </div>
+                    <div className='col-span-2'>
+                      <dt className='text-muted-foreground'>
+                        {t('supplier.duration')}
+                      </dt>
+                      <dd className='mt-1'>{item.duration_ms} ms</dd>
+                    </div>
+                  </dl>
+                </article>
+              ))}
+            </div>
+            <div className='hidden md:block'>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {[
+                      'createdAt',
+                      'auditAction',
+                      'admin',
+                      'binding',
+                      'result',
+                      'duration',
+                    ].map((key) => (
+                      <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {query.data.items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <Time value={item.created_at} />
+                        {item.ip_address && (
+                          <div className='text-muted-foreground mt-1 max-w-48 text-xs break-all whitespace-normal'>
+                            IP: {item.ip_address}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className='max-w-72 [overflow-wrap:anywhere] whitespace-normal'>
+                        {t(auditLabelKey(item.action))}
+                        {errorCode(item)}
+                      </TableCell>
+                      <TableCell>{item.admin_id || '--'}</TableCell>
+                      <TableCell>{item.binding_id || '--'}</TableCell>
+                      <TableCell>{result(item)}</TableCell>
+                      <TableCell>{item.duration_ms} ms</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
+        <Pagination
+          page={page}
+          size={20}
+          total={query.data?.total ?? 0}
+          onPage={setPage}
+          pending={query.isFetching}
+        />
+      </QueryState>
+    </div>
   )
 }

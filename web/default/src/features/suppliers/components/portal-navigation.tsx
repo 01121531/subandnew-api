@@ -22,12 +22,12 @@ export function PortalNavigation(props: {
   const { t } = useTranslation()
   return (
     <div className='flex h-full min-w-0 flex-col'>
-      <div className='flex min-h-20 items-center gap-2 border-b px-4 py-4'>
-        <ShieldCheck className='size-7 shrink-0 text-emerald-600 dark:text-emerald-400' />
+      <div className='flex min-h-20 items-center gap-3 border-b px-4 py-4'>
+        <ShieldCheck className='text-primary size-6 shrink-0' />
         <div className='min-w-0'>
           <p className='text-sm font-semibold'>Claude Gateway</p>
           <p
-            className='text-muted-foreground truncate text-xs'
+            className='text-muted-foreground text-xs [overflow-wrap:anywhere] break-words'
             title={props.name}
           >
             {props.name}

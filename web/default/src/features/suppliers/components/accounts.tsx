@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -14,7 +16,6 @@ import {
 
 import { usePortalQuery } from '../hooks/use-portal-query'
 import { formatNumber } from '../lib/display'
-import { formatCost } from '../lib/usage'
 import { portalApi } from '../portal-api'
 import type { AccountQuery } from '../types'
 import { AccountCards } from './account-cards'
@@ -27,6 +28,7 @@ import {
   SelectField,
   Time,
 } from './common'
+import { CostValue } from './cost-value'
 
 export function Accounts(props: { bindingId: number }) {
   const { t } = useTranslation()
@@ -62,28 +64,64 @@ export function Accounts(props: { bindingId: number }) {
   )
   const update = (values: Partial<AccountQuery>) =>
     setFilters((old) => ({ ...old, ...values, page: 1 }))
+  const canReset =
+    searchDraft !== '' ||
+    filters.search !== '' ||
+    filters.status !== '' ||
+    filters.recovery_window !== '' ||
+    filters.sort !== 'created_at' ||
+    filters.direction !== 'desc' ||
+    filters.page_size !== 20 ||
+    filters.page !== 1
+  const reset = () => {
+    setSearchDraft('')
+    setFilters({
+      binding_id: props.bindingId,
+      page: 1,
+      page_size: 20,
+      search: '',
+      status: '',
+      recovery_window: '',
+      sort: 'created_at',
+      direction: 'desc',
+    })
+  }
   return (
-    <div className='grid min-w-0 gap-5'>
+    <div className='supplier-portal grid min-w-0 gap-4'>
       <QueryState
         pending={summary.isPending}
         error={summary.error}
         retry={summary.refresh}
+        hasData={!!summary.data}
       >
-        <dl className='grid grid-cols-3 gap-3 border-y py-4'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <h2 className='text-sm font-semibold'>
+            {t('supplier.ui_binding_account_summary')}
+          </h2>
+          <Freshness
+            data={summary.data}
+            pending={summary.isFetching}
+            refresh={summary.refresh}
+          />
+        </div>
+        <dl className='grid gap-3 border-y py-3 min-[420px]:grid-cols-3'>
           <Metric
             label={t('supplier.totalAccounts')}
-            value={summary.data?.total_accounts}
+            value={formatNumber(summary.data?.total_accounts)}
           />
           <Metric
             label={t('supplier.availableAccounts')}
-            value={summary.data?.available_accounts}
+            value={formatNumber(summary.data?.available_accounts)}
           />
-          <Metric label={t('supplier.rpm')} value={summary.data?.rpm} />
+          <Metric
+            label={t('supplier.rpm')}
+            value={formatNumber(summary.data?.rpm)}
+          />
         </dl>
         {(summary.data?.pool_rpm !== undefined ||
           summary.data?.pool_concurrent !== undefined ||
           summary.data?.pool_available_accounts !== undefined) && (
-          <dl className='grid grid-cols-3 gap-3 border-b pb-4'>
+          <dl className='grid gap-3 border-b pb-3 min-[420px]:grid-cols-3'>
             {summary.data?.pool_rpm !== undefined && (
               <Metric
                 label={t('supplier.poolRpm')}
@@ -104,78 +142,95 @@ export function Accounts(props: { bindingId: number }) {
             )}
           </dl>
         )}
-        <Freshness
-          data={summary.data}
-          pending={summary.isFetching}
-          refresh={summary.refresh}
-        />
       </QueryState>
-      <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
-        <Field id='account-search' label={t('supplier.search')}>
-          <Input
-            id='account-search'
-            type='search'
-            value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
-          />
-        </Field>
-        <SelectField
-          id='account-status'
-          label={t('supplier.status')}
-          value={filters.status}
-          onChange={(status) => update({ status })}
-        >
-          <NativeSelectOption value=''>{t('supplier.all')}</NativeSelectOption>
-          {['available', 'active', 'cooldown', 'disabled'].map((status) => (
-            <NativeSelectOption key={status} value={status}>
-              {t(`supplier.${status}`)}
+      <section
+        aria-label={t('supplier.ui_account_filters')}
+        className='grid min-w-0 gap-3'
+      >
+        <div className='flex items-center justify-between gap-3'>
+          <h2 className='text-sm font-semibold'>
+            {t('supplier.ui_account_filters')}
+          </h2>
+          <Button
+            variant='ghost'
+            size='icon'
+            title={t('supplier.ui_reset_filters')}
+            aria-label={t('supplier.ui_reset_filters')}
+            disabled={!canReset}
+            onClick={reset}
+          >
+            <RotateCcw aria-hidden='true' />
+          </Button>
+        </div>
+        <div className='grid min-w-0 grid-cols-2 items-end gap-3 md:grid-cols-3 xl:grid-cols-[minmax(12rem,2fr)_repeat(5,minmax(0,1fr))]'>
+          <div className='col-span-2 min-w-0 md:col-span-1'>
+            <Field id='account-search' label={t('supplier.search')}>
+              <Input
+                id='account-search'
+                type='search'
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
+              />
+            </Field>
+          </div>
+          <SelectField
+            id='account-status'
+            label={t('supplier.status')}
+            value={filters.status}
+            onChange={(status) => update({ status })}
+          >
+            <NativeSelectOption value=''>
+              {t('supplier.all')}
             </NativeSelectOption>
-          ))}
-        </SelectField>
-        <SelectField
-          id='account-recovery'
-          label={t('supplier.recovery')}
-          value={filters.recovery_window}
-          onChange={(recovery_window) => update({ recovery_window })}
-        >
-          <NativeSelectOption value=''>{t('supplier.all')}</NativeSelectOption>
-          <NativeSelectOption value='15m'>
-            {t('supplier.minutes', { count: 15 })}
-          </NativeSelectOption>
-          {[1, 2, 3, 4, 5].map((hours) => (
-            <NativeSelectOption key={hours} value={`${hours}h`}>
-              {t('supplier.hours', { count: hours })}
+            {['available', 'active', 'cooldown', 'disabled'].map((status) => (
+              <NativeSelectOption key={status} value={status}>
+                {t(`supplier.${status}`)}
+              </NativeSelectOption>
+            ))}
+          </SelectField>
+          <SelectField
+            id='account-recovery'
+            label={t('supplier.recovery')}
+            value={filters.recovery_window}
+            onChange={(recovery_window) => update({ recovery_window })}
+          >
+            <NativeSelectOption value=''>
+              {t('supplier.all')}
             </NativeSelectOption>
-          ))}
-        </SelectField>
-        <SelectField
-          id='account-sort'
-          label={t('supplier.sort')}
-          value={filters.sort}
-          onChange={(sort) => update({ sort })}
-        >
-          <NativeSelectOption value='created_at'>
-            {t('supplier.createdAt')}
-          </NativeSelectOption>
-          <NativeSelectOption value='name'>
-            {t('supplier.name')}
-          </NativeSelectOption>
-          <NativeSelectOption value='total_cost'>
-            {t('supplier.totalCost')}
-          </NativeSelectOption>
-          <NativeSelectOption value='today_cost'>
-            {t('supplier.todayCost')}
-          </NativeSelectOption>
-          <NativeSelectOption value='total_requests'>
-            {t('supplier.requests')}
-          </NativeSelectOption>
-          <NativeSelectOption value='total_tokens'>
-            {t('supplier.tokens')}
-          </NativeSelectOption>
-        </SelectField>
-      </div>
-      <div className='flex flex-wrap items-end justify-between gap-3'>
-        <div className='flex gap-3'>
+            <NativeSelectOption value='15m'>
+              {t('supplier.minutes', { count: 15 })}
+            </NativeSelectOption>
+            {[1, 2, 3, 4, 5].map((hours) => (
+              <NativeSelectOption key={hours} value={`${hours}h`}>
+                {t('supplier.hours', { count: hours })}
+              </NativeSelectOption>
+            ))}
+          </SelectField>
+          <SelectField
+            id='account-sort'
+            label={t('supplier.sort')}
+            value={filters.sort}
+            onChange={(sort) => update({ sort })}
+          >
+            <NativeSelectOption value='created_at'>
+              {t('supplier.createdAt')}
+            </NativeSelectOption>
+            <NativeSelectOption value='name'>
+              {t('supplier.name')}
+            </NativeSelectOption>
+            <NativeSelectOption value='total_cost'>
+              {t('supplier.totalCost')}
+            </NativeSelectOption>
+            <NativeSelectOption value='today_cost'>
+              {t('supplier.todayCost')}
+            </NativeSelectOption>
+            <NativeSelectOption value='total_requests'>
+              {t('supplier.requests')}
+            </NativeSelectOption>
+            <NativeSelectOption value='total_tokens'>
+              {t('supplier.tokens')}
+            </NativeSelectOption>
+          </SelectField>
           <SelectField
             id='account-direction'
             label={t('supplier.direction')}
@@ -204,24 +259,45 @@ export function Accounts(props: { bindingId: number }) {
             ))}
           </SelectField>
         </div>
-        <Freshness
-          data={query.data}
-          pending={query.isFetching}
-          refresh={query.refresh}
-        />
-      </div>
+      </section>
       <QueryState
         pending={query.isPending}
         error={query.error}
         retry={query.refresh}
+        hasData={!!query.data}
       >
+        <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-3'>
+          <p className='text-sm font-medium' role='status' aria-atomic='true'>
+            {t('supplier.ui_filtered_accounts')}:{' '}
+            {formatNumber(query.data?.total)}
+          </p>
+          <Freshness
+            data={query.data}
+            pending={query.isFetching}
+            refresh={query.refresh}
+          />
+        </div>
         {!query.data?.items.length ? (
-          <Empty />
+          <Empty
+            message={t(
+              filters.search || filters.status || filters.recovery_window
+                ? 'supplier.ui_no_account_matches'
+                : 'supplier.ui_no_accounts'
+            )}
+            action={
+              canReset ? (
+                <Button variant='outline' onClick={reset}>
+                  <RotateCcw aria-hidden='true' />
+                  {t('supplier.ui_reset_filters')}
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <>
             <AccountCards accounts={query.data.items} />
             <div className='hidden min-w-0 md:block'>
-              <Table>
+              <Table aria-label={t('supplier.ui_filtered_accounts')}>
                 <TableHeader>
                   <TableRow>
                     {[
@@ -235,7 +311,22 @@ export function Accounts(props: { bindingId: number }) {
                       'tokens',
                       'createdAt',
                     ].map((key) => (
-                      <TableHead key={key}>{t(`supplier.${key}`)}</TableHead>
+                      <TableHead
+                        key={key}
+                        scope='col'
+                        className={
+                          [
+                            'todayCost',
+                            'totalCost',
+                            'requests',
+                            'tokens',
+                          ].includes(key)
+                            ? 'text-right'
+                            : undefined
+                        }
+                      >
+                        {t(`supplier.${key}`)}
+                      </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -243,33 +334,38 @@ export function Accounts(props: { bindingId: number }) {
                   {query.data.items.map((account) => (
                     <TableRow key={account.id}>
                       <TableCell
-                        className='max-w-56 truncate font-medium'
+                        className='max-w-56 min-w-36 font-medium break-all whitespace-normal'
                         title={account.name}
                       >
-                        {account.name}
+                        {account.name || '--'}
+                        <span className='text-muted-foreground mt-1 block font-mono text-xs font-normal break-all'>
+                          UUID: {account.id}
+                        </span>
                       </TableCell>
                       <TableCell
-                        className='max-w-64 truncate'
+                        className='max-w-64 min-w-40 break-all whitespace-normal'
                         title={account.email}
                       >
                         {account.email || '--'}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className='max-w-40 break-all whitespace-normal'>
                         {t(`supplier.${account.status}`, {
                           defaultValue: account.status ?? '--',
                         })}
                       </TableCell>
-                      <TableCell>{account.group_name || '--'}</TableCell>
-                      <TableCell className='tabular-nums'>
-                        {formatCost(account.today_cost)}
+                      <TableCell className='max-w-48 break-all whitespace-normal'>
+                        {account.group_name || '--'}
                       </TableCell>
-                      <TableCell className='tabular-nums'>
-                        {formatCost(account.total_cost)}
+                      <TableCell className='text-right tabular-nums'>
+                        <CostValue value={account.today_cost} />
                       </TableCell>
-                      <TableCell className='tabular-nums'>
+                      <TableCell className='text-right tabular-nums'>
+                        <CostValue value={account.total_cost} />
+                      </TableCell>
+                      <TableCell className='text-right tabular-nums'>
                         {formatNumber(account.total_requests)}
                       </TableCell>
-                      <TableCell className='tabular-nums'>
+                      <TableCell className='text-right tabular-nums'>
                         {formatNumber(account.total_tokens)}
                       </TableCell>
                       <TableCell>
@@ -296,13 +392,15 @@ export function Accounts(props: { bindingId: number }) {
 
 export function Metric(props: {
   label: string
-  value?: number | string
+  value?: ReactNode
   note?: string
 }) {
   return (
     <div className='min-w-0'>
-      <dt className='text-muted-foreground mb-1 text-xs'>{props.label}</dt>
-      <dd className='text-2xl font-semibold break-words tabular-nums'>
+      <dt className='text-muted-foreground mb-1 text-xs [overflow-wrap:anywhere]'>
+        {props.label}
+      </dt>
+      <dd className='text-xl font-semibold [overflow-wrap:anywhere] tabular-nums'>
         {props.value ?? '--'}
         {props.note && (
           <small className='mt-1 block text-xs font-normal text-amber-700 dark:text-amber-400'>

@@ -65,3 +65,10 @@ export function sessionExpired(error: unknown): boolean {
     error.code !== 'supplier_invalid_credentials'
   )
 }
+
+export function canRetainQueryData(error: unknown): boolean {
+  if (error instanceof SupplierRequestError) {
+    return error.status === 0 || error.status === 429 || error.status >= 500
+  }
+  return error instanceof TypeError
+}

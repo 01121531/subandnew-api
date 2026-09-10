@@ -8,6 +8,22 @@
     'Microsoft YaHei',
     sans-serif;
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  --primary: #1769b5;
+  --primary-foreground: #ffffff;
+  --ring: #1769b5;
+  --radius: 0.5rem;
+  font-size: 14px;
+}
+
+.dark .supplier-portal {
+  --primary: #72b7ff;
+  --primary-foreground: #101820;
+  --ring: #72b7ff;
+}
+
+.supplier-portal :is(h1, h2, h3, label, button, input, select) {
+  letter-spacing: 0;
 }
 
 .supplier-portal
@@ -18,13 +34,88 @@
     [data-slot='textarea']
   ) {
   border-radius: 6px;
+  max-width: 100%;
+}
+
+.supplier-portal
+  :is(
+    [data-slot='input'],
+    [data-slot='native-select'],
+    [data-slot='textarea']
+  ) {
+  font-size: 14px;
+}
+
+.supplier-portal [data-slot='label'] {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.supplier-portal [data-slot='button']:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.supplier-portal [data-slot='dialog-content'],
+.supplier-portal[data-slot='dialog-content'],
+.supplier-portal[data-slot='alert-dialog-content'] {
+  border-radius: 8px;
 }
 
 .supplier-portal [data-slot='table-head'] {
   background: var(--muted);
   white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  height: 40px;
 }
 
 .supplier-portal [data-slot='table-cell'] {
-  padding-block: 12px;
+  padding-block: 14px;
+  font-size: 13px;
+}
+
+.supplier-portal [data-slot='badge'] {
+  border-radius: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.supplier-portal
+  .supplier-field[data-invalid='true']
+  :is(input, select, textarea) {
+  border-color: var(--destructive);
+}
+
+.supplier-portal .supplier-form-section {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.supplier-portal .supplier-form-section > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 639px) {
+  .supplier-portal
+    :is(
+      [data-slot='button'],
+      [data-slot='native-select'],
+      [data-slot='input']
+    ) {
+    min-height: 40px;
+  }
+  .supplier-portal :is(input, select, textarea) {
+    font-size: 16px;
+  }
+  .supplier-portal[data-slot='dialog-content'].h-dvh {
+    border-radius: 0;
+  }
 }

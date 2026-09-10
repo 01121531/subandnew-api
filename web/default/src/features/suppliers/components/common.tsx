@@ -1,5 +1,11 @@
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
-import type { ReactNode } from 'react'
+import {
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  RefreshCw,
+} from 'lucide-react'
+import type { ReactNode, Ref } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -14,24 +20,36 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 
-import { errorKey } from '../lib/errors'
+import { canRetainQueryData, errorKey } from '../lib/errors'
 import { timestampMs } from '../lib/schemas'
 import type { Snapshot, Timestamp } from '../types'
 
 export function Field(props: {
   id: string
   label: string
-  error?: boolean
+  error?: ReactNode
   children: ReactNode
 }) {
   const { t } = useTranslation()
   return (
-    <div className='grid min-w-0 gap-2'>
-      <Label htmlFor={props.id}>{props.label}</Label>
+    <div
+      className='supplier-field grid min-w-0 gap-2'
+      role='group'
+      aria-labelledby={`${props.id}-label`}
+      aria-describedby={props.error ? `${props.id}-error` : undefined}
+      data-invalid={!!props.error}
+    >
+      <Label id={`${props.id}-label`} htmlFor={props.id}>
+        {props.label}
+      </Label>
       {props.children}
       {props.error && (
-        <p role='alert' className='text-destructive text-xs'>
-          {t('supplier.required')}
+        <p
+          id={`${props.id}-error`}
+          role='alert'
+          className='text-destructive text-xs'
+        >
+          {props.error === true ? t('supplier.required') : props.error}
         </p>
       )}
     </div>
@@ -44,11 +62,16 @@ export function SelectField(props: {
   onChange: (value: string) => void
   children: ReactNode
   disabled?: boolean
+  error?: ReactNode
+  inputRef?: Ref<HTMLSelectElement>
 }) {
   return (
-    <Field id={props.id} label={props.label}>
+    <Field id={props.id} label={props.label} error={props.error}>
       <NativeSelect
         id={props.id}
+        ref={props.inputRef}
+        aria-invalid={!!props.error}
+        aria-describedby={props.error ? `${props.id}-error` : undefined}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         disabled={props.disabled}
@@ -64,39 +87,65 @@ export function QueryState(props: {
   error: unknown
   retry: () => void
   children?: ReactNode
+  hasData?: boolean
 }) {
   const { t } = useTranslation()
   if (props.error) {
     return (
-      <div
-        role='alert'
-        className='flex flex-wrap items-center gap-3 border-y py-5 text-sm'
-      >
-        <span>{t(errorKey(props.error))}</span>
-        <Button variant='outline' onClick={props.retry}>
-          {t('supplier.retry')}
-        </Button>
-      </div>
+      <>
+        <div
+          role='alert'
+          className='flex flex-wrap items-center gap-3 border-y border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'
+        >
+          <AlertCircle className='size-4 shrink-0 text-amber-600 dark:text-amber-400' />
+          <span className='min-w-0 flex-1 break-words'>
+            {t(errorKey(props.error))}
+          </span>
+          <Button
+            variant='outline'
+            disabled={props.pending}
+            onClick={props.retry}
+          >
+            <RefreshCw className='size-4' />
+            {t('supplier.retry')}
+          </Button>
+        </div>
+        {props.hasData && canRetainQueryData(props.error) && props.children}
+      </>
     )
   }
   if (props.pending) {
     return (
       <div
         role='status'
-        className='text-muted-foreground animate-pulse py-12 text-center text-sm'
+        aria-label={t('supplier.loading')}
+        aria-busy='true'
+        className='grid min-h-48 content-start gap-4 py-5'
       >
-        {t('supplier.loading')}
+        <span className='sr-only'>{t('supplier.loading')}</span>
+        {[0, 1, 2, 3].map((row) => (
+          <div
+            key={row}
+            aria-hidden='true'
+            className='bg-muted h-7 w-full animate-pulse rounded motion-reduce:animate-none'
+          />
+        ))}
       </div>
     )
   }
   return props.children
 }
-export function Empty() {
+export function Empty(props: { message?: string; action?: ReactNode }) {
   const { t } = useTranslation()
   return (
-    <p className='text-muted-foreground py-12 text-center text-sm'>
-      {t('supplier.empty')}
-    </p>
+    <div
+      role='status'
+      className='text-muted-foreground grid min-h-48 content-center justify-items-center gap-3 py-8 text-center text-sm'
+    >
+      <Inbox aria-hidden='true' className='size-7 opacity-60' />
+      <p>{props.message ?? t('supplier.empty')}</p>
+      {props.action}
+    </div>
   )
 }
 export function Time(props: { value?: Timestamp }) {
@@ -149,9 +198,13 @@ export function Pagination(props: {
 }) {
   const { t } = useTranslation()
   return (
-    <div className='flex items-center justify-between gap-2 border-t pt-3 text-xs'>
+    <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs'>
       <span>
-        {t('supplier.page', { page: props.page, total: props.total })}
+        {t('supplier.ui_pagination', {
+          page: props.page,
+          pages: Math.max(1, Math.ceil(props.total / props.size)),
+          total: props.total,
+        })}
       </span>
       <div className='flex gap-1'>
         <Button
@@ -185,6 +238,7 @@ export function Confirm(props: {
   pending: boolean
   onClose: () => void
   onConfirm: () => void
+  destructive?: boolean
 }) {
   const { t } = useTranslation()
   return (
@@ -194,7 +248,7 @@ export function Confirm(props: {
         if (!open && !props.pending) props.onClose()
       }}
     >
-      <AlertDialogContent>
+      <AlertDialogContent className='supplier-portal'>
         <AlertDialogTitle>{props.title}</AlertDialogTitle>
         <AlertDialogDescription>{props.description}</AlertDialogDescription>
         <AlertDialogFooter>
@@ -202,7 +256,7 @@ export function Confirm(props: {
             {t('supplier.cancel')}
           </AlertDialogCancel>
           <Button
-            variant='destructive'
+            variant={props.destructive === false ? 'default' : 'destructive'}
             disabled={props.pending}
             onClick={props.onConfirm}
           >

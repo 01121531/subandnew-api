@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { LockKeyhole } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -30,7 +31,8 @@ export function PasswordForm(props: { session: AuthSession }) {
   )
   return (
     <form
-      className='grid max-w-sm gap-4'
+      className='grid max-w-md gap-5'
+      noValidate
       onSubmit={form.handleSubmit((data) =>
         mutation.mutate({
           current_password: data.current_password,
@@ -38,46 +40,59 @@ export function PasswordForm(props: { session: AuthSession }) {
         })
       )}
     >
-      <h2 className='text-lg font-semibold'>{t('supplier.changePassword')}</h2>
-      <Field
-        id='current-password'
-        label={t('supplier.currentPassword')}
-        error={!!form.formState.errors.current_password}
-      >
-        <Input
+      <h2 className='flex items-center gap-2 border-b pb-4 text-base font-semibold'>
+        <LockKeyhole className='text-muted-foreground size-4' />
+        {t('supplier.changePassword')}
+      </h2>
+      <fieldset disabled={mutation.isPending} className='grid min-w-0 gap-5'>
+        <Field
           id='current-password'
-          type='password'
-          autoComplete='current-password'
-          {...form.register('current_password')}
-        />
-      </Field>
-      <Field
-        id='new-password'
-        label={t('supplier.newPassword')}
-        error={!!form.formState.errors.password}
-      >
-        <Input
+          label={t('supplier.currentPassword')}
+          error={!!form.formState.errors.current_password}
+        >
+          <Input
+            id='current-password'
+            type='password'
+            autoComplete='current-password'
+            {...form.register('current_password')}
+          />
+        </Field>
+        <Field
           id='new-password'
-          type='password'
-          autoComplete='new-password'
-          {...form.register('password')}
-        />
-      </Field>
-      <Field
-        id='confirm-password'
-        label={t('supplier.confirmPassword')}
-        error={!!form.formState.errors.confirm}
-      >
-        <Input
+          label={t('supplier.newPassword')}
+          error={
+            form.formState.errors.password && t('supplier.ui_passwordLength')
+          }
+        >
+          <Input
+            id='new-password'
+            type='password'
+            autoComplete='new-password'
+            {...form.register('password')}
+          />
+        </Field>
+        <Field
           id='confirm-password'
-          type='password'
-          autoComplete='new-password'
-          {...form.register('confirm')}
-        />
-      </Field>
-      <Button type='submit' disabled={mutation.isPending}>
-        {t('supplier.save')}
-      </Button>
+          label={t('supplier.confirmPassword')}
+          error={
+            form.formState.errors.confirm && t('supplier.ui_passwordMismatch')
+          }
+        >
+          <Input
+            id='confirm-password'
+            type='password'
+            autoComplete='new-password'
+            {...form.register('confirm')}
+          />
+        </Field>
+        <Button
+          type='submit'
+          className='mt-1 justify-self-start'
+          disabled={mutation.isPending}
+        >
+          {t(mutation.isPending ? 'supplier.loading' : 'supplier.save')}
+        </Button>
+      </fieldset>
     </form>
   )
 }

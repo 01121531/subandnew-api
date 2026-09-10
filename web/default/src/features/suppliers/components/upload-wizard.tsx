@@ -234,6 +234,7 @@ export function UploadWizard(props: {
             <QueryState
               pending={options.isPending}
               error={options.error}
+              hasData={!!options.data}
               retry={options.refresh}
             >
               <div className='mb-4 flex justify-end'>
