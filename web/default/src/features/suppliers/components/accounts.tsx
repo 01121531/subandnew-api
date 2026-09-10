@@ -104,7 +104,7 @@ export function Accounts(props: { bindingId: number }) {
             refresh={summary.refresh}
           />
         </div>
-        <dl className='grid gap-3 border-y py-3 min-[420px]:grid-cols-3'>
+        <dl className='supplier-summary-band grid gap-3 min-[420px]:grid-cols-3'>
           <Metric
             label={t('supplier.totalAccounts')}
             value={formatNumber(summary.data?.total_accounts)}
@@ -121,7 +121,7 @@ export function Accounts(props: { bindingId: number }) {
         {(summary.data?.pool_rpm !== undefined ||
           summary.data?.pool_concurrent !== undefined ||
           summary.data?.pool_available_accounts !== undefined) && (
-          <dl className='grid gap-3 border-b pb-3 min-[420px]:grid-cols-3'>
+          <dl className='supplier-summary-band grid gap-3 min-[420px]:grid-cols-3'>
             {summary.data?.pool_rpm !== undefined && (
               <Metric
                 label={t('supplier.poolRpm')}
@@ -145,7 +145,7 @@ export function Accounts(props: { bindingId: number }) {
       </QueryState>
       <section
         aria-label={t('supplier.ui_account_filters')}
-        className='grid min-w-0 gap-3'
+        className='supplier-filter-band grid min-w-0 gap-3'
       >
         <div className='flex items-center justify-between gap-3'>
           <h2 className='text-sm font-semibold'>
@@ -348,12 +348,12 @@ export function Accounts(props: { bindingId: number }) {
                       >
                         {account.email || '--'}
                       </TableCell>
-                      <TableCell className='max-w-40 break-all whitespace-normal'>
+                      <TableCell className='max-w-40 min-w-20 break-all whitespace-normal'>
                         {t(`supplier.${account.status}`, {
                           defaultValue: account.status ?? '--',
                         })}
                       </TableCell>
-                      <TableCell className='max-w-48 break-all whitespace-normal'>
+                      <TableCell className='max-w-48 min-w-32 break-all whitespace-normal'>
                         {account.group_name || '--'}
                       </TableCell>
                       <TableCell className='text-right tabular-nums'>

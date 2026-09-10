@@ -17,11 +17,15 @@ export function ImportResultView({ result }: { result: AccountImportResult }) {
       <h2 className='text-lg font-semibold'>
         {t('supplier.accountImportResult')}
       </h2>
-      <dl className='grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4'>
+      <dl className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         {(['ok', 'duplicate', 'failed', 'unknown'] as const).map((key) => {
           const Icon = resultStyles[key].icon
           return (
-            <div key={key}>
+            <div
+              key={key}
+              data-import-result={key}
+              className='min-w-0 rounded-lg p-3'
+            >
               <dt
                 className={`flex items-center gap-2 text-xs ${resultStyles[key].color}`}
               >

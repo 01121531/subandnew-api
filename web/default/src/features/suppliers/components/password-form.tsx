@@ -40,7 +40,7 @@ export function PasswordForm(props: { session: AuthSession }) {
         })
       )}
     >
-      <h2 className='flex items-center gap-2 border-b pb-4 text-base font-semibold'>
+      <h2 className='supplier-disclosure-heading flex items-center gap-2 py-3 text-base font-semibold'>
         <LockKeyhole className='text-muted-foreground size-4' />
         {t('supplier.changePassword')}
       </h2>

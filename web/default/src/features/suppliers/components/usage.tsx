@@ -42,7 +42,7 @@ export function UsageView(props: { bindingId: number }) {
   const colors = { cost: '#059669', requests: '#0284c7', tokens: '#d97706' }
   return (
     <div className='supplier-portal grid min-w-0 gap-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
+      <div className='supplier-filter-band flex flex-wrap items-center justify-between gap-3'>
         <Tabs
           value={String(days)}
           onValueChange={(value) => setDays(Number(value))}
@@ -72,7 +72,7 @@ export function UsageView(props: { bindingId: number }) {
             period: t('supplier.days', { count: days }),
           })}
         </h2>
-        <dl className='grid gap-4 border-y py-3 min-[420px]:grid-cols-3'>
+        <dl className='supplier-summary-band grid gap-4 min-[420px]:grid-cols-3'>
           <Metric
             label={t('supplier.cost')}
             value={<CostValue value={total.cost.value} />}
@@ -152,7 +152,7 @@ export function UsageView(props: { bindingId: number }) {
                     backgroundColor: 'var(--popover)',
                     color: 'var(--popover-foreground)',
                     borderColor: 'var(--border)',
-                    borderRadius: 6,
+                    borderRadius: 8,
                   }}
                   cursor={{ fill: 'var(--muted)' }}
                 />
@@ -169,7 +169,7 @@ export function UsageView(props: { bindingId: number }) {
         )}
         {!!query.data?.days.length && (
           <details className='group min-w-0 border-y'>
-            <summary className='flex cursor-pointer list-none items-center justify-between gap-2 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600'>
+            <summary className='supplier-disclosure-heading flex cursor-pointer list-none items-center justify-between gap-2 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600'>
               {t('supplier.ui_daily_usage')}
               <ChevronDown
                 className='size-4 shrink-0 transition-transform group-open:rotate-180'
@@ -222,7 +222,7 @@ function UsageBreakdown(props: {
           <article
             key={item.id}
             role='listitem'
-            className='min-w-0 rounded-md border p-3'
+            className='supplier-data-item min-w-0 rounded-md border p-3'
           >
             <h3 className='text-sm font-medium [overflow-wrap:anywhere]'>
               {item.label}

@@ -30,7 +30,7 @@ import {
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 
-export function ThemeSwitch() {
+export function ThemeSwitch(props: { contentClassName?: string }) {
   const { t } = useTranslation()
   const { theme, setTheme } = useTheme()
 
@@ -51,7 +51,7 @@ export function ThemeSwitch() {
         <Moon className='absolute size-[1.2rem] scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0' />
         <span className='sr-only'>{t('Toggle theme')}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='end'>
+      <DropdownMenuContent align='end' className={props.contentClassName}>
         <DropdownMenuItem onClick={() => setTheme('light')}>
           {t('Light')}{' '}
           <Check

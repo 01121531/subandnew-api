@@ -36,15 +36,15 @@ export function SupplierSignIn() {
   })
   if (session.data?.authenticated) return <Navigate to='/supplier' replace />
   return (
-    <main className='supplier-portal bg-background text-foreground flex min-h-dvh flex-col'>
-      <header className='flex items-center justify-between gap-3 border-b px-5 py-3 sm:px-8'>
+    <main className='supplier-portal supplier-experience supplier-page text-foreground flex min-h-dvh flex-col gap-8 pb-8'>
+      <header className='supplier-topbar flex items-center justify-between gap-3 border-b px-5 py-3 sm:px-8'>
         <span className='flex items-center gap-2 font-semibold'>
           <ShieldCheck className='text-primary size-5' />
           Claude Gateway
         </span>
-        <ThemeSwitch />
+        <ThemeSwitch contentClassName='supplier-portal supplier-experience' />
       </header>
-      <div className='m-auto w-full max-w-[400px] px-6 py-12 sm:py-16'>
+      <div className='supplier-login-form m-auto w-[calc(100%-2rem)] max-w-[420px] p-6 sm:p-8'>
         <div className='mb-8 grid gap-3'>
           <p className='text-muted-foreground text-sm'>
             {t('supplier.portal')}

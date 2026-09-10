@@ -13,7 +13,10 @@ export function AccountCards(props: { accounts: Account[] }) {
   return (
     <div className='supplier-portal grid min-w-0 gap-3 md:hidden'>
       {props.accounts.map((account) => (
-        <details key={account.id} className='group min-w-0 rounded-md border'>
+        <details
+          key={account.id}
+          className='supplier-data-item group min-w-0 rounded-md border'
+        >
           <summary className='cursor-pointer list-none p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600'>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2'>
               <h3 className='min-w-0 font-semibold [overflow-wrap:anywhere]'>

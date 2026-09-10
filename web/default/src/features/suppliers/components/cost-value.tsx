@@ -39,7 +39,7 @@ export function CostValue(props: { value: number | null | undefined }) {
       <TooltipContent
         id={`${triggerId}-tooltip`}
         role='tooltip'
-        className='supplier-portal max-w-[min(20rem,calc(100vw-2rem))] [overflow-wrap:anywhere] tabular-nums'
+        className='supplier-portal supplier-experience max-w-[min(20rem,calc(100vw-2rem))] [overflow-wrap:anywhere] tabular-nums'
       >
         {t('supplier.ui_full_cost')}: {fullValue}
       </TooltipContent>

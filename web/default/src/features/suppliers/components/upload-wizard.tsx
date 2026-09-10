@@ -170,9 +170,9 @@ export function UploadWizard(props: {
     >
       <DialogContent
         showCloseButton={false}
-        className='supplier-portal flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[90dvh] sm:w-[calc(100%-3rem)] sm:max-w-[920px] sm:rounded-lg'
+        className='supplier-portal supplier-experience supplier-upload-dialog flex h-dvh max-h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0 sm:h-auto sm:max-h-[90dvh] sm:w-[calc(100%-3rem)] sm:max-w-[920px] sm:rounded-lg'
       >
-        <header className='flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4 sm:px-6'>
+        <header className='supplier-modal-band flex shrink-0 items-start justify-between gap-4 border-b px-5 py-4 sm:px-6'>
           <div className='grid min-w-0 gap-1.5'>
             <DialogTitle className='text-lg font-semibold'>
               {t('supplier.uploadAccounts')}
@@ -191,7 +191,7 @@ export function UploadWizard(props: {
             <X />
           </Button>
         </header>
-        <ol className='bg-muted/30 grid shrink-0 grid-cols-3 gap-2 border-b px-5 py-3 text-xs sm:px-6 sm:text-sm'>
+        <ol className='supplier-upload-steps grid shrink-0 grid-cols-3 gap-2 border-b px-5 py-3 text-xs sm:px-6 sm:text-sm'>
           {(method === 'rt' || method === 'sk'
             ? ['configure', 'importAccounts', 'accountImportResult']
             : ['configure', 'authorize', 'exchange']
@@ -289,7 +289,7 @@ export function UploadWizard(props: {
             />
           )}
         </div>
-        <footer className='bg-muted/20 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t px-5 py-4 sm:px-6'>
+        <footer className='supplier-modal-band flex shrink-0 flex-wrap items-center justify-end gap-2 border-t px-5 py-4 sm:px-6'>
           {!completed && (
             <Button variant='outline' disabled={pending} onClick={close}>
               {t('supplier.cancel')}
@@ -328,6 +328,7 @@ export function UploadWizard(props: {
           )}
         </footer>
         <Confirm
+          className='supplier-experience'
           open={confirmClose}
           title={t('supplier.discardUpload')}
           description={t('supplier.discardUploadConfirm')}

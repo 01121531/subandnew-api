@@ -78,14 +78,14 @@ function PortalContent(props: { session: AuthSession }) {
     />
   )
   return (
-    <div className='supplier-portal bg-background text-foreground min-h-dvh min-w-0 lg:grid lg:grid-cols-[224px_minmax(0,1fr)]'>
-      <aside className='bg-muted/30 sticky top-0 hidden h-dvh min-w-0 border-r lg:block'>
+    <div className='supplier-portal supplier-experience supplier-page text-foreground min-h-dvh min-w-0 lg:grid lg:grid-cols-[224px_minmax(0,1fr)]'>
+      <aside className='supplier-sidebar sticky top-0 hidden h-dvh min-w-0 border-r lg:block'>
         {navigation(false)}
       </aside>
       <Sheet open={drawer} onOpenChange={setDrawer}>
         <SheetContent
           side='left'
-          className='supplier-portal w-72 max-w-[85vw] gap-0'
+          className='supplier-portal supplier-experience supplier-sidebar w-72 max-w-[85vw] gap-0'
           aria-describedby={undefined}
         >
           <SheetTitle className='sr-only'>
@@ -95,7 +95,7 @@ function PortalContent(props: { session: AuthSession }) {
         </SheetContent>
       </Sheet>
       <div className='min-w-0'>
-        <header className='bg-background/95 sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b px-4 backdrop-blur-sm lg:px-6'>
+        <header className='supplier-topbar sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b px-4 lg:px-6'>
           <Button
             variant='ghost'
             size='icon'
@@ -113,7 +113,7 @@ function PortalContent(props: { session: AuthSession }) {
               {binding?.instance_name ?? supplier.name}
             </p>
           </div>
-          <ThemeSwitch />
+          <ThemeSwitch contentClassName='supplier-portal supplier-experience' />
           <Button
             variant='ghost'
             size='icon'
@@ -148,7 +148,7 @@ function PortalContent(props: { session: AuthSession }) {
             <section
               key={`${binding?.id ?? 0}-${current}`}
               aria-label={t(`supplier.${current}`)}
-              className='min-w-0'
+              className='supplier-workspace min-w-0'
             >
               {current === 'security' && (
                 <PasswordForm session={props.session} />

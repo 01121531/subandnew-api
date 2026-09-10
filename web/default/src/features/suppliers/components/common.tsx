@@ -239,6 +239,7 @@ export function Confirm(props: {
   onClose: () => void
   onConfirm: () => void
   destructive?: boolean
+  className?: string
 }) {
   const { t } = useTranslation()
   return (
@@ -248,7 +249,9 @@ export function Confirm(props: {
         if (!open && !props.pending) props.onClose()
       }}
     >
-      <AlertDialogContent className='supplier-portal'>
+      <AlertDialogContent
+        className={`supplier-portal ${props.className ?? ''}`}
+      >
         <AlertDialogTitle>{props.title}</AlertDialogTitle>
         <AlertDialogDescription>{props.description}</AlertDialogDescription>
         <AlertDialogFooter>

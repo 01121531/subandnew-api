@@ -133,7 +133,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
   )
   return (
     <div className='supplier-portal grid min-w-0 gap-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b pb-3'>
+      <div className='supplier-filter-band flex flex-wrap items-center justify-between gap-3'>
         <p className='text-sm font-medium' role='status' aria-atomic='true'>
           {t('supplier.proxies')}: {query.data?.total ?? '--'}
         </p>
@@ -163,7 +163,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
               {query.data.items.map((proxy) => (
                 <article
                   key={proxy.id}
-                  className='grid min-w-0 gap-3 rounded-md border p-3'
+                  className='supplier-data-item grid min-w-0 gap-3 rounded-md border p-3'
                 >
                   <h3 className='min-w-0 text-sm font-medium [overflow-wrap:anywhere]'>
                     {proxy.name || '--'}
@@ -286,11 +286,11 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
         }}
       >
         <DialogContent
-          className='supplier-portal flex max-h-[90dvh] flex-col gap-0 overflow-hidden rounded-lg p-0 sm:max-w-lg'
+          className='supplier-portal supplier-experience flex max-h-[90dvh] flex-col gap-0 overflow-hidden rounded-lg p-0 sm:max-w-lg'
           aria-describedby={undefined}
           showCloseButton={!importMutation.isPending}
         >
-          <div className='shrink-0 border-b p-4 pr-12'>
+          <div className='supplier-modal-band shrink-0 border-b p-4 pr-12'>
             <DialogTitle className='leading-normal [overflow-wrap:anywhere]'>
               {t('supplier.import')}
             </DialogTitle>
@@ -318,7 +318,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
                 />
               </Field>
             </div>
-            <div className='flex shrink-0 flex-wrap items-center justify-end gap-2 border-t p-4'>
+            <div className='supplier-modal-band flex shrink-0 flex-wrap items-center justify-end gap-2 border-t p-4'>
               <Button
                 type='button'
                 variant='outline'
@@ -340,6 +340,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
             </div>
           </form>
           <Confirm
+            className='supplier-experience'
             open={discardImport}
             title={t('supplier.ui_discardTitle')}
             description={t('supplier.ui_discardDescription')}
@@ -356,6 +357,7 @@ export function Proxies(props: { bindingId: number; csrf: string }) {
         </DialogContent>
       </Dialog>
       <Confirm
+        className='supplier-experience'
         open={!!action}
         title={action?.proxy.name ?? ''}
         description={confirmationText}
