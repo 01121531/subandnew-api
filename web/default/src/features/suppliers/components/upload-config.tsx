@@ -84,33 +84,24 @@ export function UploadConfig(props: {
       className='grid min-w-0 gap-5'
     >
       <fieldset disabled={props.pending} className='grid min-w-0 gap-5'>
-        <fieldset className='grid min-w-0 gap-3'>
-          <legend className='mb-3 text-sm font-semibold'>
-            {t('supplier.addMethod')}
-          </legend>
-          <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
-            {(['login', 'setup_token', 'rt', 'sk'] as const).map((method) => (
-              <label key={method} className='relative min-w-0 cursor-pointer'>
-                <input
-                  type='radio'
-                  name='upload-method'
-                  value={method}
-                  checked={props.method === method}
-                  className='peer absolute inset-0 z-10 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed'
-                  onChange={() => {
-                    form.resetField('refresh_token')
-                    form.resetField('access_token')
-                    form.resetField('session_keys_text')
-                    props.onMethodChange(method)
-                  }}
-                />
-                <span className='peer-checked:border-primary peer-checked:bg-primary/5 peer-checked:text-primary peer-focus-visible:ring-primary flex min-h-11 items-center justify-center rounded-md border px-2 py-2 text-center text-sm font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2 peer-disabled:opacity-50'>
-                  {t(`supplier.method_${method}`)}
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <SelectField
+          id='upload-method'
+          label={t('supplier.addMethod')}
+          value={props.method}
+          disabled={props.pending}
+          onChange={(method) => {
+            form.resetField('refresh_token')
+            form.resetField('access_token')
+            form.resetField('session_keys_text')
+            props.onMethodChange(method as UploadMethod)
+          }}
+        >
+          {(['login', 'setup_token', 'rt', 'sk'] as const).map((method) => (
+            <NativeSelectOption key={method} value={method}>
+              {t(`supplier.method_${method}`)}
+            </NativeSelectOption>
+          ))}
+        </SelectField>
         <fieldset className='supplier-form-section'>
           <legend>{t('supplier.ui_accountInfo')}</legend>
           <Field
