@@ -305,6 +305,8 @@
     "Container": "Thùng chứa",
     "Contains": "Chứa",
     "Contains anywhere": "Chứa ở vị trí bất kỳ",
+    "Does not start with": "Không bắt đầu bằng",
+    "Does not end with": "Không kết thúc bằng",
     "Starts with": "Bắt đầu bằng",
     "Ends with": "Kết thúc bằng",
     "Content": "Nội dung",

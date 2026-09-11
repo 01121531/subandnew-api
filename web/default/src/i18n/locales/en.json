@@ -305,6 +305,8 @@
     "Container": "Container",
     "Contains": "Contains",
     "Contains anywhere": "Contains anywhere",
+    "Does not start with": "Does not start with",
+    "Does not end with": "Does not end with",
     "Starts with": "Starts with",
     "Ends with": "Ends with",
     "Content": "Content",

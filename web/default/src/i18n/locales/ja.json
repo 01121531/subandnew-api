@@ -305,6 +305,8 @@
     "Container": "コンテナ",
     "Contains": "含む",
     "Contains anywhere": "任意の位置に含む",
+    "Does not start with": "前方不一致",
+    "Does not end with": "後方不一致",
     "Starts with": "前方一致",
     "Ends with": "後方一致",
     "Content": "コンテンツ",

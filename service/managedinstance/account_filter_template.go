@@ -61,6 +61,7 @@ var accountFilterFieldType = map[string]string{
 
 var accountTextFilterOperators = map[string]bool{
 	"contains": true, "starts_with": true, "ends_with": true, "not_contains": true,
+	"not_starts_with": true, "not_ends_with": true,
 	"is": true, "is_not": true,
 	"is_empty": true, "is_not_empty": true,
 }

@@ -305,6 +305,8 @@
     "Container": "Контейнер",
     "Contains": "Содержит",
     "Contains anywhere": "Содержит в любой позиции",
+    "Does not start with": "Не начинается с",
+    "Does not end with": "Не заканчивается на",
     "Starts with": "Начинается с",
     "Ends with": "Заканчивается на",
     "Content": "Содержание",

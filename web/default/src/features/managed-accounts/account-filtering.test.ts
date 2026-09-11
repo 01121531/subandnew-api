@@ -23,6 +23,8 @@ import {
   accountFilterDocument,
   accountFilterDateTimeInputValue,
   accountFilterSnapshot,
+  accountFilterFromTemplate,
+  accountFilterTemplateInput,
   createAccountFilterRule,
   matchesAdvancedAccountFilter,
   matchesQuickAccountFilter,
@@ -45,6 +47,62 @@ const account = accountFilterDocument({
 })
 
 describe('account filtering', () => {
+  test('excludes prefixes and suffixes with consistent multi-value semantics', () => {
+    for (const operator of ['not_starts_with', 'not_ends_with'] as const) {
+      const rule = createAccountFilterRule('name')
+      rule.operator = operator
+      rule.values = [' TEST- ']
+      const matches = (name: string | string[]) =>
+        matchesAdvancedAccountFilter(accountFilterDocument({ name }), {
+          match_mode: 'all',
+          rules: [rule],
+        })
+      assert.equal(matches('test-'), false)
+      assert.equal(matches('middle-test-copy'), true)
+      assert.equal(matches(''), true)
+      assert.equal(matches(['safe', 'test-']), false)
+      assert.equal(matches('test-account'), operator === 'not_ends_with')
+      assert.equal(matches('account-test-'), operator === 'not_starts_with')
+      rule.values = ['test-', 'other']
+      assert.equal(matches('test-'), false)
+      rule.value_mode = 'all'
+      assert.equal(matches('test-'), true)
+      assert.equal(matches(['test-', 'other']), false)
+      rule.values = ['供应商']
+      assert.equal(matches('供应商'), false)
+      assert.equal(matches('我的供应商副本'), true)
+    }
+  })
+
+  test('preserves negative affix rules in export snapshots and saved templates', () => {
+    const prefix = createAccountFilterRule('vendor_name')
+    prefix.operator = 'not_starts_with'
+    prefix.values = parseAccountFilterDisplayValues('test-\n演示，TEST-')
+    const suffix = createAccountFilterRule('vendor_email')
+    suffix.operator = 'not_ends_with'
+    suffix.values = ['@example.com']
+    const filter = { match_mode: 'all' as const, rules: [prefix, suffix] }
+    const input = accountFilterTemplateInput('Exclude vendors', filter)
+    const restored = accountFilterFromTemplate({
+      ...input,
+      id: 1,
+      created_at: 0,
+      updated_at: 0,
+    })
+    assert.deepEqual(
+      accountFilterSnapshot(restored),
+      accountFilterSnapshot(filter)
+    )
+    assert.equal(matchesAdvancedAccountFilter(account, restored), true)
+    assert.equal(
+      matchesAdvancedAccountFilter(
+        accountFilterDocument({ vendor_email: 'owner@EXAMPLE.com' }),
+        restored
+      ),
+      false
+    )
+  })
+
   test('parses and deduplicates quick multi-value terms', () => {
     assert.deepEqual(parseAccountFilterTerms(' Gmail，outlook\ngmail,  '), [
       'gmail',

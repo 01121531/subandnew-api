@@ -636,9 +636,9 @@ func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
 		valueMatched := false
 		for _, field := range normalized {
 			switch rule.Operator {
-			case "starts_with":
+			case "starts_with", "not_starts_with":
 				valueMatched = valueMatched || strings.HasPrefix(field, target)
-			case "ends_with":
+			case "ends_with", "not_ends_with":
 				valueMatched = valueMatched || strings.HasSuffix(field, target)
 			case "contains", "not_contains":
 				valueMatched = valueMatched || strings.Contains(field, target)
@@ -654,7 +654,7 @@ func ruleMatches(fields []string, rule managedinstance.AccountFilterRule) bool {
 	if rule.ValueMode == managedinstance.AccountFilterValueAll {
 		positive = matched == len(rule.Values)
 	}
-	if rule.Operator == "not_contains" || rule.Operator == "is_not" {
+	if rule.Operator == "not_contains" || rule.Operator == "not_starts_with" || rule.Operator == "not_ends_with" || rule.Operator == "is_not" {
 		return !positive
 	}
 	return positive

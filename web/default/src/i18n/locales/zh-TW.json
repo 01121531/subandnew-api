@@ -305,6 +305,8 @@
     "Container": "容器",
     "Contains": "包含",
     "Contains anywhere": "任意位置包含",
+    "Does not start with": "前綴不包含",
+    "Does not end with": "後綴不包含",
     "Starts with": "以前綴開頭",
     "Ends with": "以後綴結尾",
     "Content": "內容",

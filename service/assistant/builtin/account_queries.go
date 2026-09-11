@@ -141,7 +141,7 @@ type managedAccountRow struct {
 }
 
 func registerManagedAccountQuery(registry *tool.Registry, db *gorm.DB) error {
-	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","vendor_name","vendor_email","instance","platform","type","group","status","source","available"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_contains","is_empty","is_not_empty","is","is_not"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","vendor_name","created_at","last_activity_at","status","requests","tokens","amount"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
+	schema := json.RawMessage(`{"type":"object","properties":{"instance_ids":{"type":"array","items":{"type":"integer","minimum":1},"maxItems":100},"instance_scope":{"type":"string","enum":["all"]},"dataset":{"type":"string","enum":["inventory","account_output"]},"preset_days":{"type":"integer","enum":[1,7,14,30]},"match_mode":{"type":"string","enum":["all","any"]},"rules":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"field":{"type":"string","enum":["name","email","account_id","note","ownership","vendor_name","vendor_email","instance","platform","type","group","status","source","available"]},"operator":{"type":"string","enum":["contains","starts_with","ends_with","not_starts_with","not_ends_with","not_contains","is_empty","is_not_empty","is","is_not"]},"values":{"type":"array","maxItems":50,"items":{"type":"string","maxLength":200}},"value_mode":{"type":"string","enum":["any","all"]}},"required":["field","operator","value_mode"],"additionalProperties":false}},"sort_by":{"type":"string","enum":["name","vendor_name","created_at","last_activity_at","status","requests","tokens","amount"]},"sort_order":{"type":"string","enum":["asc","desc"]},"page":{"type":"integer","minimum":1},"page_size":{"type":"integer","minimum":1,"maximum":100}},"additionalProperties":false}`)
 	return tool.Register(registry, tool.ToolSpec{
 		Name: "query_managed_accounts", Version: "v1", Description: "从账号管理后台快照查询账号明细或新增账号产出，支持高级筛选、排序和分页；不会刷新目标实例。",
 		Permission: tool.Permission{Resource: authz.ResourceManagedInstance, Action: authz.ManagedInstanceActionUsageView},
@@ -211,7 +211,8 @@ func validateManagedAccountRule(rule managedinstance.AccountFilterRule) error {
 	empty := rule.Operator == "is_empty" || rule.Operator == "is_not_empty"
 	if textFields[rule.Field] {
 		textOperator := rule.Operator == "contains" || rule.Operator == "starts_with" ||
-			rule.Operator == "ends_with" || rule.Operator == "not_contains"
+			rule.Operator == "ends_with" || rule.Operator == "not_contains" ||
+			rule.Operator == "not_starts_with" || rule.Operator == "not_ends_with"
 		if !textOperator && !empty {
 			return errors.New("invalid text account filter operator")
 		}
@@ -321,11 +322,11 @@ func managedAccountRuleMatches(fields []string, rule managedinstance.AccountFilt
 		target := strings.ToLower(strings.TrimSpace(raw))
 		for _, field := range normalized {
 			switch rule.Operator {
-			case "starts_with":
+			case "starts_with", "not_starts_with":
 				if strings.HasPrefix(field, target) {
 					return true
 				}
-			case "ends_with":
+			case "ends_with", "not_ends_with":
 				if strings.HasSuffix(field, target) {
 					return true
 				}
@@ -351,7 +352,7 @@ func managedAccountRuleMatches(fields []string, rule managedinstance.AccountFilt
 	if rule.ValueMode == managedinstance.AccountFilterValueAll {
 		positive = matched == len(rule.Values)
 	}
-	if rule.Operator == "not_contains" || rule.Operator == "is_not" {
+	if rule.Operator == "not_contains" || rule.Operator == "not_starts_with" || rule.Operator == "not_ends_with" || rule.Operator == "is_not" {
 		return !positive
 	}
 	return positive

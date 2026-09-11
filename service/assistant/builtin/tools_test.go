@@ -484,6 +484,19 @@ func TestManagedAccountQueryUsesSnapshotFiltersAndSanitizesNotes(t *testing.T) {
 	require.Equal(t, 1, output.Summary.Available)
 	require.Equal(t, tool.FreshnessSnapshot, result.Freshness.State)
 	require.Equal(t, assistantTime(now), output.Sources[0].ObservedAt)
+
+	for _, rule := range []string{
+		`{"field":"email","operator":"not_ends_with","values":["@EXAMPLE.com"],"value_mode":"any"}`,
+		`{"field":"name","operator":"not_starts_with","values":[" ALI "],"value_mode":"any"}`,
+	} {
+		result, err = registry.Execute(t.Context(), execution, "query_managed_accounts", json.RawMessage(`{
+			"instance_ids":[`+jsonNumber(visible.Id)+`],"rules":[`+rule+`]
+		}`))
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(result.Data, &output))
+		require.Equal(t, 1, output.Total)
+		require.Equal(t, "Bob", output.Items[0].Name)
+	}
 }
 
 func TestUsageRecordMapperReturnsBusinessFieldsButDropsRawSensitiveData(t *testing.T) {

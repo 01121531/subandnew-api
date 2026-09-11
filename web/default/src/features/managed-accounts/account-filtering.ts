@@ -49,6 +49,8 @@ type AccountTextFilterOperator =
   | 'contains'
   | 'starts_with'
   | 'ends_with'
+  | 'not_starts_with'
+  | 'not_ends_with'
   | 'not_contains'
   | 'is_empty'
   | 'is_not_empty'
@@ -300,8 +302,15 @@ function matchesAccountFilterRule(
   if (expected.length === 0) return true
   const valueMatches = expected.map((term) =>
     fieldValues.some((value) => {
-      if (rule.operator === 'starts_with') return value.startsWith(term)
-      if (rule.operator === 'ends_with') return value.endsWith(term)
+      if (
+        rule.operator === 'starts_with' ||
+        rule.operator === 'not_starts_with'
+      ) {
+        return value.startsWith(term)
+      }
+      if (rule.operator === 'ends_with' || rule.operator === 'not_ends_with') {
+        return value.endsWith(term)
+      }
       if (rule.operator === 'contains' || rule.operator === 'not_contains') {
         return value.includes(term)
       }
@@ -312,7 +321,10 @@ function matchesAccountFilterRule(
     rule.value_mode === 'all'
       ? valueMatches.every(Boolean)
       : valueMatches.some(Boolean)
-  return rule.operator === 'not_contains' || rule.operator === 'is_not'
+  return rule.operator === 'not_contains' ||
+    rule.operator === 'not_starts_with' ||
+    rule.operator === 'not_ends_with' ||
+    rule.operator === 'is_not'
     ? !positive
     : positive
 }

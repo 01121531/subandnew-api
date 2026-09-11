@@ -68,10 +68,52 @@ func TestPortalFilterCannotUseHiddenFieldsOrExpandFixedScope(t *testing.T) {
 	result, err := QueryPortal(t.Context(), auth, PortalQueryInput{Page: 1, PageSize: 20, Search: "hidden", MatchMode: "all"})
 	require.NoError(t, err)
 	require.Zero(t, result.Total)
-	_, err = QueryPortal(t.Context(), auth, PortalQueryInput{Page: 1, PageSize: 20, MatchMode: "all", Rules: []managedinstance.AccountFilterRule{
-		{Field: "vendor_email", Operator: "contains", Values: []string{"example.com"}, ValueMode: "any"},
-	}})
-	require.ErrorIs(t, err, ErrInvalid)
+	for _, operator := range []string{"contains", "not_starts_with", "not_ends_with"} {
+		_, err = QueryPortal(t.Context(), auth, PortalQueryInput{Page: 1, PageSize: 20, MatchMode: "all", Rules: []managedinstance.AccountFilterRule{
+			{Field: "vendor_email", Operator: operator, Values: []string{"example.com"}, ValueMode: "any"},
+		}})
+		require.ErrorIs(t, err, ErrInvalid)
+	}
+}
+
+func TestPortalNegativeAffixFiltersPersistAndApplyToExport(t *testing.T) {
+	_, instance := setupAPIServiceTest(t)
+	input := apiInput(instance.Id)
+	input.IncludeTerms = nil
+	input.Rules = []managedinstance.AccountFilterRule{{Field: "name", Operator: "not_starts_with", Values: []string{"hid"}, ValueMode: "any"}}
+	input.Fields = []string{"name", "email", "requests"}
+	input.PortalEnabled, input.PortalPassword = true, "portal-password"
+	created, err := Create(t.Context(), input, 7)
+	require.NoError(t, err)
+	require.Equal(t, input.Rules, created.API.Rules)
+	apiAuth, err := Authenticate(created.Secret, "203.0.113.10")
+	require.NoError(t, err)
+	apiResult, err := QueryExternal(t.Context(), apiAuth, 1, 50, "", "", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, apiResult.Total)
+	slug := created.API.PortalURL[len("/account-data/"):]
+	login, err := LoginPortal(slug, input.PortalPassword, "203.0.113.10")
+	require.NoError(t, err)
+	auth, err := AuthenticatePortal(slug, login.Token, login.CSRFToken, "203.0.113.10", true)
+	require.NoError(t, err)
+	query := PortalQueryInput{Page: 1, PageSize: 1, MatchMode: "all", Rules: []managedinstance.AccountFilterRule{
+		{Field: "email", Operator: "not_ends_with", Values: []string{"@other.test"}, ValueMode: "any"},
+	}}
+	result, err := QueryPortal(t.Context(), auth, query)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, "acct-1", result.Items[0].AccountID)
+	export, err := ExportPortal(t.Context(), auth, PortalExportInput{Mode: "filtered", Query: query})
+	require.NoError(t, err)
+	require.Equal(t, 1, export.Count)
+	workbook, err := excelize.OpenReader(bytes.NewReader(export.Data))
+	require.NoError(t, err)
+	defer workbook.Close()
+	require.Equal(t, "acct-1", mustPortalCell(t, workbook, "B2"))
+	query.Rules[0].Values = []string{"@example.com"}
+	result, err = QueryPortal(t.Context(), auth, query)
+	require.NoError(t, err)
+	require.Zero(t, result.Total, "portal rules cannot restore accounts excluded by the fixed rule")
 }
 
 func TestPortalFilterFieldsIncludeOpenedMetrics(t *testing.T) {

@@ -16,6 +16,8 @@ func TestAccountFilterTemplatesAreValidatedAndActorScoped(t *testing.T) {
 		Rules: []AccountFilterRule{
 			{Field: "email", Operator: "contains", Values: []string{"gmail", "GMAIL", "outlook"}, ValueMode: AccountFilterValueAny},
 			{Field: "available", Operator: "is", Values: []string{"available"}, ValueMode: AccountFilterValueAny},
+			{Field: "name", Operator: "not_starts_with", Values: []string{"test-"}, ValueMode: AccountFilterValueAny},
+			{Field: "vendor_email", Operator: "not_ends_with", Values: []string{"@example.com"}, ValueMode: AccountFilterValueAll},
 		},
 	}
 	created, err := CreateAccountFilterTemplate(11, input)
@@ -31,6 +33,7 @@ func TestAccountFilterTemplatesAreValidatedAndActorScoped(t *testing.T) {
 	ownerTemplates, err := ListAccountFilterTemplates(11)
 	require.NoError(t, err)
 	require.Len(t, ownerTemplates, 1)
+	require.Equal(t, created.Rules, ownerTemplates[0].Rules)
 	otherTemplates, err := ListAccountFilterTemplates(12)
 	require.NoError(t, err)
 	require.Len(t, otherTemplates, 1)

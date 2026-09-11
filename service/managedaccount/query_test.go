@@ -178,6 +178,8 @@ func TestExecuteMatchesTextPrefixSuffixAndContainsRules(t *testing.T) {
 	}{
 		{operator: "starts_with", value: "allen", total: 1},
 		{operator: "ends_with", value: "allen", total: 1},
+		{operator: "not_starts_with", value: " ALLEN ", total: 2},
+		{operator: "not_ends_with", value: " ALLEN ", total: 2},
 		{operator: "contains", value: "allen", total: 3},
 	}
 	for _, test := range tests {
@@ -203,6 +205,61 @@ func TestExecuteReturnsFilterOptionsFromAllMatchingPages(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.ElementsMatch(t, []string{"group-a", "group-b"}, result.FilterOptions["group"])
 	require.ElementsMatch(t, []string{"active", "paused"}, result.FilterOptions["status"])
+}
+
+func TestNegativeAffixRuleValueModesAndEmptyFields(t *testing.T) {
+	for _, operator := range []string{"not_starts_with", "not_ends_with"} {
+		t.Run(operator, func(t *testing.T) {
+			rule := managedinstance.AccountFilterRule{Field: "name", Operator: operator, Values: []string{" TEST- "}, ValueMode: managedinstance.AccountFilterValueAny}
+			require.False(t, ruleMatches([]string{"test-"}, rule))
+			require.True(t, ruleMatches([]string{"middle-test-copy"}, rule))
+			require.True(t, ruleMatches(nil, rule))
+			require.True(t, ruleMatches([]string{"  "}, rule))
+			require.False(t, ruleMatches([]string{"safe", "test-"}, rule))
+			require.Equal(t, operator == "not_ends_with", ruleMatches([]string{"test-account"}, rule))
+			require.Equal(t, operator == "not_starts_with", ruleMatches([]string{"account-test-"}, rule))
+			rule.Values = []string{"test-", "other"}
+			require.False(t, ruleMatches([]string{"test-"}, rule))
+			rule.ValueMode = managedinstance.AccountFilterValueAll
+			require.True(t, ruleMatches([]string{"test-"}, rule))
+			require.False(t, ruleMatches([]string{"test-", "other"}, rule))
+			rule.Values = []string{"供应商"}
+			require.False(t, ruleMatches([]string{"供应商"}, rule))
+			require.True(t, ruleMatches([]string{"我的供应商副本"}, rule))
+		})
+	}
+}
+
+func TestNegativeAffixFixedAndNarrowFiltersSummarizeBeforePagination(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	cost := 4.5
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{
+		{ID: 1, Name: "test-one", Email: "one@safe.test", Cost: &cost, CostUnit: "USD"},
+		{ID: 2, Name: "two", Email: "two@example.com", Cost: &cost, CostUnit: "USD"},
+		{ID: 3, Name: "three", Email: "three@safe.test", Cost: &cost, CostUnit: "USD"},
+		{ID: 4, Name: "four", Cost: &cost, CostUnit: "USD"},
+	})
+	query := Query{InstanceIDs: []int64{instance.Id}, Dataset: DatasetInventory,
+		MatchMode:       managedinstance.AccountFilterMatchAll,
+		Rules:           []managedinstance.AccountFilterRule{{Field: "name", Operator: "not_starts_with", Values: []string{"test-"}, ValueMode: "any"}},
+		NarrowMatchMode: "all", NarrowFields: []string{"email"},
+		NarrowRules: []managedinstance.AccountFilterRule{{Field: "email", Operator: "not_ends_with", Values: []string{"@example.com"}, ValueMode: "any"}},
+		Page:        1, PageSize: 1, SortBy: "name", SortOrder: "asc"}
+	first, err := Execute(t.Context(), query)
+	require.NoError(t, err)
+	require.Equal(t, 2, first.Total)
+	require.Len(t, first.Items, 1)
+	require.Equal(t, 9.0, first.Summary.Amounts["USD"])
+	query.Page = 2
+	second, err := Execute(t.Context(), query)
+	require.NoError(t, err)
+	require.Equal(t, first.Summary, second.Summary)
+	require.NotEqual(t, first.Items[0].AccountID, second.Items[0].AccountID)
+	query.Page, query.PageSize, query.AllowLargePage = 1, 10000, true
+	export, err := Execute(t.Context(), query)
+	require.NoError(t, err)
+	require.Len(t, export.Items, 2)
+	require.Equal(t, first.Summary, export.Summary)
 }
 
 func TestExecuteReturnsVendorOptionsBeforeNarrowFilters(t *testing.T) {
