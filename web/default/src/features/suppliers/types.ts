@@ -2,6 +2,14 @@ export type Envelope<T> =
   | { success: true; data: T }
   | { success: false; message: string }
 export type Timestamp = string | number
+export interface NamingRule {
+  prefix: string
+  suffix: string
+}
+export interface EffectiveNaming extends NamingRule {
+  source: 'supplier' | 'binding'
+  version: string
+}
 export type PolicyOverrides = Record<string, boolean | null>
 export interface EffectivePolicy {
   values: Record<string, boolean>
@@ -13,6 +21,8 @@ export interface DefaultPolicy {
   revision: number
 }
 export interface Supplier {
+  naming_rule?: NamingRule | null
+  effective_naming?: EffectiveNaming
   id: number
   name: string
   username: string
@@ -36,8 +46,12 @@ export type SupplierInput = Pick<Supplier, 'name' | 'username' | 'enabled'> &
     password?: string
     policy_overrides?: PolicyOverrides
     policy_revision?: string
+    naming_rule?: NamingRule
+    naming_revision?: string
   }
 export interface Binding {
+  naming_override?: NamingRule | null
+  effective_naming?: EffectiveNaming
   id: number
   supplier_id: number
   instance_id: number
@@ -48,6 +62,8 @@ export interface Binding {
   effective_policy?: EffectivePolicy
 }
 export interface BindingInput {
+  naming_override?: NamingRule | null
+  naming_revision?: string
   instance_id: number
   identifier: string
   password: string
@@ -67,6 +83,7 @@ export interface Audit {
   error_code?: string
   ip_address?: string
   policy_changes?: string
+  naming_changes?: string
 }
 export interface Items<T> {
   items: T[]
@@ -158,12 +175,14 @@ export interface PolicyTemplate {
   >
 }
 export interface UploadOptions extends Snapshot {
+  effective_naming?: EffectiveNaming
   groups: Array<{ id: string; name: string }>
   policies: PolicyTemplate[]
   templates: Array<{ id: string; name: string }>
   proxies: Array<{ id: string; name: string; host: string; port: number }>
 }
 export interface UploadInput {
+  naming_revision?: string
   oauth_flow?: 'login' | 'setup_token'
   binding_id: number
   name: string

@@ -64,6 +64,7 @@ export function Audits(props: { supplierId: number }) {
                   </div>
                   {errorCode(item)}
                   <PolicyChanges value={item.policy_changes} />
+                  <NamingChanges value={item.naming_changes} />
                   <dl className='mt-3 grid grid-cols-2 gap-3 text-xs'>
                     <div className='col-span-2 min-w-0'>
                       <dt className='text-muted-foreground'>
@@ -136,6 +137,7 @@ export function Audits(props: { supplierId: number }) {
                         {t(auditLabelKey(item.action))}
                         {errorCode(item)}
                         <PolicyChanges value={item.policy_changes} />
+                        <NamingChanges value={item.naming_changes} />
                       </TableCell>
                       <TableCell>{item.admin_id || '--'}</TableCell>
                       <TableCell>{item.binding_id || '--'}</TableCell>
@@ -200,6 +202,42 @@ function PolicyChanges(props: { value?: string }) {
             </dd>
           </div>
         ))}
+      </dl>
+    </details>
+  )
+}
+
+function NamingChanges({ value }: { value?: string }) {
+  const { t } = useTranslation()
+  if (!value) return null
+  let changes: Record<string, unknown>
+  try {
+    changes = JSON.parse(value)
+    if (!changes || typeof changes !== 'object') return null
+  } catch {
+    return null
+  }
+  const label = (rule: unknown) => {
+    if (rule === null) return t('supplier.namingInherit')
+    if (!rule || typeof rule !== 'object') return '--'
+    const { prefix, suffix } = rule as Record<string, unknown>
+    if (typeof prefix !== 'string' || typeof suffix !== 'string') return '--'
+    return `${t('supplier.naming_prefix')}: ${prefix || t('supplier.none')}; ${t('supplier.naming_suffix')}: ${suffix || t('supplier.none')}`
+  }
+  return (
+    <details className='mt-2 text-xs [overflow-wrap:anywhere]'>
+      <summary className='cursor-pointer font-medium'>
+        {t('supplier.namingTitle')}
+      </summary>
+      <dl className='mt-2 grid gap-2'>
+        <div>
+          <dt>{t('supplier.namingBefore')}</dt>
+          <dd>{label(changes.before)}</dd>
+        </div>
+        <div>
+          <dt>{t('supplier.namingAfter')}</dt>
+          <dd>{label(changes.after)}</dd>
+        </div>
       </dl>
     </details>
   )

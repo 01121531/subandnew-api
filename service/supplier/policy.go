@@ -113,6 +113,7 @@ func (s *Service) decorateSupplier(item *model.Supplier) error {
 		return err
 	}
 	item.EffectivePolicy = model.ResolveSupplierPolicy(defaults, *item, nil)
+	item.EffectiveNaming = model.ResolveSupplierNaming(*item, nil)
 	item.ViewAccounts = item.EffectivePolicy.Values["view_accounts"]
 	item.ViewUsage = item.EffectivePolicy.Values["view_usage"]
 	item.ManageProxies = item.EffectivePolicy.Values["manage_proxies"]
@@ -130,6 +131,7 @@ func (s *Service) decorateBinding(b *model.SupplierBinding) error {
 		return err
 	}
 	b.EffectivePolicy = model.ResolveSupplierPolicy(defaults, item, b)
+	b.EffectiveNaming = model.ResolveSupplierNaming(item, b)
 	return nil
 }
 
@@ -153,15 +155,26 @@ func (s *Service) saveBindingPolicy(supplierID, id int64, in BindingInput) (*mod
 		if in.PolicyRevision != "" && in.PolicyRevision != model.ResolveSupplierPolicy(defaults, owner, &b).Version {
 			return fail(409, "supplier_policy_changed")
 		}
-		b.PolicyChanges = policyChanges(b.PolicyOverrides, *in.PolicyOverrides)
-		b.PolicyOverrides = *in.PolicyOverrides
-		if b.PolicyOverrides == nil {
-			b.PolicyOverrides = model.SupplierPolicy{}
+		if err := updateBindingNaming(&b, owner, in); err != nil {
+			return err
 		}
-		b.PolicyVersion++
+		if in.PolicyOverrides != nil {
+			b.PolicyChanges = policyChanges(b.PolicyOverrides, *in.PolicyOverrides)
+			b.PolicyOverrides = *in.PolicyOverrides
+			if b.PolicyOverrides == nil {
+				b.PolicyOverrides = model.SupplierPolicy{}
+			}
+			b.PolicyVersion++
+		}
 		b.Enabled = boolean(in.Enabled, b.Enabled)
 		if err := tx.Save(&b).Error; err != nil {
 			return err
+		}
+		if in.PolicyOverrides == nil && in.Enabled == nil {
+			if b.NamingChanges == "" {
+				return nil
+			}
+			return tx.Where("binding_id = ? AND consumed_at = 0", b.ID).Delete(&model.SupplierOAuthFlow{}).Error
 		}
 		if err := tx.Model(&owner).UpdateColumn("auth_version", gorm.Expr("auth_version + 1")).Error; err != nil {
 			return err

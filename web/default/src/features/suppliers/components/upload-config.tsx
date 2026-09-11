@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useSupplierUploadPreferences } from '@/stores/supplier-upload-preferences'
 
 import { parseSessionKeys, uploadFormSchema } from '../lib/import-input'
+import { emptyNaming, uploadName, uploadNameError } from '../lib/naming'
 import { policyValues } from '../lib/policy'
 import { uploadDefaults } from '../lib/upload-defaults'
 import type {
@@ -32,6 +33,8 @@ export function UploadConfig(props: {
   onSubmit: (data: UploadInput, credentials: AccountImportCredentials) => void
 }) {
   const { t } = useTranslation()
+  const naming = props.options.effective_naming ?? emptyNaming
+  const skBlocked = !!naming.suffix
   const schema = uploadFormSchema(props.method)
   const form = useForm<
     z.input<typeof schema>,
@@ -64,6 +67,11 @@ export function UploadConfig(props: {
       noValidate
       onSubmit={form.handleSubmit(
         ({ refresh_token, access_token, session_keys_text, ...data }) => {
+          const error = uploadNameError(naming, data.name, props.method)
+          if (error) {
+            form.setError('name', { message: t(error) }, { shouldFocus: true })
+            return
+          }
           let credentials: AccountImportCredentials = {}
           if (props.method === 'rt') {
             credentials = {
@@ -78,7 +86,13 @@ export function UploadConfig(props: {
           form.resetField('refresh_token')
           form.resetField('access_token')
           form.resetField('session_keys_text')
-          props.onSubmit(data, credentials)
+          props.onSubmit(
+            {
+              ...data,
+              naming_revision: props.options.effective_naming?.version,
+            },
+            credentials
+          )
         }
       )}
       className='grid min-w-0 gap-5'
@@ -92,17 +106,24 @@ export function UploadConfig(props: {
             (method) => ({
               value: method,
               label: t(`supplier.method_${method}`),
+              disabled: method === 'sk' && skBlocked,
             })
           )}
           value={props.method}
           disabled={props.pending}
           onChange={(method) => {
+            if (method === 'sk' && skBlocked) return
             form.resetField('refresh_token')
             form.resetField('access_token')
             form.resetField('session_keys_text')
             props.onMethodChange(method as UploadMethod)
           }}
         />
+        {skBlocked && (
+          <p role='status' className='text-muted-foreground text-xs'>
+            {t('supplier.namingSkUnavailable')}
+          </p>
+        )}
         <fieldset className='supplier-form-section'>
           <legend>{t('supplier.ui_accountInfo')}</legend>
           <Field
@@ -110,10 +131,51 @@ export function UploadConfig(props: {
             label={t(
               props.method === 'sk' ? 'supplier.namePrefix' : 'supplier.name'
             )}
-            error={form.formState.errors.name && t('supplier.ui_nameInvalid')}
+            error={
+              form.formState.errors.name &&
+              (form.formState.errors.name.type === 'manual'
+                ? form.formState.errors.name.message
+                : t('supplier.ui_nameInvalid'))
+            }
           >
-            <Input id='upload-name' maxLength={64} {...form.register('name')} />
+            <Input id='upload-name' {...form.register('name')} />
           </Field>
+          {(naming.prefix || naming.suffix) && (
+            <div className='bg-muted/50 grid min-w-0 gap-2 rounded-lg p-3'>
+              <div className='grid gap-2 text-xs sm:grid-cols-2'>
+                <div>
+                  {t('supplier.naming_prefix')}
+                  <span className='ml-2 font-mono [overflow-wrap:anywhere]'>
+                    {naming.prefix || t('supplier.none')}
+                  </span>
+                </div>
+                <div>
+                  {t('supplier.naming_suffix')}
+                  <span className='ml-2 font-mono [overflow-wrap:anywhere]'>
+                    {naming.suffix || t('supplier.none')}
+                  </span>
+                </div>
+              </div>
+              <span className='text-muted-foreground text-xs'>
+                {t(
+                  props.method === 'sk'
+                    ? 'supplier.namingBatchPreview'
+                    : 'supplier.namingPreview'
+                )}
+              </span>
+              <output
+                aria-label={t('supplier.namingPreview')}
+                className='font-mono text-sm [overflow-wrap:anywhere]'
+              >
+                {uploadName(naming, form.watch('name'))}
+              </output>
+              {[...uploadName(naming, form.watch('name'))].length > 64 && (
+                <p role='alert' className='text-destructive text-xs'>
+                  {t('supplier.namingNameTooLong')}
+                </p>
+              )}
+            </div>
+          )}
           {props.method === 'rt' && (
             <div className='grid gap-4 sm:grid-cols-2'>
               <Field

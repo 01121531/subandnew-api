@@ -17,10 +17,17 @@ import {
   useFormLeaveGuard,
   type FormLeaveGuard,
 } from '../hooks/use-form-leave-guard'
+import { emptyNaming, validNamingRule } from '../lib/naming'
 import { bindingSchema } from '../lib/schemas'
 import { SupplierRequestError } from '../portal-api'
-import type { Binding, BindingInput, PolicyOverrides } from '../types'
+import type {
+  Binding,
+  BindingInput,
+  PolicyOverrides,
+  NamingRule,
+} from '../types'
 import { Field, QueryState } from './common'
+import { NamingEditor } from './naming-editor'
 import { PolicyEditor } from './policy-editor'
 
 export function BindingForm(props: {
@@ -31,6 +38,9 @@ export function BindingForm(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const [naming, setNaming] = useState<NamingRule | null>(
+    props.binding?.naming_override ?? null
+  )
   const supplier = useQuery({
     queryKey: ['supplier-admin', 'supplier', props.supplierId],
     queryFn: () => adminApi.get(props.supplierId),
@@ -104,6 +114,8 @@ export function BindingForm(props: {
   const guard = useFormLeaveGuard({
     dirty:
       form.formState.isDirty ||
+      JSON.stringify(naming) !==
+        JSON.stringify(props.binding?.naming_override ?? null) ||
       JSON.stringify(overrides) !==
         JSON.stringify(props.binding?.policy_overrides ?? {}),
     pending: mutation.isPending,
@@ -112,11 +124,19 @@ export function BindingForm(props: {
   })
   const submit = (data: BindingInput) => {
     if (mutation.isPending || !supplier.data?.effective_policy) return
+    if (!validNamingRule(naming)) {
+      document
+        .querySelector<HTMLInputElement>('#binding-naming-prefix')
+        ?.focus()
+      return
+    }
     mutation.mutate(
       {
         ...data,
         policy_overrides: overrides,
         policy_revision: props.binding?.effective_policy?.version,
+        naming_override: naming,
+        naming_revision: props.binding?.effective_naming?.version,
       },
       {
         onError: (error) => {
@@ -240,6 +260,13 @@ export function BindingForm(props: {
                   />
                 )}
               </QueryState>
+              <NamingEditor
+                id='binding-naming'
+                value={naming}
+                parent={supplier.data?.naming_rule ?? emptyNaming}
+                disabled={mutation.isPending || !supplier.data}
+                onChange={setNaming}
+              />
             </fieldset>
           </QueryState>
         </div>

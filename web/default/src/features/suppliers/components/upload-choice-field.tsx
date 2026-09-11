@@ -11,7 +11,7 @@ export function UploadChoiceField(props: {
   id: string
   label: string
   value: string
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; disabled?: boolean }[]
   layout?: 'methods' | 'modes' | 'list'
   emptyLabel?: string
   disabled: boolean
@@ -27,7 +27,7 @@ export function UploadChoiceField(props: {
   const matches = props.options.filter((option) =>
     option.label.toLowerCase().includes(query)
   )
-  const choices = props.emptyLabel
+  const choices: typeof props.options = props.emptyLabel
     ? [{ value: '', label: props.emptyLabel }, ...matches]
     : matches
   const selected = props.options.find((option) => option.value === props.value)
@@ -102,12 +102,13 @@ export function UploadChoiceField(props: {
             htmlFor={`${props.id}-option-${index}`}
             className='supplier-upload-choice'
             data-selected={option.value === props.value}
-            data-disabled={props.disabled}
+            data-disabled={props.disabled || option.disabled}
           >
             <RadioGroupItem
               id={`${props.id}-option-${index}`}
               ref={index === 0 ? props.inputRef : undefined}
               value={option.value}
+              disabled={props.disabled || option.disabled}
               aria-labelledby={`${props.id}-text-${index}`}
               aria-describedby={props.error ? `${props.id}-error` : undefined}
               aria-invalid={!!props.error}

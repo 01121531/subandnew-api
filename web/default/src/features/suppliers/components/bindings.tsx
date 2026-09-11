@@ -19,6 +19,7 @@ import { adminApi } from '../admin-api'
 import { useAdminMutation } from '../hooks/use-admin-mutation'
 import type { Binding } from '../types'
 import { Confirm, Empty, QueryState } from './common'
+import { NamingSummary } from './naming-summary'
 
 export function Bindings(props: {
   supplierId: number
@@ -146,6 +147,7 @@ export function Bindings(props: {
                       {binding.remote_username || '--'}
                     </dd>
                   </dl>
+                  <NamingSummary rule={binding.effective_naming} />
                   {props.canManage && (
                     <div className='mt-3 flex justify-end border-t pt-2'>
                       {actions(binding)}
@@ -173,6 +175,7 @@ export function Bindings(props: {
                     <TableRow key={binding.id}>
                       <TableCell className='max-w-64 font-medium [overflow-wrap:anywhere] whitespace-normal'>
                         {binding.instance_name}
+                        <NamingSummary rule={binding.effective_naming} />
                       </TableCell>
                       <TableCell className='max-w-64 [overflow-wrap:anywhere] whitespace-normal'>
                         {binding.remote_username || '--'}

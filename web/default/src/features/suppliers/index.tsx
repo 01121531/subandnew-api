@@ -34,6 +34,7 @@ import {
   Time,
 } from './components/common'
 import { DefaultPolicyDialog } from './components/default-policy'
+import { NamingSummary } from './components/naming-summary'
 import { ResetPassword } from './components/reset-password'
 import { SupplierActions } from './components/supplier-actions'
 import { SupplierForm } from './components/supplier-form'
@@ -465,6 +466,7 @@ function SupplierDetail(props: {
             ) : (
               <>
                 <div className='min-h-0 flex-1 overflow-y-auto p-4 pt-2'>
+                  <NamingSummary rule={supplier.effective_naming} />
                   <Bindings
                     supplierId={supplier.id}
                     canManage={props.canManage}

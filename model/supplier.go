@@ -17,6 +17,10 @@ type Supplier struct {
 	PolicyVersion   int64                    `json:"-" gorm:"not null;default:0"`
 	EffectivePolicy *SupplierEffectivePolicy `json:"effective_policy,omitempty" gorm:"-"`
 	PolicyChanges   string                   `json:"-" gorm:"-"`
+	NamingRule      *SupplierNamingRule      `json:"naming_rule" gorm:"serializer:json;type:text"`
+	NamingVersion   int64                    `json:"-" gorm:"not null;default:0"`
+	EffectiveNaming *SupplierEffectiveNaming `json:"effective_naming,omitempty" gorm:"-"`
+	NamingChanges   string                   `json:"-" gorm:"-"`
 	CreatedAt       int64                    `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt       int64                    `json:"updated_at" gorm:"autoUpdateTime"`
 	DeletedAt       gorm.DeletedAt           `json:"-" gorm:"index"`
@@ -40,6 +44,10 @@ type SupplierBinding struct {
 	PolicyVersion   int64                    `json:"-" gorm:"not null;default:0"`
 	EffectivePolicy *SupplierEffectivePolicy `json:"effective_policy,omitempty" gorm:"-"`
 	PolicyChanges   string                   `json:"-" gorm:"-"`
+	NamingOverride  *SupplierNamingRule      `json:"naming_override" gorm:"serializer:json;type:text"`
+	NamingVersion   int64                    `json:"-" gorm:"not null;default:0"`
+	EffectiveNaming *SupplierEffectiveNaming `json:"effective_naming,omitempty" gorm:"-"`
+	NamingChanges   string                   `json:"-" gorm:"-"`
 }
 
 type SupplierSession struct {
@@ -79,5 +87,6 @@ type SupplierAudit struct {
 	DurationMS    int64  `json:"duration_ms" gorm:"not null"`
 	ErrorCode     string `json:"error_code" gorm:"type:varchar(64)"`
 	PolicyChanges string `json:"policy_changes,omitempty" gorm:"type:text"`
+	NamingChanges string `json:"naming_changes,omitempty" gorm:"type:text"`
 	CreatedAt     int64  `json:"created_at" gorm:"autoCreateTime;index:idx_supplier_audits_time,priority:2"`
 }

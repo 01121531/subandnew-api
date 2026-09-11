@@ -132,3 +132,27 @@ func TestSupplierDefaultPolicyAuditAndValidation(t *testing.T) {
 	w = supplierControllerRequest(r, "PUT", "/api/suppliers/default-policy", `{"policy":{"unknown":true},"revision":2}`, nil, "", "")
 	require.Equal(t, 400, w.Code)
 }
+
+func TestSupplierNamingAuditAndStrictConfig(t *testing.T) {
+	r, s := supplierControllerTest(t)
+	admin := r.Group("/api/suppliers", SupplierAuditTrail())
+	admin.POST("", SaveSupplier)
+	admin.PUT("/:id", SaveSupplier)
+	admin.GET("/:id", GetSupplier)
+	body := `{"name":"Test","username":"naming-test","password":"synthetic-password","naming_rule":{"prefix":"V-","suffix":"-S"}}`
+	w := supplierControllerRequest(r, "POST", "/api/suppliers", body, nil, "", "")
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"effective_naming"`)
+	require.NotContains(t, w.Body.String(), "synthetic-password")
+	var logs []model.SupplierAudit
+	require.NoError(t, s.DB.Where("naming_changes <> ''").Find(&logs).Error)
+	require.Len(t, logs, 1)
+	require.JSONEq(t, `{"before":{"prefix":"","suffix":""},"after":{"prefix":"V-","suffix":"-S"}}`, logs[0].NamingChanges)
+	for _, rule := range []string{`{"prefix":"X","unknown":true}`, `{"prefix":"\n"}`, `{"suffix":false}`} {
+		w = supplierControllerRequest(r, "PUT", "/api/suppliers/1", `{"name":"Test","username":"naming-test","naming_rule":`+rule+`}`, nil, "", "")
+		require.Equal(t, 400, w.Code, w.Body.String())
+	}
+	w = supplierControllerRequest(r, "GET", "/api/suppliers/1", "", nil, "", "")
+	require.Equal(t, 200, w.Code)
+	require.Contains(t, w.Body.String(), `"prefix":"V-"`)
+}

@@ -51,7 +51,15 @@ function uploadLimit(max: number) {
 export const uploadSchema = z
   .object({
     binding_id: z.number().int().positive(),
-    name: z.string().trim().min(1).max(64),
+    name: z
+      .string()
+      .min(1)
+      .refine(
+        (value) =>
+          value.trim().length > 0 &&
+          [...value.trim()].length <= 64 &&
+          !/\p{Cc}/u.test(value)
+      ),
     outbound_proxy_mode: z.enum(['direct', 'manual', 'auto']),
     outbound_proxy_id: z.string(),
     group_ids: z.array(z.string().min(1)).max(100),

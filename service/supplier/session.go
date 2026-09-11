@@ -161,6 +161,7 @@ func (s *Service) authorize(p *Principal, bindingID int64, capability string) (*
 		return nil, err
 	}
 	b.EffectivePolicy = model.ResolveSupplierPolicy(defaults, *item, &b)
+	b.EffectiveNaming = model.ResolveSupplierNaming(*item, &b)
 	allowed := false
 	switch capability {
 	case "accounts":

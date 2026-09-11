@@ -2,6 +2,21 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (error.code === 'supplier_naming_changed') {
+      return 'supplier.namingChanged'
+    }
+    if (error.code === 'supplier_invalid_naming_rule') {
+      return 'supplier.namingInvalidRule'
+    }
+    if (error.code === 'supplier_invalid_account_name') {
+      return 'supplier.namingInvalidName'
+    }
+    if (error.code === 'supplier_account_name_too_long') {
+      return 'supplier.namingNameTooLong'
+    }
+    if (error.code === 'supplier_sk_suffix_not_supported') {
+      return 'supplier.namingSkUnavailable'
+    }
     if (error.code === 'supplier_policy_changed') {
       return 'supplier.policyChanged'
     }

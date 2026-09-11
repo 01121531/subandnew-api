@@ -17,11 +17,13 @@ import {
   useFormLeaveGuard,
   type FormLeaveGuard,
 } from '../hooks/use-form-leave-guard'
+import { emptyNaming, validNamingRule } from '../lib/naming'
 import { applyOverrides, globalEffectivePolicy } from '../lib/permissions'
 import { supplierDefaults, supplierSchema } from '../lib/schemas'
 import { SupplierRequestError } from '../portal-api'
 import type { Supplier, SupplierInput, PolicyOverrides } from '../types'
 import { Confirm, Field, QueryState } from './common'
+import { NamingEditor } from './naming-editor'
 import { PasswordGenerator } from './password-generator'
 import { PolicyEditor } from './policy-editor'
 
@@ -34,6 +36,12 @@ export function SupplierForm(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const [naming, setNaming] = useState(
+    props.supplier?.naming_rule ?? emptyNaming
+  )
+  const namingDirty =
+    JSON.stringify(naming) !==
+    JSON.stringify(props.supplier?.naming_rule ?? emptyNaming)
   const defaults = useQuery({
     queryKey: ['supplier-admin', 'defaults'],
     queryFn: adminApi.defaults,
@@ -76,6 +84,7 @@ export function SupplierForm(props: {
       toast.success(t('supplier.saved'))
       setConfirmation(null)
       setOverrides(supplier.policy_overrides ?? {})
+      setNaming(supplier.naming_rule ?? emptyNaming)
       form.reset({ ...supplier, password: '' })
       if (props.onSaved) props.onSaved(supplier)
       else props.onClose()
@@ -83,7 +92,7 @@ export function SupplierForm(props: {
   )
   const locked = mutation.isPending || !!confirmation
   const guard = useFormLeaveGuard({
-    dirty: form.formState.isDirty || policyDirty,
+    dirty: form.formState.isDirty || policyDirty || namingDirty,
     pending: locked,
     guardRef: props.guardRef,
     onPendingChange: props.onPendingChange,
@@ -108,6 +117,12 @@ export function SupplierForm(props: {
   }
   const submit = (data: typeof supplierDefaults) => {
     if (locked || !defaults.data) return
+    if (!validNamingRule(naming)) {
+      document
+        .querySelector<HTMLInputElement>('#supplier-naming-prefix')
+        ?.focus()
+      return
+    }
     const input: SupplierInput = {
       name: data.name,
       username: data.username,
@@ -115,6 +130,8 @@ export function SupplierForm(props: {
       password: data.password || undefined,
       policy_overrides: overrides,
       policy_revision: props.supplier?.effective_policy?.version,
+      naming_rule: naming,
+      naming_revision: props.supplier?.effective_naming?.version,
     }
     const effective = applyOverrides(
       globalEffectivePolicy(defaults.data),
@@ -212,6 +229,12 @@ export function SupplierForm(props: {
             />
           )}
         </QueryState>
+        <NamingEditor
+          id='supplier-naming'
+          value={naming}
+          disabled={locked}
+          onChange={(value) => setNaming(value ?? emptyNaming)}
+        />
       </fieldset>
       <footer className='flex shrink-0 justify-end gap-2 border-t p-4'>
         <Button

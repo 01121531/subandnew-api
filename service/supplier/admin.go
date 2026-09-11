@@ -2,6 +2,7 @@ package supplier
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,16 +16,18 @@ import (
 )
 
 type SupplierInput struct {
-	Name            string                `json:"name"`
-	Username        string                `json:"username"`
-	Password        string                `json:"password"`
-	Enabled         *bool                 `json:"enabled"`
-	ViewAccounts    *bool                 `json:"view_accounts"`
-	ViewUsage       *bool                 `json:"view_usage"`
-	ManageProxies   *bool                 `json:"manage_proxies"`
-	UploadAccounts  *bool                 `json:"upload_accounts"`
-	PolicyOverrides *model.SupplierPolicy `json:"policy_overrides"`
-	PolicyRevision  string                `json:"policy_revision"`
+	Name            string                    `json:"name"`
+	Username        string                    `json:"username"`
+	Password        string                    `json:"password"`
+	Enabled         *bool                     `json:"enabled"`
+	ViewAccounts    *bool                     `json:"view_accounts"`
+	ViewUsage       *bool                     `json:"view_usage"`
+	ManageProxies   *bool                     `json:"manage_proxies"`
+	UploadAccounts  *bool                     `json:"upload_accounts"`
+	PolicyOverrides *model.SupplierPolicy     `json:"policy_overrides"`
+	PolicyRevision  string                    `json:"policy_revision"`
+	NamingRule      *model.SupplierNamingRule `json:"naming_rule"`
+	NamingRevision  string                    `json:"naming_revision"`
 }
 
 func boolean(value *bool, fallback bool) bool {
@@ -50,6 +53,9 @@ func (s *Service) List(page, size int) ([]model.Supplier, int64, error) {
 	return items, total, err
 }
 func (s *Service) Save(id int64, in SupplierInput) (*model.Supplier, error) {
+	if err := normalizeNaming(in.NamingRule); err != nil {
+		return nil, err
+	}
 	if in.PolicyOverrides != nil {
 		if err := validatePolicy(*in.PolicyOverrides, false); err != nil {
 			return nil, err
@@ -93,6 +99,20 @@ func (s *Service) Save(id int64, in SupplierInput) (*model.Supplier, error) {
 			item.PolicyOverrides = model.SupplierPolicy{}
 		} else if in.Password != "" {
 			return fail(400, "supplier_use_password_reset")
+		}
+		if in.NamingRevision != "" && in.NamingRevision != model.ResolveSupplierNaming(item, nil).Version {
+			return fail(409, "supplier_naming_changed")
+		}
+		if in.NamingRule != nil {
+			before := item.NamingRule
+			if before == nil {
+				before = &model.SupplierNamingRule{}
+			}
+			item.NamingChanges = namingChanges(before, in.NamingRule)
+			item.NamingRule = in.NamingRule
+			if item.NamingChanges != "" {
+				item.NamingVersion++
+			}
 		}
 		item.Name = in.Name
 		item.Username = in.Username
@@ -213,6 +233,8 @@ type BindingInput struct {
 	Enabled         *bool                 `json:"enabled"`
 	PolicyOverrides *model.SupplierPolicy `json:"policy_overrides"`
 	PolicyRevision  string                `json:"policy_revision"`
+	NamingOverride  json.RawMessage       `json:"naming_override"`
+	NamingRevision  string                `json:"naming_revision"`
 }
 
 func (s *Service) Bindings(id int64, active bool) ([]model.SupplierBinding, error) {
@@ -247,12 +269,15 @@ func (s *Service) Bindings(id int64, active bool) ([]model.SupplierBinding, erro
 	return result, nil
 }
 func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in BindingInput) (*model.SupplierBinding, error) {
+	if _, err := parseNamingOverride(in.NamingOverride); err != nil {
+		return nil, err
+	}
 	if in.PolicyOverrides != nil {
 		if err := validatePolicy(*in.PolicyOverrides, false); err != nil {
 			return nil, err
 		}
 	}
-	if id != 0 && in.PolicyOverrides != nil && in.Identifier == "" && in.Password == "" {
+	if id != 0 && (in.PolicyOverrides != nil || len(in.NamingOverride) > 0) && in.Identifier == "" && in.Password == "" {
 		return s.saveBindingPolicy(supplierID, id, in)
 	}
 	if _, err := s.Supplier(supplierID); err != nil {
@@ -330,6 +355,9 @@ func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in Bind
 			if latest.PolicyVersion != b.PolicyVersion {
 				return fail(409, "supplier_policy_changed")
 			}
+			if latest.NamingVersion != b.NamingVersion {
+				return fail(409, "supplier_naming_changed")
+			}
 		}
 		b.SupplierID = supplierID
 		var owner model.Supplier
@@ -338,6 +366,9 @@ func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in Bind
 		}
 		if in.PolicyRevision != "" && in.PolicyRevision != model.ResolveSupplierPolicy(defaults, owner, &b).Version {
 			return fail(409, "supplier_policy_changed")
+		}
+		if err := updateBindingNaming(&b, owner, in); err != nil {
+			return err
 		}
 		before := b.PolicyOverrides
 		if in.PolicyOverrides != nil {

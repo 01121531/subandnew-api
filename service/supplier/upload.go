@@ -17,18 +17,19 @@ import (
 var resourceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type UploadInput struct {
-	OAuthFlow     string   `json:"oauth_flow,omitempty"`
-	BindingID     int64    `json:"binding_id"`
-	Name          string   `json:"name"`
-	ProxyMode     string   `json:"outbound_proxy_mode"`
-	ProxyID       string   `json:"outbound_proxy_id"`
-	GroupIDs      []string `json:"group_ids"`
-	PolicyID      string   `json:"policy_template_id"`
-	TemplateID    string   `json:"cc_template_id"`
-	MaxRPM        int      `json:"max_rpm"`
-	MaxTPM        int      `json:"max_tpm"`
-	MaxConcurrent int      `json:"max_concurrent"`
-	MaxSessions   int      `json:"max_sessions"`
+	OAuthFlow      string   `json:"oauth_flow,omitempty"`
+	BindingID      int64    `json:"binding_id"`
+	Name           string   `json:"name"`
+	NamingRevision string   `json:"naming_revision,omitempty"`
+	ProxyMode      string   `json:"outbound_proxy_mode"`
+	ProxyID        string   `json:"outbound_proxy_id"`
+	GroupIDs       []string `json:"group_ids"`
+	PolicyID       string   `json:"policy_template_id"`
+	TemplateID     string   `json:"cc_template_id"`
+	MaxRPM         int      `json:"max_rpm"`
+	MaxTPM         int      `json:"max_tpm"`
+	MaxConcurrent  int      `json:"max_concurrent"`
+	MaxSessions    int      `json:"max_sessions"`
 }
 type frozenUpload struct {
 	Parameters UploadInput `json:"parameters"`
@@ -39,7 +40,7 @@ func (in UploadInput) valid() bool {
 	if in.OAuthFlow != "" && in.OAuthFlow != "login" && in.OAuthFlow != "setup_token" {
 		return false
 	}
-	if strings.TrimSpace(in.Name) == "" || utf8.RuneCountInString(in.Name) > 64 || len(in.GroupIDs) > 100 {
+	if strings.TrimSpace(in.Name) == "" || utf8.RuneCountInString(strings.TrimSpace(in.Name)) > 64 || len(in.GroupIDs) > 100 {
 		return false
 	}
 	if in.ProxyMode != "direct" && in.ProxyMode != "manual" && in.ProxyMode != "auto" {
@@ -79,6 +80,10 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	if err != nil {
 		return nil, err
 	}
+	in, err = applyUploadNaming(in, b, false)
+	if err != nil {
+		return nil, err
+	}
 	c, err := cipher()
 	if err != nil {
 		return nil, fail(503, "supplier_encryption_unavailable")
@@ -106,6 +111,19 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	}
 	flow := model.SupplierOAuthFlow{TokenHash: digest(raw), SupplierID: p.Supplier.ID, SessionID: p.Session.ID, BindingID: b.ID, BindingRevision: b.Revision, ExpiresAt: s.Now().Add(10 * time.Minute).Unix()}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := lockPolicy(tx); err != nil {
+			return err
+		}
+		current, err := (&Service{DB: tx, Now: s.Now}).authorize(p, b.ID, "upload")
+		if err != nil {
+			return err
+		}
+		if current.Revision != b.Revision {
+			return fail(409, "supplier_binding_changed")
+		}
+		if current.EffectiveNaming.Version != in.NamingRevision {
+			return fail(409, "supplier_naming_changed")
+		}
 		if err := tx.Where("session_id = ? AND binding_id = ?", p.Session.ID, b.ID).Delete(&model.SupplierOAuthFlow{}).Error; err != nil {
 			return err
 		}
@@ -196,12 +214,32 @@ func (s *Service) Exchange(ctx context.Context, p *Principal, flowToken, callbac
 		return nil, err
 	}
 	// Consume before dispatch: an uncertain network result must never replay an exchange.
-	r := s.DB.Model(&model.SupplierOAuthFlow{}).Where("id = ? AND consumed_at = 0 AND expires_at > ?", flow.ID, s.Now().Unix()).Updates(map[string]any{"consumed_at": s.Now().Unix(), "ciphertext": ""})
-	if r.Error != nil {
-		return nil, r.Error
-	}
-	if r.RowsAffected != 1 {
-		return nil, fail(409, "supplier_oauth_flow_expired_or_used")
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := lockPolicy(tx); err != nil {
+			return err
+		}
+		current, err := (&Service{DB: tx, Now: s.Now}).authorize(p, b.ID, "upload")
+		if err != nil {
+			return err
+		}
+		if current.Revision != flow.BindingRevision {
+			return fail(409, "supplier_binding_changed")
+		}
+		rule := current.EffectiveNaming
+		if frozen.Parameters.NamingRevision != rule.Version && (frozen.Parameters.NamingRevision != "" || rule.Prefix != "" || rule.Suffix != "") {
+			return fail(409, "supplier_naming_changed")
+		}
+		r := tx.Model(&model.SupplierOAuthFlow{}).Where("id = ? AND consumed_at = 0 AND expires_at > ?", flow.ID, s.Now().Unix()).Updates(map[string]any{"consumed_at": s.Now().Unix(), "ciphertext": ""})
+		if r.Error != nil {
+			return r.Error
+		}
+		if r.RowsAffected != 1 {
+			return fail(409, "supplier_oauth_flow_expired_or_used")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	body := frozen.Parameters.payload()
 	body["code"] = code

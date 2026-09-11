@@ -22,6 +22,14 @@ func (s *Service) ImportAccounts(ctx context.Context, p *Principal, kind string,
 	if !in.UploadInput.valid() || in.OAuthFlow != "" || (kind != "rt" && kind != "sk") {
 		return nil, fail(400, "supplier_invalid_upload_parameters")
 	}
+	b, err := s.authorize(p, in.BindingID, "upload")
+	if err != nil {
+		return nil, err
+	}
+	in.UploadInput, err = applyUploadNaming(in.UploadInput, b, kind == "sk")
+	if err != nil {
+		return nil, err
+	}
 	body := in.UploadInput.payload()
 	if kind == "rt" {
 		in.RefreshToken = strings.TrimSpace(in.RefreshToken)
@@ -51,13 +59,19 @@ func (s *Service) ImportAccounts(ctx context.Context, p *Principal, kind string,
 		}
 		body["session_keys"] = keys
 	}
-	b, err := s.authorize(p, in.BindingID, "upload")
-	if err != nil {
-		return nil, err
-	}
 	remote, err := s.remoteFor(b)
 	if err != nil {
 		return nil, err
+	}
+	current, err := s.authorize(p, b.ID, "upload")
+	if err != nil {
+		return nil, err
+	}
+	if current.Revision != b.Revision {
+		return nil, fail(409, "supplier_binding_changed")
+	}
+	if current.EffectiveNaming.Version != in.NamingRevision {
+		return nil, fail(409, "supplier_naming_changed")
 	}
 	defer s.invalidate(b)
 	return remote.Write(ctx, "POST", "account-upload/import-"+kind, body)

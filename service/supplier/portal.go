@@ -126,6 +126,9 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 		result[key] = value.(map[string]any)[key]
 	}
 	redactPolicy(result, resource, current.EffectivePolicy, q)
+	if resource == "account-upload/options" {
+		result["effective_naming"] = current.EffectiveNaming
+	}
 	return result, nil
 }
 func cached(entry cacheEntry, stale bool) (map[string]any, error) {

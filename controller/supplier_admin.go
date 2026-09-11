@@ -49,6 +49,7 @@ func SaveSupplier(c *gin.Context) {
 	}
 	c.Set("supplier_id", item.ID)
 	c.Set("supplier_policy_changes", item.PolicyChanges)
+	c.Set("supplier_naming_changes", item.NamingChanges)
 	supplierSuccess(c, item)
 }
 func DeleteSupplier(c *gin.Context) {
@@ -141,6 +142,7 @@ func SaveSupplierBinding(c *gin.Context) {
 	}
 	c.Set("supplier_binding_id", item.ID)
 	c.Set("supplier_policy_changes", item.PolicyChanges)
+	c.Set("supplier_naming_changes", item.NamingChanges)
 	supplierSuccess(c, item)
 }
 
