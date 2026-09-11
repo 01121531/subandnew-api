@@ -166,7 +166,7 @@ func TestRemoteServiceComposition(t *testing.T) {
 			requireRemoteError(t, err, 502, "upstream_unavailable")
 		} else {
 			require.NoError(t, err)
-			require.Equal(t, map[string]any{"completed": true}, result)
+			require.Equal(t, map[string]any{"completed": true, "resolved_name": "Frozen account"}, result)
 		}
 		require.Equal(t, before+1, exchanges.Load())
 		_, err = svc.Exchange(ctx, principal, flowToken, "synthetic-code#synthetic-frozen-state")

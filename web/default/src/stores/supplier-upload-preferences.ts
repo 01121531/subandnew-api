@@ -1,9 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+import type { NameTimeMode } from '@/features/suppliers/types'
+
 export interface SupplierTemplateChoice {
   policyId: string
   templateId: string
+  nameTimeMode?: NameTimeMode
 }
 
 interface SupplierUploadPreferences {
@@ -26,6 +29,7 @@ export const useSupplierUploadPreferences = create<SupplierUploadPreferences>()(
             [`${supplierId}:${bindingId}`]: {
               policyId: choice.policyId,
               templateId: choice.templateId,
+              nameTimeMode: choice.nameTimeMode ?? 'none',
             },
           },
         })),

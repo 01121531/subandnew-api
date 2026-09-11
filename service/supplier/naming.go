@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -65,7 +66,7 @@ func updateBindingNaming(b *model.SupplierBinding, owner model.Supplier, in Bind
 	return nil
 }
 
-func applyUploadNaming(in UploadInput, b *model.SupplierBinding, sk bool) (UploadInput, error) {
+func applyUploadNaming(in UploadInput, b *model.SupplierBinding, sk bool, at time.Time) (UploadInput, error) {
 	rule := b.EffectiveNaming
 	if rule == nil {
 		return in, fail(503, "supplier_service_unavailable")
@@ -83,7 +84,18 @@ func applyUploadNaming(in UploadInput, b *model.SupplierBinding, sk bool) (Uploa
 	if name == "" {
 		return in, fail(400, "supplier_invalid_account_name")
 	}
-	in.Name = rule.Prefix + name + rule.Suffix
+	suffix := ""
+	china := at.In(time.FixedZone("Asia/Shanghai", 8*60*60))
+	switch in.NameTimeMode {
+	case "", "none":
+	case "date":
+		suffix = "-" + china.Format("0102")
+	case "date_time":
+		suffix = "-" + china.Format("0102-1504")
+	default:
+		return in, fail(400, "supplier_invalid_upload_parameters")
+	}
+	in.Name = rule.Prefix + name + suffix + rule.Suffix
 	if utf8.RuneCountInString(in.Name) > 64 {
 		return in, fail(400, "supplier_account_name_too_long")
 	}

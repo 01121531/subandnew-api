@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import type { z } from 'zod'
@@ -16,6 +16,7 @@ import type {
   AccountImportCredentials,
   UploadInput,
   UploadMethod,
+  NameTimeMode,
   UploadOptions,
 } from '../types'
 import { Field } from './common'
@@ -61,13 +62,31 @@ export function UploadConfig(props: {
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange])
   const mode = form.watch('outbound_proxy_mode')
   const groups = form.watch('group_ids')
+  const timeMode = form.watch('name_time_mode') ?? 'none'
+  const [previewAt, setPreviewAt] = useState(() => new Date())
+  useEffect(() => {
+    if (timeMode === 'none' || props.pending) return
+    const timer = window.setInterval(() => setPreviewAt(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [timeMode, props.pending])
+  const previewName = uploadName(
+    naming,
+    form.watch('name'),
+    timeMode,
+    previewAt
+  )
   return (
     <form
       id='supplier-upload-config'
       noValidate
       onSubmit={form.handleSubmit(
         ({ refresh_token, access_token, session_keys_text, ...data }) => {
-          const error = uploadNameError(naming, data.name, props.method)
+          const error = uploadNameError(
+            naming,
+            data.name,
+            props.method,
+            data.name_time_mode
+          )
           if (error) {
             form.setError('name', { message: t(error) }, { shouldFocus: true })
             return
@@ -140,7 +159,26 @@ export function UploadConfig(props: {
           >
             <Input id='upload-name' {...form.register('name')} />
           </Field>
-          {(naming.prefix || naming.suffix) && (
+          <UploadChoiceField
+            id='upload-name-time'
+            label={t('supplier.nameTimeTitle')}
+            layout='modes'
+            options={(['none', 'date', 'date_time'] as const).map((value) => ({
+              value,
+              label: t(`supplier.nameTime_${value}`),
+            }))}
+            value={timeMode}
+            disabled={props.pending}
+            onChange={(value) => {
+              setPreviewAt(new Date())
+              form.setValue('name_time_mode', value as NameTimeMode, {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+              form.clearErrors('name')
+            }}
+          />
+          {(naming.prefix || naming.suffix || timeMode !== 'none') && (
             <div className='bg-muted/50 grid min-w-0 gap-2 rounded-lg p-3'>
               <div className='grid gap-2 text-xs sm:grid-cols-2'>
                 <div>
@@ -167,9 +205,14 @@ export function UploadConfig(props: {
                 aria-label={t('supplier.namingPreview')}
                 className='font-mono text-sm [overflow-wrap:anywhere]'
               >
-                {uploadName(naming, form.watch('name'))}
+                {previewName}
               </output>
-              {[...uploadName(naming, form.watch('name'))].length > 64 && (
+              {timeMode !== 'none' && (
+                <p className='text-muted-foreground text-xs'>
+                  {t('supplier.nameTimePreviewHint')}
+                </p>
+              )}
+              {[...previewName].length > 64 && (
                 <p role='alert' className='text-destructive text-xs'>
                   {t('supplier.namingNameTooLong')}
                 </p>

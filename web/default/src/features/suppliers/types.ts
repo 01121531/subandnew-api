@@ -182,6 +182,7 @@ export interface UploadOptions extends Snapshot {
   proxies: Array<{ id: string; name: string; host: string; port: number }>
 }
 export interface UploadInput {
+  name_time_mode?: NameTimeMode
   naming_revision?: string
   oauth_flow?: 'login' | 'setup_token'
   binding_id: number
@@ -197,6 +198,7 @@ export interface UploadInput {
   max_sessions: number
 }
 export type UploadMethod = 'login' | 'setup_token' | 'rt' | 'sk'
+export type NameTimeMode = 'none' | 'date' | 'date_time'
 export interface AccountImportCredentials {
   refresh_token?: string
   access_token?: string
@@ -212,6 +214,8 @@ type AccountImportStatus =
   | 'reauth_required'
   | 'unknown'
 export interface AccountImportResult {
+  resolved_name?: string
+  resolved_name_prefix?: string
   total: number
   ok: number
   duplicate: number
@@ -220,6 +224,7 @@ export interface AccountImportResult {
   results: Array<{ index: number; status: AccountImportStatus }>
 }
 export interface OAuthFlow {
+  resolved_name?: string
   flow_id: string
   url: string
   expires_at: Timestamp

@@ -29,6 +29,16 @@ export function UploadAuthorization(props: {
   }
   return (
     <div className='grid min-w-0 gap-5'>
+      {props.flow.resolved_name && (
+        <Field id='supplier-resolved-name' label={t('supplier.resolvedName')}>
+          <output
+            id='supplier-resolved-name'
+            className='block font-mono text-sm [overflow-wrap:anywhere]'
+          >
+            {props.flow.resolved_name}
+          </output>
+        </Field>
+      )}
       <p className='text-muted-foreground text-sm'>
         {t('supplier.expires')}: <Time value={props.flow.expires_at} />
       </p>

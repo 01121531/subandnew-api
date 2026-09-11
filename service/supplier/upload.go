@@ -21,6 +21,7 @@ type UploadInput struct {
 	BindingID      int64    `json:"binding_id"`
 	Name           string   `json:"name"`
 	NamingRevision string   `json:"naming_revision,omitempty"`
+	NameTimeMode   string   `json:"name_time_mode,omitempty"`
 	ProxyMode      string   `json:"outbound_proxy_mode"`
 	ProxyID        string   `json:"outbound_proxy_id"`
 	GroupIDs       []string `json:"group_ids"`
@@ -37,6 +38,9 @@ type frozenUpload struct {
 }
 
 func (in UploadInput) valid() bool {
+	if in.NameTimeMode != "" && in.NameTimeMode != "none" && in.NameTimeMode != "date" && in.NameTimeMode != "date_time" {
+		return false
+	}
 	if in.OAuthFlow != "" && in.OAuthFlow != "login" && in.OAuthFlow != "setup_token" {
 		return false
 	}
@@ -80,7 +84,7 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	if err != nil {
 		return nil, err
 	}
-	in, err = applyUploadNaming(in, b, false)
+	in, err = applyUploadNaming(in, b, false, s.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +143,7 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"flow_id": raw, "url": authURL, "expires_at": flow.ExpiresAt}, nil
+	return map[string]any{"flow_id": raw, "url": authURL, "expires_at": flow.ExpiresAt, "resolved_name": in.Name}, nil
 }
 func callbackCode(callback, state string) (string, error) {
 	callback = strings.TrimSpace(callback)
@@ -245,5 +249,9 @@ func (s *Service) Exchange(ctx context.Context, p *Principal, flowToken, callbac
 	body["code"] = code
 	body["pending_state"] = frozen.State
 	defer s.invalidate(b)
-	return remote.Write(ctx, "POST", "account-upload/exchange", body)
+	result, err := remote.Write(ctx, "POST", "account-upload/exchange", body)
+	if err == nil && result != nil {
+		result["resolved_name"] = frozen.Parameters.Name
+	}
+	return result, err
 }

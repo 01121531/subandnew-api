@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestSupplierNamingValidation(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			b := &model.SupplierBinding{EffectiveNaming: &model.SupplierEffectiveNaming{SupplierNamingRule: model.SupplierNamingRule{Prefix: test.prefix, Suffix: test.suffix}, Version: "v1"}}
-			in, err := applyUploadNaming(UploadInput{Name: test.base}, b, test.sk)
+			in, err := applyUploadNaming(UploadInput{Name: test.base}, b, test.sk, time.Time{})
 			if test.code != "" {
 				requireCoreError(t, err, 400, test.code)
 				return
@@ -36,7 +37,7 @@ func TestSupplierNamingValidation(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, test.expected, in.Name)
 			require.Equal(t, "v1", in.NamingRevision)
-			_, err = applyUploadNaming(UploadInput{Name: test.base, NamingRevision: "old"}, b, test.sk)
+			_, err = applyUploadNaming(UploadInput{Name: test.base, NamingRevision: "old"}, b, test.sk, time.Time{})
 			requireCoreError(t, err, 409, "supplier_naming_changed")
 		})
 	}

@@ -17,6 +17,20 @@ export function ImportResultView({ result }: { result: AccountImportResult }) {
       <h2 className='text-lg font-semibold'>
         {t('supplier.accountImportResult')}
       </h2>
+      {(result.resolved_name || result.resolved_name_prefix) && (
+        <dl className='grid min-w-0 gap-1 text-sm'>
+          <dt className='text-muted-foreground'>
+            {t(
+              result.resolved_name_prefix
+                ? 'supplier.namingBatchPreview'
+                : 'supplier.resolvedName'
+            )}
+          </dt>
+          <dd className='font-mono [overflow-wrap:anywhere]'>
+            {result.resolved_name_prefix ?? result.resolved_name}
+          </dd>
+        </dl>
+      )}
       <dl className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         {(['ok', 'duplicate', 'failed', 'unknown'] as const).map((key) => {
           const Icon = resultStyles[key].icon

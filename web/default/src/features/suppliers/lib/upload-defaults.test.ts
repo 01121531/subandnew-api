@@ -103,19 +103,37 @@ describe('supplier upload defaults', () => {
     )
   })
 
-  test('stores only IDs with supplier and binding isolation', () => {
+  test('stores only IDs and time format with supplier and binding isolation', () => {
     const store = useSupplierUploadPreferences.getState()
     store.remember(1, 11, {
       policyId: 'p2',
       templateId: 'cc2',
       password: 'never-store',
       max_rpm: 99,
+      nameTimeMode: 'date_time',
+      timestamp: 'never-store',
     } as { policyId: string; templateId: string })
     store.remember(2, 11, { policyId: 'p1', templateId: 'cc1' })
     const { choices } = useSupplierUploadPreferences.getState()
-    expect(choices['1:11']).toEqual({ policyId: 'p2', templateId: 'cc2' })
-    expect(choices['2:11']).toEqual({ policyId: 'p1', templateId: 'cc1' })
+    expect(choices['1:11']).toEqual({
+      policyId: 'p2',
+      templateId: 'cc2',
+      nameTimeMode: 'date_time',
+    })
+    expect(choices['2:11']).toEqual({
+      policyId: 'p1',
+      templateId: 'cc1',
+      nameTimeMode: 'none',
+    })
     expect(choices['1:12']).toBeUndefined()
+    expect(uploadDefaults(11, options, choices['1:11']).name_time_mode).toBe(
+      'date_time'
+    )
+    expect(uploadDefaults(11, options).name_time_mode).toBe('none')
+    expect(
+      uploadDefaults(11, options, { policyId: 'p1', templateId: 'cc1' })
+        .name_time_mode
+    ).toBe('none')
   })
 
   test('upload-only suppliers retain the account entry without other modules', () => {

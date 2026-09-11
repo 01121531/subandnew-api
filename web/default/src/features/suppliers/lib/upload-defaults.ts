@@ -20,6 +20,11 @@ export function uploadDefaults(
   const defaults: z.input<typeof uploadSchema> = {
     binding_id: bindingId,
     name: '',
+    name_time_mode: ['date', 'date_time'].includes(
+      remembered?.nameTimeMode ?? ''
+    )
+      ? remembered?.nameTimeMode
+      : 'none',
     outbound_proxy_mode: 'manual',
     outbound_proxy_id: options.proxies[0]?.id ?? '',
     group_ids: [],

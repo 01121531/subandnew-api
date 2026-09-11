@@ -64,6 +64,7 @@ export function UploadWizard(props: {
         .remember(props.supplierId, props.bindingId, {
           policyId: data.policy_template_id,
           templateId: data.cc_template_id,
+          nameTimeMode: data.name_time_mode ?? 'none',
         })
     } catch {
       // Storage restrictions must not invalidate a successful remote import.
@@ -216,6 +217,16 @@ export function UploadWizard(props: {
               <h2 className='text-lg font-semibold'>
                 {t('supplier.uploadComplete')}
               </h2>
+              {exchange.data?.resolved_name && (
+                <dl className='grid min-w-0 gap-1 text-center text-sm'>
+                  <dt className='text-muted-foreground'>
+                    {t('supplier.resolvedName')}
+                  </dt>
+                  <dd className='font-mono [overflow-wrap:anywhere]'>
+                    {exchange.data.resolved_name}
+                  </dd>
+                </dl>
+              )}
             </div>
           )}
           {completed && importResult && (

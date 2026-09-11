@@ -60,6 +60,7 @@ export const uploadSchema = z
           [...value.trim()].length <= 64 &&
           !/\p{Cc}/u.test(value)
       ),
+    name_time_mode: z.enum(['none', 'date', 'date_time']).default('none'),
     outbound_proxy_mode: z.enum(['direct', 'manual', 'auto']),
     outbound_proxy_id: z.string(),
     group_ids: z.array(z.string().min(1)).max(100),

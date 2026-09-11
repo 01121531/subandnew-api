@@ -181,9 +181,12 @@ export const portalApi = {
       body,
     }),
   exchange: (csrf: string, flow_id: string, callback: string) =>
-    request<{ completed: true }>('/account-upload/exchange', {
-      method: 'POST',
-      csrf,
-      body: { flow_id, callback },
-    }),
+    request<{ completed: true; resolved_name?: string }>(
+      '/account-upload/exchange',
+      {
+        method: 'POST',
+        csrf,
+        body: { flow_id, callback },
+      }
+    ),
 }

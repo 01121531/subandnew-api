@@ -8,6 +8,20 @@ import {
 } from './naming'
 
 describe('supplier upload naming', () => {
+  test('time marker uses China time before the fixed suffix and counts toward the limit', () => {
+    const rule = { prefix: 'V-', suffix: '-S' }
+    const at = new Date('2026-09-11T09:12:00Z')
+    expect(uploadName(rule, '账号', 'none', at)).toBe('V-账号-S')
+    expect(uploadName(rule, '账号', 'date', at)).toBe('V-账号-0911-S')
+    expect(uploadName(rule, '账号', 'date_time', at)).toBe('V-账号-0911-1712-S')
+    expect(
+      uploadName(rule, '账号', 'date_time', new Date('2026-12-31T16:00:00Z'))
+    ).toBe('V-账号-0101-0000-S')
+    expect(uploadNameError(rule, '中'.repeat(50), 'rt', 'date_time')).toBeNull()
+    expect(uploadNameError(rule, '中'.repeat(51), 'rt', 'date_time')).toBe(
+      'supplier.namingNameTooLong'
+    )
+  })
   test('inheritance, explicit empty, whitespace and Unicode boundaries', () => {
     expect(validNamingRule(null)).toBe(true)
     expect(validNamingRule(emptyNaming)).toBe(true)

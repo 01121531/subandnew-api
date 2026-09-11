@@ -26,7 +26,7 @@ func (s *Service) ImportAccounts(ctx context.Context, p *Principal, kind string,
 	if err != nil {
 		return nil, err
 	}
-	in.UploadInput, err = applyUploadNaming(in.UploadInput, b, kind == "sk")
+	in.UploadInput, err = applyUploadNaming(in.UploadInput, b, kind == "sk", s.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -74,5 +74,13 @@ func (s *Service) ImportAccounts(ctx context.Context, p *Principal, kind string,
 		return nil, fail(409, "supplier_naming_changed")
 	}
 	defer s.invalidate(b)
-	return remote.Write(ctx, "POST", "account-upload/import-"+kind, body)
+	result, err := remote.Write(ctx, "POST", "account-upload/import-"+kind, body)
+	if err == nil && result != nil {
+		if kind == "sk" {
+			result["resolved_name_prefix"] = in.Name
+		} else {
+			result["resolved_name"] = in.Name
+		}
+	}
+	return result, err
 }
