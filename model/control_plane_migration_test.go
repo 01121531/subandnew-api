@@ -81,6 +81,7 @@ var expectedControlPlaneTables = []string{
 	"supplier_audits",
 	"supplier_bindings",
 	"supplier_oauth_flows",
+	"supplier_policy_defaults",
 	"supplier_sessions",
 	"suppliers",
 	"system_instances",

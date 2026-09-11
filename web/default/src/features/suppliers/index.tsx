@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Copy, ExternalLink, Plus, RefreshCw, X } from 'lucide-react'
+import { Copy, ExternalLink, Plus, RefreshCw, Settings, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -33,6 +33,7 @@ import {
   QueryState,
   Time,
 } from './components/common'
+import { DefaultPolicyDialog } from './components/default-policy'
 import { ResetPassword } from './components/reset-password'
 import { SupplierActions } from './components/supplier-actions'
 import { SupplierForm } from './components/supplier-form'
@@ -56,6 +57,7 @@ export function Suppliers() {
   }
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState(false)
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
   const [detail, setDetail] = useState<{
     supplier: Supplier
     view: 'bindings' | 'audits' | 'edit'
@@ -102,9 +104,19 @@ export function Suppliers() {
   )
   return (
     <div className='supplier-portal flex min-h-0 flex-1 flex-col'>
+      {defaultsOpen && (
+        <DefaultPolicyDialog
+          canManage={canManage}
+          onClose={() => setDefaultsOpen(false)}
+        />
+      )}
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('supplier.title')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions className='w-full justify-start sm:w-auto sm:justify-end'>
+          <Button variant='outline' onClick={() => setDefaultsOpen(true)}>
+            <Settings />
+            {t('supplier.defaultPolicy')}
+          </Button>
           <div className='flex items-center gap-1'>
             <a
               href={loginUrl}

@@ -74,7 +74,8 @@ func TestSupplierAccountImportPermissionValidationAndNoPersistence(t *testing.T)
 	_, err = f.s.ImportAccounts(context.Background(), p, "sk", in)
 	require.Error(t, err)
 	in.BindingID = b.ID
-	require.NoError(t, f.db.Model(&model.Supplier{}).Where("id = ?", s.ID).Update("upload_accounts", false).Error)
+	s.PolicyOverrides["upload_accounts"] = boolPtr(false)
+	require.NoError(t, f.db.Model(s).Select("policy_overrides").Updates(s).Error)
 	_, err = f.s.ImportAccounts(context.Background(), p, "sk", in)
 	requireCoreError(t, err, 403, "")
 }

@@ -21,7 +21,7 @@ func supplierControllerTest(t *testing.T) (*gin.Engine, *supplier.Service) {
 	old := model.DB
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "supplier.db")), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Supplier{}, &model.SupplierSession{}, &model.SupplierBinding{}, &model.SupplierOAuthFlow{}, &model.SupplierAudit{}))
+	require.NoError(t, db.AutoMigrate(&model.Supplier{}, &model.SupplierSession{}, &model.SupplierBinding{}, &model.SupplierOAuthFlow{}, &model.SupplierAudit{}, &model.SupplierPolicyDefault{}))
 	model.DB = db
 	t.Cleanup(func() { model.DB = old; sqlDB, _ := db.DB(); sqlDB.Close() })
 	gin.SetMode(gin.TestMode)
@@ -106,4 +106,29 @@ func TestSupplierPortalInvalidCookieAndRequestBody(t *testing.T) {
 	for _, body := range []string{`{"username":"a","password":"b","supplier_id":2}`, `{} {}`} {
 		require.Equal(t, 400, supplierControllerRequest(r, "POST", "/supplier-api/v1/auth/login", body, nil, "", "").Code)
 	}
+}
+
+func TestSupplierDefaultPolicyAuditAndValidation(t *testing.T) {
+	r, s := supplierControllerTest(t)
+	admin := r.Group("/api/suppliers", SupplierAuditTrail())
+	admin.GET("/default-policy", GetSupplierDefaultPolicy)
+	admin.PUT("/default-policy", SaveSupplierDefaultPolicy)
+	admin.GET("/:id/audits", ListSupplierAudits)
+	defaults, err := s.DefaultPolicy()
+	require.NoError(t, err)
+	denied := false
+	defaults.Policy["account.email"] = &denied
+	body, err := json.Marshal(defaults)
+	require.NoError(t, err)
+	w := supplierControllerRequest(r, "PUT", "/api/suppliers/default-policy", string(body), nil, "", "")
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"account.email":false`)
+	w = supplierControllerRequest(r, "GET", "/api/suppliers/1/audits", "", nil, "", "")
+	require.Equal(t, 200, w.Code)
+	require.Contains(t, w.Body.String(), `policy_changes`)
+	require.Contains(t, w.Body.String(), `PUT /api/suppliers/default-policy`)
+	w = supplierControllerRequest(r, "PUT", "/api/suppliers/default-policy", string(body), nil, "", "")
+	require.Equal(t, 409, w.Code)
+	w = supplierControllerRequest(r, "PUT", "/api/suppliers/default-policy", `{"policy":{"unknown":true},"revision":2}`, nil, "", "")
+	require.Equal(t, 400, w.Code)
 }

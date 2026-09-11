@@ -2,6 +2,15 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (error.code === 'supplier_policy_changed') {
+      return 'supplier.policyChanged'
+    }
+    if (error.code === 'supplier_invalid_policy') {
+      return 'supplier.invalidPolicy'
+    }
+    if (error.code === 'supplier_field_forbidden') {
+      return 'supplier.fieldForbidden'
+    }
     if (error.code === 'supplier_upstream_import_result_unconfirmed') {
       return 'supplier.importStatus_unknown'
     }

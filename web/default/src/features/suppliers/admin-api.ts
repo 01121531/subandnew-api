@@ -12,6 +12,7 @@ import type {
   Supplier,
   SupplierInput,
   TestResult,
+  DefaultPolicy,
 } from './types'
 
 async function request<T>(
@@ -43,6 +44,10 @@ async function request<T>(
 }
 
 export const adminApi = {
+  get: (id: number) => request<Supplier>(`/${id}`),
+  defaults: () => request<DefaultPolicy>('/default-policy'),
+  saveDefaults: (data: DefaultPolicy) =>
+    request<DefaultPolicy>('/default-policy', 'PUT', data),
   list: (page: number) =>
     request<Items<Supplier>>(`?page=${page}&page_size=50`),
   instances: () =>

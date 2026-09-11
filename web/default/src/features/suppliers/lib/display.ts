@@ -13,6 +13,8 @@ export function formatNumber(
 }
 
 const auditActions: Record<string, string> = {
+  'GET /api/suppliers/default-policy': 'defaultPolicy',
+  'PUT /api/suppliers/default-policy': 'defaultPolicy',
   'GET /api/suppliers': 'title',
   'POST /api/suppliers': 'create',
   'GET /api/suppliers/instances': 'instance',

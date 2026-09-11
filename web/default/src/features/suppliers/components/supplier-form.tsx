@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
 import { Save } from 'lucide-react'
 import { useState, type Ref } from 'react'
 import { useForm } from 'react-hook-form'
@@ -16,11 +17,13 @@ import {
   useFormLeaveGuard,
   type FormLeaveGuard,
 } from '../hooks/use-form-leave-guard'
+import { applyOverrides, globalEffectivePolicy } from '../lib/permissions'
 import { supplierDefaults, supplierSchema } from '../lib/schemas'
 import { SupplierRequestError } from '../portal-api'
-import type { Supplier, SupplierInput } from '../types'
-import { Confirm, Field } from './common'
+import type { Supplier, SupplierInput, PolicyOverrides } from '../types'
+import { Confirm, Field, QueryState } from './common'
 import { PasswordGenerator } from './password-generator'
+import { PolicyEditor } from './policy-editor'
 
 export function SupplierForm(props: {
   supplier?: Supplier
@@ -31,6 +34,16 @@ export function SupplierForm(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const defaults = useQuery({
+    queryKey: ['supplier-admin', 'defaults'],
+    queryFn: adminApi.defaults,
+  })
+  const [overrides, setOverrides] = useState<PolicyOverrides>(
+    props.supplier?.policy_overrides ?? {}
+  )
+  const policyDirty =
+    JSON.stringify(overrides) !==
+    JSON.stringify(props.supplier?.policy_overrides ?? {})
   const schema = supplierSchema.extend({
     name: z
       .string()
@@ -61,6 +74,8 @@ export function SupplierForm(props: {
     (data: SupplierInput) => adminApi.save(data, props.supplier?.id),
     (supplier) => {
       toast.success(t('supplier.saved'))
+      setConfirmation(null)
+      setOverrides(supplier.policy_overrides ?? {})
       form.reset({ ...supplier, password: '' })
       if (props.onSaved) props.onSaved(supplier)
       else props.onClose()
@@ -68,7 +83,7 @@ export function SupplierForm(props: {
   )
   const locked = mutation.isPending || !!confirmation
   const guard = useFormLeaveGuard({
-    dirty: form.formState.isDirty,
+    dirty: form.formState.isDirty || policyDirty,
     pending: locked,
     guardRef: props.guardRef,
     onPendingChange: props.onPendingChange,
@@ -92,12 +107,28 @@ export function SupplierForm(props: {
     })
   }
   const submit = (data: typeof supplierDefaults) => {
-    if (locked) return
-    const input = { ...data, password: data.password || undefined }
+    if (locked || !defaults.data) return
+    const input: SupplierInput = {
+      name: data.name,
+      username: data.username,
+      enabled: data.enabled,
+      password: data.password || undefined,
+      policy_overrides: overrides,
+      policy_revision: props.supplier?.effective_policy?.version,
+    }
+    const effective = applyOverrides(
+      globalEffectivePolicy(defaults.data),
+      overrides,
+      'supplier'
+    ).values
     const addsWrite =
-      (data.manage_proxies && !props.supplier?.manage_proxies) ||
-      (data.upload_accounts && !props.supplier?.upload_accounts)
-    if (addsWrite || (props.supplier?.enabled && !data.enabled)) {
+      (effective.manage_proxies && !props.supplier?.manage_proxies) ||
+      (effective.upload_accounts && !props.supplier?.upload_accounts)
+    if (
+      addsWrite ||
+      policyDirty ||
+      (props.supplier?.enabled && !data.enabled)
+    ) {
       setConfirmation(input)
     } else save(input)
   }
@@ -166,24 +197,21 @@ export function SupplierForm(props: {
           <input type='checkbox' {...form.register('enabled')} />
           {t('supplier.enabled')}
         </label>
-        <fieldset className='grid gap-3 border-t pt-3'>
-          <legend className='text-sm font-medium'>
-            {t('supplier.permissions')}
-          </legend>
-          {(
-            [
-              ['view_accounts', 'readAccounts'],
-              ['view_usage', 'readUsage'],
-              ['manage_proxies', 'manageProxies'],
-              ['upload_accounts', 'uploadAccounts'],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className='flex items-center gap-2 text-sm'>
-              <input type='checkbox' {...form.register(key)} />
-              {t(`supplier.${label}`)}
-            </label>
-          ))}
-        </fieldset>
+        <QueryState
+          pending={defaults.isPending}
+          error={defaults.error}
+          retry={() => void defaults.refetch()}
+        >
+          {defaults.data && (
+            <PolicyEditor
+              value={overrides}
+              parent={globalEffectivePolicy(defaults.data)}
+              level='supplier'
+              disabled={locked}
+              onChange={setOverrides}
+            />
+          )}
+        </QueryState>
       </fieldset>
       <footer className='flex shrink-0 justify-end gap-2 border-t p-4'>
         <Button
@@ -194,7 +222,7 @@ export function SupplierForm(props: {
         >
           {t('supplier.cancel')}
         </Button>
-        <Button type='submit' disabled={locked}>
+        <Button type='submit' disabled={locked || !defaults.data}>
           <Save />
           {t('supplier.save')}
         </Button>
@@ -227,6 +255,7 @@ export function SupplierForm(props: {
         open={!!confirmation}
         title={t('supplier.permissions')}
         description={[
+          t('supplier.policySaveConfirm'),
           props.supplier?.enabled && confirmation?.enabled === false
             ? t('supplier.disableConfirm')
             : '',

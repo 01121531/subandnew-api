@@ -2,6 +2,16 @@ export type Envelope<T> =
   | { success: true; data: T }
   | { success: false; message: string }
 export type Timestamp = string | number
+export type PolicyOverrides = Record<string, boolean | null>
+export interface EffectivePolicy {
+  values: Record<string, boolean>
+  sources: Record<string, 'global' | 'supplier' | 'binding'>
+  version: string
+}
+export interface DefaultPolicy {
+  policy: PolicyOverrides
+  revision: number
+}
 export interface Supplier {
   id: number
   name: string
@@ -11,13 +21,22 @@ export interface Supplier {
   view_usage: boolean
   manage_proxies: boolean
   upload_accounts: boolean
+  policy_overrides?: PolicyOverrides | null
+  effective_policy?: EffectivePolicy
   created_at: Timestamp
   updated_at: Timestamp
 }
-export type SupplierInput = Omit<
-  Supplier,
-  'id' | 'created_at' | 'updated_at'
-> & { password?: string }
+export type SupplierInput = Pick<Supplier, 'name' | 'username' | 'enabled'> &
+  Partial<
+    Pick<
+      Supplier,
+      'view_accounts' | 'view_usage' | 'manage_proxies' | 'upload_accounts'
+    >
+  > & {
+    password?: string
+    policy_overrides?: PolicyOverrides
+    policy_revision?: string
+  }
 export interface Binding {
   id: number
   supplier_id: number
@@ -25,12 +44,16 @@ export interface Binding {
   instance_name: string
   remote_username?: string
   enabled: boolean
+  policy_overrides?: PolicyOverrides | null
+  effective_policy?: EffectivePolicy
 }
 export interface BindingInput {
   instance_id: number
   identifier: string
   password: string
   enabled: boolean
+  policy_overrides?: PolicyOverrides
+  policy_revision?: string
 }
 export interface Audit {
   id: number
@@ -43,6 +66,7 @@ export interface Audit {
   admin_id: number
   error_code?: string
   ip_address?: string
+  policy_changes?: string
 }
 export interface Items<T> {
   items: T[]
@@ -78,7 +102,10 @@ export interface AccountQuery {
   sort: string
   direction: 'asc' | 'desc'
 }
-export interface AccountPage extends Items<Account>, Snapshot {
+export interface AccountPage extends Snapshot {
+  items: Account[]
+  total?: number
+  has_more?: boolean
   page: number
   page_size: number
 }

@@ -77,6 +77,9 @@ func (s *Service) Supplier(id int64) (*model.Supplier, error) {
 	} else if err != nil {
 		return nil, err
 	}
+	if err := s.decorateSupplier(&item); err != nil {
+		return nil, err
+	}
 	return &item, nil
 }
 

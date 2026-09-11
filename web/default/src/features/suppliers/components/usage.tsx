@@ -23,21 +23,28 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { usePortalQuery } from '../hooks/use-portal-query'
 import { formatNumber } from '../lib/display'
+import { useSupplierPolicy } from '../lib/permissions'
 import { aggregateUsage, formatCost } from '../lib/usage'
 import { portalApi } from '../portal-api'
 import type { UsageMetrics } from '../types'
 import { Metric } from './accounts'
 import { Empty, Freshness, QueryState } from './common'
 import { CostValue } from './cost-value'
+import { Visible } from './policy-visibility'
 
 export function UsageView(props: { bindingId: number }) {
   const { t } = useTranslation()
   const [days, setDays] = useState(7)
-  const [metric, setMetric] = useState<keyof UsageMetrics>('cost')
+  const allowed = useSupplierPolicy()
+  const [selectedMetric, setMetric] = useState<keyof UsageMetrics>('cost')
   const query = usePortalQuery(
     ['usage', props.bindingId, days],
     (signal, refresh) => portalApi.usage(props.bindingId, days, signal, refresh)
   )
+  const metrics = (['cost', 'requests', 'tokens'] as const).filter((key) =>
+    allowed(`usage.${key}`)
+  )
+  const metric = metrics.find((key) => key === selectedMetric) ?? metrics[0]
   const total = aggregateUsage(query.data?.days)
   const colors = { cost: '#059669', requests: '#0284c7', tokens: '#d97706' }
   return (
@@ -73,23 +80,31 @@ export function UsageView(props: { bindingId: number }) {
           })}
         </h2>
         <dl className='supplier-summary-band grid gap-4 min-[420px]:grid-cols-3'>
-          <Metric
-            label={t('supplier.cost')}
-            value={<CostValue value={total.cost.value} />}
-            note={total.cost.partial ? t('supplier.partialData') : undefined}
-          />
-          <Metric
-            label={t('supplier.requests')}
-            value={formatNumber(total.requests.value)}
-            note={
-              total.requests.partial ? t('supplier.partialData') : undefined
-            }
-          />
-          <Metric
-            label={t('supplier.tokens')}
-            value={formatNumber(total.tokens.value)}
-            note={total.tokens.partial ? t('supplier.partialData') : undefined}
-          />
+          <Visible field='usage.cost'>
+            <Metric
+              label={t('supplier.cost')}
+              value={<CostValue value={total.cost.value} />}
+              note={total.cost.partial ? t('supplier.partialData') : undefined}
+            />
+          </Visible>
+          <Visible field='usage.requests'>
+            <Metric
+              label={t('supplier.requests')}
+              value={formatNumber(total.requests.value)}
+              note={
+                total.requests.partial ? t('supplier.partialData') : undefined
+              }
+            />
+          </Visible>
+          <Visible field='usage.tokens'>
+            <Metric
+              label={t('supplier.tokens')}
+              value={formatNumber(total.tokens.value)}
+              note={
+                total.tokens.partial ? t('supplier.partialData') : undefined
+              }
+            />
+          </Visible>
         </dl>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <h2 className='text-sm font-semibold'>{t('supplier.trend')}</h2>
@@ -106,7 +121,7 @@ export function UsageView(props: { bindingId: number }) {
             }}
           >
             <TabsList aria-label={t('supplier.trend')}>
-              {(['cost', 'requests', 'tokens'] as const).map((value) => (
+              {metrics.map((value) => (
                 <TabsTrigger key={value} value={value}>
                   {t(`supplier.${value}`)}
                 </TabsTrigger>
@@ -114,7 +129,7 @@ export function UsageView(props: { bindingId: number }) {
             </TabsList>
           </Tabs>
         </div>
-        {!query.data?.days.length ? (
+        {!metric || !query.data?.days.length ? (
           <Empty />
         ) : (
           <div
@@ -211,6 +226,7 @@ function UsageBreakdown(props: {
   items: Array<UsageMetrics & { id: string; label: string }>
 }) {
   const { t } = useTranslation()
+  const allowed = useSupplierPolicy()
   return (
     <div className='min-w-0'>
       <div
@@ -228,30 +244,36 @@ function UsageBreakdown(props: {
               {item.label}
             </h3>
             <dl className='mt-3 grid min-w-0 grid-cols-2 gap-3 text-sm'>
-              <div className='col-span-2 min-w-0'>
-                <dt className='text-muted-foreground text-xs'>
-                  {t('supplier.cost')}
-                </dt>
-                <dd className='font-medium [overflow-wrap:anywhere] tabular-nums'>
-                  <CostValue value={item.cost} />
-                </dd>
-              </div>
-              <div className='min-w-0'>
-                <dt className='text-muted-foreground text-xs'>
-                  {t('supplier.requests')}
-                </dt>
-                <dd className='[overflow-wrap:anywhere] tabular-nums'>
-                  {formatNumber(item.requests)}
-                </dd>
-              </div>
-              <div className='min-w-0'>
-                <dt className='text-muted-foreground text-xs'>
-                  {t('supplier.tokens')}
-                </dt>
-                <dd className='[overflow-wrap:anywhere] tabular-nums'>
-                  {formatNumber(item.tokens)}
-                </dd>
-              </div>
+              <Visible field='usage.cost'>
+                <div className='col-span-2 min-w-0'>
+                  <dt className='text-muted-foreground text-xs'>
+                    {t('supplier.cost')}
+                  </dt>
+                  <dd className='font-medium [overflow-wrap:anywhere] tabular-nums'>
+                    <CostValue value={item.cost} />
+                  </dd>
+                </div>
+              </Visible>
+              <Visible field='usage.requests'>
+                <div className='min-w-0'>
+                  <dt className='text-muted-foreground text-xs'>
+                    {t('supplier.requests')}
+                  </dt>
+                  <dd className='[overflow-wrap:anywhere] tabular-nums'>
+                    {formatNumber(item.requests)}
+                  </dd>
+                </div>
+              </Visible>
+              <Visible field='usage.tokens'>
+                <div className='min-w-0'>
+                  <dt className='text-muted-foreground text-xs'>
+                    {t('supplier.tokens')}
+                  </dt>
+                  <dd className='[overflow-wrap:anywhere] tabular-nums'>
+                    {formatNumber(item.tokens)}
+                  </dd>
+                </div>
+              </Visible>
             </dl>
           </article>
         ))}
@@ -261,11 +283,13 @@ function UsageBreakdown(props: {
           <TableHeader>
             <TableRow>
               <TableHead scope='col'>{props.nameLabel}</TableHead>
-              {['requests', 'tokens', 'cost'].map((key) => (
-                <TableHead key={key} scope='col' className='text-right'>
-                  {t(`supplier.${key}`)}
-                </TableHead>
-              ))}
+              {['requests', 'tokens', 'cost']
+                .filter((key) => allowed(`usage.${key}`))
+                .map((key) => (
+                  <TableHead key={key} scope='col' className='text-right'>
+                    {t(`supplier.${key}`)}
+                  </TableHead>
+                ))}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -274,15 +298,21 @@ function UsageBreakdown(props: {
                 <TableCell className='max-w-64 font-medium break-all whitespace-normal'>
                   {item.label}
                 </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  {formatNumber(item.requests)}
-                </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  {formatNumber(item.tokens)}
-                </TableCell>
-                <TableCell className='text-right tabular-nums'>
-                  <CostValue value={item.cost} />
-                </TableCell>
+                <Visible field='usage.requests'>
+                  <TableCell className='text-right tabular-nums'>
+                    {formatNumber(item.requests)}
+                  </TableCell>
+                </Visible>
+                <Visible field='usage.tokens'>
+                  <TableCell className='text-right tabular-nums'>
+                    {formatNumber(item.tokens)}
+                  </TableCell>
+                </Visible>
+                <Visible field='usage.cost'>
+                  <TableCell className='text-right tabular-nums'>
+                    <CostValue value={item.cost} />
+                  </TableCell>
+                </Visible>
               </TableRow>
             ))}
           </TableBody>

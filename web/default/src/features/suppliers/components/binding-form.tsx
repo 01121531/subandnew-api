@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { Save } from 'lucide-react'
-import type { Ref } from 'react'
+import { useState, type Ref } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -19,8 +19,9 @@ import {
 } from '../hooks/use-form-leave-guard'
 import { bindingSchema } from '../lib/schemas'
 import { SupplierRequestError } from '../portal-api'
-import type { Binding, BindingInput } from '../types'
+import type { Binding, BindingInput, PolicyOverrides } from '../types'
 import { Field, QueryState } from './common'
+import { PolicyEditor } from './policy-editor'
 
 export function BindingForm(props: {
   supplierId: number
@@ -30,6 +31,13 @@ export function BindingForm(props: {
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const supplier = useQuery({
+    queryKey: ['supplier-admin', 'supplier', props.supplierId],
+    queryFn: () => adminApi.get(props.supplierId),
+  })
+  const [overrides, setOverrides] = useState<PolicyOverrides>(
+    props.binding?.policy_overrides ?? {}
+  )
   const instances = useQuery({
     queryKey: ['supplier-admin', 'instances'],
     queryFn: adminApi.instances,
@@ -94,27 +102,37 @@ export function BindingForm(props: {
     }
   )
   const guard = useFormLeaveGuard({
-    dirty: form.formState.isDirty,
+    dirty:
+      form.formState.isDirty ||
+      JSON.stringify(overrides) !==
+        JSON.stringify(props.binding?.policy_overrides ?? {}),
     pending: mutation.isPending,
     guardRef: props.guardRef,
     onPendingChange: props.onPendingChange,
   })
   const submit = (data: BindingInput) => {
-    if (mutation.isPending) return
-    mutation.mutate(data, {
-      onError: (error) => {
-        if (
-          error instanceof SupplierRequestError &&
-          error.code === 'supplier_binding_conflict'
-        ) {
-          form.setError(
-            'instance_id',
-            { message: t('supplier.bindingConflict') },
-            { shouldFocus: true }
-          )
-        }
+    if (mutation.isPending || !supplier.data?.effective_policy) return
+    mutation.mutate(
+      {
+        ...data,
+        policy_overrides: overrides,
+        policy_revision: props.binding?.effective_policy?.version,
       },
-    })
+      {
+        onError: (error) => {
+          if (
+            error instanceof SupplierRequestError &&
+            error.code === 'supplier_binding_conflict'
+          ) {
+            form.setError(
+              'instance_id',
+              { message: t('supplier.bindingConflict') },
+              { shouldFocus: true }
+            )
+          }
+        },
+      }
+    )
   }
   const options =
     instances.data?.filter((instance) => instance.kind === 'claude_gateway') ??
@@ -207,6 +225,21 @@ export function BindingForm(props: {
                 <input type='checkbox' {...form.register('enabled')} />
                 {t('supplier.enabled')}
               </label>
+              <QueryState
+                pending={supplier.isPending}
+                error={supplier.error}
+                retry={() => void supplier.refetch()}
+              >
+                {supplier.data?.effective_policy && (
+                  <PolicyEditor
+                    value={overrides}
+                    parent={supplier.data.effective_policy}
+                    level='binding'
+                    disabled={mutation.isPending}
+                    onChange={setOverrides}
+                  />
+                )}
+              </QueryState>
             </fieldset>
           </QueryState>
         </div>
@@ -221,7 +254,11 @@ export function BindingForm(props: {
           </Button>
           <Button
             type='submit'
-            disabled={mutation.isPending || instances.data === undefined}
+            disabled={
+              mutation.isPending ||
+              instances.data === undefined ||
+              !supplier.data?.effective_policy
+            }
           >
             <Save />
             {t('supplier.save')}

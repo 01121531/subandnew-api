@@ -48,6 +48,7 @@ func SaveSupplier(c *gin.Context) {
 		return
 	}
 	c.Set("supplier_id", item.ID)
+	c.Set("supplier_policy_changes", item.PolicyChanges)
 	supplierSuccess(c, item)
 }
 func DeleteSupplier(c *gin.Context) {
@@ -139,6 +140,32 @@ func SaveSupplierBinding(c *gin.Context) {
 		return
 	}
 	c.Set("supplier_binding_id", item.ID)
+	c.Set("supplier_policy_changes", item.PolicyChanges)
+	supplierSuccess(c, item)
+}
+
+func GetSupplierDefaultPolicy(c *gin.Context) {
+	item, err := supplierService().DefaultPolicy()
+	if err != nil {
+		supplierFailure(c, err)
+		return
+	}
+	supplierSuccess(c, item)
+}
+func SaveSupplierDefaultPolicy(c *gin.Context) {
+	var in struct {
+		Policy   model.SupplierPolicy `json:"policy"`
+		Revision int64                `json:"revision"`
+	}
+	if !supplierDecode(c, &in) {
+		return
+	}
+	item, changes, err := supplierService().SaveDefaultPolicy(in.Policy, in.Revision)
+	if err != nil {
+		supplierFailure(c, err)
+		return
+	}
+	c.Set("supplier_policy_changes", changes)
 	supplierSuccess(c, item)
 }
 func DeleteSupplierBinding(c *gin.Context) {
@@ -184,7 +211,7 @@ func ListSupplierAudits(c *gin.Context) {
 	}
 	items := []model.SupplierAudit{}
 	var total int64
-	q := model.DB.Model(&model.SupplierAudit{}).Where("supplier_id = ?", id)
+	q := model.DB.Model(&model.SupplierAudit{}).Where("supplier_id = ? OR (supplier_id = 0 AND action = ?)", id, "PUT /api/suppliers/default-policy")
 	if err := q.Count(&total).Error; err != nil {
 		supplierFailure(c, err)
 		return

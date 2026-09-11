@@ -152,23 +152,28 @@ func (s *Service) authorize(p *Principal, bindingID int64, capability string) (*
 	if err != nil || !item.Enabled || item.AuthVersion != session.AuthVersion {
 		return nil, fail(401, "supplier_unauthenticated")
 	}
-	allowed := false
-	switch capability {
-	case "accounts":
-		allowed = item.ViewAccounts
-	case "usage":
-		allowed = item.ViewUsage
-	case "proxies":
-		allowed = item.ManageProxies
-	case "upload":
-		allowed = item.UploadAccounts
-	}
-	if !allowed {
-		return nil, fail(403, "supplier_permission_denied")
-	}
 	var b model.SupplierBinding
 	if s.DB.Where("id = ? AND supplier_id = ? AND enabled = ?", bindingID, item.ID, true).First(&b).Error != nil {
 		return nil, fail(404, "supplier_binding_not_found")
+	}
+	defaults, err := defaultPolicy(s.DB)
+	if err != nil {
+		return nil, err
+	}
+	b.EffectivePolicy = model.ResolveSupplierPolicy(defaults, *item, &b)
+	allowed := false
+	switch capability {
+	case "accounts":
+		allowed = b.EffectivePolicy.Values["view_accounts"]
+	case "usage":
+		allowed = b.EffectivePolicy.Values["view_usage"]
+	case "proxies":
+		allowed = b.EffectivePolicy.Values["manage_proxies"]
+	case "upload":
+		allowed = b.EffectivePolicy.Values["upload_accounts"]
+	}
+	if !allowed {
+		return nil, fail(403, "supplier_permission_denied")
 	}
 	return &b, nil
 }

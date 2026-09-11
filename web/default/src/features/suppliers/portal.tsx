@@ -11,11 +11,13 @@ import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Accounts } from './components/accounts'
 import { Empty, QueryState } from './components/common'
 import { PasswordForm } from './components/password-form'
+import { SupplierPolicyProvider } from './components/policy-visibility'
 import { PortalNavigation } from './components/portal-navigation'
 import { Proxies } from './components/proxies'
 import { UploadWizard } from './components/upload-wizard'
 import { UsageView } from './components/usage'
 import { usePortalQuery, useSupplierMutation } from './hooks/use-portal-query'
+import { bindingCapabilities } from './lib/permissions'
 import { portalViews } from './lib/portal-views'
 import { portalApi } from './portal-api'
 import { clearSupplierSession, sessionOptions } from './session'
@@ -54,11 +56,14 @@ function PortalContent(props: { session: AuthSession }) {
     () => portalApi.logout(props.session.csrf_token),
     clearSupplierSession
   )
-  const supplier = props.session.supplier
   const available = bindings.data?.filter((item) => item.enabled) ?? []
   const binding =
     available.find((item) => item.id === bindingId) ??
     (available.length === 1 ? available[0] : undefined)
+  const supplier = bindingCapabilities(
+    props.session.supplier,
+    binding?.effective_policy
+  )
   const views = portalViews(supplier)
   const current = views.find((item) => item.id === view)?.id ?? views[0].id
   const navigation = (mobile: boolean) => (
@@ -145,39 +150,43 @@ function PortalContent(props: { session: AuthSession }) {
             error={bindings.error}
             retry={bindings.refresh}
           >
-            <section
-              key={`${binding?.id ?? 0}-${current}`}
-              aria-label={t(`supplier.${current}`)}
-              className='supplier-workspace min-w-0'
-            >
-              {current === 'security' && (
-                <PasswordForm session={props.session} />
-              )}
-              {current !== 'security' && !binding && (
-                <Empty
-                  message={t(
-                    available.length
-                      ? 'supplier.chooseBinding'
-                      : 'supplier.noBindings'
+            <SupplierPolicyProvider policy={binding?.effective_policy}>
+              <section
+                key={`${binding?.id ?? 0}-${current}-${binding?.effective_policy?.version ?? ''}`}
+                aria-label={t(`supplier.${current}`)}
+                className='supplier-workspace min-w-0'
+              >
+                {current === 'security' && (
+                  <PasswordForm session={props.session} />
+                )}
+                {current !== 'security' && !binding && (
+                  <Empty
+                    message={t(
+                      available.length
+                        ? 'supplier.chooseBinding'
+                        : 'supplier.noBindings'
+                    )}
+                  />
+                )}
+                {binding &&
+                  current === 'accounts' &&
+                  supplier.view_accounts && <Accounts bindingId={binding.id} />}
+                {binding &&
+                  current === 'accounts' &&
+                  !supplier.view_accounts && (
+                    <Empty message={t('supplier.accountsNotPermitted')} />
                   )}
-                />
-              )}
-              {binding && current === 'accounts' && supplier.view_accounts && (
-                <Accounts bindingId={binding.id} />
-              )}
-              {binding && current === 'accounts' && !supplier.view_accounts && (
-                <Empty message={t('supplier.accountsNotPermitted')} />
-              )}
-              {binding && current === 'usage' && (
-                <UsageView bindingId={binding.id} />
-              )}
-              {binding && current === 'proxies' && (
-                <Proxies
-                  bindingId={binding.id}
-                  csrf={props.session.csrf_token}
-                />
-              )}
-            </section>
+                {binding && current === 'usage' && (
+                  <UsageView bindingId={binding.id} />
+                )}
+                {binding && current === 'proxies' && (
+                  <Proxies
+                    bindingId={binding.id}
+                    csrf={props.session.csrf_token}
+                  />
+                )}
+              </section>
+            </SupplierPolicyProvider>
           </QueryState>
         </main>
       </div>

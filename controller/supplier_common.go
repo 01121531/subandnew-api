@@ -102,6 +102,7 @@ func SupplierAuditTrail() gin.HandlerFunc {
 		}
 		action := c.Request.Method + " " + c.FullPath()
 		entry := model.SupplierAudit{SupplierID: supplierID, BindingID: c.GetInt64("supplier_binding_id"), AdminID: c.GetInt("id"), Action: action, IPAddress: c.ClientIP(), StatusCode: c.Writer.Status(), DurationMS: time.Since(start).Milliseconds(), ErrorCode: c.GetString("supplier_error")}
+		entry.PolicyChanges = c.GetString("supplier_policy_changes")
 		model.DB.Create(&entry)
 		supplierService().MaybeCleanup()
 	}

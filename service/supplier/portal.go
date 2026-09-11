@@ -39,11 +39,15 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 	if err = validateQuery(resource, q); err != nil {
 		return nil, err
 	}
+	q = cloneQuery(q)
+	if err = validatePolicyQuery(b.EffectivePolicy, resource, q); err != nil {
+		return nil, err
+	}
 	remote, err := s.remoteFor(b)
 	if err != nil {
 		return nil, err
 	}
-	key := fmt.Sprintf("%d:%s:%d:%d:%s:%s", b.ID, b.Revision, b.CacheVersion, p.Supplier.AuthVersion, resource, q.Encode())
+	key := fmt.Sprintf("%d:%s:%d:%d:%s:%s:%s", b.ID, b.Revision, b.CacheVersion, p.Supplier.AuthVersion, b.EffectivePolicy.Version, resource, q.Encode())
 	value, err, _ := s.reads.Do(key, func() (any, error) {
 		s.cacheMu.Lock()
 		old, ok := s.cache[key]
@@ -106,7 +110,23 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 	if current.Revision != b.Revision {
 		return nil, fail(409, "supplier_binding_changed")
 	}
-	return value.(map[string]any), nil
+	if current.EffectivePolicy.Version != b.EffectivePolicy.Version {
+		return nil, fail(409, "supplier_policy_changed")
+	}
+	// singleflight may share results: never redact another caller's map in place.
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	result, err := cached(cacheEntry{Data: encoded, At: s.Now()}, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"observed_at", "stale"} {
+		result[key] = value.(map[string]any)[key]
+	}
+	redactPolicy(result, resource, current.EffectivePolicy, q)
+	return result, nil
 }
 func cached(entry cacheEntry, stale bool) (map[string]any, error) {
 	var result map[string]any

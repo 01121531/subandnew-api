@@ -16,6 +16,7 @@ import {
 
 import { usePortalQuery } from '../hooks/use-portal-query'
 import { formatNumber } from '../lib/display'
+import { useSupplierPolicy } from '../lib/permissions'
 import { portalApi } from '../portal-api'
 import type { AccountQuery } from '../types'
 import { AccountCards } from './account-cards'
@@ -29,9 +30,24 @@ import {
   Time,
 } from './common'
 import { CostValue } from './cost-value'
+import { Visible } from './policy-visibility'
+
+const accountFields = {
+  name: '',
+  email: 'email',
+  status: 'status',
+  group: 'group_name',
+  todayCost: 'today_cost',
+  totalCost: 'total_cost',
+  requests: 'total_requests',
+  tokens: 'total_tokens',
+  createdAt: 'created_at',
+}
 
 export function Accounts(props: { bindingId: number }) {
   const { t } = useTranslation()
+  const allowed = useSupplierPolicy()
+  const defaultSort = allowed('account.created_at') ? 'created_at' : 'name'
   const [searchDraft, setSearchDraft] = useState('')
   const [filters, setFilters] = useState<AccountQuery>({
     binding_id: props.bindingId,
@@ -40,7 +56,7 @@ export function Accounts(props: { bindingId: number }) {
     search: '',
     status: '',
     recovery_window: '',
-    sort: 'created_at',
+    sort: defaultSort,
     direction: 'desc',
   })
   const query = usePortalQuery(['accounts', filters], (signal, refresh) =>
@@ -69,7 +85,7 @@ export function Accounts(props: { bindingId: number }) {
     filters.search !== '' ||
     filters.status !== '' ||
     filters.recovery_window !== '' ||
-    filters.sort !== 'created_at' ||
+    filters.sort !== defaultSort ||
     filters.direction !== 'desc' ||
     filters.page_size !== 20 ||
     filters.page !== 1
@@ -82,7 +98,7 @@ export function Accounts(props: { bindingId: number }) {
       search: '',
       status: '',
       recovery_window: '',
-      sort: 'created_at',
+      sort: defaultSort,
       direction: 'desc',
     })
   }
@@ -105,40 +121,52 @@ export function Accounts(props: { bindingId: number }) {
           />
         </div>
         <dl className='supplier-summary-band grid gap-3 min-[420px]:grid-cols-3'>
-          <Metric
-            label={t('supplier.totalAccounts')}
-            value={formatNumber(summary.data?.total_accounts)}
-          />
-          <Metric
-            label={t('supplier.availableAccounts')}
-            value={formatNumber(summary.data?.available_accounts)}
-          />
-          <Metric
-            label={t('supplier.rpm')}
-            value={formatNumber(summary.data?.rpm)}
-          />
+          <Visible field='summary.total_accounts'>
+            <Metric
+              label={t('supplier.totalAccounts')}
+              value={formatNumber(summary.data?.total_accounts)}
+            />
+          </Visible>
+          <Visible field='summary.available_accounts'>
+            <Metric
+              label={t('supplier.availableAccounts')}
+              value={formatNumber(summary.data?.available_accounts)}
+            />
+          </Visible>
+          <Visible field='summary.rpm'>
+            <Metric
+              label={t('supplier.rpm')}
+              value={formatNumber(summary.data?.rpm)}
+            />
+          </Visible>
         </dl>
         {(summary.data?.pool_rpm !== undefined ||
           summary.data?.pool_concurrent !== undefined ||
           summary.data?.pool_available_accounts !== undefined) && (
           <dl className='supplier-summary-band grid gap-3 min-[420px]:grid-cols-3'>
             {summary.data?.pool_rpm !== undefined && (
-              <Metric
-                label={t('supplier.poolRpm')}
-                value={formatNumber(summary.data.pool_rpm)}
-              />
+              <Visible field='summary.pool_rpm'>
+                <Metric
+                  label={t('supplier.poolRpm')}
+                  value={formatNumber(summary.data.pool_rpm)}
+                />
+              </Visible>
             )}
             {summary.data?.pool_concurrent !== undefined && (
-              <Metric
-                label={t('supplier.poolConcurrent')}
-                value={formatNumber(summary.data.pool_concurrent)}
-              />
+              <Visible field='summary.pool_concurrent'>
+                <Metric
+                  label={t('supplier.poolConcurrent')}
+                  value={formatNumber(summary.data.pool_concurrent)}
+                />
+              </Visible>
             )}
             {summary.data?.pool_available_accounts !== undefined && (
-              <Metric
-                label={t('supplier.poolAvailableAccounts')}
-                value={formatNumber(summary.data.pool_available_accounts)}
-              />
+              <Visible field='summary.pool_available_accounts'>
+                <Metric
+                  label={t('supplier.poolAvailableAccounts')}
+                  value={formatNumber(summary.data.pool_available_accounts)}
+                />
+              </Visible>
             )}
           </dl>
         )}
@@ -163,73 +191,89 @@ export function Accounts(props: { bindingId: number }) {
           </Button>
         </div>
         <div className='grid min-w-0 grid-cols-2 items-end gap-3 md:grid-cols-3 xl:grid-cols-[minmax(12rem,2fr)_repeat(5,minmax(0,1fr))]'>
-          <div className='col-span-2 min-w-0 md:col-span-1'>
-            <Field id='account-search' label={t('supplier.search')}>
-              <Input
-                id='account-search'
-                type='search'
-                value={searchDraft}
-                onChange={(event) => setSearchDraft(event.target.value)}
-              />
-            </Field>
-          </div>
-          <SelectField
-            id='account-status'
-            label={t('supplier.status')}
-            value={filters.status}
-            onChange={(status) => update({ status })}
-          >
-            <NativeSelectOption value=''>
-              {t('supplier.all')}
-            </NativeSelectOption>
-            {['available', 'active', 'cooldown', 'disabled'].map((status) => (
-              <NativeSelectOption key={status} value={status}>
-                {t(`supplier.${status}`)}
+          <Visible field='account.email'>
+            <div className='col-span-2 min-w-0 md:col-span-1'>
+              <Field id='account-search' label={t('supplier.search')}>
+                <Input
+                  id='account-search'
+                  type='search'
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                />
+              </Field>
+            </div>
+          </Visible>
+          <Visible field='account.status'>
+            <SelectField
+              id='account-status'
+              label={t('supplier.status')}
+              value={filters.status}
+              onChange={(status) => update({ status })}
+            >
+              <NativeSelectOption value=''>
+                {t('supplier.all')}
               </NativeSelectOption>
-            ))}
-          </SelectField>
-          <SelectField
-            id='account-recovery'
-            label={t('supplier.recovery')}
-            value={filters.recovery_window}
-            onChange={(recovery_window) => update({ recovery_window })}
-          >
-            <NativeSelectOption value=''>
-              {t('supplier.all')}
-            </NativeSelectOption>
-            <NativeSelectOption value='15m'>
-              {t('supplier.minutes', { count: 15 })}
-            </NativeSelectOption>
-            {[1, 2, 3, 4, 5].map((hours) => (
-              <NativeSelectOption key={hours} value={`${hours}h`}>
-                {t('supplier.hours', { count: hours })}
+              {['available', 'active', 'cooldown', 'disabled'].map((status) => (
+                <NativeSelectOption key={status} value={status}>
+                  {t(`supplier.${status}`)}
+                </NativeSelectOption>
+              ))}
+            </SelectField>
+          </Visible>
+          <Visible field='account.status'>
+            <SelectField
+              id='account-recovery'
+              label={t('supplier.recovery')}
+              value={filters.recovery_window}
+              onChange={(recovery_window) => update({ recovery_window })}
+            >
+              <NativeSelectOption value=''>
+                {t('supplier.all')}
               </NativeSelectOption>
-            ))}
-          </SelectField>
+              <NativeSelectOption value='15m'>
+                {t('supplier.minutes', { count: 15 })}
+              </NativeSelectOption>
+              {[1, 2, 3, 4, 5].map((hours) => (
+                <NativeSelectOption key={hours} value={`${hours}h`}>
+                  {t('supplier.hours', { count: hours })}
+                </NativeSelectOption>
+              ))}
+            </SelectField>
+          </Visible>
           <SelectField
             id='account-sort'
             label={t('supplier.sort')}
             value={filters.sort}
             onChange={(sort) => update({ sort })}
           >
-            <NativeSelectOption value='created_at'>
-              {t('supplier.createdAt')}
-            </NativeSelectOption>
+            <Visible field='account.created_at'>
+              <NativeSelectOption value='created_at'>
+                {t('supplier.createdAt')}
+              </NativeSelectOption>
+            </Visible>
             <NativeSelectOption value='name'>
               {t('supplier.name')}
             </NativeSelectOption>
-            <NativeSelectOption value='total_cost'>
-              {t('supplier.totalCost')}
-            </NativeSelectOption>
-            <NativeSelectOption value='today_cost'>
-              {t('supplier.todayCost')}
-            </NativeSelectOption>
-            <NativeSelectOption value='total_requests'>
-              {t('supplier.requests')}
-            </NativeSelectOption>
-            <NativeSelectOption value='total_tokens'>
-              {t('supplier.tokens')}
-            </NativeSelectOption>
+            <Visible field='account.total_cost'>
+              <NativeSelectOption value='total_cost'>
+                {t('supplier.totalCost')}
+              </NativeSelectOption>
+            </Visible>
+            <Visible field='account.today_cost'>
+              <NativeSelectOption value='today_cost'>
+                {t('supplier.todayCost')}
+              </NativeSelectOption>
+            </Visible>
+            <Visible field='account.total_requests'>
+              <NativeSelectOption value='total_requests'>
+                {t('supplier.requests')}
+              </NativeSelectOption>
+            </Visible>
+            <Visible field='account.total_tokens'>
+              <NativeSelectOption value='total_tokens'>
+                {t('supplier.tokens')}
+              </NativeSelectOption>
+            </Visible>
           </SelectField>
           <SelectField
             id='account-direction'
@@ -267,10 +311,12 @@ export function Accounts(props: { bindingId: number }) {
         hasData={!!query.data}
       >
         <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-3'>
-          <p className='text-sm font-medium' role='status' aria-atomic='true'>
-            {t('supplier.ui_filtered_accounts')}:{' '}
-            {formatNumber(query.data?.total)}
-          </p>
+          <Visible field='summary.total_accounts'>
+            <p className='text-sm font-medium' role='status' aria-atomic='true'>
+              {t('supplier.ui_filtered_accounts')}:{' '}
+              {formatNumber(query.data?.total)}
+            </p>
+          </Visible>
           <Freshness
             data={query.data}
             pending={query.isFetching}
@@ -310,24 +356,34 @@ export function Accounts(props: { bindingId: number }) {
                       'requests',
                       'tokens',
                       'createdAt',
-                    ].map((key) => (
-                      <TableHead
-                        key={key}
-                        scope='col'
-                        className={
-                          [
-                            'todayCost',
-                            'totalCost',
-                            'requests',
-                            'tokens',
-                          ].includes(key)
-                            ? 'text-right'
-                            : undefined
-                        }
-                      >
-                        {t(`supplier.${key}`)}
-                      </TableHead>
-                    ))}
+                    ]
+                      .filter(
+                        (key) =>
+                          key === 'name' ||
+                          allowed(
+                            `account.${
+                              accountFields[key as keyof typeof accountFields]
+                            }`
+                          )
+                      )
+                      .map((key) => (
+                        <TableHead
+                          key={key}
+                          scope='col'
+                          className={
+                            [
+                              'todayCost',
+                              'totalCost',
+                              'requests',
+                              'tokens',
+                            ].includes(key)
+                              ? 'text-right'
+                              : undefined
+                          }
+                        >
+                          {t(`supplier.${key}`)}
+                        </TableHead>
+                      ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -342,35 +398,51 @@ export function Accounts(props: { bindingId: number }) {
                           UUID: {account.id}
                         </span>
                       </TableCell>
-                      <TableCell
-                        className='max-w-64 min-w-40 break-all whitespace-normal'
-                        title={account.email}
-                      >
-                        {account.email || '--'}
-                      </TableCell>
-                      <TableCell className='max-w-40 min-w-20 break-all whitespace-normal'>
-                        {t(`supplier.${account.status}`, {
-                          defaultValue: account.status ?? '--',
-                        })}
-                      </TableCell>
-                      <TableCell className='max-w-48 min-w-32 break-all whitespace-normal'>
-                        {account.group_name || '--'}
-                      </TableCell>
-                      <TableCell className='text-right tabular-nums'>
-                        <CostValue value={account.today_cost} />
-                      </TableCell>
-                      <TableCell className='text-right tabular-nums'>
-                        <CostValue value={account.total_cost} />
-                      </TableCell>
-                      <TableCell className='text-right tabular-nums'>
-                        {formatNumber(account.total_requests)}
-                      </TableCell>
-                      <TableCell className='text-right tabular-nums'>
-                        {formatNumber(account.total_tokens)}
-                      </TableCell>
-                      <TableCell>
-                        <Time value={account.created_at} />
-                      </TableCell>
+                      <Visible field='account.email'>
+                        <TableCell
+                          className='max-w-64 min-w-40 break-all whitespace-normal'
+                          title={account.email}
+                        >
+                          {account.email || '--'}
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.status'>
+                        <TableCell className='max-w-40 min-w-20 break-all whitespace-normal'>
+                          {t(`supplier.${account.status}`, {
+                            defaultValue: account.status ?? '--',
+                          })}
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.group_name'>
+                        <TableCell className='max-w-48 min-w-32 break-all whitespace-normal'>
+                          {account.group_name || '--'}
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.today_cost'>
+                        <TableCell className='text-right tabular-nums'>
+                          <CostValue value={account.today_cost} />
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.total_cost'>
+                        <TableCell className='text-right tabular-nums'>
+                          <CostValue value={account.total_cost} />
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.total_requests'>
+                        <TableCell className='text-right tabular-nums'>
+                          {formatNumber(account.total_requests)}
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.total_tokens'>
+                        <TableCell className='text-right tabular-nums'>
+                          {formatNumber(account.total_tokens)}
+                        </TableCell>
+                      </Visible>
+                      <Visible field='account.created_at'>
+                        <TableCell>
+                          <Time value={account.created_at} />
+                        </TableCell>
+                      </Visible>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -381,7 +453,10 @@ export function Accounts(props: { bindingId: number }) {
         <Pagination
           page={filters.page}
           size={filters.page_size}
-          total={query.data?.total ?? 0}
+          total={
+            allowed('summary.total_accounts') ? query.data?.total : undefined
+          }
+          hasMore={query.data?.has_more}
           pending={query.isFetching}
           onPage={(page) => setFilters((old) => ({ ...old, page }))}
         />

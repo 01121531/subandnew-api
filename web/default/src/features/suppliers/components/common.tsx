@@ -191,7 +191,8 @@ export function Freshness(props: {
 }
 export function Pagination(props: {
   page: number
-  total: number
+  total?: number
+  hasMore?: boolean
   size: number
   pending?: boolean
   onPage: (page: number) => void
@@ -200,11 +201,13 @@ export function Pagination(props: {
   return (
     <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs'>
       <span>
-        {t('supplier.ui_pagination', {
-          page: props.page,
-          pages: Math.max(1, Math.ceil(props.total / props.size)),
-          total: props.total,
-        })}
+        {props.total === undefined
+          ? t('supplier.pageOnly', { page: props.page })
+          : t('supplier.ui_pagination', {
+              page: props.page,
+              pages: Math.max(1, Math.ceil(props.total / props.size)),
+              total: props.total,
+            })}
       </span>
       <div className='flex gap-1'>
         <Button
@@ -222,7 +225,12 @@ export function Pagination(props: {
           size='icon'
           title={t('supplier.next')}
           aria-label={t('supplier.next')}
-          disabled={props.pending || props.page * props.size >= props.total}
+          disabled={
+            props.pending ||
+            (props.total === undefined
+              ? !props.hasMore
+              : props.page * props.size >= props.total)
+          }
           onClick={() => props.onPage(props.page + 1)}
         >
           <ChevronRight />
