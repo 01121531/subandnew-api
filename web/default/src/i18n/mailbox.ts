@@ -59,6 +59,10 @@ export const mailboxEn = {
     discardTitle: 'Discard changes?',
     discardBody: 'Your unsaved changes will be lost.',
     invalidInput: 'Enter a valid value.',
+    usernameFormat:
+      'Use 3-96 characters, starting with a letter or digit. Letters, digits and @ . _ + - are allowed; Chinese names belong in Display name.',
+    displayNameFormat:
+      'Enter a display name of 1-128 characters. Chinese names are supported.',
     importTitle: 'Import mailboxes',
     importAtomic: 'Import {{count}} mailboxes',
     imported: '{{count}} mailboxes imported',
@@ -90,7 +94,8 @@ export const mailboxEn = {
     createOperator: 'Create operator',
     editOperator: 'Edit operator',
     optionalPassword: 'Password (leave blank to generate)',
-    passwordLength: 'Password must be 8–72 UTF-8 bytes.',
+    passwordLength:
+      'Password must be 8–72 UTF-8 bytes and not only whitespace.',
     generatedPassword: 'New password. Shown only this time.',
     resetPassword: 'Reset password',
     resetPasswordFor: 'Reset password: {{name}}',
@@ -188,7 +193,8 @@ export const mailboxEn = {
     mailbox_import_invalid_format: 'Unsupported import format.',
     mailbox_import_too_large: 'Import file is too large.',
     mailbox_import_too_many_rows: 'An import cannot exceed 1000 rows.',
-    mailbox_invalid_operator: 'Invalid or disabled operator.',
+    mailbox_invalid_operator:
+      'Invalid operator details. Check the username format and display name.',
     mailbox_operator_exists: 'This username already exists.',
     mailbox_invalid_password: 'Password must be 8–72 UTF-8 bytes.',
     mailbox_username_immutable: 'The username cannot be changed.',
@@ -270,6 +276,9 @@ export const mailboxZh: typeof mailboxEn = {
     discardTitle: '放弃修改？',
     discardBody: '尚未保存的修改将丢失。',
     invalidInput: '请输入有效内容。',
+    usernameFormat:
+      '用户名须为 3–96 位，以英文字母或数字开头，只能包含英文字母、数字和 @ . _ + -；中文姓名请填写到显示名称。',
+    displayNameFormat: '显示名称须为 1–128 个字符，支持中文。',
     importTitle: '导入邮箱',
     importAtomic: '导入 {{count}} 个邮箱',
     imported: '已导入 {{count}} 个邮箱',
@@ -301,7 +310,7 @@ export const mailboxZh: typeof mailboxEn = {
     createOperator: '创建操作员',
     editOperator: '编辑操作员',
     optionalPassword: '密码（留空自动生成）',
-    passwordLength: '密码长度须为 8–72 个 UTF-8 字节。',
+    passwordLength: '密码须为 8–72 个 UTF-8 字节，不能全部为空白字符。',
     generatedPassword: '新密码，仅显示本次。',
     resetPassword: '重置密码',
     resetPasswordFor: '重置密码：{{name}}',
@@ -390,7 +399,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_import_invalid_format: '不支持的导入格式。',
     mailbox_import_too_large: '导入文件过大。',
     mailbox_import_too_many_rows: '单次导入不能超过 1000 行。',
-    mailbox_invalid_operator: '操作员无效或已停用。',
+    mailbox_invalid_operator:
+      '操作员资料格式不正确，请检查用户名格式和显示名称。',
     mailbox_operator_exists: '该用户名已存在。',
     mailbox_invalid_password: '密码长度须为 8–72 个 UTF-8 字节。',
     mailbox_username_immutable: '不能修改用户名。',

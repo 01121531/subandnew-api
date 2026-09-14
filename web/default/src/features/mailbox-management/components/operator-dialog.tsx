@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 
 import { mailboxApi } from '../api'
 import { useMailboxMutation } from '../hooks'
+import { MailboxError } from '../lib/errors'
 import { operatorSchema, passwordSchema } from '../lib/schemas'
 import type { Operator } from '../types'
 import { Confirm, CopyButton, Field, Modal } from './common'
@@ -31,17 +32,31 @@ export function OperatorDialog(props: {
     },
   })
   const mutation = useMailboxMutation(async () => {
-    const value = form.getValues()
-    const result = await mailboxApi.saveOperator(
-      {
-        username: value.username,
-        display_name: value.display_name,
-        enabled: value.enabled,
-        version: value.version,
-        ...(props.operator ? {} : { password: value.password }),
-      },
-      props.operator?.id
-    )
+    const value = operatorSchema.parse(form.getValues())
+    const result = await mailboxApi
+      .saveOperator(
+        {
+          username: value.username,
+          display_name: value.display_name,
+          enabled: value.enabled,
+          version: value.version,
+          ...(props.operator ? {} : { password: value.password }),
+        },
+        props.operator?.id
+      )
+      .catch((error: unknown) => {
+        if (
+          error instanceof MailboxError &&
+          error.code === 'mailbox_operator_exists'
+        ) {
+          form.setError(
+            'username',
+            { message: 'mailbox.errors.mailbox_operator_exists' },
+            { shouldFocus: true }
+          )
+        }
+        throw error
+      })
     form.reset({ ...value, password: '' })
     setConfirmation(false)
     if (result.generated_password) setGenerated(result.generated_password)
@@ -94,28 +109,32 @@ export function OperatorDialog(props: {
             <Field
               id='mailbox-username'
               label={t('mailbox.admin.username')}
-              error={
-                form.formState.errors.username && 'mailbox.admin.invalidInput'
-              }
+              error={form.formState.errors.username?.message}
             >
               <Input
                 id='mailbox-username'
                 autoComplete='off'
+                aria-invalid={!!form.formState.errors.username}
+                aria-describedby='mailbox-username-hint'
                 {...form.register('username')}
                 readOnly={!!props.operator}
                 disabled={mutation.isPending}
               />
+              <p
+                id='mailbox-username-hint'
+                className='text-muted-foreground text-xs'
+              >
+                {t('mailbox.admin.usernameFormat')}
+              </p>
             </Field>
             <Field
               id='mailbox-display-name'
               label={t('mailbox.admin.displayName')}
-              error={
-                form.formState.errors.display_name &&
-                'mailbox.admin.invalidInput'
-              }
+              error={form.formState.errors.display_name?.message}
             >
               <Input
                 id='mailbox-display-name'
+                aria-invalid={!!form.formState.errors.display_name}
                 {...form.register('display_name')}
                 disabled={mutation.isPending}
               />

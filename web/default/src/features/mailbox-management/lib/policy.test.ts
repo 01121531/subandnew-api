@@ -53,6 +53,58 @@ describe('mailbox grants', () => {
   })
 })
 describe('atomic assignment and form contracts', () => {
+  test('operator usernames match the backend contract and keep Chinese display names', () => {
+    const input = {
+      username: '  Test.User+1@EXAMPLE.COM  ',
+      display_name: '  张三  ',
+      password: '  password-123  ',
+      enabled: true,
+      version: 0,
+    }
+    expect(operatorSchema.parse(input)).toEqual({
+      ...input,
+      username: 'test.user+1@example.com',
+      display_name: '张三',
+    })
+    for (const username of [
+      'a',
+      'ab',
+      '张三',
+      'test user',
+      '_test',
+      '@test',
+      'a'.repeat(97),
+    ]) {
+      const result = operatorSchema.safeParse({ ...input, username })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe(
+          'mailbox.admin.usernameFormat'
+        )
+      }
+    }
+    for (const username of [
+      'abc',
+      '123',
+      'a'.repeat(96),
+      'operator+1@example.test',
+    ]) {
+      expect(operatorSchema.safeParse({ ...input, username }).success).toBe(
+        true
+      )
+    }
+    expect(
+      operatorSchema.safeParse({ ...input, display_name: '名'.repeat(128) })
+        .success
+    ).toBe(true)
+    expect(
+      operatorSchema.safeParse({ ...input, display_name: '名'.repeat(129) })
+        .success
+    ).toBe(false)
+    expect(
+      operatorSchema.safeParse({ ...input, display_name: ' ' }).success
+    ).toBe(false)
+  })
   test('explicit IDs retain optimistic versions, reject duplicates and unsafe values', () => {
     expect(parseVersionedIDs('1,7\n2\t9\n3:11')).toEqual([
       { id: 1, version: 7 },
@@ -82,6 +134,12 @@ describe('atomic assignment and form contracts', () => {
       passwordSchema.safeParse({ password: '密'.repeat(25) }).success
     ).toBe(false)
     expect(passwordSchema.safeParse({ password: 'short' }).success).toBe(false)
+    expect(passwordSchema.safeParse({ password: ' '.repeat(8) }).success).toBe(
+      false
+    )
+    expect(passwordSchema.safeParse({ password: '\t'.repeat(8) }).success).toBe(
+      false
+    )
     expect(
       operatorSchema.safeParse({
         username: ' ',

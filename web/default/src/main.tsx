@@ -109,7 +109,9 @@ const queryClient = new QueryClient({
 const router = createRouter({
   routeTree,
   context: { queryClient },
-  defaultPreload: 'intent',
+  // Pending lazy preloads can lose their match during navigation in router-core.
+  // Load on navigation until that race is fixed; do not run guards on hover.
+  defaultPreload: false,
   defaultPreloadStaleTime: 0,
 })
 

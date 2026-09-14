@@ -7,13 +7,24 @@ const password = z
   .refine(
     (value) =>
       value === '' ||
-      (new TextEncoder().encode(value).length >= 8 &&
+      (value.trim().length > 0 &&
+        new TextEncoder().encode(value).length >= 8 &&
         new TextEncoder().encode(value).length <= 72),
     'mailbox.admin.passwordLength'
   )
 export const operatorSchema = z.object({
-  username: z.string().trim().min(1).max(96),
-  display_name: z.string().trim().min(1).max(128),
+  username: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9][a-z0-9@._+-]{2,95}$/, 'mailbox.admin.usernameFormat'),
+  display_name: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value.length > 0 && [...value].length <= 128,
+      'mailbox.admin.displayNameFormat'
+    ),
   password,
   enabled: z.boolean(),
   version: z.number().int().nonnegative(),

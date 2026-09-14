@@ -49,6 +49,8 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 		c.Next()
 	}, MailboxAdminOriginGuard)
 	admin.GET("/accounts", MailboxGuard(authz.MailboxView), ListMailboxAccounts)
+	admin.GET("/operators", MailboxGuard(authz.MailboxOperators), ListMailboxOperators)
+	admin.POST("/operators", MailboxGuard(authz.MailboxOperators), SaveMailboxOperator)
 	admin.POST("/imports/preview", MailboxGuard(authz.MailboxManage), ImportMailboxAccounts(true))
 	admin.POST("/imports", MailboxGuard(authz.MailboxManage), ImportMailboxAccounts(false))
 	admin.POST("/submissions/:id/review", MailboxGuard(authz.MailboxReview), ReviewMailboxSubmission)
@@ -67,6 +69,27 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 	secured.POST("/assignments/:id/submit", SubmitMailboxScreenshots)
 	secured.GET("/attachments/:id", ReadMailboxAttachment)
 	return r, mailboxService(), actor
+}
+
+func TestMailboxHTTPOperatorFormContract(t *testing.T) {
+	r, _, _ := mailboxControllerFixture(t)
+	for _, username := range []string{"x", "ab", "张三", "test user", "_operator", strings.Repeat("a", 97)} {
+		body, err := json.Marshal(mailbox.OperatorInput{Username: username, DisplayName: "测试操作员", Password: "test-password-42", Enabled: true})
+		require.NoError(t, err)
+		w := mailboxRequest(r, "POST", "/api/mailbox-management/operators", string(body), nil, "")
+		require.Equal(t, 400, w.Code)
+		require.Contains(t, w.Body.String(), "mailbox_invalid_operator")
+		require.NotContains(t, w.Body.String(), "test-password-42")
+	}
+	w := mailboxRequest(r, "POST", "/api/mailbox-management/operators", `{"username":"  Valid.User  ","display_name":"测试操作员","password":"","enabled":true,"version":0}`, nil, "")
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"username":"valid.user"`)
+	require.Contains(t, w.Body.String(), `"generated_password"`)
+	w = mailboxRequest(r, "GET", "/api/mailbox-management/operators?page=1&page_size=20&search=", "", nil, "")
+	require.Equal(t, 200, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"total":1`)
+	require.NotContains(t, w.Body.String(), "generated_password")
+	require.NotContains(t, w.Body.String(), "password_hash")
 }
 
 func mailboxRequest(r *gin.Engine, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {
