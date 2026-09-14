@@ -73,6 +73,8 @@ export const adminApi = {
   password: (id: number, password: string) =>
     request<unknown>(`/${id}/password`, 'POST', { password }),
   revoke: (id: number) => request<unknown>(`/${id}/revoke-sessions`, 'POST'),
+  takeOwnership: (id: number) =>
+    request<{ completed: boolean }>(`/${id}/takeover`, 'POST'),
   audits: (id: number, page: number) =>
     request<Items<Audit>>(`/${id}/audits?page=${page}&page_size=20`),
 }

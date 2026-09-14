@@ -15,6 +15,7 @@ import (
 
 	"github.com/01121531/subandnew-api/model"
 	controlplaneservice "github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 )
 
@@ -264,6 +265,28 @@ func NormalizeQuery(input Query) (Query, error) {
 }
 
 func Execute(ctx context.Context, input Query) (*Result, error) {
+	access := authz.DataAccessFrom(ctx)
+	if access != nil {
+		if err := access.Current(model.DB); err != nil {
+			return nil, err
+		}
+		if err := access.CheckInstances(input.InstanceIDs); err != nil {
+			return nil, err
+		}
+		for _, rules := range [][]managedinstance.AccountFilterRule{input.Rules, input.NarrowRules} {
+			for _, rule := range rules {
+				if err := access.CheckDataField(rule.Field); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if input.SortBy == "" && !access.HasField("time") {
+			input.SortBy = "name"
+		}
+		if err := access.CheckDataField(input.SortBy); err != nil {
+			return nil, err
+		}
+	}
 	input, err := NormalizeQuery(input)
 	if err != nil {
 		return nil, err
@@ -332,6 +355,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 				sourceNames := sourceNameMap(inventory)
 				for _, account := range inventory.Items {
 					candidate := inventoryRow(instance, account, sourceNames)
+					candidate.doc = authorizedDocument(candidate.doc, access)
 					if !matchesBase(candidate.doc, input) {
 						continue
 					}
@@ -359,6 +383,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 			}
 			for _, account := range output.Items {
 				candidate := outputRow(instance, account, sourceNames)
+				candidate.doc = authorizedDocument(candidate.doc, access)
 				if !matchesBase(candidate.doc, input) {
 					continue
 				}
@@ -381,12 +406,30 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 	for _, candidate := range rows[start:end] {
 		items = append(items, candidate.item)
 	}
+	if access != nil {
+		if err := access.Current(model.DB); err != nil {
+			return nil, err
+		}
+	}
 	return &Result{
 		Dataset: input.Dataset, PresetDays: input.PresetDays, Items: items, Total: len(rows), Page: input.Page,
 		PageSize: input.PageSize, HasMore: end < len(rows), Summary: summary, Sources: statuses,
 		ObservedAt: observedAt, Stale: stale, Partial: partial || (successfulSources > 0 && successfulSources < len(input.InstanceIDs)), NoData: successfulSources == 0,
 		FilterOptions: finalizeFilterOptions(filterOptionSets),
 	}, nil
+}
+
+func authorizedDocument(doc map[string][]string, access *authz.DataAccess) map[string][]string {
+	if access == nil || access.AllFields() {
+		return doc
+	}
+	result := map[string][]string{}
+	for key, values := range doc {
+		if access.CheckDataField(key) == nil {
+			result[key] = values
+		}
+	}
+	return result
 }
 
 func newFilterOptionSets(fields []string) map[string]map[string]string {

@@ -66,6 +66,10 @@ export function useSidebarData(): SidebarData {
         id: 'control-plane',
         title: t('Control plane'),
         items: [
+          { title: t('Profile'), url: '/profile', icon: Users },
+          ...(user?.role === ROLE.SUPER_ADMIN
+            ? [{ title: t('Users'), url: '/users', icon: Users }]
+            : []),
           ...(canViewManagedInstances
             ? [
                 {
@@ -145,6 +149,7 @@ export function useSidebarData(): SidebarData {
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],
             icon: Settings,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
         ],
       },

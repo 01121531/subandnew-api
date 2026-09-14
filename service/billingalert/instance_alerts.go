@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -32,7 +33,18 @@ type InstanceAlertPage struct {
 	PageSize int                  `json:"page_size"`
 }
 
-func ListInstanceAlerts(filter InstanceAlertFilter) (*InstanceAlertPage, error) {
+func ListInstanceAlerts(filter InstanceAlertFilter, access ...*authz.DataAccess) (*InstanceAlertPage, error) {
+	a := OptionalAccess(access)
+	if a != nil {
+		if filter.InstanceID > 0 && !a.HasInstance(filter.InstanceID) {
+			return nil, authz.ErrDataForbidden
+		}
+		for field, used := range map[string]bool{"status": filter.Status != "" || filter.AlertType != "" || filter.Search != "", "email": filter.DeliveryStatus != "" || filter.Search != "", "time": filter.StartTime != 0 || filter.EndTime != 0} {
+			if used && !a.HasField(field) {
+				return nil, authz.ErrDataForbidden
+			}
+		}
+	}
 	if filter.Page <= 0 {
 		filter.Page = 1
 	}
@@ -45,6 +57,9 @@ func ListInstanceAlerts(filter InstanceAlertFilter) (*InstanceAlertPage, error) 
 	query, err := applyInstanceAlertFilter(model.DB.Model(&model.ManagedInstanceAlert{}), filter)
 	if err != nil {
 		return nil, err
+	}
+	if a != nil {
+		query = a.ScopeQuery(query, "managed_instance_alerts.instance_id")
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {

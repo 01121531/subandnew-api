@@ -75,7 +75,7 @@ func TestAssistantListResponsesUseEmptyArrays(t *testing.T) {
 	require.Equal(t, http.StatusOK, runRecorder.Code)
 	require.Contains(t, runRecorder.Body.String(), `"items":[]`)
 
-	user := model.User{Username: "assistant-user", Password: "hash", Role: common.RoleCommonUser, Status: common.UserStatusEnabled}
+	user := model.User{Username: "assistant-user", Password: "hash", Role: common.RoleRootUser, Status: common.UserStatusEnabled}
 	require.NoError(t, db.Create(&user).Error)
 	identity := model.AssistantIdentity{
 		ChannelID: 1, ExternalUserID: "wx-user", UserID: user.Id,

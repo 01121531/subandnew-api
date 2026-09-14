@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -31,7 +32,14 @@ func setupManagedInstanceOperationTestDB(t *testing.T) *gorm.DB {
 		&model.SystemTaskScopeLock{},
 		&model.ManagedConfigTemplate{},
 		&model.ManagedInstanceConfigBinding{},
+		&model.User{},
+		&model.AdminDataPolicy{},
 	))
+	// Existing execution-contract fixtures represent authorized administrators.
+	for _, id := range []int{1, 7, 8, 9, 32, 42, 62, 72} {
+		require.NoError(t, db.FirstOrCreate(&model.User{Id: id, Username: fmt.Sprintf("operation-root-%d", id),
+			Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
+	}
 	return db
 }
 

@@ -114,6 +114,13 @@ func (s *Service) decorateSupplier(item *model.Supplier) error {
 		return err
 	}
 	item.EffectivePolicy = model.ResolveSupplierPolicy(defaults, *item, nil)
+	if a, err := s.ownerAccess(item); err == nil {
+		intersectPolicy(item.EffectivePolicy, a)
+	} else {
+		for key := range item.EffectivePolicy.Values {
+			item.EffectivePolicy.Values[key] = false
+		}
+	}
 	item.EffectiveNaming = model.ResolveSupplierNaming(*item, nil)
 	item.ViewAccounts = item.EffectivePolicy.Values["view_accounts"]
 	item.ViewUsage = item.EffectivePolicy.Values["view_usage"]

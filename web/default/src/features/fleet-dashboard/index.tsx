@@ -48,6 +48,8 @@ import {
   YAxis,
 } from 'recharts'
 
+import { AdminDataField } from '@/components/admin-data-field'
+import { AdminDataTable } from '@/components/admin-data-table'
 import { SectionPageLayout } from '@/components/layout'
 import {
   Accordion,
@@ -86,6 +88,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useAdminDataAccess } from '@/hooks/use-admin-data-access'
+import {
+  ADMIN_DATA_FIELD_KEYS,
+  type AdminDataFieldKey,
+} from '@/lib/admin-data-policy'
 import { cn } from '@/lib/utils'
 
 import {
@@ -477,6 +484,9 @@ function latestDashboardSection(
 ) {
   if (!streamed) return cached
   if (!cached) return streamed
+  if (streamed.last_attempt_at == null || cached.last_attempt_at == null) {
+    return streamed
+  }
   return streamed.last_attempt_at >= cached.last_attempt_at ? streamed : cached
 }
 
@@ -533,6 +543,12 @@ function instanceFamily(instance: ManagedInstance): FleetFamily | null {
 }
 
 export function FleetDashboard() {
+  const access = useAdminDataAccess()
+  return <FullFleetDashboard key={access.key} />
+}
+
+function FullFleetDashboard() {
+  const access = useAdminDataAccess()
   const { t } = useTranslation()
   const initialPreferences = useMemo(readDashboardPreferences, [])
   const [family, setFamily] = useState<FleetFamily>(initialPreferences.family)
@@ -576,8 +592,21 @@ export function FleetDashboard() {
   ) {
     effectiveTrendMetric = 'rpm'
   }
-  const effectiveConsumptionMetric =
+  let familyMetrics: TrendMetricKey[] = ['requests', 'tokens', 'quota', 'rpm']
+  if (family === 'claude_gateway') {
+    familyMetrics = ['quota', 'rpm', 'success_rate', 'accounts']
+  }
+  if (family === 'conductor') familyMetrics = ['quota', 'rpm']
+  if (!access.allows(effectiveTrendMetric)) {
+    effectiveTrendMetric = familyMetrics.find(access.allows) ?? 'requests'
+  }
+  let effectiveConsumptionMetric =
     family === 'conductor' ? 'quota' : consumptionMetric
+  if (family !== 'conductor' && !access.allows(effectiveConsumptionMetric)) {
+    effectiveConsumptionMetric =
+      (['requests', 'tokens', 'quota'] as const).find(access.allows) ??
+      'requests'
+  }
   const isClaudeCostTrend =
     family === 'claude_gateway' && effectiveTrendMetric === 'quota'
 
@@ -719,7 +748,8 @@ export function FleetDashboard() {
         const realtime = realtimeEvents.states[instance.id]
         const accountsReady =
           instance.kind === 'conductor' || instance.kind === 'claude_gateway'
-            ? Boolean(realtime?.observed_at)
+            ? realtime?.accounts_total != null ||
+              realtime?.accounts_available != null
             : instance.kind === 'sub2api' &&
               realtime?.accounts_collection_status === 'succeeded'
         const usesRealtimeCosts = instance.kind === 'claude_gateway'
@@ -750,9 +780,11 @@ export function FleetDashboard() {
           concurrencyUsed: metricValue(realtime?.concurrency_used),
           concurrencyMax: metricValue(realtime?.concurrency_max),
           accountsAvailable: accountsReady
-            ? (realtime?.accounts_available ?? 0)
+            ? (realtime?.accounts_available ?? null)
             : null,
-          accountsTotal: accountsReady ? (realtime?.accounts_total ?? 0) : null,
+          accountsTotal: accountsReady
+            ? (realtime?.accounts_total ?? null)
+            : null,
           todayCost,
           todayCostStale: usesRealtimeCosts
             ? Boolean(realtime?.today_cost_stale)
@@ -1234,7 +1266,7 @@ export function FleetDashboard() {
                   })}
                 </span>
               </span>
-              {lastObservedAt > 0 && (
+              {access.canView('time') && lastObservedAt > 0 && (
                 <span className='text-muted-foreground hidden tabular-nums md:inline'>
                   {t('Updated {{time}}', {
                     time: new Date(lastObservedAt * 1000).toLocaleTimeString(),
@@ -1373,6 +1405,7 @@ function DailyUsagePanel(props: {
   observedAt: number
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const isRPM = props.metric === 'rpm'
   const isSuccessRate = props.metric === 'success_rate'
   const isAccounts = props.metric === 'accounts'
@@ -1452,6 +1485,8 @@ function DailyUsagePanel(props: {
     if (value === 'accounts') return t('Account count')
     return t(metricLabel(value, props.family))
   }
+  metricOptions = metricOptions.filter(access.allows)
+  if (!metricOptions.length) return null
   let panelTitle = t('Daily usage trend')
   if (isClaudeCost) {
     panelTitle = t('Consumption trend')
@@ -1825,7 +1860,7 @@ function DailyUsagePanel(props: {
                             false
                           )}
                         </span>
-                        {props.observedAt > 0 && (
+                        {access.canView('time') && props.observedAt > 0 && (
                           <span className='text-muted-foreground text-[11px]'>
                             {t('Collected at {{time}}', {
                               time: new Date(
@@ -2059,6 +2094,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
     >
       <MetricCard
+        fields={['status', 'rates', 'accounts']}
         icon={CheckCircle2}
         label={t('Fleet availability')}
         value={`${props.healthRate}%`}
@@ -2072,6 +2108,7 @@ function SummaryGrid(props: DashboardContentProps) {
       />
       {showsChannelUsageMetrics && (
         <MetricCard
+          fields={['requests']}
           icon={Activity}
           label={t('Requests')}
           value={formatMetric(
@@ -2092,6 +2129,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {props.family === 'sub2api' && (
         <MetricCard
+          fields={['concurrency']}
           icon={Cpu}
           label={t('Concurrency')}
           value={
@@ -2125,6 +2163,7 @@ function SummaryGrid(props: DashboardContentProps) {
         />
       )}
       <MetricCard
+        fields={['rpm']}
         icon={Radio}
         label='RPM'
         value={
@@ -2154,6 +2193,7 @@ function SummaryGrid(props: DashboardContentProps) {
       />
       {props.family === 'claude_gateway' && (
         <MetricCard
+          fields={['rates']}
           icon={BadgeCheck}
           label={t('Success rate')}
           value={
@@ -2185,6 +2225,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {showsAccountMetrics && (
         <MetricCard
+          fields={['accounts']}
           icon={UserCheck}
           label={t('Available accounts')}
           value={formatMetric(
@@ -2206,6 +2247,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {showsAccountMetrics && (
         <MetricCard
+          fields={['accounts']}
           icon={Users}
           label={t('Total accounts')}
           value={formatMetric(
@@ -2227,6 +2269,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {showsChannelUsageMetrics && (
         <MetricCard
+          fields={['tokens']}
           icon={DatabaseZap}
           label={t('Tokens')}
           value={formatMetric(
@@ -2247,6 +2290,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {props.family !== 'claude_gateway' && (
         <MetricCard
+          fields={['amount']}
           icon={CircleDollarSign}
           label={costLabel}
           value={formatUsageMetric(
@@ -2263,6 +2307,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {showsTodayCost && (
         <MetricCard
+          fields={['amount']}
           icon={CircleDollarSign}
           label={t('Today consumption')}
           value={formatUsageMetric(
@@ -2283,6 +2328,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {props.family === 'claude_gateway' && (
         <MetricCard
+          fields={['amount']}
           icon={CircleDollarSign}
           label={t('7-day actual consumption')}
           value={formatUsageMetric(
@@ -2303,6 +2349,7 @@ function SummaryGrid(props: DashboardContentProps) {
       )}
       {props.family === 'claude_gateway' && (
         <MetricCard
+          fields={['amount']}
           icon={CircleDollarSign}
           label={t('30-day actual consumption')}
           value={formatUsageMetric(
@@ -2322,6 +2369,7 @@ function SummaryGrid(props: DashboardContentProps) {
         />
       )}
       <MetricCard
+        fields={[...ADMIN_DATA_FIELD_KEYS]}
         icon={Gauge}
         label={t('Metric coverage')}
         value={`${props.metricCoverage}%`}
@@ -2348,6 +2396,8 @@ function ConsumptionPanel(props: {
   observedAt: number
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  if (!access.allows(props.metric)) return null
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader
@@ -2373,16 +2423,20 @@ function ConsumptionPanel(props: {
                 props.onMetricChange(event.target.value as MetricKey)
               }
             >
-              {(['requests', 'tokens', 'quota'] as const).map((option) => (
-                <NativeSelectOption key={option} value={option}>
-                  {t(metricLabel(option, props.family))}
-                </NativeSelectOption>
-              ))}
+              {(['requests', 'tokens', 'quota'] as const)
+                .filter(access.allows)
+                .map((option) => (
+                  <NativeSelectOption key={option} value={option}>
+                    {t(metricLabel(option, props.family))}
+                  </NativeSelectOption>
+                ))}
             </NativeSelect>
             <div className='hidden md:block'>
               <SegmentedControl
                 value={props.metric}
-                options={['requests', 'tokens', 'quota']}
+                options={(['requests', 'tokens', 'quota'] as const).filter(
+                  access.allows
+                )}
                 getLabel={(value) => t(metricLabel(value, props.family))}
                 onChange={props.onMetricChange}
               />
@@ -2435,7 +2489,7 @@ function ConsumptionPanel(props: {
                             false
                           )}
                         </span>
-                        {props.observedAt > 0 && (
+                        {access.canView('time') && props.observedAt > 0 && (
                           <span className='text-muted-foreground text-[11px]'>
                             {t('Collected at {{time}}', {
                               time: new Date(
@@ -2468,6 +2522,8 @@ function ConsumptionPanel(props: {
 
 function HealthPanel({ data, total }: { data: HealthData[]; total: number }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  if (!['status', 'accounts', 'rates'].every(access.allows)) return null
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader className={PANEL_HEADER_CLASS}>
@@ -2538,17 +2594,66 @@ function PerformanceTable({
   rows: InstanceMetricRow[]
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  if (!access.full) {
+    return (
+      <AdminDataTable
+        rows={rows}
+        rowKey={(row) => String(row.instance.id)}
+        columns={[
+          {
+            key: 'name',
+            label: t('Instance'),
+            render: (row) => (
+              <Link
+                to='/instances/$id'
+                params={{ id: String(row.instance.id) }}
+              >
+                {row.instance.name}
+              </Link>
+            ),
+          },
+          ...(
+            [
+              'requests',
+              'tokens',
+              'rpm',
+              'quota',
+              'concurrencyUsed',
+              'accountsTotal',
+              'successRate',
+            ] as const
+          ).map((key) => {
+            const fields: AdminDataFieldKey[] = (
+              {
+                requests: ['requests'],
+                tokens: ['tokens'],
+                rpm: ['rpm'],
+                quota: ['amount'],
+                concurrencyUsed: ['concurrency'],
+                accountsTotal: ['accounts'],
+                successRate: ['rates'],
+              } as Record<typeof key, AdminDataFieldKey[]>
+            )[key]
+            return {
+              key,
+              fields,
+              label: t(`adminData.fields.${fields[0]}`),
+              render: (row: InstanceMetricRow) => formatMetric(row[key]),
+            }
+          }),
+        ]}
+      />
+    )
+  }
   const showsChannelUsageMetrics =
     family === 'new_api' || family === 'mercer_router'
   const showsTodayCost = family !== 'new_api' && family !== 'mercer_router'
-  const sortMetric = showsChannelUsageMetrics ? 'requests' : 'quota'
   const showsAccountMetrics =
     family === 'conductor' ||
     family === 'sub2api' ||
     family === 'claude_gateway'
-  const sortedRows = [...rows]
-    .sort((a, b) => (b[sortMetric] ?? -1) - (a[sortMetric] ?? -1))
-    .slice(0, 12)
+  const sortedRows = rows.slice(0, 12)
   return (
     <Card className={PANEL_CARD_CLASS}>
       <CardHeader
@@ -2897,6 +3002,7 @@ type MetricCardTone =
   | 'neutral'
 
 function MetricCard(props: {
+  fields: AdminDataFieldKey[]
   icon: React.ElementType
   label: string
   value: string | number
@@ -2908,6 +3014,8 @@ function MetricCard(props: {
   stale?: boolean
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  if (!props.fields.every(access.canView)) return null
   const compactValue = String(props.value).length > 14
   const toneClass: Record<MetricCardTone, string> = {
     success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
@@ -2957,7 +3065,7 @@ function MetricCard(props: {
             <span className='font-mono break-all tabular-nums'>
               {props.exactValue}
             </span>
-            {props.observedAt ? (
+            {access.canView('time') && props.observedAt ? (
               <span className='text-xs opacity-80'>
                 {props.stale
                   ? t('Last successful collection at {{time}}', {
@@ -2980,9 +3088,11 @@ function MetricCard(props: {
           {props.value}
         </p>
       )}
-      <p className='text-muted-foreground mt-1 text-xs leading-4 break-words'>
-        {props.detail}
-      </p>
+      {access.full && (
+        <p className='text-muted-foreground mt-1 text-xs leading-4 break-words'>
+          {props.detail}
+        </p>
+      )}
     </div>
   )
 }
@@ -3021,11 +3131,13 @@ function InstanceSelect(props: {
   onChange: (value: string) => void
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const selected = props.instances.find(
     (instance) => String(instance.id) === props.value
   )
   const selectedFamily = selected ? instanceFamily(selected) : null
   const statusLabel = (instance: ManagedInstance) => {
+    if (!access.canView('status') || !instance.status) return ''
     return t(
       instance.status
         .split('_')
@@ -3062,7 +3174,9 @@ function InstanceSelect(props: {
               {selected.name}
             </span>
             <span className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-1.5 text-xs'>
-              <span className={statusDot(selected)} aria-hidden='true' />
+              {access.canView('status') && (
+                <span className={statusDot(selected)} aria-hidden='true' />
+              )}
               <span>
                 {selectedFamily
                   ? t(familyLabel(selectedFamily))
@@ -3090,7 +3204,9 @@ function InstanceSelect(props: {
                   {instance.name}
                 </span>
                 <span className='text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs'>
-                  <span className={statusDot(instance)} aria-hidden='true' />
+                  {access.canView('status') && (
+                    <span className={statusDot(instance)} aria-hidden='true' />
+                  )}
                   <span>{family ? t(familyLabel(family)) : instance.kind}</span>
                   <span aria-hidden='true'>·</span>
                   <span>{statusLabel(instance)}</span>
@@ -3135,17 +3251,19 @@ function InstanceTabs(props: {
               )}
               onClick={() => props.onChange(String(instance.id))}
             >
-              <span
-                className={cn(
-                  'size-1.5 shrink-0 rounded-full',
-                  instance.status === 'healthy' && 'bg-emerald-500',
-                  instance.status === 'degraded' && 'bg-amber-500',
-                  instance.status === 'offline' && 'bg-red-500',
-                  instance.status === 'auth_failed' && 'bg-fuchsia-500',
-                  instance.status === 'unknown' && 'bg-muted-foreground/50'
-                )}
-                aria-hidden='true'
-              />
+              <AdminDataField fields={['status']}>
+                <span
+                  className={cn(
+                    'size-1.5 shrink-0 rounded-full',
+                    instance.status === 'healthy' && 'bg-emerald-500',
+                    instance.status === 'degraded' && 'bg-amber-500',
+                    instance.status === 'offline' && 'bg-red-500',
+                    instance.status === 'auth_failed' && 'bg-fuchsia-500',
+                    instance.status === 'unknown' && 'bg-muted-foreground/50'
+                  )}
+                  aria-hidden='true'
+                />
+              </AdminDataField>
               <span className='truncate'>{instance.name}</span>
               {family && (
                 <span className='text-muted-foreground/80 shrink-0 text-[10px] font-normal'>

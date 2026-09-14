@@ -56,6 +56,11 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import {
+  AdminDataField,
+  AdminTableCell as TableCell,
+  AdminTableHead as TableHead,
+} from '@/components/admin-data-field'
 import { SectionPageLayout } from '@/components/layout'
 import { MultiSelect, type MultiSelectOption } from '@/components/multi-select'
 import {
@@ -85,14 +90,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Table, TableBody, TableHeader, TableRow } from '@/components/ui/table'
 import {
   createFleetPresetRange,
   resolveFleetTimeRange,
@@ -116,7 +114,9 @@ import type {
 } from '@/features/managed-instances/types'
 import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
 import { createManagedAccountExport } from '@/features/usage-records/api'
+import { useAdminDataAccess } from '@/hooks/use-admin-data-access'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import type { AdminDataFieldKey } from '@/lib/admin-data-policy'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -127,6 +127,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { AccountFilterPanel } from './account-filter-panel'
 import {
+  ACCOUNT_FILTER_FIELDS,
   accountFilterDocument,
   accountFilterSnapshot,
   isAccountFilterRuleComplete,
@@ -136,6 +137,13 @@ import {
   type AccountFilterDocument,
   type AccountFilterField,
 } from './account-filtering'
+import { AccountLoad } from './account-load'
+import { accountLoadFields } from './account-load-policy'
+import {
+  accountOutputTotals,
+  formatOutputAmount,
+  hasAccountOutputMetrics,
+} from './account-output-metrics'
 import { useBatchedAccountSnapshots } from './use-batched-account-snapshots'
 
 type AccountFamily =
@@ -398,7 +406,10 @@ function compareResourceRows(
   }
   const comparison = compareSortValues(leftValue, rightValue, direction)
   if (comparison !== 0) return comparison
-  return (right.item.created_at ?? 0) - (left.item.created_at ?? 0)
+  return (
+    left.item.name.localeCompare(right.item.name) ||
+    inventoryAccountID(left.item).localeCompare(inventoryAccountID(right.item))
+  )
 }
 
 function formatSurvivalDuration(seconds: number | null, t: TFunction) {
@@ -422,8 +433,14 @@ function formatCost(item: ManagedInstanceInventoryItem) {
 }
 
 function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
-  if (item.requests_24h == null || item.requests_24h <= 0) return null
-  const successful = Math.max(0, item.successful_requests_24h ?? 0)
+  if (
+    item.requests_24h == null ||
+    item.requests_24h <= 0 ||
+    item.successful_requests_24h == null
+  ) {
+    return null
+  }
+  const successful = Math.max(0, item.successful_requests_24h)
   return `${Math.min(100, (successful / item.requests_24h) * 100).toFixed(2)}%`
 }
 
@@ -499,16 +516,11 @@ function outputFilterDocument(
     status: account.status,
     source: sourceName || account.source_id,
     available: filterAvailability(account.enabled),
-    requests:
-      output.collection_status === 'succeeded'
-        ? output.total_requests
-        : undefined,
-    tokens:
-      output.collection_status === 'succeeded'
-        ? output.total_tokens
-        : undefined,
-    amount:
-      output.collection_status === 'succeeded' ? output.amount : undefined,
+    requests: hasAccountOutputMetrics(output)
+      ? output.total_requests
+      : undefined,
+    tokens: hasAccountOutputMetrics(output) ? output.total_tokens : undefined,
+    amount: hasAccountOutputMetrics(output) ? output.amount : undefined,
     rpm: account.rpm,
     active_sessions: account.active_sessions,
     utilization_5h:
@@ -584,6 +596,7 @@ function AccountExportBar(props: {
   sortOrder: SortDirection
 }) {
   const { t, i18n } = useTranslation()
+  const access = useAdminDataAccess()
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const selectedItems = [...props.selection.selected.values()]
@@ -643,10 +656,12 @@ function AccountExportBar(props: {
             aria-label={t('Select all filtered accounts')}
           />
           <span className='tabular-nums'>
-            {t('Selected {{selected}} / filtered {{filtered}}', {
-              selected: selectedItems.length,
-              filtered: props.available.length,
-            })}
+            {access.canView('accounts')
+              ? t('Selected {{selected}} / filtered {{filtered}}', {
+                  selected: selectedItems.length,
+                  filtered: props.available.length,
+                })
+              : t('Select all filtered accounts')}
           </span>
         </label>
         <div className='flex flex-1 flex-wrap items-center justify-end gap-2'>
@@ -677,10 +692,12 @@ function AccountExportBar(props: {
             </DialogDescription>
           </DialogHeader>
           <div className='bg-muted/35 grid grid-cols-2 gap-3 rounded-md p-4 text-sm'>
-            <MobileDetail label={t('Accounts')}>
+            <MobileDetail fields={['accounts']} label={t('Accounts')}>
               {selectedItems.length}
             </MobileDetail>
-            <MobileDetail label={t('Instances')}>{instanceCount}</MobileDetail>
+            <MobileDetail fields={['accounts']} label={t('Instances')}>
+              {instanceCount}
+            </MobileDetail>
             <MobileDetail label={t('Data source')}>
               {t(
                 props.source === 'inventory'
@@ -723,6 +740,12 @@ function AccountExportBar(props: {
 }
 
 export function ManagedAccounts() {
+  const access = useAdminDataAccess()
+  return <FullManagedAccounts key={access.key} />
+}
+
+function FullManagedAccounts() {
+  const access = useAdminDataAccess()
   const { t } = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.auth.user)
@@ -743,12 +766,14 @@ export function ManagedAccounts() {
     match_mode: 'all',
     rules: [],
   })
-  const [sortKey, setSortKey] = useState<AccountSortKey>('available')
+  const [sortKey, setSortKey] = useState<AccountSortKey>(
+    access.canView('status') ? 'available' : 'name'
+  )
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [timeRange, setTimeRange] = useState<FleetTimeRange>(() =>
     createFleetPresetRange(30)
   )
-  const handledSnapshotEvents = useRef(new Map<number, number>())
+  const handledSnapshotEvents = useRef(new WeakSet<object>())
   const [submittingRefreshes, setSubmittingRefreshes] = useState<Set<number>>(
     () => new Set()
   )
@@ -938,10 +963,15 @@ export function ManagedAccounts() {
       new Map(
         rows.map((row) => [
           `${row.instance.id}:${inventoryAccountID(row.item)}`,
-          resourceFilterDocument(row),
+          Object.fromEntries(
+            Object.entries(resourceFilterDocument(row)).map(([key, value]) => [
+              key,
+              access.allows(key) ? value : [],
+            ])
+          ) as AccountFilterDocument,
         ])
       ),
-    [rows]
+    [rows, access]
   )
   const sourceNames = useMemo(
     () =>
@@ -958,10 +988,19 @@ export function ManagedAccounts() {
       new Map(
         outputRows.map((row) => {
           const key = `${row.instance.id}:${inventoryAccountID(row.output.account)}`
-          return [key, outputFilterDocument(row, sourceNames.get(key))]
+          const document = outputFilterDocument(row, sourceNames.get(key))
+          return [
+            key,
+            Object.fromEntries(
+              Object.entries(document).map(([field, value]) => [
+                field,
+                access.allows(field) ? value : [],
+              ])
+            ) as AccountFilterDocument,
+          ]
         })
       ),
-    [outputRows, sourceNames]
+    [outputRows, sourceNames, access]
   )
   const filterOptions = useMemo(() => {
     const categoryFields: AccountFilterField[] = [
@@ -1006,12 +1045,14 @@ export function ManagedAccounts() {
   }, [outputDocuments, resourceDocuments, t])
 
   const vendorSnapshotWarning =
+    access.canView('vendor') &&
     family === 'claude_gateway' &&
     snapshotQueries.some((query) => {
       const page = query.data?.data.inventory.observation?.data
       return page?.vendor_collection_status === 'failed'
     })
   const vendorSnapshotMissing =
+    access.canView('vendor') &&
     family === 'claude_gateway' &&
     snapshotQueries.some((query) => {
       const page = query.data?.data.inventory.observation?.data
@@ -1060,37 +1101,10 @@ export function ManagedAccounts() {
       outputRows,
     ]
   )
-  const outputTotals = useMemo(() => {
-    const collected = filteredOutputRows.filter(
-      ({ output }) => output.collection_status === 'succeeded'
-    )
-    const currencies = new Set(collected.map(({ output }) => output.currency))
-    const currency = currencies.size === 1 ? [...currencies][0] : 'mixed'
-    const amount =
-      currency === 'mixed'
-        ? null
-        : collected.reduce((sum, { output }) => sum + output.amount, 0)
-    return {
-      added: filteredOutputRows.length,
-      collected: collected.length,
-      requests: collected.reduce(
-        (sum, { output }) => sum + output.total_requests,
-        0
-      ),
-      tokens: collected.reduce(
-        (sum, { output }) => sum + output.total_tokens,
-        0
-      ),
-      amount,
-      average:
-        amount == null ||
-        collected.length !== filteredOutputRows.length ||
-        filteredOutputRows.length === 0
-          ? null
-          : amount / filteredOutputRows.length,
-      currency,
-    }
-  }, [filteredOutputRows])
+  const outputTotals = useMemo(
+    () => accountOutputTotals(filteredOutputRows.map(({ output }) => output)),
+    [filteredOutputRows]
+  )
   const filteredRows = useMemo(() => {
     const filtered = filtering
       ? rows.filter((row) => {
@@ -1256,25 +1270,15 @@ export function ManagedAccounts() {
   useEffect(() => {
     instances.forEach((instance, index) => {
       const event = accountSnapshotEvents.states[instance.id]?.account_snapshot
-      if (!event?.last_attempt_at) return
-      if (
-        (handledSnapshotEvents.current.get(instance.id) ?? 0) >=
-        event.last_attempt_at
-      ) {
-        return
-      }
-      handledSnapshotEvents.current.set(instance.id, event.last_attempt_at)
+      if (!event || handledSnapshotEvents.current.has(event)) return
+      handledSnapshotEvents.current.add(event)
       const snapshot = snapshotQueries[index]?.data?.data
       const currentAttempt = Math.max(
         snapshot?.inventory.last_attempt_at ?? 0,
         snapshot?.account_output.last_attempt_at ?? 0
       )
-      if (event.last_attempt_at > currentAttempt) {
-        void snapshotQueries[index]?.refetch().then((result) => {
-          if (result.isError) {
-            handledSnapshotEvents.current.delete(instance.id)
-          }
-        })
+      if (!event.last_attempt_at || event.last_attempt_at > currentAttempt) {
+        void snapshotQueries[index]?.refetch()
       }
     })
   }, [accountSnapshotEvents.states, instances, snapshotQueries])
@@ -1460,7 +1464,9 @@ export function ManagedAccounts() {
               value={family}
               options={ACCOUNT_FAMILIES}
               getLabel={(option) =>
-                `${t(familyLabel(option))} · ${familyCounts[option]}`
+                access.canView('accounts')
+                  ? `${t(familyLabel(option))} · ${familyCounts[option]}`
+                  : t(familyLabel(option))
               }
               onChange={(value) => {
                 setFamily(value)
@@ -1468,7 +1474,7 @@ export function ManagedAccounts() {
                   (value === 'new_api' || value === 'mercer_router') &&
                   sortKey === 'survival'
                 ) {
-                  setSortKey('available')
+                  setSortKey(access.canView('status') ? 'available' : 'name')
                 }
               }}
             />
@@ -1476,7 +1482,9 @@ export function ManagedAccounts() {
               items={[
                 {
                   value: ALL_SITES_VALUE,
-                  label: `${t('All sites')} · ${familyInstances.length}`,
+                  label: access.canView('accounts')
+                    ? `${t('All sites')} · ${familyInstances.length}`
+                    : t('All sites'),
                 },
                 ...familyInstances.map((instance) => ({
                   value: String(instance.id),
@@ -1501,23 +1509,27 @@ export function ManagedAccounts() {
               <SelectContent>
                 <SelectGroup>
                   <SelectItem value={ALL_SITES_VALUE}>
-                    {t('All sites')} · {familyInstances.length}
+                    {t('All sites')}
+                    {access.canView('accounts') &&
+                      ` · ${familyInstances.length}`}
                   </SelectItem>
                   {familyInstances.map((instance) => (
                     <SelectItem key={instance.id} value={String(instance.id)}>
                       <span className='flex min-w-0 items-center gap-2'>
-                        <span
-                          className={cn(
-                            'size-1.5 shrink-0 rounded-full',
-                            instance.status === 'healthy' && 'bg-success',
-                            instance.status === 'degraded' && 'bg-warning',
-                            ['offline', 'auth_failed'].includes(
-                              instance.status
-                            ) && 'bg-destructive',
-                            instance.status === 'unknown' &&
-                              'bg-muted-foreground/50'
-                          )}
-                        />
+                        <AdminDataField fields={['status']}>
+                          <span
+                            className={cn(
+                              'size-1.5 shrink-0 rounded-full',
+                              instance.status === 'healthy' && 'bg-success',
+                              instance.status === 'degraded' && 'bg-warning',
+                              ['offline', 'auth_failed'].includes(
+                                instance.status
+                              ) && 'bg-destructive',
+                              instance.status === 'unknown' &&
+                                'bg-muted-foreground/50'
+                            )}
+                          />
+                        </AdminDataField>
                         <span className='truncate'>{instance.name}</span>
                       </span>
                     </SelectItem>
@@ -1562,8 +1574,14 @@ export function ManagedAccounts() {
           </div>
           <AccountFilterPanel
             value={advancedFilter}
-            onChange={setAdvancedFilter}
+            onChange={(value) =>
+              setAdvancedFilter({
+                ...value,
+                rules: value.rules.filter((rule) => access.allows(rule.field)),
+              })
+            }
             options={filterOptions}
+            allowedFields={ACCOUNT_FILTER_FIELDS.filter(access.allows)}
           />
           {content}
         </div>
@@ -1615,22 +1633,27 @@ function AccountCacheStatus(props: {
         />
         <span className='truncate'>{label}</span>
       </span>
-      {props.observedAt ? (
-        <div className='flex flex-wrap items-center justify-end gap-2'>
-          <Badge variant='outline' className='bg-background/70 tabular-nums'>
-            {t('Collected at {{time}}', {
-              time: formatTimestamp(props.observedAt),
-            })}
-          </Badge>
-          {props.nextRefreshAt && !props.refreshing ? (
+      <AdminDataField fields={['time']}>
+        {props.observedAt ? (
+          <div className='flex flex-wrap items-center justify-end gap-2'>
             <Badge variant='outline' className='bg-background/70 tabular-nums'>
-              {t('Next automatic update at {{time}}', {
-                time: formatTimestamp(props.nextRefreshAt),
+              {t('Collected at {{time}}', {
+                time: formatTimestamp(props.observedAt),
               })}
             </Badge>
-          ) : null}
-        </div>
-      ) : null}
+            {props.nextRefreshAt && !props.refreshing ? (
+              <Badge
+                variant='outline'
+                className='bg-background/70 tabular-nums'
+              >
+                {t('Next automatic update at {{time}}', {
+                  time: formatTimestamp(props.nextRefreshAt),
+                })}
+              </Badge>
+            ) : null}
+          </div>
+        ) : null}
+      </AdminDataField>
     </div>
   )
 }
@@ -1673,11 +1696,13 @@ function ConductorRealtimeStatus(props: {
         />
         <span>{statusLabel}</span>
       </span>
-      {observedAt > 0 && (
-        <Badge variant='outline' className='bg-background/70 tabular-nums'>
-          更新于 {formatTimestamp(observedAt)}
-        </Badge>
-      )}
+      <AdminDataField fields={['time']}>
+        {observedAt > 0 && (
+          <Badge variant='outline' className='bg-background/70 tabular-nums'>
+            更新于 {formatTimestamp(observedAt)}
+          </Badge>
+        )}
+      </AdminDataField>
     </div>
   )
 }
@@ -1693,8 +1718,10 @@ function ConductorNodeSummary(props: {
     activeSessions: number
   }
 }) {
+  const access = useAdminDataAccess()
   const items = [
     {
+      fields: ['accounts', 'status'] as AdminDataFieldKey[],
       label: '工作节点',
       value: exactNumber.format(props.stats.nodes),
       hint: `${props.stats.connectedNodes} 个已连接`,
@@ -1703,6 +1730,7 @@ function ConductorNodeSummary(props: {
     },
     {
       label: '节点配置账号',
+      fields: ['accounts'] as AdminDataFieldKey[],
       value: exactNumber.format(props.stats.configuredAccounts),
       hint: `来自 ${props.sources.length} 个节点配置`,
       icon: Server,
@@ -1710,13 +1738,17 @@ function ConductorNodeSummary(props: {
     },
     {
       label: '账号快照 RPM',
+      fields: ['rpm'] as AdminDataFieldKey[],
       value: exactNumber.format(props.stats.rpm),
-      hint: `${props.stats.reportingAccounts} 个账号参与统计`,
+      hint: access.canView('accounts')
+        ? `${props.stats.reportingAccounts} 个账号参与统计`
+        : '',
       icon: Gauge,
       tone: 'bg-warning/10 text-warning',
     },
     {
       label: '活跃会话',
+      fields: ['concurrency'] as AdminDataFieldKey[],
       value: exactNumber.format(props.stats.activeSessions),
       hint: '所有账号快照汇总',
       icon: DatabaseZap,
@@ -1725,30 +1757,32 @@ function ConductorNodeSummary(props: {
   ]
   return (
     <div className='border-border/80 bg-card grid overflow-hidden rounded-lg border shadow-xs sm:grid-cols-2 xl:grid-cols-4'>
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className='border-border/70 flex min-h-28 items-start justify-between gap-3 border-b p-4 sm:odd:border-r xl:border-b-0 xl:not-last:border-r'
-        >
-          <div className='min-w-0'>
-            <p className='text-muted-foreground text-sm'>{item.label}</p>
-            <p className='mt-2 text-2xl font-semibold tabular-nums'>
-              {item.value}
-            </p>
-            <p className='text-muted-foreground mt-1 truncate text-xs'>
-              {item.hint}
-            </p>
-          </div>
-          <span
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-md',
-              item.tone
-            )}
+      {items
+        .filter((item) => item.fields.every(access.canView))
+        .map((item) => (
+          <div
+            key={item.label}
+            className='border-border/70 flex min-h-28 items-start justify-between gap-3 border-b p-4 sm:odd:border-r xl:border-b-0 xl:not-last:border-r'
           >
-            <item.icon className='size-4' />
-          </span>
-        </div>
-      ))}
+            <div className='min-w-0'>
+              <p className='text-muted-foreground text-sm'>{item.label}</p>
+              <p className='mt-2 text-2xl font-semibold tabular-nums'>
+                {item.value}
+              </p>
+              <p className='text-muted-foreground mt-1 truncate text-xs'>
+                {item.hint}
+              </p>
+            </div>
+            <span
+              className={cn(
+                'flex size-9 shrink-0 items-center justify-center rounded-md',
+                item.tone
+              )}
+            >
+              <item.icon className='size-4' />
+            </span>
+          </div>
+        ))}
     </div>
   )
 }
@@ -1764,12 +1798,15 @@ function AccountSummary(props: {
   survivalSampleCount: number
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const items = [
     {
       key: 'total',
       label: t('Total resources'),
       value: props.total,
-      hint: t('{{count}} unknown status', { count: props.unknown }),
+      hint: access.canView('status')
+        ? t('{{count}} unknown status', { count: props.unknown })
+        : '',
       icon: Users,
       className: 'bg-primary/10 text-primary',
     },
@@ -1817,53 +1854,45 @@ function AccountSummary(props: {
         props.showAverageSurvival ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
       )}
     >
-      {items.map((item) => (
-        <Card key={item.key} className='gap-0 rounded-lg py-0 shadow-xs'>
-          <CardContent className='flex min-h-28 items-start justify-between gap-3 p-4'>
-            <div className='min-w-0'>
-              <p className='text-muted-foreground truncate text-sm'>
-                {item.label}
-              </p>
-              <p className='mt-2 text-2xl font-semibold tabular-nums'>
-                {item.value}
-              </p>
-              <p className='text-muted-foreground mt-1 truncate text-xs'>
-                {item.hint}
-              </p>
-            </div>
-            <span
-              className={cn(
-                'flex size-8 shrink-0 items-center justify-center rounded-md',
-                item.className
-              )}
-            >
-              <item.icon className='size-4' />
-            </span>
-          </CardContent>
-        </Card>
-      ))}
+      {items
+        .filter(
+          (item) =>
+            access.allows(item.key) &&
+            (item.key !== 'available' || access.canView('accounts'))
+        )
+        .map((item) => (
+          <Card key={item.key} className='gap-0 rounded-lg py-0 shadow-xs'>
+            <CardContent className='flex min-h-28 items-start justify-between gap-3 p-4'>
+              <div className='min-w-0'>
+                <p className='text-muted-foreground truncate text-sm'>
+                  {item.label}
+                </p>
+                <p className='mt-2 text-2xl font-semibold tabular-nums'>
+                  {item.value}
+                </p>
+                <p className='text-muted-foreground mt-1 truncate text-xs'>
+                  {item.hint}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  'flex size-8 shrink-0 items-center justify-center rounded-md',
+                  item.className
+                )}
+              >
+                <item.icon className='size-4' />
+              </span>
+            </CardContent>
+          </Card>
+        ))}
     </section>
   )
-}
-
-function formatOutputAmount(value: number | null, currency: string) {
-  if (value == null || currency === 'mixed') return '--'
-  if (currency.toUpperCase() === 'USD') return exactCurrency.format(value)
-  return `${exactNumber.format(value)} ${currency || ''}`.trim()
 }
 
 function AccountOutputPanel(props: {
   family: AccountFamily
   rows: OutputRow[]
-  totals: {
-    added: number
-    collected: number
-    requests: number
-    tokens: number
-    amount: number | null
-    average: number | null
-    currency: string
-  }
+  totals: ReturnType<typeof accountOutputTotals>
   loading: boolean
   error: boolean
   searching: boolean
@@ -1878,6 +1907,7 @@ function AccountOutputPanel(props: {
   onPageSizeChange: (pageSize: number) => void
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const summary = [
     {
       key: 'added',
@@ -1958,26 +1988,28 @@ function AccountOutputPanel(props: {
       </CardHeader>
       <CardContent className='p-0'>
         <div className='bg-border grid grid-cols-1 gap-px border-b min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
-          {summary.map((item) => (
-            <div key={item.key} className='bg-card min-h-24 p-4'>
-              <div className='flex items-start justify-between gap-2'>
-                <p className='text-muted-foreground text-xs font-medium'>
-                  {item.label}
+          {summary
+            .filter((item) => access.allows(item.key))
+            .map((item) => (
+              <div key={item.key} className='bg-card min-h-24 p-4'>
+                <div className='flex items-start justify-between gap-2'>
+                  <p className='text-muted-foreground text-xs font-medium'>
+                    {item.label}
+                  </p>
+                  <span
+                    className={cn(
+                      'flex size-7 shrink-0 items-center justify-center rounded-md',
+                      item.tone
+                    )}
+                  >
+                    <item.icon className='size-3.5' />
+                  </span>
+                </div>
+                <p className='mt-2 font-mono text-xl font-semibold tabular-nums'>
+                  {item.value}
                 </p>
-                <span
-                  className={cn(
-                    'flex size-7 shrink-0 items-center justify-center rounded-md',
-                    item.tone
-                  )}
-                >
-                  <item.icon className='size-3.5' />
-                </span>
               </div>
-              <p className='mt-2 font-mono text-xl font-semibold tabular-nums'>
-                {item.value}
-              </p>
-            </div>
-          ))}
+            ))}
         </div>
         {detailContent}
       </CardContent>
@@ -2013,7 +2045,10 @@ function AccountOutputTable({
   const { t } = useTranslation()
   const isChannel = family === 'new_api' || family === 'mercer_router'
   const isClaudeGateway = family === 'claude_gateway'
-  const [sortKey, setSortKey] = useState<OutputSortKey>('created_at')
+  const access = useAdminDataAccess()
+  const [sortKey, setSortKey] = useState<OutputSortKey>(
+    access.canView('time') ? 'created_at' : 'account'
+  )
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [pageIndex, setPageIndex] = useState(0)
   const isMobile = useMediaQuery('(max-width: 767px)')
@@ -2025,8 +2060,8 @@ function AccountOutputTable({
       })
     const compareNumber = (left: number, right: number) => left - right
     const result = [...rows].sort((left, right) => {
-      const leftSucceeded = left.output.collection_status === 'succeeded'
-      const rightSucceeded = right.output.collection_status === 'succeeded'
+      const leftSucceeded = hasAccountOutputMetrics(left.output)
+      const rightSucceeded = hasAccountOutputMetrics(right.output)
       if (leftSucceeded !== rightSucceeded) return leftSucceeded ? -1 : 1
 
       let compared = 0
@@ -2123,6 +2158,7 @@ function AccountOutputTable({
     label: string,
     align: 'left' | 'right' = 'left'
   ) => {
+    if (!access.allows(key)) return null
     const active = sortKey === key
     let SortIcon = ArrowUpDown
     let ariaSort: 'ascending' | 'descending' | 'none' = 'none'
@@ -2195,7 +2231,9 @@ function AccountOutputTable({
         <div className='border-b p-3'>
           <div className='grid grid-cols-[minmax(0,1fr)_7rem] gap-2'>
             <Select
-              items={sortOptions}
+              items={sortOptions.filter((option) =>
+                access.allows(option.value)
+              )}
               value={sortKey}
               onValueChange={(value) =>
                 value && setSortKey(value as OutputSortKey)
@@ -2205,11 +2243,13 @@ function AccountOutputTable({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {sortOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                {sortOptions
+                  .filter((option) => access.allows(option.value))
+                  .map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <Select
@@ -2236,7 +2276,7 @@ function AccountOutputTable({
       {isMobile ? (
         <Accordion className='divide-border divide-y'>
           {pageRows.map(({ instance, output }) => {
-            const succeeded = output.collection_status === 'succeeded'
+            const succeeded = hasAccountOutputMetrics(output)
             const selectable = accountSelection(instance, output.account)
             return (
               <AccordionItem
@@ -2260,11 +2300,16 @@ function AccountOutputTable({
                         <span className='min-w-0 font-medium break-words'>
                           {output.account.name || `#${output.account.id}`}
                         </span>
-                        <span className='shrink-0 font-mono text-sm font-semibold tabular-nums'>
-                          {succeeded
-                            ? formatOutputAmount(output.amount, output.currency)
-                            : t('Collection failed')}
-                        </span>
+                        <AdminDataField fields={['amount']}>
+                          <span className='shrink-0 font-mono text-sm font-semibold tabular-nums'>
+                            {succeeded
+                              ? formatOutputAmount(
+                                  output.amount,
+                                  output.currency
+                                )
+                              : t('Collection failed')}
+                          </span>
+                        </AdminDataField>
                       </div>
                       <div className='text-muted-foreground mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs'>
                         <span className='break-words'>{instance.name}</span>
@@ -2278,6 +2323,7 @@ function AccountOutputTable({
                 <AccordionContent className='px-4 pb-4'>
                   <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
                     <MobileDetail
+                      fields={['time']}
                       label={t(isChannel ? 'Created At' : 'Uploaded at')}
                     >
                       {formatTimestamp(output.account.created_at)}
@@ -2286,23 +2332,26 @@ function AccountOutputTable({
                       {instance.name}
                     </MobileDetail>
                     {isClaudeGateway && (
-                      <MobileDetail label={t('Vendor')}>
+                      <MobileDetail fields={['vendor']} label={t('Vendor')}>
                         {output.account.vendor_name || '--'}
                       </MobileDetail>
                     )}
                     {isClaudeGateway && (
-                      <MobileDetail label={t('Vendor email')}>
+                      <MobileDetail
+                        fields={['vendor', 'email']}
+                        label={t('Vendor email')}
+                      >
                         <span className='break-all'>
                           {output.account.vendor_email || '--'}
                         </span>
                       </MobileDetail>
                     )}
-                    <MobileDetail label={t('Requests')}>
+                    <MobileDetail fields={['requests']} label={t('Requests')}>
                       {succeeded
                         ? formatOptionalNumber(output.total_requests)
                         : '--'}
                     </MobileDetail>
-                    <MobileDetail label={t('Tokens')}>
+                    <MobileDetail fields={['tokens']} label={t('Tokens')}>
                       {succeeded
                         ? formatOptionalNumber(output.total_tokens)
                         : '--'}
@@ -2331,7 +2380,11 @@ function AccountOutputTable({
                 </TableHead>
                 {sortableHead('account', t(isChannel ? 'Channel' : 'Account'))}
                 {isClaudeGateway && sortableHead('vendor', t('Vendor'))}
-                {isClaudeGateway && <TableHead>{t('Vendor email')}</TableHead>}
+                {isClaudeGateway && (
+                  <TableHead fields={['vendor', 'email']}>
+                    {t('Vendor email')}
+                  </TableHead>
+                )}
                 {sortableHead('instance', t('Instance'))}
                 {sortableHead(
                   'created_at',
@@ -2365,35 +2418,44 @@ function AccountOutputTable({
                       </p>
                     </TableCell>
                     {isClaudeGateway && (
-                      <TableCell>
+                      <TableCell fields={['vendor']}>
                         <p className='max-w-44 truncate text-sm font-medium'>
                           {output.account.vendor_name || '--'}
                         </p>
                       </TableCell>
                     )}
                     {isClaudeGateway && (
-                      <TableCell>
+                      <TableCell fields={['vendor', 'email']}>
                         <p className='max-w-56 truncate text-sm'>
                           {output.account.vendor_email || '--'}
                         </p>
                       </TableCell>
                     )}
                     <TableCell>{instance.name}</TableCell>
-                    <TableCell className='whitespace-nowrap'>
+                    <TableCell fields={['time']} className='whitespace-nowrap'>
                       {formatTimestamp(output.account.created_at)}
                     </TableCell>
-                    <TableCell className='text-right tabular-nums'>
-                      {output.collection_status === 'succeeded'
+                    <TableCell
+                      fields={['requests']}
+                      className='text-right tabular-nums'
+                    >
+                      {hasAccountOutputMetrics(output)
                         ? formatOptionalNumber(output.total_requests)
                         : '--'}
                     </TableCell>
-                    <TableCell className='text-right tabular-nums'>
-                      {output.collection_status === 'succeeded'
+                    <TableCell
+                      fields={['tokens']}
+                      className='text-right tabular-nums'
+                    >
+                      {hasAccountOutputMetrics(output)
                         ? formatOptionalNumber(output.total_tokens)
                         : '--'}
                     </TableCell>
-                    <TableCell className='pe-6 text-right font-medium tabular-nums'>
-                      {output.collection_status === 'succeeded'
+                    <TableCell
+                      fields={['amount']}
+                      className='pe-6 text-right font-medium tabular-nums'
+                    >
+                      {hasAccountOutputMetrics(output)
                         ? formatOutputAmount(output.amount, output.currency)
                         : t('Collection failed')}
                     </TableCell>
@@ -2415,12 +2477,19 @@ function AccountOutputTable({
   )
 }
 
-function MobileDetail(props: { label: string; children: ReactNode }) {
+function MobileDetail(props: {
+  label: string
+  children: ReactNode
+  fields?: AdminDataFieldKey[]
+  anyFields?: AdminDataFieldKey[]
+}) {
   return (
-    <div className='min-w-0'>
-      <div className='text-muted-foreground text-xs'>{props.label}</div>
-      <div className='mt-1 break-words tabular-nums'>{props.children}</div>
-    </div>
+    <AdminDataField fields={props.fields} anyFields={props.anyFields}>
+      <div className='min-w-0'>
+        <div className='text-muted-foreground text-xs'>{props.label}</div>
+        <div className='mt-1 break-words tabular-nums'>{props.children}</div>
+      </div>
+    </AdminDataField>
   )
 }
 
@@ -2432,13 +2501,20 @@ function ClientPagination(props: {
   onPageSizeChange: (pageSize: number) => void
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const totalPages = Math.max(1, Math.ceil(props.totalRows / props.pageSize))
   const currentPage = Math.min(props.pageIndex + 1, totalPages)
   return (
     <div className='flex flex-wrap items-center justify-between gap-3 border-t px-3 py-3 sm:px-4'>
       <div className='text-muted-foreground text-xs tabular-nums sm:text-sm'>
-        {t('Total:')} {props.totalRows.toLocaleString()} · {currentPage} /{' '}
-        {totalPages}
+        {access.canView('accounts') ? (
+          <>
+            {t('Total:')} {props.totalRows.toLocaleString()} · {currentPage} /{' '}
+            {totalPages}
+          </>
+        ) : (
+          t('adminData.page', { page: currentPage })
+        )}
       </div>
       <div className='flex items-center gap-2'>
         <Select
@@ -2513,6 +2589,7 @@ function AccountTable(props: {
   onPageSizeChange: (pageSize: number) => void
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
   const [selectedSource, setSelectedSource] = useState<SourceRow | null>(null)
   const [pageIndex, setPageIndex] = useState(0)
   const isMobile = useMediaQuery('(max-width: 767px)')
@@ -2560,6 +2637,17 @@ function AccountTable(props: {
     usageColumnLabel = t('Actual consumption')
   }
   if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
+  const loadFields = accountLoadFields(
+    isConductor,
+    isClaudeGateway,
+    access.canView
+  )
+  let loadColumnLabel = isConductor ? '运行负载' : usageColumnLabel
+  if (!access.full) {
+    loadColumnLabel = loadFields
+      .map((field) => t(`adminData.fields.${field}`))
+      .join(' / ')
+  }
   const sortOptions: { value: AccountSortKey; label: string }[] = [
     { value: 'available', label: t('Available') },
     { value: 'name', label: t(isChannel ? 'Channel' : 'Account') },
@@ -2647,14 +2735,18 @@ function AccountTable(props: {
                           />
                         </div>
                         <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
-                          <span>
-                            {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
-                            {formatTimestamp(item.created_at)}
-                          </span>
-                          {!isConductor && (
-                            <span className='text-foreground font-medium'>
-                              {usageColumnLabel}: {formatCost(item)}
+                          <AdminDataField fields={['time']}>
+                            <span>
+                              {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
+                              {formatTimestamp(item.created_at)}
                             </span>
+                          </AdminDataField>
+                          {!isConductor && (
+                            <AdminDataField fields={['amount']}>
+                              <span className='text-foreground font-medium'>
+                                {usageColumnLabel}: {formatCost(item)}
+                              </span>
+                            </AdminDataField>
                           )}
                         </div>
                       </div>
@@ -2672,12 +2764,15 @@ function AccountTable(props: {
                         </Link>
                       </MobileDetail>
                       {isClaudeGateway && (
-                        <MobileDetail label={t('Vendor')}>
+                        <MobileDetail fields={['vendor']} label={t('Vendor')}>
                           {item.vendor_name || '--'}
                         </MobileDetail>
                       )}
                       {isClaudeGateway && (
-                        <MobileDetail label={t('Vendor email')}>
+                        <MobileDetail
+                          fields={['vendor', 'email']}
+                          label={t('Vendor email')}
+                        >
                           <span className='break-all'>
                             {item.vendor_email || '--'}
                           </span>
@@ -2706,18 +2801,19 @@ function AccountTable(props: {
                         )}
                       </MobileDetail>
                       <MobileDetail
-                        label={isConductor ? '运行负载' : usageColumnLabel}
+                        anyFields={loadFields}
+                        label={loadColumnLabel}
                       >
-                        {isConductor ? (
-                          <>
-                            {formatOptionalNumber(item.rpm)} RPM ·{' '}
-                            {formatOptionalNumber(item.active_sessions)} 个会话
-                          </>
-                        ) : (
-                          formatCost(item)
-                        )}
+                        <AccountLoad
+                          item={item}
+                          isConductor={isConductor}
+                          isClaudeGateway={isClaudeGateway}
+                        />
                       </MobileDetail>
-                      <MobileDetail label={t('Last activity')}>
+                      <MobileDetail
+                        fields={['time']}
+                        label={t('Last activity')}
+                      >
                         {formatTimestamp(item.last_activity_at)}
                         {item.response_time_ms != null && (
                           <span className='text-muted-foreground block text-xs'>
@@ -2726,7 +2822,10 @@ function AccountTable(props: {
                         )}
                       </MobileDetail>
                       {showsSurvival && (
-                        <MobileDetail label={t('Survival time')}>
+                        <MobileDetail
+                          fields={['time', 'status']}
+                          label={t('Survival time')}
+                        >
                           {formatSurvivalDuration(survivalSeconds, t)}
                           {survivalSeconds != null && (
                             <span className='text-muted-foreground block text-xs'>
@@ -2740,7 +2839,10 @@ function AccountTable(props: {
                         </MobileDetail>
                       )}
                       {isClaudeGateway && (
-                        <MobileDetail label={t('Success rate')}>
+                        <MobileDetail
+                          fields={['rates', 'requests']}
+                          label={t('Success rate')}
+                        >
                           {formatSuccessRate24H(item) || '--'} ·{' '}
                           {formatOptionalNumber(item.requests_24h)}{' '}
                           {t('Requests')} / 24h
@@ -2781,9 +2883,13 @@ function AccountTable(props: {
                   <TableHead className='ps-6'>
                     {t(isChannel ? 'Channel' : 'Account')}
                   </TableHead>
-                  {isClaudeGateway && <TableHead>{t('Vendor')}</TableHead>}
                   {isClaudeGateway && (
-                    <TableHead>{t('Vendor email')}</TableHead>
+                    <TableHead fields={['vendor']}>{t('Vendor')}</TableHead>
+                  )}
+                  {isClaudeGateway && (
+                    <TableHead fields={['vendor', 'email']}>
+                      {t('Vendor email')}
+                    </TableHead>
                   )}
                   <TableHead>{t('Instance')}</TableHead>
                   <TableHead>
@@ -2791,15 +2897,19 @@ function AccountTable(props: {
                       ? '工作节点'
                       : `${t('Platform')} / ${t('Type')}`}
                   </TableHead>
-                  <TableHead>
+                  <TableHead fields={['time']}>
                     {t(isChannel ? 'Created At' : 'Uploaded at')}
                   </TableHead>
-                  <TableHead className='text-right'>
-                    {isConductor ? '运行负载' : usageColumnLabel}
+                  <TableHead anyFields={loadFields} className='text-right'>
+                    {loadColumnLabel}
                   </TableHead>
-                  <TableHead>{t('Last activity')}</TableHead>
-                  {showsSurvival && <TableHead>{t('Survival time')}</TableHead>}
-                  <TableHead className='pe-6 text-right'>
+                  <TableHead fields={['time']}>{t('Last activity')}</TableHead>
+                  {showsSurvival && (
+                    <TableHead fields={['time', 'status']}>
+                      {t('Survival time')}
+                    </TableHead>
+                  )}
+                  <TableHead fields={['status']} className='pe-6 text-right'>
                     {t('Available')}
                   </TableHead>
                 </TableRow>
@@ -2841,14 +2951,14 @@ function AccountTable(props: {
                         </div>
                       </TableCell>
                       {isClaudeGateway && (
-                        <TableCell>
+                        <TableCell fields={['vendor']}>
                           <p className='max-w-48 truncate text-sm font-medium'>
                             {item.vendor_name || '--'}
                           </p>
                         </TableCell>
                       )}
                       {isClaudeGateway && (
-                        <TableCell>
+                        <TableCell fields={['vendor', 'email']}>
                           <p className='max-w-56 truncate text-sm'>
                             {item.vendor_email || '--'}
                           </p>
@@ -2881,69 +2991,26 @@ function AccountTable(props: {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className='text-muted-foreground whitespace-nowrap'>
+                      <TableCell
+                        fields={['time']}
+                        className='text-muted-foreground whitespace-nowrap'
+                      >
                         {formatTimestamp(item.created_at)}
                       </TableCell>
-                      <TableCell className='text-right tabular-nums'>
-                        {isConductor ? (
-                          <>
-                            <p className='font-medium'>
-                              {formatOptionalNumber(item.rpm)} RPM
-                            </p>
-                            <p className='text-muted-foreground text-xs'>
-                              {formatOptionalNumber(item.active_sessions)}{' '}
-                              个会话 ·{' '}
-                              {item.utilization_5h == null
-                                ? '--'
-                                : `${(item.utilization_5h * 100).toFixed(1)}%`}{' '}
-                              / 5h
-                            </p>
-                          </>
-                        ) : (
-                          <p className='font-medium'>{formatCost(item)}</p>
-                        )}
-                        {isClaudeGateway && (
-                          <>
-                            <p className='text-muted-foreground text-xs'>
-                              {formatOptionalNumber(item.requests_24h)}{' '}
-                              {t('Requests')} / 24h
-                            </p>
-                            {formatSuccessRate24H(item) && (
-                              <p className='text-muted-foreground text-xs'>
-                                {t('Success rate')} {formatSuccessRate24H(item)}
-                                {item.limited_requests_24h != null && (
-                                  <>
-                                    {' · '}
-                                    {formatOptionalNumber(
-                                      item.limited_requests_24h
-                                    )}{' '}
-                                    {t('Rate limited')}
-                                  </>
-                                )}
-                              </p>
-                            )}
-                          </>
-                        )}
-                        {!isConductor &&
-                          !isClaudeGateway &&
-                          (isChannel
-                            ? item.balance != null && (
-                                <p className='text-muted-foreground text-xs'>
-                                  {t('Balance')}{' '}
-                                  {exactCurrency.format(item.balance)}
-                                </p>
-                              )
-                            : (item.requests != null ||
-                                item.tokens != null) && (
-                                <p className='text-muted-foreground text-xs'>
-                                  {formatOptionalNumber(item.requests)}{' '}
-                                  {t('Requests')} /{' '}
-                                  {formatOptionalNumber(item.tokens)}{' '}
-                                  {t('Tokens')}
-                                </p>
-                              ))}
+                      <TableCell
+                        anyFields={loadFields}
+                        className='text-right tabular-nums'
+                      >
+                        <AccountLoad
+                          item={item}
+                          isConductor={isConductor}
+                          isClaudeGateway={isClaudeGateway}
+                        />
                       </TableCell>
-                      <TableCell className='whitespace-nowrap'>
+                      <TableCell
+                        fields={['time']}
+                        className='whitespace-nowrap'
+                      >
                         <p className='text-sm'>
                           {formatTimestamp(item.last_activity_at)}
                         </p>
@@ -2954,7 +3021,10 @@ function AccountTable(props: {
                         )}
                       </TableCell>
                       {showsSurvival && (
-                        <TableCell className='whitespace-nowrap'>
+                        <TableCell
+                          fields={['time', 'status']}
+                          className='whitespace-nowrap'
+                        >
                           <p className='text-sm font-medium tabular-nums'>
                             {formatSurvivalDuration(survivalSeconds, t)}
                           </p>
@@ -2969,7 +3039,10 @@ function AccountTable(props: {
                           )}
                         </TableCell>
                       )}
-                      <TableCell className='pe-6 text-right'>
+                      <TableCell
+                        fields={['status']}
+                        className='pe-6 text-right'
+                      >
                         <AvailabilityBadge
                           enabled={item.enabled}
                           rateLimited={rateLimited}
@@ -3022,7 +3095,7 @@ function AccountTable(props: {
         </div>
         <div className='grid w-full grid-cols-[minmax(0,1fr)_7rem_auto] gap-1.5 sm:flex sm:w-auto sm:max-w-full sm:flex-wrap sm:items-center sm:justify-end'>
           <Select
-            items={sortOptions}
+            items={sortOptions.filter((option) => access.allows(option.value))}
             value={props.sortKey}
             onValueChange={(value) =>
               value && props.onSortKeyChange(value as AccountSortKey)
@@ -3035,11 +3108,13 @@ function AccountTable(props: {
               <SelectValue />
             </SelectTrigger>
             <SelectContent align='end'>
-              {sortOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
+              {sortOptions
+                .filter((option) => access.allows(option.value))
+                .map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
           <Select
@@ -3063,14 +3138,16 @@ function AccountTable(props: {
               ))}
             </SelectContent>
           </Select>
-          <Badge
-            variant='secondary'
-            className='h-11 justify-center tabular-nums sm:h-auto'
-          >
-            {props.rows.length === props.total
-              ? props.total
-              : `${props.rows.length} / ${props.total}`}
-          </Badge>
+          <AdminDataField fields={['accounts']}>
+            <Badge
+              variant='secondary'
+              className='h-11 justify-center tabular-nums sm:h-auto'
+            >
+              {props.rows.length === props.total
+                ? props.total
+                : `${props.rows.length} / ${props.total}`}
+            </Badge>
+          </AdminDataField>
         </div>
       </CardHeader>
       {props.error && props.rows.length > 0 && (
@@ -3123,14 +3200,18 @@ function SourceCell(props: {
       className='hover:bg-muted/70 focus-visible:ring-ring flex max-w-48 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none'
       onClick={() => props.onOpen(source)}
     >
-      <span className={cn('size-2 shrink-0 rounded-full', statusTone)} />
+      <AdminDataField fields={['status']}>
+        <span className={cn('size-2 shrink-0 rounded-full', statusTone)} />
+      </AdminDataField>
       <span className='min-w-0'>
         <span className='block truncate text-sm font-medium'>
           {source.name}
         </span>
-        <span className='text-muted-foreground block truncate text-xs'>
-          {connected ? '已连接' : source.status || '状态未知'}
-        </span>
+        <AdminDataField fields={['status']}>
+          <span className='text-muted-foreground block truncate text-xs'>
+            {connected ? '已连接' : source.status || '状态未知'}
+          </span>
+        </AdminDataField>
       </span>
     </button>
   )
@@ -3159,19 +3240,27 @@ function SourceDetailsDialog(props: {
         {source && (
           <div className='grid gap-3 rounded-lg border p-4'>
             <SourceDetail label='节点 ID' value={source.id} mono />
-            <SourceDetail
-              label='连接状态'
-              value={
-                isConnectedSource(source.status)
-                  ? '已连接'
-                  : source.status || '未知'
-              }
-            />
-            <SourceDetail label='启用状态' value={enabledLabel} />
-            <SourceDetail
-              label='配置账号数'
-              value={exactNumber.format(source.account_count ?? 0)}
-            />
+            <AdminDataField fields={['status']}>
+              <SourceDetail
+                label='连接状态'
+                value={
+                  isConnectedSource(source.status)
+                    ? '已连接'
+                    : source.status || '未知'
+                }
+              />
+              <SourceDetail label='启用状态' value={enabledLabel} />
+            </AdminDataField>
+            <AdminDataField fields={['accounts']}>
+              <SourceDetail
+                label='配置账号数'
+                value={
+                  source.account_count == null
+                    ? '--'
+                    : exactNumber.format(source.account_count)
+                }
+              />
+            </AdminDataField>
             <SourceDetail
               label='内部 WS 地址'
               value={source.url || '--'}
@@ -3205,8 +3294,10 @@ function isConnectedSource(status?: string) {
   return ['connected', 'healthy', 'online', 'ready'].includes(normalized ?? '')
 }
 
-function formatOptionalNumber(value?: number) {
-  return value == null ? '--' : compactNumber.format(value)
+function formatOptionalNumber(value?: number | null) {
+  return value == null || !Number.isFinite(value)
+    ? '--'
+    : compactNumber.format(value)
 }
 
 function AvailabilityBadge({
@@ -3217,6 +3308,8 @@ function AvailabilityBadge({
   rateLimited?: boolean
 }) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  if (!access.canView('status')) return null
   if (rateLimited) {
     return (
       <Badge

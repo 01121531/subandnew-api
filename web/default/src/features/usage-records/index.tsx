@@ -33,6 +33,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { AdminDataField } from '@/components/admin-data-field'
+import { AdminDataTable } from '@/components/admin-data-table'
 import { SectionPageLayout } from '@/components/layout'
 import { MultiSelect } from '@/components/multi-select'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +55,11 @@ import { InstanceConnectionAlert } from '@/features/managed-instances/components
 import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type { ManagedInstance } from '@/features/managed-instances/types'
 import { useMediaQuery } from '@/hooks'
+import { useAdminDataAccess } from '@/hooks/use-admin-data-access'
+import {
+  adminDataValue,
+  formatAdminDataValue,
+} from '@/lib/admin-data-policy-view'
 import { cn } from '@/lib/utils'
 
 import {
@@ -62,6 +69,10 @@ import {
   getUsageRecordSummary,
 } from './api'
 import { CompactDateTimeRangePicker } from './compact-date-time-range-picker'
+import {
+  USAGE_DATA_COLUMNS,
+  sanitizeUsageFilters,
+} from './restricted-usage-policy'
 import type {
   UsageRecord,
   UsageRecordFilters,
@@ -381,6 +392,12 @@ function sortUsageRecords(
 }
 
 export function UsageRecords() {
+  const access = useAdminDataAccess()
+  return <FullUsageRecords key={access.key} />
+}
+
+function FullUsageRecords() {
+  const access = useAdminDataAccess()
   const { t } = useTranslation()
   const [system, setSystem] = useState<UsageSystem>('new_api')
   const [instanceId, setInstanceId] = useState('')
@@ -393,7 +410,9 @@ export function UsageRecords() {
   const [page, setPage] = useState(1)
   const [exporting, setExporting] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [sortKey, setSortKey] = useState<UsageSortKey>('created_at')
+  const [sortKey, setSortKey] = useState<UsageSortKey>(
+    access.canView('time') ? 'created_at' : 'model'
+  )
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const instancesQuery = useQuery({
@@ -418,14 +437,21 @@ export function UsageRecords() {
     () =>
       requestFilters(
         system,
-        withUsageSort(system, applied, sortKey, sortDirection),
+        sanitizeUsageFilters(
+          withUsageSort(system, applied, sortKey, sortDirection),
+          access.allows
+        ),
         page
       ),
-    [applied, page, sortDirection, sortKey, system]
+    [applied, page, sortDirection, sortKey, system, access]
   )
   const summaryApiFilters = useMemo(
-    () => summaryRequestFilters(system, applied),
-    [applied, system]
+    () =>
+      summaryRequestFilters(
+        system,
+        sanitizeUsageFilters(applied, access.allows)
+      ),
+    [applied, system, access]
   )
   const rangeApiFilters = useMemo(
     () => rangeRequestFilters(system, applied),
@@ -442,7 +468,8 @@ export function UsageRecords() {
   const summaryQuery = useQuery({
     queryKey: ['usage-record-summary', selectedId, summaryApiFilters],
     queryFn: () => getUsageRecordSummary(selectedId, summaryApiFilters),
-    enabled: selectedId > 0,
+    enabled:
+      selectedId > 0 && ['amount', 'tokens', 'requests'].some(access.allows),
     retry: false,
     staleTime: USAGE_RECORDS_REFRESH_MS / 2,
     refetchInterval: USAGE_RECORDS_REFRESH_MS,
@@ -474,25 +501,27 @@ export function UsageRecords() {
     () => sortUsageRecords(records, system, sortKey, sortDirection),
     [records, sortDirection, sortKey, system]
   )
+  const exactTotal =
+    result?.total_is_exact === true && typeof result.total === 'number'
   const total = result?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const remotePageSize = Math.max(1, result?.page_size ?? PAGE_SIZE)
-  const hasNextPage = usesDateOnly(system)
-    ? result?.page === page &&
-      (result.has_more ?? records.length >= remotePageSize)
-    : page < totalPages
-  const filters = filtersForSystem(system)
+  const hasNextPage =
+    result?.page === page &&
+    (result.has_more ?? (exactTotal && page < totalPages))
+  const filters = filtersForSystem(system).filter((filter) =>
+    access.allows(filter.key)
+  )
 
   useEffect(() => {
     if (!result) return
-    if (usesDateOnly(system)) {
+    if (!exactTotal || usesDateOnly(system)) {
       if (result.page === page && page > 1 && records.length === 0) {
         setPage((value) => value - 1)
       }
       return
     }
     if (page > totalPages) setPage(totalPages)
-  }, [page, records.length, result, system, totalPages])
+  }, [page, records.length, result, system, totalPages, exactTotal])
 
   const changeSystem = (value: UsageSystem) => {
     const defaults = defaultFilters(value)
@@ -500,7 +529,7 @@ export function UsageRecords() {
     setInstanceId('')
     setDraft(defaults)
     setApplied(defaults)
-    setSortKey('created_at')
+    setSortKey(access.canView('time') ? 'created_at' : 'model')
     setSortDirection('desc')
     setPage(1)
   }
@@ -521,7 +550,7 @@ export function UsageRecords() {
     const defaults = defaultFilters(system)
     setDraft(defaults)
     setApplied(defaults)
-    setSortKey('created_at')
+    setSortKey(access.canView('time') ? 'created_at' : 'model')
     setSortDirection('desc')
     setPage(1)
   }
@@ -532,7 +561,10 @@ export function UsageRecords() {
     try {
       const filters = requestFilters(
         system,
-        withUsageSort(system, applied, sortKey, sortDirection),
+        sanitizeUsageFilters(
+          withUsageSort(system, applied, sortKey, sortDirection),
+          access.allows
+        ),
         1
       )
       const task = (await createUsageRecordsExport(selectedId, filters)).data
@@ -761,9 +793,11 @@ export function UsageRecords() {
             <div className='border-border grid gap-3 border-b px-3 py-2.5 sm:flex sm:flex-wrap sm:items-center sm:justify-between'>
               <div>
                 <div className='text-sm font-semibold'>记录明细</div>
-                <div className='text-muted-foreground text-xs tabular-nums'>
-                  共 {total.toLocaleString('zh-CN')} 条
-                </div>
+                {exactTotal && access.canView('accounts') && (
+                  <div className='text-muted-foreground text-xs tabular-nums'>
+                    共 {total.toLocaleString('zh-CN')} 条
+                  </div>
+                )}
               </div>
               <div className='grid grid-cols-[minmax(0,1fr)_7rem_auto] items-center gap-1.5 sm:flex sm:max-w-full sm:flex-wrap sm:justify-end'>
                 <NativeSelect
@@ -775,10 +809,14 @@ export function UsageRecords() {
                   className='h-11 w-full text-xs sm:h-7 sm:w-28'
                   aria-label={t('Sort')}
                 >
-                  <NativeSelectOption value='created_at'>
-                    时间
+                  {access.canView('time') && (
+                    <NativeSelectOption value='created_at'>
+                      时间
+                    </NativeSelectOption>
+                  )}
+                  <NativeSelectOption value='model'>
+                    {t('Name')}
                   </NativeSelectOption>
-                  <NativeSelectOption value='model'>模型</NativeSelectOption>
                   <NativeSelectOption value='id'>记录 ID</NativeSelectOption>
                 </NativeSelect>
                 <NativeSelect
@@ -814,9 +852,11 @@ export function UsageRecords() {
             {(total > 0 || records.length > 0) && (
               <div className='border-border flex flex-col gap-2 border-t px-3 py-2 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between'>
                 <span className='text-muted-foreground text-xs tabular-nums'>
-                  {usesDateOnly(system)
-                    ? `第 ${page} 页 · 本页 ${records.length} 条`
-                    : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} / ${total}`}
+                  {!access.canView('accounts') && t('adminData.page', { page })}
+                  {access.canView('accounts') &&
+                    (!exactTotal || usesDateOnly(system)
+                      ? `第 ${page} 页 · 本页 ${records.length} 条`
+                      : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} / ${total}`)}
                 </span>
                 <div className='flex items-center gap-1'>
                   <Button
@@ -853,6 +893,8 @@ function UsageSummaryPanel(props: {
   error: boolean
   hasInstance: boolean
 }) {
+  const access = useAdminDataAccess()
+  if (!['tokens', 'amount'].some(access.allows)) return null
   const amountIsQuota = props.summary?.currency === 'quota'
   let status = '当前查询时间范围'
   if (!props.hasInstance) status = '未选择站点'
@@ -867,19 +909,23 @@ function UsageSummaryPanel(props: {
         <div className='text-muted-foreground text-xs'>{status}</div>
       </div>
       <div className='grid sm:grid-cols-2'>
-        <SummaryMetric
-          icon={Binary}
-          label='消耗 Tokens'
-          value={formatTokenTotal(props.summary?.total_tokens)}
-          loading={props.loading}
-        />
-        <SummaryMetric
-          icon={CircleDollarSign}
-          label={amountIsQuota ? '额度消耗' : '消费金额'}
-          value={formatSummaryAmount(props.summary)}
-          loading={props.loading}
-          divided
-        />
+        <AdminDataField fields={['tokens']}>
+          <SummaryMetric
+            icon={Binary}
+            label='消耗 Tokens'
+            value={formatTokenTotal(props.summary?.total_tokens)}
+            loading={props.loading}
+          />
+        </AdminDataField>
+        <AdminDataField fields={['amount']}>
+          <SummaryMetric
+            icon={CircleDollarSign}
+            label={amountIsQuota ? '额度消耗' : '消费金额'}
+            value={formatSummaryAmount(props.summary)}
+            loading={props.loading}
+            divided
+          />
+        </AdminDataField>
       </div>
     </section>
   )
@@ -957,6 +1003,8 @@ function UsageRecordsContent(props: {
   hasInstance: boolean
   onRetry: () => void
 }) {
+  const access = useAdminDataAccess()
+  const { t } = useTranslation()
   const isMobile = useMediaQuery('(max-width: 767px)')
   if (props.loading) {
     return (
@@ -988,6 +1036,22 @@ function UsageRecordsContent(props: {
   }
   if (props.records.length === 0) {
     return <EmptyMessage text='当前筛选条件下没有记录' />
+  }
+  if (!access.full) {
+    return (
+      <AdminDataTable
+        rows={props.records}
+        rowKey={(row, index) => String(row.id ?? index)}
+        columns={USAGE_DATA_COLUMNS.map((column) => ({
+          ...column,
+          label: t(column.label),
+          render: (row) =>
+            formatAdminDataValue(
+              adminDataValue(row, ...(column.paths ?? [column.key]))
+            ),
+        }))}
+      />
+    )
   }
   if (isMobile) {
     return (

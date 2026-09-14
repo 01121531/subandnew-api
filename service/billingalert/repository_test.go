@@ -19,6 +19,7 @@ func setupRepositoryTestDB(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
+		&model.User{}, &model.AdminDataPolicy{},
 		&model.ManagedInstance{},
 		&model.ManagedInstanceAlert{},
 		&model.BillingFilterTemplate{},

@@ -38,3 +38,16 @@ export function isInstanceConnectionError(error: unknown) {
   }
   return error instanceof Error && isConnectionMessage(error.message)
 }
+
+export function isInstanceOrderConflict(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('response' in error)) {
+    return false
+  }
+  const response = error.response
+  return (
+    !!response &&
+    typeof response === 'object' &&
+    'status' in response &&
+    response.status === 409
+  )
+}

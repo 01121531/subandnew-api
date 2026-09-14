@@ -20,6 +20,7 @@ import { useNavigate } from '@tanstack/react-router'
 import i18n from 'i18next'
 
 import type { User } from '@/features/users/types'
+import { adminLoginRedirect } from '@/lib/admin-permissions'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -74,7 +75,10 @@ export function useAuthRedirect() {
     }
 
     // Navigate to target page
-    const targetPath = redirectTo || '/instances'
+    const targetPath = adminLoginRedirect(
+      useAuthStore.getState().auth.user,
+      redirectTo
+    )
     navigate({ to: targetPath, replace: true })
   }
 

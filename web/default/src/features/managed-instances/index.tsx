@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
-import { Plus, RefreshCw, Search, X } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowUpDown, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -27,6 +27,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { useAdminDataAccess } from '@/hooks/use-admin-data-access'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -43,15 +44,21 @@ import {
 import { BatchRefreshSheet } from './components/batch-refresh-sheet'
 import { CredentialSheet } from './components/credential-sheet'
 import { InstanceFormSheet } from './components/instance-form-sheet'
+import { InstanceOrderSheet } from './components/instance-order-sheet'
 import { InstancesTable } from './components/instances-table'
 import { statusCounts } from './lib'
+import { isInstanceOrderConsumer } from './order'
 import type { ManagedInstance, ManagedInstanceFilters } from './types'
 
 const EMPTY_INSTANCES: ManagedInstance[] = []
 
 export function ManagedInstances() {
   const { t } = useTranslation()
+  const client = useQueryClient()
   const user = useAuthStore((state) => state.auth.user)
+  const access = useAdminDataAccess()
+  const showStatus = access.canView('status')
+  const showCounts = access.canView('accounts')
   const isRoot = user?.role === ROLE.SUPER_ADMIN
   const [filters, setFilters] = useState<ManagedInstanceFilters>({
     search: '',
@@ -59,6 +66,7 @@ export function ManagedInstances() {
     status: '',
   })
   const [formOpen, setFormOpen] = useState(false)
+  const [orderOpen, setOrderOpen] = useState(false)
   const [editing, setEditing] = useState<ManagedInstance | null>(null)
   const [rotating, setRotating] = useState<ManagedInstance | null>(null)
   const [deleting, setDeleting] = useState<ManagedInstance | null>(null)
@@ -66,17 +74,27 @@ export function ManagedInstances() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const deferredSearch = useDeferredValue(filters.search)
   const queryFilters = useMemo(
-    () => ({ ...filters, search: deferredSearch.trim() }),
-    [deferredSearch, filters]
+    () => ({
+      ...filters,
+      search: deferredSearch.trim(),
+      status: showStatus ? filters.status : '',
+    }),
+    [deferredSearch, filters, showStatus]
   )
 
   const instancesQuery = useQuery({
-    queryKey: ['managed-instances', queryFilters],
-    queryFn: () => getManagedInstances(queryFilters),
+    queryKey: ['managed-instances', queryFilters, access.key],
+    queryFn: ({ signal }) => getManagedInstances(queryFilters, signal),
     refetchInterval: 30_000,
   })
   const instances = instancesQuery.data?.data.items ?? EMPTY_INSTANCES
-  const counts = statusCounts(instances)
+  const counts =
+    showCounts &&
+    showStatus &&
+    instancesQuery.isSuccess &&
+    instances.every((instance) => instance.status != null)
+      ? statusCounts(instances)
+      : undefined
   const selectedInstances = useMemo(
     () => instances.filter((instance) => selectedIds.has(instance.id)),
     [instances, selectedIds]
@@ -124,6 +142,10 @@ export function ManagedInstances() {
   }, [instances])
 
   const refresh = () => void instancesQuery.refetch()
+  const refreshInstanceConsumers = () =>
+    void client.invalidateQueries({
+      predicate: (entry) => isInstanceOrderConsumer(entry.queryKey),
+    })
 
   const check = async (instance: ManagedInstance) => {
     setCheckingId(instance.id)
@@ -142,7 +164,7 @@ export function ManagedInstances() {
     if (result.success) {
       toast.success(t('Instance removed'))
       setDeleting(null)
-      refresh()
+      refreshInstanceConsumers()
     }
   }
 
@@ -178,6 +200,16 @@ export function ManagedInstances() {
           {t('Instance center')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
+          {isRoot && (
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setOrderOpen(true)}
+            >
+              <ArrowUpDown />
+              {t('instanceOrder.open')}
+            </Button>
+          )}
           <Button
             variant='outline'
             size='icon-sm'
@@ -203,29 +235,44 @@ export function ManagedInstances() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='grid gap-4'>
-            <div className='grid grid-cols-2 overflow-hidden rounded-lg border md:grid-cols-5 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1'>
-              <SummaryCell label={t('Total')} value={counts.total} />
-              <SummaryCell
-                label={t('Healthy')}
-                value={counts.healthy}
-                tone='healthy'
-              />
-              <SummaryCell
-                label={t('Degraded')}
-                value={counts.degraded}
-                tone='degraded'
-              />
-              <SummaryCell
-                label={t('Offline')}
-                value={counts.offline}
-                tone='offline'
-              />
-              <SummaryCell
-                label={t('Auth failed')}
-                value={counts.auth_failed}
-                tone='auth'
-              />
-            </div>
+            {showCounts && (
+              <div
+                className={
+                  showStatus
+                    ? 'grid grid-cols-2 overflow-hidden rounded-lg border md:grid-cols-5 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1'
+                    : 'grid overflow-hidden rounded-lg border'
+                }
+              >
+                <SummaryCell
+                  label={t('Total')}
+                  value={instancesQuery.data?.data.total}
+                />
+                {showStatus && (
+                  <>
+                    <SummaryCell
+                      label={t('Healthy')}
+                      value={counts?.healthy}
+                      tone='healthy'
+                    />
+                    <SummaryCell
+                      label={t('Degraded')}
+                      value={counts?.degraded}
+                      tone='degraded'
+                    />
+                    <SummaryCell
+                      label={t('Offline')}
+                      value={counts?.offline}
+                      tone='offline'
+                    />
+                    <SummaryCell
+                      label={t('Auth failed')}
+                      value={counts?.auth_failed}
+                      tone='auth'
+                    />
+                  </>
+                )}
+              </div>
+            )}
 
             <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
               <div className='relative min-w-0 flex-1 sm:max-w-sm'>
@@ -270,35 +317,37 @@ export function ManagedInstances() {
                   {t('Generic')}
                 </NativeSelectOption>
               </NativeSelect>
-              <NativeSelect
-                className='w-full sm:w-40'
-                value={filters.status}
-                onChange={(event) =>
-                  setFilters((value) => ({
-                    ...value,
-                    status: event.target.value,
-                  }))
-                }
-              >
-                <NativeSelectOption value=''>
-                  {t('All statuses')}
-                </NativeSelectOption>
-                <NativeSelectOption value='healthy'>
-                  {t('Healthy')}
-                </NativeSelectOption>
-                <NativeSelectOption value='degraded'>
-                  {t('Degraded')}
-                </NativeSelectOption>
-                <NativeSelectOption value='offline'>
-                  {t('Offline')}
-                </NativeSelectOption>
-                <NativeSelectOption value='auth_failed'>
-                  {t('Auth failed')}
-                </NativeSelectOption>
-                <NativeSelectOption value='unknown'>
-                  {t('Unknown')}
-                </NativeSelectOption>
-              </NativeSelect>
+              {showStatus && (
+                <NativeSelect
+                  className='w-full sm:w-40'
+                  value={filters.status}
+                  onChange={(event) =>
+                    setFilters((value) => ({
+                      ...value,
+                      status: event.target.value,
+                    }))
+                  }
+                >
+                  <NativeSelectOption value=''>
+                    {t('All statuses')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='healthy'>
+                    {t('Healthy')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='degraded'>
+                    {t('Degraded')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='offline'>
+                    {t('Offline')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='auth_failed'>
+                    {t('Auth failed')}
+                  </NativeSelectOption>
+                  <NativeSelectOption value='unknown'>
+                    {t('Unknown')}
+                  </NativeSelectOption>
+                </NativeSelect>
+              )}
             </div>
 
             {canBatchOperate && (
@@ -332,34 +381,45 @@ export function ManagedInstances() {
               </div>
             )}
 
-            <InstancesTable
-              instances={instances}
-              canUpdate={canUpdate}
-              canCheck={canCheck}
-              canRotate={canRotate}
-              canDelete={canDelete}
-              selectable={canBatchOperate}
-              selectedIds={selectedIds}
-              checkingId={checkingId}
-              onToggleSelection={toggleSelection}
-              onToggleAll={toggleAll}
-              onEdit={(instance) => {
-                setEditing(instance)
-                setFormOpen(true)
-              }}
-              onCheck={check}
-              onRotate={setRotating}
-              onDelete={setDeleting}
-            />
+            {instancesQuery.isPending && <p role='status'>{t('Loading...')}</p>}
+            {instancesQuery.isError && (
+              <p role='alert' className='text-destructive'>
+                {t('Unable to load instances')}
+              </p>
+            )}
+            {instancesQuery.isSuccess && (
+              <InstancesTable
+                instances={instances}
+                canUpdate={canUpdate}
+                canCheck={canCheck}
+                canRotate={canRotate}
+                canDelete={canDelete}
+                selectable={canBatchOperate}
+                selectedIds={selectedIds}
+                checkingId={checkingId}
+                onToggleSelection={toggleSelection}
+                onToggleAll={toggleAll}
+                onEdit={(instance) => {
+                  setEditing(instance)
+                  setFormOpen(true)
+                }}
+                onCheck={check}
+                onRotate={setRotating}
+                onDelete={setDeleting}
+              />
+            )}
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
+      {isRoot && orderOpen && (
+        <InstanceOrderSheet onClose={() => setOrderOpen(false)} />
+      )}
       <InstanceFormSheet
         open={formOpen}
         instance={editing}
         onOpenChange={setFormOpen}
-        onSaved={refresh}
+        onSaved={refreshInstanceConsumers}
       />
       <CredentialSheet
         instance={rotating}
@@ -383,7 +443,7 @@ export function ManagedInstances() {
 
 type SummaryCellProps = {
   label: string
-  value: number
+  value: number | undefined
   tone?: 'healthy' | 'degraded' | 'offline' | 'auth'
 }
 
@@ -400,7 +460,7 @@ function SummaryCell(props: SummaryCellProps) {
       <span
         className={`text-2xl font-semibold ${props.tone ? valueClass : ''}`}
       >
-        {props.value}
+        {props.value ?? '-'}
       </span>
     </div>
   )

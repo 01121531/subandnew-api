@@ -17,6 +17,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -400,6 +401,13 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 			err = authorizeConfigApplyBinding(operation.InstanceId, operation.Parameters)
 		}
 	}
+	var access *authz.DataAccess
+	if err == nil {
+		access, err = queuedOperationActorAccess(&operation)
+		if err == nil {
+			ctx = authz.WithDataAccess(ctx, access)
+		}
+	}
 	var remoteResult *remoteOperationResult
 	var remoteWriteSent atomic.Bool
 	if err == nil {
@@ -412,6 +420,12 @@ func runOperation(ctx context.Context, operationID string, taskID string, runner
 		}
 		if err == nil {
 			err = requireOperationLease(taskID, runnerID)
+		}
+		if err == nil {
+			err = access.Current(model.DB)
+		}
+		if err == nil {
+			_, err = queuedOperationActorAccess(&operation)
 		}
 		if err == nil {
 			executionContext := ctx
@@ -950,6 +964,8 @@ func managedInstanceOperationErrorCode(err error) string {
 		return probeError.Code
 	}
 	switch {
+	case errors.Is(err, authz.ErrDataForbidden), errors.Is(err, authz.ErrAuthorizationChanged):
+		return "authorization_revoked"
 	case errors.Is(err, ErrObserveModeWrite):
 		return "observe_mode_write_forbidden"
 	case errors.Is(err, ErrUnsupportedCapability):

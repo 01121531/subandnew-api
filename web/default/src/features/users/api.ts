@@ -89,5 +89,6 @@ export async function getPermissionCatalog(): Promise<PermissionCatalog> {
   return {
     resources: response.data?.data?.resources ?? [],
     roles: response.data?.data?.roles ?? [],
+    data_fields: response.data?.data?.data_fields ?? [],
   }
 }

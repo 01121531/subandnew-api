@@ -28,11 +28,12 @@ type AccountExportSelection struct {
 }
 
 type AccountExportInput struct {
-	Source   string                   `json:"source"`
-	Window   TimeWindow               `json:"window"`
-	Locale   string                   `json:"locale"`
-	ActorID  int                      `json:"actor_id,omitempty"`
-	Selected []AccountExportSelection `json:"selected"`
+	Source        string                   `json:"source"`
+	Window        TimeWindow               `json:"window"`
+	Locale        string                   `json:"locale"`
+	ActorID       int                      `json:"actor_id,omitempty"`
+	Selected      []AccountExportSelection `json:"selected"`
+	VisibleFields map[string]bool          `json:"-"`
 }
 
 type AccountExportRow struct {
@@ -396,6 +397,9 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
 	for index, row := range rows {
+		if input.VisibleFields != nil && !input.VisibleFields["group"] {
+			row.Selection.Account.Group = ""
+		}
 		values := accountExportCellValues(row, input.Window, location)
 		for column, value := range values {
 			cell, _ := excelize.CoordinatesToCellName(column+1, index+2)
@@ -418,7 +422,36 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	}
 	_ = workbook.SetRowHeight(sheet, 1, 24)
 	_ = workbook.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
-	_ = workbook.AutoFilter(sheet, "A1:U1", nil)
+	if input.VisibleFields != nil {
+		groups := []string{"vendor", "vendor", "vendor", "email", "", "time", "time", "email", "requests", "tokens", "tokens", "tokens", "tokens", "amount", "", "", "", "status", "tokens", "", "status"}
+		remaining := len(groups)
+		for index := len(groups) - 1; index >= 0; index-- {
+			allowed := groups[index] == "" || input.VisibleFields[groups[index]]
+			if index == 2 {
+				allowed = allowed && input.VisibleFields["email"]
+			}
+			if index == 6 {
+				allowed = allowed && input.VisibleFields["status"]
+			}
+			if index == 7 {
+				for _, category := range model.AdminDataFields {
+					allowed = allowed && input.VisibleFields[category]
+				}
+			}
+			if allowed {
+				continue
+			}
+			column, _ := excelize.ColumnNumberToName(index + 1)
+			if err := workbook.RemoveCol(sheet, column); err != nil {
+				return nil, err
+			}
+			remaining--
+		}
+		endColumn, _ := excelize.ColumnNumberToName(remaining)
+		_ = workbook.AutoFilter(sheet, "A1:"+endColumn+"1", nil)
+	} else {
+		_ = workbook.AutoFilter(sheet, "A1:U1", nil)
+	}
 	temporaryFile, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err

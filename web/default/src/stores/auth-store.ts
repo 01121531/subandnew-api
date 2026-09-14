@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { create } from 'zustand'
 
+import type { AdminDataPolicy } from '@/lib/admin-data-policy'
 import type { AdminCapabilities } from '@/lib/admin-permissions'
 
 type UserPermissions = {
@@ -39,6 +40,8 @@ export interface AuthUser {
   linux_do_id?: string
   setting?: Record<string, unknown> | string
   permissions?: UserPermissions
+  admin_data_policy?: AdminDataPolicy
+  authorization_version?: number
 }
 
 interface AuthState {

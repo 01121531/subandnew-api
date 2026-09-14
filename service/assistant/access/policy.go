@@ -40,18 +40,25 @@ func Authorize(db *gorm.DB) tool.AuthorizeFunc {
 		if db == nil {
 			return errors.New("assistant authorization database is nil")
 		}
-		user, _, err := activeSubject(ctx, db, request.Execution)
+		_, identity, err := activeSubject(ctx, db, request.Execution)
 		if err != nil {
 			return err
 		}
-		if !authz.Can(user.Id, user.Role, authz.AssistantAccess) {
-			return errors.New("assistant access permission denied")
+		a, err := IdentityDataAccess(db, identity)
+		if err != nil {
+			return err
 		}
 		permission := authz.Permission{Resource: request.Tool.Permission.Resource, Action: request.Tool.Permission.Action}
-		if !authz.Can(user.Id, user.Role, permission) {
+		if !a.Can(permission) {
 			return fmt.Errorf("domain permission %s:%s denied", permission.Resource, permission.Action)
 		}
-		return nil
+		if identity.BoundBy > 0 {
+			owner, err := authz.LoadDataAccess(db, identity.BoundBy)
+			if err != nil || !owner.Can(permission) {
+				return ErrIdentityDenied
+			}
+		}
+		return checkArguments(a, request.Arguments)
 	}
 }
 
@@ -69,6 +76,10 @@ func ResolveInstanceSelection(ctx context.Context, db *gorm.DB, execution tool.E
 		return InstanceResolution{}, errors.New("assistant authorization database is nil")
 	}
 	_, identity, err := activeSubject(ctx, db, execution)
+	if err != nil {
+		return InstanceResolution{}, err
+	}
+	a, err := IdentityDataAccess(db, identity)
 	if err != nil {
 		return InstanceResolution{}, err
 	}
@@ -98,7 +109,14 @@ func ResolveInstanceSelection(ctx context.Context, db *gorm.DB, execution tool.E
 	if err != nil {
 		return InstanceResolution{}, err
 	}
-	if len(allowed) == 0 && identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected {
+	filtered := make([]int64, 0, len(allowed))
+	for _, id := range allowed {
+		if a.HasInstance(id) {
+			filtered = append(filtered, id)
+		}
+	}
+	allowed = filtered
+	if len(allowed) == 0 && (identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected || a.Policy.InstanceScope != "all") {
 		return InstanceResolution{}, ErrInstanceDenied
 	}
 

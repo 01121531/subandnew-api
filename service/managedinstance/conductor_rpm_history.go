@@ -11,6 +11,7 @@ import (
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -338,6 +339,9 @@ func GetConductorRPMHistory(ctx context.Context, instanceIDs []int64, bucket str
 }
 
 func GetManagedRPMHistory(ctx context.Context, instanceIDs []int64, bucket string, start int64, end int64) (*ConductorRPMHistoryResult, error) {
+	if err := authz.CheckContextInstances(ctx, instanceIDs...); err != nil {
+		return nil, err
+	}
 	bucket = strings.TrimSpace(strings.ToLower(bucket))
 	if bucket != ConductorRPMBucketMinute && bucket != ConductorRPMBucketHour && bucket != ConductorRPMBucketDay {
 		return nil, ErrInvalidInstance

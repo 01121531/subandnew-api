@@ -13,7 +13,10 @@ export interface EffectiveNaming extends NamingRule {
 export type PolicyOverrides = Record<string, boolean | null>
 export interface EffectivePolicy {
   values: Record<string, boolean>
-  sources: Record<string, 'global' | 'supplier' | 'binding'>
+  sources: Record<
+    string,
+    'global' | 'supplier' | 'binding' | 'responsible_admin'
+  >
   version: string
 }
 export interface DefaultPolicy {
@@ -39,6 +42,7 @@ export interface PortalBinding {
   portal_revision: number
 }
 export interface Supplier {
+  responsible_admin_id?: number
   naming_rule?: NamingRule | null
   effective_naming?: EffectiveNaming
   id: number

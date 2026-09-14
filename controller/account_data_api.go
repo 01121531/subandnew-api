@@ -11,6 +11,7 @@ import (
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/accountdataapi"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,7 +25,7 @@ type accountDataAPIKeyRequest struct {
 func ListAccountDataAPIs(c *gin.Context) {
 	page, _ := strconv.Atoi(c.Query("page"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-	result, err := accountdataapi.List(c.Query("search"), c.Query("status"), page, pageSize)
+	result, err := accountdataapi.List(c.Query("search"), c.Query("status"), page, pageSize, c.GetInt("id"))
 	if err != nil {
 		accountDataAPIError(c, err)
 		return
@@ -33,7 +34,7 @@ func ListAccountDataAPIs(c *gin.Context) {
 }
 
 func ListAccountDataAPIInstanceOptions(c *gin.Context) {
-	result, err := accountdataapi.ListInstanceOptions()
+	result, err := accountdataapi.ListInstanceOptions(c.GetInt("id"))
 	if err != nil {
 		accountDataAPIError(c, err)
 		return
@@ -79,6 +80,16 @@ func UpdateAccountDataAPI(c *gin.Context) {
 		accountDataAPIError(c, accountdataapi.ErrInvalid)
 		return
 	}
+	if request.Takeover {
+		result, previous, err := accountdataapi.Takeover(c.Request.Context(), id, c.GetInt("id"))
+		if err != nil {
+			accountDataAPIError(c, err)
+			return
+		}
+		recordManageAudit(c, "account_data_api.takeover", map[string]interface{}{"id": result.ID, "previous_admin_id": previous, "responsible_admin_id": c.GetInt("id")})
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+		return
+	}
 	result, err := accountdataapi.Update(c.Request.Context(), id, request, c.GetInt("id"))
 	if err != nil {
 		accountDataAPIError(c, err)
@@ -102,6 +113,9 @@ func DeleteAccountDataAPI(c *gin.Context) {
 }
 
 func PreviewAccountDataAPI(c *gin.Context) {
+	if !accountDataContext(c) {
+		return
+	}
 	var request accountdataapi.ConfigInput
 	if err := c.ShouldBindJSON(&request); err != nil {
 		accountDataAPIError(c, accountdataapi.ErrInvalid)
@@ -112,10 +126,13 @@ func PreviewAccountDataAPI(c *gin.Context) {
 		accountDataAPIError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	accountDataProjected(c, result)
 }
 
 func GetAccountDataAPIFilterOptions(c *gin.Context) {
+	if !accountDataContext(c) {
+		return
+	}
 	var request accountdataapi.FilterOptionsInput
 	if err := c.ShouldBindJSON(&request); err != nil {
 		accountDataAPIError(c, accountdataapi.ErrInvalid)
@@ -126,7 +143,7 @@ func GetAccountDataAPIFilterOptions(c *gin.Context) {
 		accountDataAPIError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	accountDataProjected(c, result)
 }
 
 func CreateAccountDataAPIKey(c *gin.Context) {
@@ -232,21 +249,28 @@ func GetOpenAccountData(c *gin.Context) {
 		items = append(items, accountdataapi.Project(item, fields))
 	}
 	resultCount = len(items)
-	etag := accountDataETag(auth.View.ID, auth.View.UpdatedAt, result.ObservedAt, result.Total, c.Request.URL.RawQuery)
-	c.Header("ETag", etag)
-	c.Header("Cache-Control", "private, max-age=30")
-	accountdataapi.MarkUsed(auth, result)
-	if accountDataETagMatches(c.Request.Header.Get("If-None-Match"), etag) {
-		statusCode = http.StatusNotModified
-		c.Status(statusCode)
-		return
+	etag := accountDataETag(auth.View.ID, auth.View.UpdatedAt, result.ObservedAt, result.Total, c.Request.URL.RawQuery+":"+strconv.FormatInt(auth.View.Access.Version, 10)+":"+strconv.FormatInt(auth.View.Access.Policy.Revision, 10))
+	if auth.View.Access.AllFields() {
+		c.Header("ETag", etag)
 	}
-	c.JSON(http.StatusOK, gin.H{
+	c.Header("Cache-Control", "no-store")
+	accountdataapi.MarkUsed(auth, result)
+	response, err := accountdataapi.ProjectResponse(auth.View, gin.H{
 		"object": "list", "data": items,
 		"pagination":    gin.H{"page": result.Page, "page_size": result.PageSize, "total": result.Total, "has_more": result.HasMore},
 		"authorization": gin.H{"name": auth.View.Name, "dataset": result.Dataset, "preset_days": result.PresetDays},
 		"snapshot":      gin.H{"observed_at": accountDataTime(result.ObservedAt), "timezone": accountdataapiTimezone(), "stale": result.Stale, "partial": result.Partial, "sources": externalSourceStatuses(result.Sources)},
 	})
+	if err != nil {
+		openAccountDataError(c, requestID, err)
+		return
+	}
+	if auth.View.Access.AllFields() && accountDataETagMatches(c.GetHeader("If-None-Match"), etag) {
+		statusCode = http.StatusNotModified
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func accountDataAPIID(c *gin.Context) (int64, bool) {
@@ -255,12 +279,18 @@ func accountDataAPIID(c *gin.Context) (int64, bool) {
 		accountDataAPIError(c, accountdataapi.ErrInvalid)
 		return 0, false
 	}
+	if err := accountdataapi.CheckOwner(id, c.GetInt("id")); err != nil {
+		accountDataAPIError(c, err)
+		return 0, false
+	}
 	return id, true
 }
 
 func accountDataAPIError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	switch {
+	case errors.Is(err, accountdataapi.ErrDisabled), errors.Is(err, authz.ErrDataForbidden), errors.Is(err, authz.ErrAuthorizationChanged):
+		status = http.StatusForbidden
 	case errors.Is(err, accountdataapi.ErrInvalid):
 		status = http.StatusBadRequest
 	case errors.Is(err, accountdataapi.ErrNotFound):
@@ -271,6 +301,30 @@ func accountDataAPIError(c *gin.Context, err error) {
 		status = http.StatusServiceUnavailable
 	}
 	c.JSON(status, gin.H{"success": false, "message": err.Error()})
+}
+
+func accountDataContext(c *gin.Context) bool {
+	a, err := authz.LoadDataAccess(model.DB, c.GetInt("id"))
+	if err != nil {
+		accountDataAPIError(c, accountdataapi.ErrDisabled)
+		return false
+	}
+	c.Request = c.Request.WithContext(authz.WithDataAccess(c.Request.Context(), a))
+	return true
+}
+
+func accountDataProjected(c *gin.Context, value any) {
+	a := authz.DataAccessFrom(c.Request.Context())
+	if a == nil || a.Current(model.DB) != nil {
+		accountDataAPIError(c, accountdataapi.ErrDisabled)
+		return
+	}
+	result, err := a.Project(value)
+	if err != nil {
+		accountDataAPIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
 }
 
 func openAccountDataError(c *gin.Context, requestID string, err error) {

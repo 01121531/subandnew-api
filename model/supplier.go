@@ -3,27 +3,28 @@ package model
 import "gorm.io/gorm"
 
 type Supplier struct {
-	ID              int64                    `json:"id" gorm:"primaryKey"`
-	Name            string                   `json:"name" gorm:"type:varchar(96);not null"`
-	Username        string                   `json:"username" gorm:"type:varchar(96);not null;uniqueIndex"`
-	PasswordHash    string                   `json:"-" gorm:"type:varchar(100);not null"`
-	Enabled         bool                     `json:"enabled" gorm:"not null"`
-	ViewAccounts    bool                     `json:"view_accounts" gorm:"not null"`
-	ViewUsage       bool                     `json:"view_usage" gorm:"not null"`
-	ManageProxies   bool                     `json:"manage_proxies" gorm:"not null"`
-	UploadAccounts  bool                     `json:"upload_accounts" gorm:"not null"`
-	AuthVersion     int64                    `json:"-" gorm:"not null"`
-	PolicyOverrides SupplierPolicy           `json:"policy_overrides" gorm:"serializer:json;type:text"`
-	PolicyVersion   int64                    `json:"-" gorm:"not null;default:0"`
-	EffectivePolicy *SupplierEffectivePolicy `json:"effective_policy,omitempty" gorm:"-"`
-	PolicyChanges   string                   `json:"-" gorm:"-"`
-	NamingRule      *SupplierNamingRule      `json:"naming_rule" gorm:"serializer:json;type:text"`
-	NamingVersion   int64                    `json:"-" gorm:"not null;default:0"`
-	EffectiveNaming *SupplierEffectiveNaming `json:"effective_naming,omitempty" gorm:"-"`
-	NamingChanges   string                   `json:"-" gorm:"-"`
-	CreatedAt       int64                    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       int64                    `json:"updated_at" gorm:"autoUpdateTime"`
-	DeletedAt       gorm.DeletedAt           `json:"-" gorm:"index"`
+	ResponsibleAdminID int                      `json:"responsible_admin_id" gorm:"not null;default:0;index"`
+	ID                 int64                    `json:"id" gorm:"primaryKey"`
+	Name               string                   `json:"name" gorm:"type:varchar(96);not null"`
+	Username           string                   `json:"username" gorm:"type:varchar(96);not null;uniqueIndex"`
+	PasswordHash       string                   `json:"-" gorm:"type:varchar(100);not null"`
+	Enabled            bool                     `json:"enabled" gorm:"not null"`
+	ViewAccounts       bool                     `json:"view_accounts" gorm:"not null"`
+	ViewUsage          bool                     `json:"view_usage" gorm:"not null"`
+	ManageProxies      bool                     `json:"manage_proxies" gorm:"not null"`
+	UploadAccounts     bool                     `json:"upload_accounts" gorm:"not null"`
+	AuthVersion        int64                    `json:"-" gorm:"not null"`
+	PolicyOverrides    SupplierPolicy           `json:"policy_overrides" gorm:"serializer:json;type:text"`
+	PolicyVersion      int64                    `json:"-" gorm:"not null;default:0"`
+	EffectivePolicy    *SupplierEffectivePolicy `json:"effective_policy,omitempty" gorm:"-"`
+	PolicyChanges      string                   `json:"-" gorm:"-"`
+	NamingRule         *SupplierNamingRule      `json:"naming_rule" gorm:"serializer:json;type:text"`
+	NamingVersion      int64                    `json:"-" gorm:"not null;default:0"`
+	EffectiveNaming    *SupplierEffectiveNaming `json:"effective_naming,omitempty" gorm:"-"`
+	NamingChanges      string                   `json:"-" gorm:"-"`
+	CreatedAt          int64                    `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt          int64                    `json:"updated_at" gorm:"autoUpdateTime"`
+	DeletedAt          gorm.DeletedAt           `json:"-" gorm:"index"`
 }
 
 type SupplierBinding struct {

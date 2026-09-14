@@ -11,6 +11,8 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
+	"github.com/01121531/subandnew-api/service/billingalert"
 	"gorm.io/gorm"
 )
 
@@ -101,13 +103,22 @@ func MetricDefinitions() []MetricDefinition {
 	return result
 }
 
-func Capabilities(instanceIDs []int64, scopeMode string) ([]MetricDefinition, error) {
+func Capabilities(instanceIDs []int64, scopeMode string, access ...*authz.DataAccess) ([]MetricDefinition, error) {
+	a := billingalert.OptionalAccess(access)
+	if a != nil {
+		if err := a.CheckInstances(instanceIDs); err != nil {
+			return nil, err
+		}
+	}
 	instances, err := loadInstances(instanceIDs)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]MetricDefinition, 0, len(metricDefinitions))
 	for _, definition := range metricDefinitions {
+		if !billingalert.MetricAllowed(a, definition.Key) {
+			continue
+		}
 		if scopeMode == ScopeAggregate && !definition.Aggregatable {
 			continue
 		}
@@ -125,9 +136,9 @@ func Capabilities(instanceIDs []int64, scopeMode string) ([]MetricDefinition, er
 	return result, nil
 }
 
-func ListRules() ([]*RuleView, error) {
+func ListRules(access ...*authz.DataAccess) ([]*RuleView, error) {
 	var rules []*model.MetricAlertRule
-	if err := model.DB.Order("id DESC").Find(&rules).Error; err != nil {
+	if err := billingalert.ScopeRules(model.DB.Model(&model.MetricAlertRule{}), billingalert.OptionalAccess(access), "metric_alert_rules", "metric_alert_rule_instances").Order("id DESC").Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	views := make([]*RuleView, 0, len(rules))
@@ -141,7 +152,10 @@ func ListRules() ([]*RuleView, error) {
 	return views, nil
 }
 
-func GetRule(id int64) (*RuleView, error) {
+func GetRule(id int64, access ...*authz.DataAccess) (*RuleView, error) {
+	if err := billingalert.CheckRuleAccess(billingalert.OptionalAccess(access), id, "metric_alert_rules", "metric_alert_rule_instances"); err != nil {
+		return nil, err
+	}
 	var rule model.MetricAlertRule
 	if err := model.DB.First(&rule, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

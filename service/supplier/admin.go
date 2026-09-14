@@ -240,11 +240,13 @@ type BindingInput struct {
 
 func (s *Service) Bindings(id int64, active bool) ([]model.SupplierBinding, error) {
 	items := []model.SupplierBinding{}
-	q := s.DB.Where("supplier_id = ?", id)
+	q := s.DB.Model(&model.SupplierBinding{}).Select("supplier_bindings.*").
+		Joins("LEFT JOIN managed_instances ON managed_instances.id = supplier_bindings.instance_id").
+		Where("supplier_bindings.supplier_id = ?", id)
 	if active {
-		q = q.Where("enabled = ?", true)
+		q = q.Where("supplier_bindings.enabled = ?", true)
 	}
-	if err := q.Order("id ASC").Find(&items).Error; err != nil {
+	if err := q.Order("CASE WHEN managed_instances.id IS NULL THEN 1 ELSE 0 END, managed_instances.sort_order ASC, managed_instances.id DESC, supplier_bindings.id ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	result := make([]model.SupplierBinding, 0, len(items))

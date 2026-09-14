@@ -89,6 +89,9 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Pr
 	if err != nil || !item.Enabled || !valid {
 		return nil, "", fail(401, "supplier_invalid_credentials")
 	}
+	if _, err := s.ownerAccess(&item); err != nil {
+		return nil, "", err
+	}
 	raw, err := token()
 	if err != nil {
 		return nil, "", err
@@ -106,6 +109,9 @@ func (s *Service) Login(ctx context.Context, username, password, ip string) (*Pr
 		return nil, "", err
 	}
 	s.clearLogin(ctx, key)
+	if err := s.decorateSupplier(&item); err != nil {
+		return nil, "", err
+	}
 	return &Principal{Supplier: item, Session: session}, raw, nil
 }
 
@@ -129,6 +135,12 @@ func (s *Service) Authenticate(raw string) (*Principal, error) {
 	}
 	if s.Now().Unix()-session.LastUsedAt >= 60 {
 		s.DB.Model(&session).UpdateColumn("last_used_at", s.Now().Unix())
+	}
+	if _, err := s.ownerAccess(&item); err != nil {
+		return nil, err
+	}
+	if err := s.decorateSupplier(&item); err != nil {
+		return nil, err
 	}
 	return &Principal{Supplier: item, Session: session}, nil
 }
@@ -161,6 +173,14 @@ func (s *Service) authorize(p *Principal, bindingID int64, capability string) (*
 		return nil, err
 	}
 	b.EffectivePolicy = model.ResolveSupplierPolicy(defaults, *item, &b)
+	a, err := s.ownerAccess(item)
+	if err != nil {
+		return nil, err
+	}
+	if a.CheckInstances([]int64{b.InstanceID}) != nil {
+		return nil, fail(403, "supplier_permission_denied")
+	}
+	intersectPolicy(b.EffectivePolicy, a)
 	b.EffectiveNaming = model.ResolveSupplierNaming(*item, &b)
 	allowed := false
 	switch capability {

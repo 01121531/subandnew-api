@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/assistant/tool"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -17,9 +19,13 @@ type InstanceOption struct {
 }
 
 func ListAllInstanceOptions(ctx context.Context, db *gorm.DB) ([]InstanceOption, error) {
+	a := authz.DataAccessFrom(ctx)
+	if a == nil || a.Current(db) != nil {
+		return nil, ErrInstanceDenied
+	}
 	options := make([]InstanceOption, 0)
-	err := db.WithContext(ctx).Model(&model.ManagedInstance{}).
-		Select("id", "name", "kind", "status").Order("name ASC, id ASC").Scan(&options).Error
+	err := a.ScopeQuery(db.WithContext(ctx).Model(&model.ManagedInstance{}), "id").
+		Select("id", "name", "kind", "status").Order(model.ManagedInstanceOrderSQL).Scan(&options).Error
 	return options, err
 }
 
@@ -28,6 +34,22 @@ func ListIdentityInstanceOptions(ctx context.Context, db *gorm.DB, identity *mod
 		return nil, ErrIdentityDenied
 	}
 	query := db.WithContext(ctx).Model(&model.ManagedInstance{}).Select("id", "name", "kind", "status")
+	var current model.AssistantIdentity
+	if db.First(&current, identity.ID).Error != nil {
+		return nil, ErrIdentityDenied
+	}
+	identity = &current
+	a, err := IdentityDataAccess(db, identity)
+	if err != nil {
+		return nil, err
+	}
+	query = a.ScopeQuery(query, "id")
+	if actor := authz.DataAccessFrom(ctx); actor != nil {
+		if actor.Current(db) != nil {
+			return nil, ErrIdentityDenied
+		}
+		query = actor.ScopeQuery(query, "id")
+	}
 	switch identity.AllowedInstanceScope {
 	case model.AssistantInstanceScopeAll:
 	case model.AssistantInstanceScopeSelected:
@@ -44,7 +66,7 @@ func ListIdentityInstanceOptions(ctx context.Context, db *gorm.DB, identity *mod
 		return []InstanceOption{}, nil
 	}
 	options := make([]InstanceOption, 0)
-	err := query.Order("name ASC, id ASC").Scan(&options).Error
+	err = query.Order(model.ManagedInstanceOrderSQL).Scan(&options).Error
 	return options, err
 }
 
@@ -54,11 +76,23 @@ func GetGlobalDefaultInstanceID(ctx context.Context, db *gorm.DB) (*int64, error
 	if err != nil {
 		return nil, err
 	}
+	if a := authz.DataAccessFrom(ctx); a != nil {
+		if a.Current(db) != nil {
+			return nil, ErrInstanceDenied
+		}
+		if setting.GlobalDefaultInstanceID != nil && !a.HasInstance(*setting.GlobalDefaultInstanceID) {
+			return nil, nil
+		}
+	}
 	return cloneInt64(setting.GlobalDefaultInstanceID), nil
 }
 
 func UpdateGlobalDefaultInstance(ctx context.Context, db *gorm.DB, instanceID *int64, actorID int) error {
 	if db == nil || actorID <= 0 {
+		return ErrInstanceDenied
+	}
+	a, err := authz.LoadDataAccess(db, actorID)
+	if err != nil || a.Role < common.RoleRootUser {
 		return ErrInstanceDenied
 	}
 	if err := validateExistingInstance(ctx, db, instanceID); err != nil {

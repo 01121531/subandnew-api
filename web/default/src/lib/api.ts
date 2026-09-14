@@ -22,11 +22,14 @@ import { toast } from 'sonner'
 
 import { useAuthStore } from '@/stores/auth-store'
 
+import { adminDataAuthorizationKey } from './admin-data-policy'
+
 declare module 'axios' {
   export interface AxiosRequestConfig {
     skipBusinessError?: boolean
     skipErrorHandler?: boolean
     disableDuplicate?: boolean
+    authorizationKey?: string
   }
 }
 
@@ -60,6 +63,9 @@ function isControlPlaneRequest(
 }
 
 api.interceptors.request.use((config) => {
+  config.authorizationKey = adminDataAuthorizationKey(
+    useAuthStore.getState().auth.user
+  )
   if (!isControlPlaneRequest(config)) {
     return Promise.reject(
       new Error(
@@ -84,7 +90,7 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
   if (disableDuplicate) return originalGet(url, config)
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
-  const key = `${url}?${params}`
+  const key = `${adminDataAuthorizationKey(useAuthStore.getState().auth.user)}:${url}?${params}`
 
   // Return existing in-flight request if available
   const inFlightRequest = inFlightGet.get(key)
@@ -103,6 +109,12 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
 // Handle business logic errors and HTTP errors globally
 api.interceptors.response.use(
   (response) => {
+    if (
+      response.config.authorizationKey !==
+      adminDataAuthorizationKey(useAuthStore.getState().auth.user)
+    ) {
+      throw new axios.CanceledError('Authorization changed')
+    }
     const skipBusiness = response.config.skipBusinessError
 
     // Unified business response format: { success, message, data }
@@ -121,6 +133,13 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    if (
+      error?.config?.authorizationKey !== undefined &&
+      error.config.authorizationKey !==
+        adminDataAuthorizationKey(useAuthStore.getState().auth.user)
+    ) {
+      return Promise.reject(new axios.CanceledError('Authorization changed'))
+    }
     const skip = error?.config?.skipErrorHandler
     const status = error?.response?.status
 

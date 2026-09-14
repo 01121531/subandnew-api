@@ -9,6 +9,7 @@ import (
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/billingalert"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,7 @@ import (
 )
 
 func ListInstanceAlertRules(c *gin.Context) {
-	data, err := managedinstance.ListAlertRules()
+	data, err := managedinstance.ListAlertRules(authz.DataAccessFrom(c.Request.Context()))
 	instanceAlertRuleJSON(c, data, err)
 }
 
@@ -25,7 +26,7 @@ func GetInstanceAlertRule(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := managedinstance.GetAlertRule(id)
+	data, err := managedinstance.GetAlertRule(id, authz.DataAccessFrom(c.Request.Context()))
 	instanceAlertRuleJSON(c, data, err)
 }
 
@@ -48,6 +49,9 @@ func UpdateInstanceAlertRule(c *gin.Context) {
 	if !billingBind(c, &input) {
 		return
 	}
+	if !alertRuleAllowed(c, id, "instance") {
+		return
+	}
 	data, err := managedinstance.UpdateAlertRule(id, input, c.GetInt("id"))
 	billingAuditResult(c, "update", "instance_alert_rule", id, err, input)
 	instanceAlertRuleJSON(c, data, err)
@@ -58,6 +62,9 @@ func DeleteInstanceAlertRule(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !alertRuleAllowed(c, id, "instance") {
+		return
+	}
 	err := managedinstance.DeleteAlertRule(id)
 	billingAuditResult(c, "delete", "instance_alert_rule", id, err, nil)
 	instanceAlertRuleJSON(c, nil, err)
@@ -65,7 +72,11 @@ func DeleteInstanceAlertRule(c *gin.Context) {
 
 func instanceAlertRuleJSON(c *gin.Context, data any, err error) {
 	if err == nil {
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": data})
+		alertDataJSON(c, http.StatusOK, data)
+		return
+	}
+	if errors.Is(err, authz.ErrDataForbidden) || errors.Is(err, authz.ErrAuthorizationChanged) {
+		adminDataError(c, err)
 		return
 	}
 	status, message := http.StatusInternalServerError, "instance_alert_rule_operation_failed"
@@ -109,7 +120,7 @@ func CreateBillingFilterTemplate(c *gin.Context) {
 		billingError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": data})
+	alertDataJSON(c, http.StatusCreated, data)
 }
 
 func PreviewBillingFilterTemplate(c *gin.Context) {
@@ -119,6 +130,10 @@ func PreviewBillingFilterTemplate(c *gin.Context) {
 	}
 	var input billingalert.TemplateInput
 	if !billingBind(c, &input) {
+		return
+	}
+	if err := billingalert.CheckTemplateAccess(authz.DataAccessFrom(c.Request.Context()), id); err != nil {
+		adminDataError(c, err)
 		return
 	}
 	data, err := billingalert.PreviewTemplateUpdate(id, input)
@@ -134,6 +149,10 @@ func UpdateBillingFilterTemplate(c *gin.Context) {
 	if !billingBind(c, &input) {
 		return
 	}
+	if err := billingalert.CheckTemplateAccess(authz.DataAccessFrom(c.Request.Context()), id); err != nil {
+		adminDataError(c, err)
+		return
+	}
 	data, err := billingalert.UpdateTemplate(id, input, c.GetInt("id"))
 	billingAuditResult(c, "update", "filter_template", id, err, input)
 	billingJSON(c, data, err)
@@ -142,6 +161,10 @@ func UpdateBillingFilterTemplate(c *gin.Context) {
 func DeleteBillingFilterTemplate(c *gin.Context) {
 	id, ok := billingResourceID(c)
 	if !ok {
+		return
+	}
+	if err := billingalert.CheckTemplateAccess(authz.DataAccessFrom(c.Request.Context()), id); err != nil {
+		adminDataError(c, err)
 		return
 	}
 	err := billingalert.DeleteTemplate(id)
@@ -154,7 +177,7 @@ func DeleteBillingFilterTemplate(c *gin.Context) {
 }
 
 func ListBillingAlertRules(c *gin.Context) {
-	data, err := billingalert.ListRules()
+	data, err := billingalert.ListRules(authz.DataAccessFrom(c.Request.Context()))
 	billingJSON(c, data, err)
 }
 
@@ -163,7 +186,7 @@ func GetBillingAlertRule(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := billingalert.GetRule(id)
+	data, err := billingalert.GetRule(id, authz.DataAccessFrom(c.Request.Context()))
 	billingJSON(c, data, err)
 }
 
@@ -178,7 +201,7 @@ func CreateBillingAlertRule(c *gin.Context) {
 		billingError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": data})
+	alertDataJSON(c, http.StatusCreated, data)
 }
 
 func PreviewBillingAlertRule(c *gin.Context) {
@@ -194,6 +217,9 @@ func PreviewBillingAlertRule(c *gin.Context) {
 	if !billingBind(c, &input) {
 		return
 	}
+	if id > 0 && !alertRuleAllowed(c, id, "billing") {
+		return
+	}
 	data, err := billingalert.PreviewRule(id, input, c.GetInt("id"))
 	billingJSON(c, data, err)
 }
@@ -207,6 +233,9 @@ func UpdateBillingAlertRule(c *gin.Context) {
 	if !billingBind(c, &input) {
 		return
 	}
+	if !alertRuleAllowed(c, id, "billing") {
+		return
+	}
 	data, err := billingalert.UpdateRule(id, input, c.GetInt("id"))
 	billingAuditResult(c, "update", "alert_rule", id, err, input)
 	billingJSON(c, data, err)
@@ -215,6 +244,9 @@ func UpdateBillingAlertRule(c *gin.Context) {
 func DeleteBillingAlertRule(c *gin.Context) {
 	id, ok := billingResourceID(c)
 	if !ok {
+		return
+	}
+	if !alertRuleAllowed(c, id, "billing") {
 		return
 	}
 	err := billingalert.DeleteRule(id)
@@ -241,15 +273,21 @@ func EvaluateBillingAlertRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid instance id"})
 		return
 	}
+	if !alertRuleAllowed(c, id, "billing") {
+		return
+	}
+	if !adminInstancesAllowed(c, []int64{input.InstanceID}) || !alertFieldsAllowed(c, "amount") {
+		return
+	}
 	task, created, err := service.EnqueueBillingRuleEvaluation(id, input.InstanceID)
 	billingAuditResult(c, "evaluate", "alert_rule", id, err, input)
 	if err != nil {
 		billingError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": gin.H{
+	alertDataJSON(c, http.StatusAccepted, gin.H{
 		"task": task.ToResponse(), "created": created,
-	}})
+	})
 }
 
 func ListBillingAlertRecords(c *gin.Context) {
@@ -258,7 +296,7 @@ func ListBillingAlertRecords(c *gin.Context) {
 		InstanceID: queryInt64(c, "instance_id"), RuleID: queryInt64(c, "rule_id"),
 		EventType: c.Query("event_type"), SourceType: c.Query("source_type"), MetricKey: c.Query("metric_key"), Currency: c.Query("currency"), Recipient: c.Query("recipient"),
 		StartTime: queryInt64(c, "start_time"), EndTime: queryInt64(c, "end_time"),
-	})
+	}, authz.DataAccessFrom(c.Request.Context()))
 	billingJSON(c, data, err)
 }
 
@@ -268,7 +306,7 @@ func ListBillingInstanceAlerts(c *gin.Context) {
 		InstanceID: queryInt64(c, "instance_id"), Status: c.Query("status"),
 		AlertType: c.Query("alert_type"), DeliveryStatus: c.Query("delivery_status"),
 		Search: c.Query("search"), StartTime: queryInt64(c, "start_time"), EndTime: queryInt64(c, "end_time"),
-	})
+	}, authz.DataAccessFrom(c.Request.Context()))
 	billingJSON(c, data, err)
 }
 
@@ -277,7 +315,7 @@ func GetBillingAlertRecord(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := billingalert.GetAlertRecord(id)
+	data, err := billingalert.GetAlertRecord(id, authz.DataAccessFrom(c.Request.Context()))
 	billingJSON(c, data, err)
 }
 
@@ -289,7 +327,7 @@ func CreateBillingAlertRecordExport(c *gin.Context) {
 		billingError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": record})
+	alertDataJSON(c, http.StatusAccepted, record)
 }
 
 func ListBillingAlertRecordExports(c *gin.Context) {
@@ -313,6 +351,10 @@ func DownloadBillingAlertRecordExport(c *gin.Context) {
 	}
 	if _, err := os.Stat(record.FilePath); err != nil {
 		c.JSON(http.StatusGone, gin.H{"success": false, "message": "export_file_missing"})
+		return
+	}
+	if err := billingalert.CheckAlertExportAccess(record, authz.DataAccessFrom(c.Request.Context())); err != nil {
+		adminDataError(c, err)
 		return
 	}
 	c.FileAttachment(record.FilePath, record.FileName)
@@ -403,6 +445,12 @@ func billingBind(c *gin.Context, target any) bool {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
 		return false
 	}
+	switch input := target.(type) {
+	case *billingalert.RuleInput:
+		return adminInstancesAllowed(c, input.InstanceIDs) && alertFieldsAllowed(c, "amount", "status", "email")
+	case *managedinstance.AlertRuleInput:
+		return adminInstancesAllowed(c, input.InstanceIDs) && alertFieldsAllowed(c, "status", "email")
+	}
 	return true
 }
 
@@ -411,10 +459,70 @@ func billingJSON(c *gin.Context, data any, err error) {
 		billingError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": data})
+	alertDataJSON(c, http.StatusOK, data)
+}
+
+func alertDataJSON(c *gin.Context, status int, data any) {
+	a := authz.DataAccessFrom(c.Request.Context())
+	if a != nil {
+		if err := a.Current(model.DB); err != nil {
+			adminDataError(c, err)
+			return
+		}
+	}
+	projected, err := billingalert.ProjectAlertData(data, a)
+	if err != nil {
+		billingError(c, err)
+		return
+	}
+	c.JSON(status, gin.H{"success": true, "message": "", "data": projected})
+}
+
+func alertRuleAllowed(c *gin.Context, id int64, source string) bool {
+	table, bindings := "billing_alert_rules", "billing_alert_rule_instances"
+	switch source {
+	case model.AlertSourceMetric:
+		table, bindings = "metric_alert_rules", "metric_alert_rule_instances"
+	case model.AlertSourceInstance:
+		table, bindings = "managed_instance_alert_rules", "managed_instance_alert_rule_instances"
+	}
+	a := authz.DataAccessFrom(c.Request.Context())
+	if a != nil {
+		if err := a.Current(model.DB); err != nil {
+			adminDataError(c, err)
+			return false
+		}
+	}
+	if err := billingalert.CheckRuleAccess(a, id, table, bindings); err != nil {
+		adminDataError(c, err)
+		return false
+	}
+	return true
+}
+
+func alertFieldsAllowed(c *gin.Context, fields ...string) bool {
+	a := authz.DataAccessFrom(c.Request.Context())
+	if a == nil {
+		return true
+	}
+	if err := a.Current(model.DB); err != nil {
+		adminDataError(c, err)
+		return false
+	}
+	for _, field := range fields {
+		if !a.HasField(field) {
+			adminDataError(c, authz.ErrDataForbidden)
+			return false
+		}
+	}
+	return true
 }
 
 func billingError(c *gin.Context, err error) {
+	if errors.Is(err, authz.ErrDataForbidden) || errors.Is(err, authz.ErrAuthorizationChanged) {
+		adminDataError(c, err)
+		return
+	}
 	status := http.StatusInternalServerError
 	message := "billing_alert_operation_failed"
 	switch {

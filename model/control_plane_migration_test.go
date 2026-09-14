@@ -13,6 +13,7 @@ import (
 )
 
 var expectedControlPlaneTables = []string{
+	"admin_data_policies",
 	"assistant_binding_codes",
 	"assistant_channel_leases",
 	"assistant_channel_secrets",
@@ -66,6 +67,7 @@ var expectedControlPlaneTables = []string{
 	"managed_instance_operation_batch_items",
 	"managed_instance_operation_batches",
 	"managed_instance_operations",
+	"managed_instance_order_states",
 	"managed_instance_snapshots",
 	"managed_instances",
 	"managed_rpm_history",

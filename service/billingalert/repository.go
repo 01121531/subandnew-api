@@ -11,6 +11,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -363,9 +364,9 @@ func UpdateRule(id int64, input RuleInput, actorID int) (*RuleView, error) {
 	return GetRule(id)
 }
 
-func ListRules() ([]*RuleView, error) {
+func ListRules(access ...*authz.DataAccess) ([]*RuleView, error) {
 	var rules []*model.BillingAlertRule
-	if err := model.DB.Order("id DESC").Find(&rules).Error; err != nil {
+	if err := ScopeRules(model.DB.Model(&model.BillingAlertRule{}), OptionalAccess(access), "billing_alert_rules", "billing_alert_rule_instances").Order("id DESC").Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	views := make([]*RuleView, 0, len(rules))
@@ -379,7 +380,10 @@ func ListRules() ([]*RuleView, error) {
 	return views, nil
 }
 
-func GetRule(id int64) (*RuleView, error) {
+func GetRule(id int64, access ...*authz.DataAccess) (*RuleView, error) {
+	if err := CheckRuleAccess(OptionalAccess(access), id, "billing_alert_rules", "billing_alert_rule_instances"); err != nil {
+		return nil, err
+	}
 	var rule model.BillingAlertRule
 	if err := model.DB.First(&rule, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

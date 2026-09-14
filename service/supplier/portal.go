@@ -39,6 +39,13 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 	if err = validateQuery(resource, q); err != nil {
 		return nil, err
 	}
+	a, err := s.ownerAccess(&p.Supplier)
+	if err != nil {
+		return nil, err
+	}
+	if a.CheckQuery(q) != nil {
+		return nil, fail(403, "supplier_field_forbidden")
+	}
 	q = cloneQuery(q)
 	if err = validatePolicyQuery(b.EffectivePolicy, resource, q); err != nil {
 		return nil, err
@@ -134,6 +141,20 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 		}
 		result["allowed_upload_methods"] = allowedUploadMethods(settings, *current)
 		result["portal_revision"] = settings.Revision
+	}
+	latest, err := s.ownerAccess(&p.Supplier)
+	if err != nil {
+		return nil, err
+	}
+	if a.Current(s.DB) != nil || latest.UserID != a.UserID {
+		return nil, fail(403, "supplier_owner_denied")
+	}
+	if resource == "accounts" || resource == "account-summary" || resource == "usage" {
+		projected, err := latest.Project(result)
+		if err != nil {
+			return nil, err
+		}
+		return projected.(map[string]any), nil
 	}
 	return result, nil
 }

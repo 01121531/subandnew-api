@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"github.com/01121531/subandnew-api/model"
 	"net/http"
 
 	"github.com/01121531/subandnew-api/service/authz"
@@ -17,8 +18,17 @@ func GetPermissionCatalog(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"resources": authz.Catalog(),
-			"roles":     authz.Roles(),
+			"resources":   authz.Catalog(),
+			"roles":       authz.Roles(),
+			"data_fields": adminDataFieldCatalog(),
 		},
 	})
+}
+
+func adminDataFieldCatalog() []gin.H {
+	items := make([]gin.H, 0, len(model.AdminDataFields))
+	for _, key := range model.AdminDataFields {
+		items = append(items, gin.H{"key": key, "label_key": "adminData.fields." + key})
+	}
+	return items
 }

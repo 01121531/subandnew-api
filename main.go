@@ -26,11 +26,13 @@ import (
 	"github.com/01121531/subandnew-api/pkg/systemupdate"
 	"github.com/01121531/subandnew-api/router"
 	"github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/accountdataapi"
 	assistantsecrets "github.com/01121531/subandnew-api/service/assistant/secrets"
 	assistantworker "github.com/01121531/subandnew-api/service/assistant/worker"
 	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/billingalert"
 	"github.com/01121531/subandnew-api/service/managedinstance"
+	"github.com/01121531/subandnew-api/service/supplier"
 	_ "github.com/01121531/subandnew-api/setting/performance_setting"
 
 	"github.com/gin-contrib/sessions"
@@ -331,6 +333,14 @@ func InitResources() error {
 	}
 
 	model.CheckSetup()
+	if common.IsMasterNode {
+		if err = accountdataapi.BackfillLegacyOwners(model.DB); err != nil {
+			return fmt.Errorf("migrate account API responsibility: %w", err)
+		}
+		if err = supplier.BackfillLegacyOwners(model.DB); err != nil {
+			return fmt.Errorf("migrate supplier responsibility: %w", err)
+		}
+	}
 
 	// Initialize options, should after model.InitDB()
 	model.InitOptionMap()

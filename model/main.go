@@ -175,7 +175,10 @@ func migrateDB() error {
 	if err := DB.AutoMigrate(controlPlaneModels()...); err != nil {
 		return err
 	}
-	return MigrateSupplierPolicies(DB)
+	if err := MigrateSupplierPolicies(DB); err != nil {
+		return err
+	}
+	return MigrateAdminDataPolicies(DB)
 }
 
 // SQLite cannot add a UNIQUE column to an existing table. Add the nullable
@@ -215,6 +218,8 @@ func controlPlaneModels() []interface{} {
 		&SystemTaskScopeLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&AdminDataPolicy{},
+		&ManagedInstanceOrderState{},
 		&ManagedInstance{},
 		&ManagedInstanceCredential{},
 		&ManagedInstanceSnapshot{},

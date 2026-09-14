@@ -10,6 +10,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -64,9 +65,9 @@ type activeAlertPolicy struct {
 	NotificationEnabled bool
 }
 
-func ListAlertRules() ([]*AlertRuleView, error) {
+func ListAlertRules(access ...*authz.DataAccess) ([]*AlertRuleView, error) {
 	var rules []*model.ManagedInstanceAlertRule
-	if err := model.DB.Order("id DESC").Find(&rules).Error; err != nil {
+	if err := scopeAlertRules(model.DB.Model(&model.ManagedInstanceAlertRule{}), access).Order("id DESC").Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	result := make([]*AlertRuleView, 0, len(rules))
@@ -80,7 +81,16 @@ func ListAlertRules() ([]*AlertRuleView, error) {
 	return result, nil
 }
 
-func GetAlertRule(id int64) (*AlertRuleView, error) {
+func GetAlertRule(id int64, access ...*authz.DataAccess) (*AlertRuleView, error) {
+	if len(access) > 0 && access[0] != nil {
+		var count int64
+		if err := scopeAlertRules(model.DB.Model(&model.ManagedInstanceAlertRule{}), access).Where("id = ?", id).Count(&count).Error; err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			return nil, authz.ErrDataForbidden
+		}
+	}
 	var rule model.ManagedInstanceAlertRule
 	if err := model.DB.First(&rule, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -89,6 +99,18 @@ func GetAlertRule(id int64) (*AlertRuleView, error) {
 		return nil, err
 	}
 	return alertRuleView(model.DB, &rule)
+}
+
+func scopeAlertRules(q *gorm.DB, access []*authz.DataAccess) *gorm.DB {
+	if len(access) == 0 || access[0] == nil || access[0].Policy.InstanceScope == "all" {
+		return q
+	}
+	ids := access[0].Policy.InstanceIDs
+	if len(ids) == 0 {
+		return q.Where("1 = 0")
+	}
+	return q.Where("EXISTS (SELECT 1 FROM managed_instance_alert_rule_instances b WHERE b.rule_id = managed_instance_alert_rules.id)").
+		Where("NOT EXISTS (SELECT 1 FROM managed_instance_alert_rule_instances b WHERE b.rule_id = managed_instance_alert_rules.id AND b.instance_id NOT IN ?)", ids)
 }
 
 func CreateAlertRule(input AlertRuleInput, actorID int) (*AlertRuleView, error) {

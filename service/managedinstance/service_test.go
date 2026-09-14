@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,8 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceAudit{},
+		&model.ManagedInstanceOrderState{},
+		&model.User{}, &model.AdminDataPolicy{},
 		&model.ManagedInstanceSnapshot{}, &model.ManagedInstanceAlert{},
 		&model.ManagedInstanceAlertRule{}, &model.ManagedInstanceAlertRuleInstance{}, &model.ManagedInstanceAlertAssignment{},
 		&model.BillingAlertEvent{},
@@ -35,6 +38,7 @@ func newManagedInstanceTestDB(t *testing.T) *gorm.DB {
 		&model.ManagedRPMHistory{},
 		&model.ManagedConfigTemplate{}, &model.ManagedInstanceConfigBinding{},
 	))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "instance-test-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	previousDB := model.DB
 	model.DB = db
 	t.Cleanup(func() { model.DB = previousDB })

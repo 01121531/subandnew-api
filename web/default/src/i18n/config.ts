@@ -20,6 +20,8 @@ import i18n from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
 
+import { adminDataEn, adminDataZh } from './admin-data'
+import { instanceOrderEn, instanceOrderZh } from './instance-order'
 import { convertDetectedLanguage } from './languages'
 import en from './locales/en.json'
 import fr from './locales/fr.json'
@@ -31,13 +33,36 @@ import zhCN from './locales/zh.json'
 import { supplierEn, supplierZh } from './supplier'
 
 const resources = {
-  en: { ...en, translation: { ...en.translation, supplier: supplierEn } },
-  zhCN: { ...zhCN, translation: { ...zhCN.translation, supplier: supplierZh } },
-  fr,
-  ru,
-  ja,
-  vi,
-  zhTW,
+  en: {
+    ...en,
+    translation: {
+      ...en.translation,
+      supplier: supplierEn,
+      adminData: adminDataEn,
+      instanceOrder: instanceOrderEn,
+    },
+  },
+  zhCN: {
+    ...zhCN,
+    translation: {
+      ...zhCN.translation,
+      supplier: supplierZh,
+      adminData: adminDataZh,
+      instanceOrder: instanceOrderZh,
+    },
+  },
+  fr: { ...fr, translation: { ...fr.translation, adminData: adminDataEn } },
+  ru: { ...ru, translation: { ...ru.translation, adminData: adminDataEn } },
+  ja: { ...ja, translation: { ...ja.translation, adminData: adminDataEn } },
+  vi: { ...vi, translation: { ...vi.translation, adminData: adminDataEn } },
+  zhTW: {
+    ...zhTW,
+    translation: {
+      ...zhTW.translation,
+      adminData: adminDataZh,
+      instanceOrder: instanceOrderZh,
+    },
+  },
 } as const
 
 const documentLanguageByInterfaceLanguage: Record<string, string> = {

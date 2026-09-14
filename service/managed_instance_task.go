@@ -14,6 +14,7 @@ import (
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"gorm.io/gorm"
 )
@@ -148,6 +149,16 @@ func EnqueueManagedUsageExport(instanceID int64, actorID int, query url.Values) 
 	if instanceID <= 0 || actorID <= 0 {
 		return nil, managedinstance.ErrInvalidInstance
 	}
+	access, err := managedExportAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := access.CheckInstances([]int64{instanceID}); err != nil {
+		return nil, err
+	}
+	if err := access.CheckQuery(query); err != nil {
+		return nil, err
+	}
 	instance, err := managedinstance.Get(instanceID)
 	if err != nil {
 		return nil, err
@@ -169,7 +180,7 @@ func EnqueueManagedUsageExport(instanceID int64, actorID int, query url.Values) 
 	task, err := model.CreateManagedUsageExport(&model.ManagedUsageExport{
 		InstanceID: instanceID, InstanceName: instance.Name, InstanceKind: instance.Kind,
 		ActorID: actorID, ActorName: actorName, ExportKind: model.ManagedExportKindUsageRecords,
-		FileFormat: model.ManagedExportFormatCSV, Query: string(queryJSON),
+		FileFormat: model.ManagedExportFormatCSV, Query: string(queryJSON), DataPolicy: &access.Policy,
 	}, payload, state)
 	if err == nil {
 		notifySystemTaskRunner()
@@ -189,9 +200,39 @@ func managedExportActorName(actorID int) string {
 }
 
 func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*model.SystemTask, error) {
+	access, accessErr := managedExportAccess(actorID)
+	if accessErr != nil {
+		return nil, accessErr
+	}
+	ids := make([]int64, 0, len(request.Items))
+	for _, item := range request.Items {
+		ids = append(ids, item.InstanceID)
+	}
+	if err := access.CheckInstances(ids); err != nil {
+		return nil, err
+	}
+	if err := access.CheckDataField(request.SortBy); err != nil {
+		return nil, err
+	}
 	request.Source = strings.TrimSpace(request.Source)
 	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
 		return nil, managedinstance.ErrInvalidInstance
+	}
+	if err := access.CheckQuery(url.Values{"search": {request.Search}, "keyword": {request.ExcludeSearch}}); err != nil {
+		return nil, err
+	}
+	if len(request.FilterSnapshot) > 0 {
+		var filter struct {
+			Rules []managedinstance.AccountFilterRule `json:"rules"`
+		}
+		if err := json.Unmarshal(request.FilterSnapshot, &filter); err != nil {
+			return nil, managedinstance.ErrInvalidInstance
+		}
+		for _, rule := range filter.Rules {
+			if err := access.CheckDataField(rule.Field); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if request.Window.Timezone == "" {
 		request.Window.Timezone = "Asia/Shanghai"
@@ -360,7 +401,7 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
 		InstanceID: soleInstanceID, InstanceName: instanceName, InstanceKind: instanceKind,
 		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
-		FileFormat: model.ManagedExportFormatXLSX, Source: request.Source, Query: string(queryJSON),
+		FileFormat: model.ManagedExportFormatXLSX, Source: request.Source, Query: string(queryJSON), DataPolicy: &access.Policy,
 	}, payload, state, exportItems)
 	if err == nil {
 		notifySystemTaskRunner()
@@ -431,6 +472,13 @@ func GetManagedUsageExport(taskID string, actorID int, root bool) (*model.Manage
 	if !root && record.ActorID != actorID {
 		return nil, nil
 	}
+	access, accessErr := managedExportAccess(actorID)
+	if accessErr != nil {
+		return nil, accessErr
+	}
+	if err := CheckManagedExportAccess(record, access, false); err != nil {
+		return nil, err
+	}
 	return record, nil
 }
 
@@ -452,10 +500,19 @@ func CleanupExpiredManagedUsageExports() error {
 }
 
 func CancelManagedUsageExport(taskID string, actorID int, root bool) error {
+	if record, err := GetManagedUsageExport(taskID, actorID, root); err != nil || record == nil {
+		if err != nil {
+			return err
+		}
+		return authz.ErrDataForbidden
+	}
 	return model.CancelManagedUsageExport(taskID, actorID, root)
 }
 
 func DeleteManagedUsageExport(taskID string, actorID int, root bool) (*model.ManagedUsageExport, error) {
+	if record, err := GetManagedUsageExport(taskID, actorID, root); err != nil || record == nil {
+		return nil, err
+	}
 	record, err := model.DeleteManagedUsageExport(taskID, actorID, root)
 	if err != nil || record == nil {
 		return record, err
@@ -502,6 +559,13 @@ func enqueueManagedAccountExportSelections(actorID int, original *model.ManagedU
 	if original == nil || actorID <= 0 || len(selections) == 0 || len(selections) > 10000 {
 		return nil, managedinstance.ErrInvalidInstance
 	}
+	access, err := managedExportAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckManagedExportAccess(original, access, false); err != nil {
+		return nil, err
+	}
 	items := make([]*model.ManagedExportItem, 0, len(selections))
 	for _, selection := range selections {
 		metadata, err := json.Marshal(selection)
@@ -519,7 +583,7 @@ func enqueueManagedAccountExportSelections(actorID int, original *model.ManagedU
 	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
 		InstanceID: original.InstanceID, InstanceName: original.InstanceName, InstanceKind: original.InstanceKind,
 		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
-		FileFormat: model.ManagedExportFormatXLSX, Source: snapshot.Source, Query: string(queryJSON),
+		FileFormat: model.ManagedExportFormatXLSX, Source: snapshot.Source, Query: string(queryJSON), DataPolicy: &access.Policy,
 	}, payload, state, items)
 	if err == nil {
 		notifySystemTaskRunner()
@@ -556,7 +620,25 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "usage_export_status_conflict")
 		return
 	}
+	access, accessErr := managedExportAccess(payload.ActorID)
+	record, recordErr := model.GetManagedUsageExport(task.TaskID)
+	if accessErr == nil && recordErr == nil && record != nil {
+		accessErr = CheckManagedExportAccess(record, access, true)
+	}
+	if accessErr != nil || recordErr != nil || record == nil {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "admin_data_forbidden")
+		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, 0, "admin_data_forbidden", 0)
+		return
+	}
+	// Keep the submit-time field ceiling even if more fields were granted later.
+	if record.DataPolicy != nil {
+		access.Policy.Fields = record.DataPolicy.Fields
+	}
+	ctx = authz.WithDataAccess(ctx, access)
 	progressCallback := func(progress managedinstance.UsageRecordExportProgress) error {
+		if err := access.Current(model.DB); err != nil {
+			return err
+		}
 		if err := model.UpdateManagedUsageExportProgress(task.TaskID, progress.Progress, progress.Processed, progress.Total); err != nil {
 			return err
 		}
@@ -579,13 +661,17 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 				selections = append(selections, selection)
 			}
 			if err == nil {
-				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections}, progressCallback)
+				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections, VisibleFields: access.Policy.Fields}, progressCallback)
 			}
 		}
 	} else {
 		artifact, err = managedinstance.ExportUsageRecordsCSVToTaskFile(ctx, payload.InstanceID, task.TaskID, payload.Query, progressCallback)
 	}
+	if err == nil {
+		err = access.Current(model.DB)
+	}
 	if err != nil {
+		managedinstance.RemoveManagedExportArtifact(task.TaskID, record.FileFormat)
 		if ctx.Err() != nil {
 			record, _ := model.GetManagedUsageExport(task.TaskID)
 			if record != nil {

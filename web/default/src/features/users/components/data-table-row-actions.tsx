@@ -44,6 +44,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -53,6 +54,7 @@ import {
   isUserDeleted,
 } from '../constants'
 import { getUserActionMessage } from '../lib'
+import { canManageUser } from '../lib/admin-editor-access'
 import type { User, ManageUserAction } from '../types'
 import { useUsers } from './users-provider'
 
@@ -63,6 +65,7 @@ interface DataTableRowActionsProps {
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const user = row.original
+  const actor = useAuthStore((state) => state.auth.user)
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
@@ -129,7 +132,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
 
-  if (isUserDeleted(user)) {
+  if (isUserDeleted(user) || !canManageUser(actor, user)) {
     return null
   }
 
@@ -183,7 +186,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         )}
 
-        {!isAdmin && (
+        {!isAdmin && actor?.role === USER_ROLE.ROOT && actor.id !== user.id && (
           <DropdownMenuItem onClick={() => handleManage('promote')}>
             {t('Promote')}
             <DropdownMenuShortcut>

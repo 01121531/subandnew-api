@@ -236,6 +236,7 @@ func TestManagedAccountInventoryBackfillsLegacySnapshot(t *testing.T) {
 
 func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 	truncate(t)
+	seedAccountExportActor(t)
 	instance := &model.ManagedInstance{Name: "export-source", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://export.example.com"}
 	require.NoError(t, model.DB.Create(instance).Error)
 	page := managedinstance.InventoryPage{
@@ -275,6 +276,7 @@ func TestEnqueueManagedAccountExportFreezesSelectedInventory(t *testing.T) {
 
 func TestEnqueueManagedAccountExportUsesSelectedOutputSnapshot(t *testing.T) {
 	truncate(t)
+	seedAccountExportActor(t)
 	instance := &model.ManagedInstance{Name: "output-source", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://output.example.com"}
 	require.NoError(t, model.DB.Create(instance).Error)
 	inventoryPayload, err := json.Marshal(managedinstance.InventoryPage{
@@ -324,6 +326,7 @@ func TestEnqueueManagedAccountExportAcceptsOriginalAndLegacyRoundedAccountIDs(t 
 	} {
 		t.Run(requestedID, func(t *testing.T) {
 			truncate(t)
+			seedAccountExportActor(t)
 			instance := &model.ManagedInstance{Name: "large-id-export", Kind: model.ManagedInstanceKindClaudeGateway, BaseURL: "https://large-id.example.com"}
 			require.NoError(t, model.DB.Create(instance).Error)
 			const internalID int64 = 6822196335042536377
@@ -353,6 +356,11 @@ func TestEnqueueManagedAccountExportAcceptsOriginalAndLegacyRoundedAccountIDs(t 
 			require.Equal(t, internalID, items[0].ResourceID)
 		})
 	}
+}
+
+func seedAccountExportActor(t *testing.T) {
+	t.Helper()
+	require.NoError(t, model.DB.Create(&model.User{Id: 7, Username: "export-admin", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 }
 
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {

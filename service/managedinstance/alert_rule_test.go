@@ -4,9 +4,45 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInstanceAlertDataScopeBeforePagination(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}))
+	user := &model.User{Username: "alert-scope", Role: common.RoleAdminUser, Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(user).Error)
+	p := model.FullAdminDataPolicy()
+	p.UserID, p.InstanceScope, p.InstanceIDs = user.Id, "selected", []int64{1}
+	require.NoError(t, db.Create(&p).Error)
+	a, err := authz.LoadDataAccess(db, user.Id)
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&[]model.ManagedInstanceAlert{
+		{InstanceId: 1, LastSeenAt: 1}, {InstanceId: 2, LastSeenAt: 3}, {InstanceId: 1, LastSeenAt: 2},
+	}).Error)
+	page, err := ListAlerts(AlertListFilter{Access: a, PageSize: 1})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, page.Total)
+	require.Len(t, page.Items, 1)
+	require.EqualValues(t, 2, page.Items[0].LastSeenAt)
+	_, err = ListAlerts(AlertListFilter{Access: a, InstanceID: 2})
+	require.ErrorIs(t, err, authz.ErrDataForbidden)
+	require.NoError(t, db.Create(&model.ManagedInstanceAlertRule{ID: 1, Name: "mixed-scope"}).Error)
+	require.NoError(t, db.Create(&[]model.ManagedInstanceAlertRuleInstance{{RuleID: 1, InstanceID: 1}, {RuleID: 1, InstanceID: 2}}).Error)
+	rules, err := ListAlertRules(a)
+	require.NoError(t, err)
+	require.Empty(t, rules)
+	_, err = GetAlertRule(1, a)
+	require.ErrorIs(t, err, authz.ErrDataForbidden)
+	a.Policy.InstanceIDs = nil
+	page, err = ListAlerts(AlertListFilter{Access: a})
+	require.NoError(t, err)
+	require.Zero(t, page.Total)
+	require.Empty(t, page.Items)
+}
 
 func TestAlertRuleConflictAndDisabledRuleReleasesInstances(t *testing.T) {
 	db := newManagedInstanceTestDB(t)

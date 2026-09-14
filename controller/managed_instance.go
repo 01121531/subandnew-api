@@ -15,6 +15,7 @@ import (
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -62,12 +63,19 @@ type managedRealtimeRefreshRequest struct {
 }
 
 func ListManagedInstances(c *gin.Context) {
+	if !adminQueryAllowed(c) {
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-	result, err := managedinstance.List(managedinstance.ListFilter{
+	filter := managedinstance.ListFilter{
 		Kind: c.Query("kind"), Environment: c.Query("environment"), Status: c.Query("status"),
 		Search: c.Query("search"), Page: page, PageSize: pageSize, SearchConnection: c.GetInt("role") >= common.RoleRootUser,
-	})
+	}
+	if a := authz.DataAccessFrom(c.Request.Context()); a != nil && a.Policy.InstanceScope != "all" {
+		filter.AllowedIDs = &a.Policy.InstanceIDs
+	}
+	result, err := managedinstance.List(filter)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -77,7 +85,7 @@ func ListManagedInstances(c *gin.Context) {
 			result.Items[index] = managedinstance.RedactConnectionDetails(instance)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstance(c *gin.Context) {
@@ -93,7 +101,7 @@ func GetManagedInstance(c *gin.Context) {
 	if c.GetInt("role") < common.RoleRootUser {
 		instance = managedinstance.RedactConnectionDetails(instance)
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": instance})
+	adminDataJSON(c, http.StatusOK, instance)
 }
 
 func ProbeManagedInstance(c *gin.Context) {
@@ -107,7 +115,7 @@ func ProbeManagedInstance(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceInventory(c *gin.Context) {
@@ -121,7 +129,7 @@ func GetManagedInstanceInventory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceMetrics(c *gin.Context) {
@@ -149,11 +157,11 @@ func GetManagedInstanceMetrics(c *gin.Context) {
 		}})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": section.Observation})
+	adminDataJSON(c, http.StatusOK, section.Observation)
 }
 
 func GetManagedDashboardSnapshots(c *gin.Context) {
-	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	instanceIDs, err := authorizedRealtimeIDs(c)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -176,13 +184,16 @@ func GetManagedDashboardSnapshots(c *gin.Context) {
 			_, _ = service.EnqueueManagedDashboardRefresh(item.InstanceID, c.GetInt("id"), dashboardRange)
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func RefreshManagedDashboard(c *gin.Context) {
 	request := managedDashboardRefreshRequest{}
 	if err := c.ShouldBindJSON(&request); err != nil || len(request.InstanceIDs) == 0 || len(request.InstanceIDs) > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	if !adminInstancesAllowed(c, request.InstanceIDs) {
 		return
 	}
 	dashboardRange, err := service.NormalizeManagedDashboardRange(request.PresetDays, request.Start, request.End)
@@ -208,11 +219,11 @@ func RefreshManagedDashboard(c *gin.Context) {
 		}
 		results = append(results, result)
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": results})
+	adminDataJSON(c, http.StatusAccepted, results)
 }
 
 func StreamManagedDashboardEvents(c *gin.Context) {
-	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	instanceIDs, err := authorizedRealtimeIDs(c)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -236,6 +247,9 @@ func StreamManagedDashboardEvents(c *gin.Context) {
 		case <-c.Request.Context().Done():
 			return
 		case <-heartbeat.C:
+			if !adminStreamCurrent(c) {
+				return
+			}
 			_, _ = c.Writer.WriteString(": heartbeat\n\n")
 			c.Writer.Flush()
 		case event, ok := <-events:
@@ -251,9 +265,9 @@ func StreamManagedDashboardEvents(c *gin.Context) {
 				}
 				event.InstanceIDs = filtered
 			}
-			payload, marshalErr := json.Marshal(event)
+			payload, marshalErr := adminEventPayload(c, event)
 			if marshalErr != nil {
-				continue
+				return
 			}
 			_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, payload)
 			c.Writer.Flush()
@@ -271,7 +285,7 @@ func GetManagedInstanceRealtimeMetrics(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func RefreshManagedInstanceRealtime(c *gin.Context) {
@@ -280,17 +294,24 @@ func RefreshManagedInstanceRealtime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
 		return
 	}
+	if !adminInstancesAllowed(c, request.InstanceIDs) {
+		return
+	}
 	result, err := service.RefreshManagedRealtime(request.InstanceIDs)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusAccepted, result)
 }
 
 func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
-	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	instanceIDs, err := authorizedRealtimeIDs(c)
 	if err != nil {
+		if errors.Is(err, authz.ErrDataForbidden) || errors.Is(err, authz.ErrAuthorizationChanged) {
+			adminDataError(c, err)
+			return
+		}
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": "invalid instance ids"})
 		return
 	}
@@ -359,15 +380,18 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 		case <-streamContext.Done():
 			return
 		case <-heartbeat.C:
+			if !adminStreamCurrent(c) {
+				return
+			}
 			_, _ = c.Writer.WriteString(": heartbeat\n\n")
 			c.Writer.Flush()
 		case event := <-merged:
 			if _, ok := topics[event.Type]; !ok {
 				continue
 			}
-			payload, marshalErr := json.Marshal(service.ManagedRealtimeEventPayload(event))
+			payload, marshalErr := adminEventPayload(c, service.ManagedRealtimeEventPayload(event))
 			if marshalErr != nil {
-				continue
+				return
 			}
 			_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Type, payload)
 			c.Writer.Flush()
@@ -376,7 +400,7 @@ func StreamManagedInstanceRealtimeEvents(c *gin.Context) {
 }
 
 func GetManagedInstanceRPMHistory(c *gin.Context) {
-	instanceIDs, err := managedInstanceRealtimeIDs(c.Query("ids"))
+	instanceIDs, err := authorizedRealtimeIDs(c)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -389,7 +413,7 @@ func GetManagedInstanceRPMHistory(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func managedInstanceRealtimeIDs(raw string) ([]int64, error) {
@@ -451,7 +475,7 @@ func GetManagedInstanceAccountOutput(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceConductorKeyUsage(c *gin.Context) {
@@ -471,7 +495,7 @@ func GetManagedInstanceConductorKeyUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
@@ -498,7 +522,7 @@ func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
 			result.Task = refresh.Task
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func RefreshManagedInstanceAccountManagement(c *gin.Context) {
@@ -521,7 +545,7 @@ func RefreshManagedInstanceAccountManagement(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusAccepted, result)
 }
 
 func GetManagedInstanceUsageRecords(c *gin.Context) {
@@ -535,7 +559,7 @@ func GetManagedInstanceUsageRecords(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
@@ -549,7 +573,7 @@ func GetManagedInstanceUsageRecordFilterOptions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
@@ -563,7 +587,7 @@ func GetManagedInstanceUsageRecordSummary(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func ExportManagedInstanceUsageRecords(c *gin.Context) {
@@ -603,6 +627,9 @@ func ExportManagedInstanceUsageRecords(c *gin.Context) {
 		return
 	}
 	filename := "usage-records-" + strconv.FormatInt(id, 10) + "-" + time.Now().Format("20060102-150405") + ".csv"
+	if !adminInstancesAllowed(c, []int64{id}) {
+		return
+	}
 	c.DataFromReader(http.StatusOK, info.Size(), "text/csv; charset=utf-8", temporary, map[string]string{
 		"Content-Disposition":    `attachment; filename="` + filename + `"`,
 		"X-Content-Type-Options": "nosniff",
@@ -625,7 +652,7 @@ func CreateManagedInstanceUsageRecordExport(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
+	adminDataJSON(c, http.StatusAccepted, view)
 }
 
 func CreateManagedAccountExport(c *gin.Context) {
@@ -644,7 +671,7 @@ func CreateManagedAccountExport(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
+	adminDataJSON(c, http.StatusAccepted, view)
 }
 
 func ListManagedUsageExports(c *gin.Context) {
@@ -655,15 +682,25 @@ func ListManagedUsageExports(c *gin.Context) {
 	if c.GetInt("role") < common.RoleRootUser {
 		actorID = c.GetInt("id")
 	}
+	var allowedIDs *[]int64
+	if a := authz.DataAccessFrom(c.Request.Context()); a != nil {
+		if instanceID > 0 && !adminInstancesAllowed(c, []int64{instanceID}) {
+			return
+		}
+		if a.Policy.InstanceScope == "selected" {
+			allowedIDs = &a.Policy.InstanceIDs
+		}
+	}
 	result, err := service.ListManagedUsageExports(model.ManagedUsageExportListFilter{
-		Status: c.Query("status"), ExportKind: c.Query("export_kind"), InstanceID: instanceID, ActorID: actorID,
+		AllowedInstanceIDs: allowedIDs,
+		Status:             c.Query("status"), ExportKind: c.Query("export_kind"), InstanceID: instanceID, ActorID: actorID,
 		Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedUsageExport(c *gin.Context) {
@@ -676,7 +713,7 @@ func GetManagedUsageExport(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": view})
+	adminDataJSON(c, http.StatusOK, view)
 }
 
 func DownloadManagedUsageExport(c *gin.Context) {
@@ -688,6 +725,12 @@ func DownloadManagedUsageExport(c *gin.Context) {
 	if record == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
 		return
+	}
+	if a := authz.DataAccessFrom(c.Request.Context()); a != nil {
+		if err := service.CheckManagedExportAccess(record, a, true); err != nil {
+			adminDataError(c, err)
+			return
+		}
 	}
 	if record.Status == model.ManagedUsageExportStatusExpired || (record.ExpiresAt > 0 && record.ExpiresAt <= time.Now().Unix()) {
 		_ = model.ExpireManagedUsageExport(record.TaskID)
@@ -770,7 +813,7 @@ func RetryManagedUsageExport(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": view})
+	adminDataJSON(c, http.StatusAccepted, view)
 }
 
 func GetManagedInstanceUsageRecordExport(c *gin.Context) {
@@ -787,7 +830,7 @@ func GetManagedInstanceUsageRecordExport(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export task not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+	adminDataJSON(c, http.StatusOK, task.ToResponse())
 }
 
 func DownloadManagedInstanceUsageRecordExport(c *gin.Context) {
@@ -803,6 +846,17 @@ func DownloadManagedInstanceUsageRecordExport(c *gin.Context) {
 	if task == nil {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export task not found"})
 		return
+	}
+	record, err := service.GetManagedUsageExport(task.TaskID, c.GetInt("id"), false)
+	if err != nil || record == nil {
+		adminDataError(c, authz.ErrDataForbidden)
+		return
+	}
+	if a := authz.DataAccessFrom(c.Request.Context()); a != nil {
+		if err := service.CheckManagedExportAccess(record, a, true); err != nil {
+			adminDataError(c, err)
+			return
+		}
 	}
 	if task.Status != model.SystemTaskStatusSucceeded {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "usage export is not ready"})
@@ -842,7 +896,7 @@ func ListManagedInstanceAudits(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminDataJSON(c, http.StatusOK, result)
 }
 
 func ListManagedInstanceAlerts(c *gin.Context) {
@@ -850,13 +904,14 @@ func ListManagedInstanceAlerts(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	instanceID, _ := strconv.ParseInt(c.Query("instance_id"), 10, 64)
 	result, err := managedinstance.ListAlerts(managedinstance.AlertListFilter{
+		Access:     authz.DataAccessFrom(c.Request.Context()),
 		InstanceID: instanceID, Status: c.Query("status"), Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	alertDataJSON(c, http.StatusOK, result)
 }
 
 func ListManagedInstanceAlertsForInstance(c *gin.Context) {
@@ -867,13 +922,14 @@ func ListManagedInstanceAlertsForInstance(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	result, err := managedinstance.ListAlerts(managedinstance.AlertListFilter{
+		Access:     authz.DataAccessFrom(c.Request.Context()),
 		InstanceID: id, Status: c.Query("status"), Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	alertDataJSON(c, http.StatusOK, result)
 }
 
 func GetManagedInstanceTask(c *gin.Context) {
@@ -890,7 +946,7 @@ func GetManagedInstanceTask(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "managed instance task not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+	adminManagedInstanceTaskJSON(c, http.StatusOK, task)
 }
 
 func CreateManagedInstance(c *gin.Context) {
@@ -917,6 +973,9 @@ func CreateManagedInstance(c *gin.Context) {
 		return
 	}
 	input.Preflight = preflight.Probe
+	if !adminInstancesAllowed(c, nil) {
+		return
+	}
 	instance, err := managedinstance.Create(input)
 	if err != nil {
 		managedInstanceError(c, err)
@@ -925,7 +984,21 @@ func CreateManagedInstance(c *gin.Context) {
 	if c.GetInt("role") < common.RoleRootUser {
 		instance = managedinstance.RedactConnectionDetails(instance)
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": instance})
+	// Creation may grant this one instance and revoke the old session. Return
+	// the successful operation using the new ceiling; the next request reauthenticates.
+	if authz.DataAccessFrom(c.Request.Context()) != nil {
+		access, err := authz.LoadDataAccess(model.DB, c.GetInt("id"))
+		if err != nil {
+			adminDataError(c, err)
+			return
+		}
+		if err := access.CheckInstances([]int64{instance.Id}); err != nil {
+			adminDataError(c, err)
+			return
+		}
+		c.Request = c.Request.WithContext(authz.WithDataAccess(c.Request.Context(), access))
+	}
+	adminDataJSON(c, http.StatusCreated, instance)
 }
 
 func UpdateManagedInstance(c *gin.Context) {
@@ -958,7 +1031,7 @@ func UpdateManagedInstance(c *gin.Context) {
 	if c.GetInt("role") < common.RoleRootUser {
 		instance = managedinstance.RedactConnectionDetails(instance)
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": instance})
+	adminDataJSON(c, http.StatusOK, instance)
 }
 
 func RotateManagedInstanceCredential(c *gin.Context) {
@@ -980,7 +1053,7 @@ func RotateManagedInstanceCredential(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": credential})
+	adminDataJSON(c, http.StatusOK, credential)
 }
 
 func CheckManagedInstance(c *gin.Context) {
@@ -998,7 +1071,7 @@ func CheckManagedInstance(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": task.ToResponse()})
+	adminDataJSON(c, http.StatusAccepted, task.ToResponse())
 }
 
 func DeleteManagedInstance(c *gin.Context) {
@@ -1010,13 +1083,16 @@ func DeleteManagedInstance(c *gin.Context) {
 		managedInstanceError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
+	adminDataJSON(c, http.StatusOK, gin.H{"id": id})
 }
 
 func managedInstanceID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid managed instance id"})
+		return 0, false
+	}
+	if !adminInstancesAllowed(c, []int64{id}) || !adminQueryAllowed(c) {
 		return 0, false
 	}
 	return id, true
@@ -1082,6 +1158,10 @@ func managedInstanceDataCall[T any](c *gin.Context, instanceID int64, collect fu
 }
 
 func managedInstanceError(c *gin.Context, err error) {
+	if errors.Is(err, authz.ErrDataForbidden) || errors.Is(err, authz.ErrAuthorizationChanged) {
+		adminDataError(c, err)
+		return
+	}
 	switch {
 	case errors.Is(err, managedinstance.ErrInstanceConnectionFailed):
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": managedinstance.ErrInstanceConnectionFailed.Error()})

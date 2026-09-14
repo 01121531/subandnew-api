@@ -9,6 +9,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -64,6 +65,7 @@ type UpdateInput struct {
 
 type ListFilter struct {
 	IDs              []int64
+	AllowedIDs       *[]int64
 	Kind             string
 	Environment      string
 	Status           string
@@ -94,6 +96,7 @@ type ListResult struct {
 	Total    int64           `json:"total"`
 	Page     int             `json:"page"`
 	PageSize int             `json:"page_size"`
+	HasMore  bool            `json:"has_more"`
 }
 
 type AuditListResult struct {
@@ -152,6 +155,9 @@ func Create(input CreateInput) (*InstanceView, error) {
 		return nil, fmt.Errorf("%w: MercerRouter requires account_password", ErrInvalidInstance)
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := appendInstanceOrder(tx, instance); err != nil {
+			return err
+		}
 		var duplicateCount int64
 		if err := tx.Model(&model.ManagedInstance{}).
 			Where("name = ? OR base_url = ?", instance.Name, instance.BaseURL).
@@ -162,6 +168,9 @@ func Create(input CreateInput) (*InstanceView, error) {
 			return ErrInstanceAlreadyExists
 		}
 		if err := tx.Create(instance).Error; err != nil {
+			return err
+		}
+		if err := authz.GrantCreatedInstance(tx, input.ActorID, instance.Id); err != nil {
 			return err
 		}
 		if input.Credential != nil {
@@ -220,6 +229,13 @@ func List(filter ListFilter) (*ListResult, error) {
 		filter.PageSize = 100
 	}
 	query := model.DB.Model(&model.ManagedInstance{})
+	if filter.AllowedIDs != nil {
+		if len(*filter.AllowedIDs) == 0 {
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("id IN ?", *filter.AllowedIDs)
+		}
+	}
 	if len(filter.IDs) > 0 {
 		query = query.Where("id IN ?", filter.IDs)
 	}
@@ -244,7 +260,7 @@ func List(filter ListFilter) (*ListResult, error) {
 		return nil, err
 	}
 	var instances []*model.ManagedInstance
-	if err := query.Order("id desc").Offset((filter.Page - 1) * filter.PageSize).Limit(filter.PageSize).Find(&instances).Error; err != nil {
+	if err := query.Order(model.ManagedInstanceOrderSQL).Offset((filter.Page - 1) * filter.PageSize).Limit(filter.PageSize).Find(&instances).Error; err != nil {
 		return nil, err
 	}
 	credentials := make(map[int64]*model.ManagedInstanceCredential)
@@ -265,7 +281,8 @@ func List(filter ListFilter) (*ListResult, error) {
 	for _, instance := range instances {
 		views = append(views, newInstanceView(instance, credentials[instance.Id]))
 	}
-	return &ListResult{Items: views, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
+	return &ListResult{Items: views, Total: total, Page: filter.Page, PageSize: filter.PageSize,
+		HasMore: int64(filter.Page)*int64(filter.PageSize) < total}, nil
 }
 
 func ListAudits(instanceID int64, page int, pageSize int) (*AuditListResult, error) {
@@ -391,6 +408,12 @@ func Delete(id int64, actorID int) error {
 		return ErrInvalidInstance
 	}
 	return model.DB.Transaction(func(tx *gorm.DB) error {
+		if _, err := model.LockManagedInstanceOrder(tx); err != nil {
+			return err
+		}
+		if err := model.AdvanceManagedInstanceOrder(tx); err != nil {
+			return err
+		}
 		if err := ensureNoActiveConfigApply(tx, id); err != nil {
 			return err
 		}

@@ -21,19 +21,22 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { deleteUser } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import { getUserActionMessage } from '../lib'
+import { canManageUser } from '../lib/admin-editor-access'
 import { useUsers } from './users-provider'
 
 export function UsersDeleteDialog() {
   const { t } = useTranslation()
   const { open, setOpen, currentRow, triggerRefresh } = useUsers()
   const [isDeleting, setIsDeleting] = useState(false)
+  const actor = useAuthStore((state) => state.auth.user)
 
   const handleDelete = async () => {
-    if (!currentRow) return
+    if (!currentRow || !canManageUser(actor, currentRow)) return
 
     setIsDeleting(true)
     try {

@@ -57,7 +57,7 @@ func (s *Service) CreateCode(ctx context.Context, input CreateInput) (*Generated
 		return nil, ErrInvalidBinding
 	}
 	var user model.User
-	if err := s.db.WithContext(ctx).First(&user, input.UserID).Error; err != nil || user.Status != common.UserStatusEnabled || !authz.Can(user.Id, user.Role, authz.AssistantAccess) {
+	if err := s.db.WithContext(ctx).First(&user, input.UserID).Error; err != nil || user.Status != common.UserStatusEnabled {
 		return nil, ErrUserDenied
 	}
 	instanceIDs, err := normalizeInstanceIDs(input.Scope, input.InstanceIDs)
@@ -74,6 +74,9 @@ func (s *Service) CreateCode(ctx context.Context, input CreateInput) (*Generated
 		}
 	}
 	encodedIDs, _ := json.Marshal(instanceIDs)
+	if err := validateDelegation(s.db, input.CreatedBy, input.UserID, input.Scope, instanceIDs); err != nil {
+		return nil, err
+	}
 	expiresAt := s.now().Add(5 * time.Minute).Unix()
 	for attempt := 0; attempt < 3; attempt++ {
 		raw, err := generateCode()
@@ -108,8 +111,15 @@ func (s *Service) Consume(ctx context.Context, channelID int64, externalUserID s
 		if code.ExpiresAt <= s.now().Unix() {
 			return ErrCodeInvalid
 		}
+		var ids []int64
+		if json.Unmarshal([]byte(code.InstanceIDs), &ids) != nil {
+			return ErrInvalidBinding
+		}
+		if err := validateDelegation(tx, code.CreatedBy, code.UserID, code.AllowedInstanceScope, ids); err != nil {
+			return err
+		}
 		var user model.User
-		if err := tx.First(&user, code.UserID).Error; err != nil || user.Status != common.UserStatusEnabled || !authz.Can(user.Id, user.Role, authz.AssistantAccess) {
+		if err := tx.First(&user, code.UserID).Error; err != nil || user.Status != common.UserStatusEnabled {
 			return ErrUserDenied
 		}
 		findErr := tx.Where("channel_id = ? AND external_user_id = ?", channelID, externalUserID).First(&identity).Error
@@ -171,6 +181,27 @@ func generateCode() (string, error) {
 		buffer[index] = bindingCodeAlphabet[int(value)%len(bindingCodeAlphabet)]
 	}
 	return string(buffer), nil
+}
+
+func validateDelegation(db *gorm.DB, actorID, userID int, scope string, ids []int64) error {
+	actor, err := authz.LoadDataAccess(db, actorID)
+	if err != nil || !actor.Can(authz.AssistantManage) {
+		return ErrUserDenied
+	}
+	subject, err := authz.LoadDataAccess(db, userID)
+	if err != nil || !subject.Can(authz.AssistantAccess) {
+		return ErrUserDenied
+	}
+	if subject.Role >= common.RoleRootUser && actor.Role < common.RoleRootUser {
+		return ErrUserDenied
+	}
+	if scope == model.AssistantInstanceScopeAll && (actor.Policy.InstanceScope != "all" || subject.Policy.InstanceScope != "all") {
+		return ErrUserDenied
+	}
+	if actor.CheckInstances(ids) != nil || subject.CheckInstances(ids) != nil {
+		return ErrUserDenied
+	}
+	return nil
 }
 
 func hashCode(raw string) string {

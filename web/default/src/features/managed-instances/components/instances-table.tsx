@@ -46,6 +46,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useAdminDataAccess } from '@/hooks/use-admin-data-access'
 import { cn } from '@/lib/utils'
 
 import { formatTimestamp, MANAGED_INSTANCE_KINDS } from '../lib'
@@ -78,6 +79,9 @@ function productLabel(instance: ManagedInstance): string {
 
 export function InstancesTable(props: InstancesTableProps) {
   const { t } = useTranslation()
+  const access = useAdminDataAccess()
+  const showStatus = access.canView('status')
+  const showTime = access.canView('time')
   const navigate = useNavigate()
   const selectedCount = props.instances.reduce(
     (count, instance) => count + Number(props.selectedIds.has(instance.id)),
@@ -142,7 +146,9 @@ export function InstancesTable(props: InstancesTableProps) {
                   )}
                 </div>
               </div>
-              <StatusBadge status={instance.status} />
+              {showStatus && instance.status != null && (
+                <StatusBadge status={instance.status} />
+              )}
             </div>
             <div className='grid grid-cols-2 gap-3 text-xs'>
               <div>
@@ -151,10 +157,14 @@ export function InstancesTable(props: InstancesTableProps) {
                   {productLabel(instance)} / {instance.environment}
                 </div>
               </div>
-              <div>
-                <div className='text-muted-foreground'>{t('Last checked')}</div>
-                <div>{formatTimestamp(instance.last_checked_at)}</div>
-              </div>
+              {showTime && (
+                <div>
+                  <div className='text-muted-foreground'>
+                    {t('Last checked')}
+                  </div>
+                  <div>{formatTimestamp(instance.last_checked_at)}</div>
+                </div>
+              )}
             </div>
             <div
               className='flex min-h-11 justify-end gap-1 border-t pt-2'
@@ -217,7 +227,9 @@ export function InstancesTable(props: InstancesTableProps) {
         ))}
       </div>
       <div className='hidden overflow-auto rounded-lg border md:block'>
-        <Table className='min-w-[820px]'>
+        <Table
+          className={showStatus && showTime ? 'min-w-[820px]' : 'min-w-[560px]'}
+        >
           <TableHeader>
             <TableRow>
               {props.selectable && (
@@ -232,9 +244,9 @@ export function InstancesTable(props: InstancesTableProps) {
               )}
               <TableHead>{t('Instance')}</TableHead>
               <TableHead>{t('Product')}</TableHead>
-              <TableHead>{t('Status')}</TableHead>
+              {showStatus && <TableHead>{t('Status')}</TableHead>}
               <TableHead>{t('Version')}</TableHead>
-              <TableHead>{t('Last checked')}</TableHead>
+              {showTime && <TableHead>{t('Last checked')}</TableHead>}
               <TableHead className='w-40 text-right'>{t('Actions')}</TableHead>
             </TableRow>
           </TableHeader>
@@ -287,22 +299,30 @@ export function InstancesTable(props: InstancesTableProps) {
                     </span>
                   </div>
                 </TableCell>
-                <TableCell>
-                  <StatusBadge status={instance.status} />
-                </TableCell>
+                {showStatus && (
+                  <TableCell>
+                    <div className='grid gap-0.5'>
+                      {instance.status != null ? (
+                        <StatusBadge status={instance.status} />
+                      ) : (
+                        '-'
+                      )}
+                      {instance.consecutive_failures > 0 && (
+                        <span className='text-destructive text-xs'>
+                          {t('{{count}} consecutive failures', {
+                            count: instance.consecutive_failures,
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                )}
                 <TableCell>{instance.version || '-'}</TableCell>
-                <TableCell>
-                  <div className='grid gap-0.5'>
-                    <span>{formatTimestamp(instance.last_checked_at)}</span>
-                    {instance.consecutive_failures > 0 && (
-                      <span className='text-destructive text-xs'>
-                        {t('{{count}} consecutive failures', {
-                          count: instance.consecutive_failures,
-                        })}
-                      </span>
-                    )}
-                  </div>
-                </TableCell>
+                {showTime && (
+                  <TableCell>
+                    {formatTimestamp(instance.last_checked_at)}
+                  </TableCell>
+                )}
                 <TableCell>
                   <div className='flex h-8 justify-end gap-1'>
                     {props.canCheck && (

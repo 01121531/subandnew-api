@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -77,6 +79,30 @@ func TestMetricRuleLifecycleAndCapabilities(t *testing.T) {
 	require.NoError(t, DeleteRule(rule.ID))
 	_, err = GetRule(rule.ID)
 	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestMetricCapabilitiesAndRulesRespectDataScope(t *testing.T) {
+	setupMetricAlertTestDB(t)
+	require.NoError(t, model.DB.Create(&model.ManagedInstance{Id: 1, Name: "allowed", Kind: model.ManagedInstanceKindNewAPI}).Error)
+	p := model.EmptyAdminDataPolicy()
+	p.InstanceIDs, p.Fields["rpm"] = []int64{1}, true
+	a := &authz.DataAccess{Role: common.RoleAdminUser, Policy: p}
+	capabilities, err := Capabilities([]int64{1}, ScopePerInstance, a)
+	require.NoError(t, err)
+	require.Len(t, capabilities, 1)
+	require.Equal(t, "rpm", capabilities[0].Key)
+	_, err = Capabilities([]int64{1, 2}, ScopePerInstance, a)
+	require.ErrorIs(t, err, authz.ErrDataForbidden)
+	require.NoError(t, model.DB.Create(&model.MetricAlertRule{ID: 1, Name: "mixed"}).Error)
+	require.NoError(t, model.DB.Create(&[]model.MetricAlertRuleInstance{{RuleID: 1, InstanceID: 1}, {RuleID: 1, InstanceID: 2}}).Error)
+	rules, err := ListRules(a)
+	require.NoError(t, err)
+	require.Empty(t, rules)
+	_, err = GetRule(1, a)
+	require.ErrorIs(t, err, authz.ErrDataForbidden)
+	a.Policy.InstanceIDs = nil
+	_, err = Capabilities([]int64{1}, ScopePerInstance, a)
+	require.ErrorIs(t, err, authz.ErrDataForbidden)
 }
 
 func TestMetricAlertConsecutiveTriggerAndRecovery(t *testing.T) {

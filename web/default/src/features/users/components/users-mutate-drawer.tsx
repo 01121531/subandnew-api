@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -42,18 +42,9 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import {
   Sheet,
   SheetClose,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -63,6 +54,7 @@ import {
   EMPTY_PERMISSION_CATALOG,
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
+import { handleServerError } from '@/lib/handle-server-error'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -75,46 +67,108 @@ import {
   userFormSchema,
   type UserFormValues,
 } from '../lib'
+import {
+  isAdminPolicyConflict,
+  canManageUser,
+} from '../lib/admin-editor-access'
+import { useAdminEditorLabels } from '../lib/admin-editor-labels'
+import {
+  createAdminFormDefaults,
+  explicitAdminPermissions,
+} from '../lib/user-form'
 import type { User } from '../types'
+import { AdminDataPolicyEditor } from './admin-data-policy-editor'
+import { AdminPolicyConflict } from './admin-policy-conflict'
 import { useUsers } from './users-provider'
 
 type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: User
+  createAdmin?: boolean
 }
 
-export function UsersMutateDrawer({ open, onOpenChange, currentRow }: Props) {
+export function UsersMutateDrawer({
+  open,
+  onOpenChange,
+  currentRow,
+  createAdmin = false,
+}: Props) {
   const { t } = useTranslation()
+  const label = useAdminEditorLabels()
   const isUpdate = !!currentRow
   const { triggerRefresh } = useUsers()
   const currentUser = useAuthStore((state) => state.auth.user)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const { data: catalog = EMPTY_PERMISSION_CATALOG } = useQuery({
+  const [conflict, setConflict] = useState(false)
+  const canManage = currentRow
+    ? canManageUser(currentUser, currentRow)
+    : currentUser?.role === ROLE.SUPER_ADMIN
+  const catalogQuery = useQuery({
     queryKey: ['admin-permission-catalog'],
     queryFn: getPermissionCatalog,
     staleTime: 5 * 60 * 1000,
+    enabled: open && canManage && currentUser?.role === ROLE.SUPER_ADMIN,
   })
+  const catalog = catalogQuery.data ?? EMPTY_PERMISSION_CATALOG
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
-    defaultValues: USER_FORM_DEFAULT_VALUES,
+    defaultValues: createAdmin
+      ? createAdminFormDefaults()
+      : USER_FORM_DEFAULT_VALUES,
+  })
+  const userQuery = useQuery({
+    queryKey: ['users', 'edit', currentRow?.id],
+    queryFn: async () => {
+      if (!currentRow) throw new Error('User ID required')
+      const result = await getUser(currentRow.id)
+      if (!result.success || !result.data) {
+        throw new Error(result.message || 'User request failed')
+      }
+      return result.data
+    },
+    enabled: open && !!currentRow && canManage,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  })
+  const saveMutation = useMutation({
+    mutationFn: (payload: ReturnType<typeof transformFormDataToPayload>) =>
+      payload.id !== undefined
+        ? updateUser({ ...payload, id: payload.id })
+        : createUser(payload),
+    onError: () => {},
   })
 
   useEffect(() => {
-    if (open && currentRow) {
-      void getUser(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformUserToFormDefaults(result.data))
-        }
-      })
-    } else if (open) form.reset(USER_FORM_DEFAULT_VALUES)
-  }, [open, currentRow, form])
+    if (
+      open &&
+      userQuery.data &&
+      !userQuery.isFetching &&
+      !form.formState.isDirty
+    ) {
+      form.reset(transformUserToFormDefaults(userQuery.data))
+    }
+  }, [open, userQuery.data, userQuery.isFetching, form, form.formState.isDirty])
 
   const selectedRole = form.watch('role') ?? currentRow?.role ?? 0
   const canEditPermissions =
-    currentUser?.role === ROLE.SUPER_ADMIN && selectedRole >= ROLE.ADMIN
+    canManage &&
+    currentUser?.role === ROLE.SUPER_ADMIN &&
+    selectedRole === ROLE.ADMIN
+  const loading = isUpdate && (userQuery.isPending || userQuery.isFetching)
+  const loadFailed = isUpdate && userQuery.isError
+  const permissionsReady =
+    !canEditPermissions ||
+    (catalogQuery.isSuccess && catalog.resources.length > 0)
 
   const onSubmit = async (values: UserFormValues) => {
+    if (!canManage || loading || loadFailed || !permissionsReady || conflict) {
+      return
+    }
+    if (!isUpdate && values.role !== (createAdmin ? ROLE.ADMIN : ROLE.USER)) {
+      return
+    }
+    if (userQuery.data && !canManageUser(currentUser, userQuery.data)) return
     if (
       !isUpdate &&
       ((values.password?.length ?? 0) < 8 ||
@@ -132,10 +186,24 @@ export function UsersMutateDrawer({ open, onOpenChange, currentRow }: Props) {
         currentRow?.id,
         catalog
       )
-      const result = isUpdate
-        ? await updateUser(payload as typeof payload & { id: number })
-        : await createUser(payload)
+      if (
+        !canEditPermissions ||
+        (isUpdate && !form.formState.dirtyFields.admin_data_policy)
+      ) {
+        delete payload.admin_data_policy
+      }
+      if (
+        !canEditPermissions ||
+        (isUpdate && !form.formState.dirtyFields.admin_permissions)
+      ) {
+        delete payload.admin_permissions
+      }
+      const result = await saveMutation.mutateAsync(payload)
       if (!result.success) {
+        if (isAdminPolicyConflict(result)) {
+          setConflict(true)
+          return
+        }
         toast.error(result.message || t(ERROR_MESSAGES.UPDATE_FAILED))
         return
       }
@@ -148,8 +216,9 @@ export function UsersMutateDrawer({ open, onOpenChange, currentRow }: Props) {
       )
       onOpenChange(false)
       triggerRefresh()
-    } catch {
-      toast.error(t(ERROR_MESSAGES.UNEXPECTED))
+    } catch (error) {
+      if (isAdminPolicyConflict(error)) setConflict(true)
+      else handleServerError(error)
     } finally {
       setIsSubmitting(false)
     }
@@ -157,14 +226,16 @@ export function UsersMutateDrawer({ open, onOpenChange, currentRow }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className={sideDrawerContentClassName('sm:max-w-[600px]')}>
+      <SheetContent
+        aria-describedby={undefined}
+        className={sideDrawerContentClassName('sm:max-w-[600px]')}
+      >
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>
-            {isUpdate ? t('Update User') : t('Create User')}
+            {canEditPermissions
+              ? label(isUpdate ? 'update' : 'create')
+              : t(isUpdate ? 'Update User' : 'Create User')}
           </SheetTitle>
-          <SheetDescription>
-            {t('Manage control-plane identity and administrator access.')}
-          </SheetDescription>
         </SheetHeader>
         <Form {...form}>
           <form
@@ -172,172 +243,181 @@ export function UsersMutateDrawer({ open, onOpenChange, currentRow }: Props) {
             onSubmit={form.handleSubmit(onSubmit)}
             className={sideDrawerFormClassName()}
           >
-            <SideDrawerSection>
-              <FormField
-                control={form.control}
-                name='username'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Username')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} disabled={isUpdate} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+            {(loadFailed ||
+              (canEditPermissions &&
+                !permissionsReady &&
+                !catalogQuery.isPending)) && (
+              <div role='alert' className='text-destructive text-sm'>
+                {label('loadError')}
+                <Button
+                  type='button'
+                  variant='ghost'
+                  onClick={() => {
+                    if (isUpdate) void userQuery.refetch()
+                    if (canEditPermissions) void catalogQuery.refetch()
+                  }}
+                >
+                  {label('retry')}
+                </Button>
+              </div>
+            )}
+            {loading && <p role='status'>{t('Loading...')}</p>}
+            {conflict && currentRow && (
+              <AdminPolicyConflict
+                userId={currentRow.id}
+                onResolved={() => setConflict(false)}
               />
-              <FormField
-                control={form.control}
-                name='display_name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Display Name')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
+            )}
+            <fieldset
+              disabled={!canManage || loading || loadFailed || isSubmitting}
+              className='min-w-0 space-y-6'
+            >
+              <SideDrawerSection>
+                {canEditPermissions && (
+                  <h3 className='text-sm font-medium'>{label('basic')}</h3>
                 )}
-              />
-              <FormField
-                control={form.control}
-                name='password'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Password')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        {...field}
-                        type='password'
-                        placeholder={
-                          isUpdate
-                            ? t('Leave empty to keep unchanged')
-                            : t('Enter password (8-20 characters)')
-                        }
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {!isUpdate && (
                 <FormField
                   control={form.control}
-                  name='role'
+                  name='username'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Role')}</FormLabel>
-                      <Select
-                        items={[
-                          { value: '1', label: t('Common User') },
-                          { value: '10', label: t('Admin') },
-                        ]}
-                        value={String(field.value)}
-                        onValueChange={(value) =>
-                          value !== null && field.onChange(Number(value))
-                        }
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent alignItemWithTrigger={false}>
-                          <SelectGroup>
-                            <SelectItem value='1'>
-                              {t('Common User')}
-                            </SelectItem>
-                            <SelectItem value='10'>{t('Admin')}</SelectItem>
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-              {isUpdate && (
-                <FormField
-                  control={form.control}
-                  name='remark'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Remark')}</FormLabel>
+                      <FormLabel>{t('Username')}</FormLabel>
                       <FormControl>
-                        <Textarea {...field} rows={3} />
+                        <Input {...field} disabled={isUpdate} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              )}
-            </SideDrawerSection>
-
-            {canEditPermissions && catalog.resources.length > 0 && (
-              <SideDrawerSection>
-                <h3 className='text-sm font-medium'>
-                  {t('Admin Permissions')}
-                </h3>
                 <FormField
                   control={form.control}
-                  name='admin_permissions'
-                  render={({ field }) => {
-                    const selected = normalizeAdminPermissions(
-                      field.value,
-                      catalog
-                    )
-                    return (
+                  name='display_name'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Display Name')}</FormLabel>
+                      <FormControl>
+                        <Input {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='password'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Password')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='password'
+                          placeholder={
+                            isUpdate
+                              ? t('Leave empty to keep unchanged')
+                              : t('Enter password (8-20 characters)')
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                {isUpdate && (
+                  <FormField
+                    control={form.control}
+                    name='remark'
+                    render={({ field }) => (
                       <FormItem>
-                        <div className='space-y-3'>
-                          {catalog.resources.map((resource) => (
-                            <div
-                              key={resource.resource}
-                              className='space-y-2 border-b pb-3'
-                            >
-                              <div className='text-sm font-medium'>
-                                {t(resource.label_key)}
-                              </div>
-                              {resource.actions.map((action) => (
-                                <label
-                                  key={action.action}
-                                  className='flex items-center gap-3 text-sm'
-                                >
-                                  <Checkbox
-                                    checked={
-                                      selected[resource.resource]?.[
-                                        action.action
-                                      ] === true
-                                    }
-                                    onCheckedChange={(checked) =>
-                                      field.onChange({
-                                        ...selected,
-                                        [resource.resource]: {
-                                          ...selected[resource.resource],
-                                          [action.action]: checked === true,
-                                        },
-                                      })
-                                    }
-                                  />
-                                  {t(action.label_key)}
-                                </label>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
+                        <FormLabel>{t('Remark')}</FormLabel>
+                        <FormControl>
+                          <Textarea {...field} rows={3} />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
-                    )
-                  }}
-                />
+                    )}
+                  />
+                )}
               </SideDrawerSection>
-            )}
+
+              {canEditPermissions && catalog.resources.length > 0 && (
+                <SideDrawerSection>
+                  <h3 className='text-sm font-medium'>{label('functions')}</h3>
+                  <FormField
+                    control={form.control}
+                    name='admin_permissions'
+                    render={({ field }) => {
+                      const normalize = isUpdate
+                        ? normalizeAdminPermissions
+                        : explicitAdminPermissions
+                      const selected = normalize(field.value, catalog)
+                      return (
+                        <FormItem>
+                          <div className='space-y-3'>
+                            {catalog.resources.map((resource) => (
+                              <div
+                                key={resource.resource}
+                                className='space-y-2 border-b pb-3'
+                              >
+                                <div className='text-sm font-medium'>
+                                  {t(resource.label_key)}
+                                </div>
+                                {resource.actions.map((action) => (
+                                  <label
+                                    key={action.action}
+                                    className='flex items-center gap-3 text-sm'
+                                  >
+                                    <Checkbox
+                                      checked={
+                                        selected[resource.resource]?.[
+                                          action.action
+                                        ] === true
+                                      }
+                                      onCheckedChange={(checked) =>
+                                        field.onChange({
+                                          ...selected,
+                                          [resource.resource]: {
+                                            ...selected[resource.resource],
+                                            [action.action]: checked === true,
+                                          },
+                                        })
+                                      }
+                                    />
+                                    {t(action.label_key)}
+                                  </label>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )
+                    }}
+                  />
+                </SideDrawerSection>
+              )}
+              {canEditPermissions && (
+                <AdminDataPolicyEditor catalog={catalog} />
+              )}
+            </fieldset>
           </form>
         </Form>
         <SheetFooter className={sideDrawerFooterClassName()}>
           <SheetClose render={<Button variant='outline' />}>
             {t('Close')}
           </SheetClose>
-          <Button form='user-form' type='submit' disabled={isSubmitting}>
+          <Button
+            form='user-form'
+            type='submit'
+            disabled={
+              isSubmitting ||
+              !canManage ||
+              loading ||
+              loadFailed ||
+              !permissionsReady ||
+              conflict
+            }
+          >
             {isSubmitting ? t('Saving...') : t('Save changes')}
           </Button>
         </SheetFooter>

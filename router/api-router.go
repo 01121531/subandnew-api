@@ -68,7 +68,7 @@ func registerControlPlaneUserRoutes(api *gin.RouterGroup, requestBodyLimit gin.H
 	}
 
 	admin := users.Group("/")
-	admin.Use(middleware.AdminAuth())
+	admin.Use(middleware.RootAuth())
 	{
 		admin.GET("/", controller.GetAllUsers)
 		admin.GET("/search", controller.SearchUsers)

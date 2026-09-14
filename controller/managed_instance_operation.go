@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/i18n"
@@ -79,7 +80,7 @@ func PlanManagedInstanceOperation(c *gin.Context) {
 	if operation.IdempotentReplay {
 		status = http.StatusOK
 	}
-	c.JSON(status, gin.H{"success": true, "message": "", "data": operation})
+	adminManagedInstanceDTOJSON(c, status, operation)
 }
 
 func ExecuteManagedInstanceOperation(c *gin.Context) {
@@ -104,11 +105,12 @@ func executeManagedInstanceOperation(c *gin.Context, expectedAction string, reje
 		managedInstanceOperationError(c, err)
 		return
 	}
-	data := gin.H{"operation": operation}
+	data := managedinstance.OperationTaskView{Operation: operation}
 	if task != nil {
-		data["task"] = task.ToResponse()
+		response := task.ToResponse()
+		data.Task = &response
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": data})
+	adminManagedInstanceDTOJSON(c, http.StatusAccepted, data)
 }
 
 func GetManagedInstanceOperation(c *gin.Context) {
@@ -138,13 +140,20 @@ func getManagedInstanceOperation(c *gin.Context, expectedAction string, rejected
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": operation})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, operation)
 }
 
 func PlanManagedInstanceBatchOperation(c *gin.Context) {
 	var request managedInstanceBatchPlanRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid batch operation plan request"})
+		return
+	}
+	ids := make([]int64, 0, len(request.Targets))
+	for _, target := range request.Targets {
+		ids = append(ids, target.InstanceID)
+	}
+	if !adminInstancesAllowed(c, ids) {
 		return
 	}
 	targets := make([]managedinstance.BatchOperationTargetInput, 0, len(request.Targets))
@@ -165,13 +174,16 @@ func PlanManagedInstanceBatchOperation(c *gin.Context) {
 	if batch.IdempotentReplay {
 		status = http.StatusOK
 	}
-	c.JSON(status, gin.H{"success": true, "message": "", "data": batch})
+	adminManagedInstanceDTOJSON(c, status, batch)
 }
 
 func ExecuteManagedInstanceBatchOperation(c *gin.Context) {
 	var request managedInstanceBatchExecuteRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid batch operation execute request"})
+		return
+	}
+	if !adminBatchAllowed(c, request.BatchID) {
 		return
 	}
 	batch, err := managedinstance.ExecuteBatchOperation(managedinstance.ExecuteBatchOperationInput{
@@ -181,10 +193,13 @@ func ExecuteManagedInstanceBatchOperation(c *gin.Context) {
 		managedInstanceOperationError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": batch})
+	adminManagedInstanceDTOJSON(c, http.StatusAccepted, batch)
 }
 
 func GetManagedInstanceBatchOperation(c *gin.Context) {
+	if !adminBatchAllowed(c, c.Param("batch_id")) {
+		return
+	}
 	batch, err := managedinstance.GetBatchOperation(c.Param("batch_id"))
 	if err != nil {
 		managedInstanceOperationError(c, err)
@@ -199,11 +214,22 @@ func GetManagedInstanceBatchOperation(c *gin.Context) {
 		})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": batch})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, batch)
+}
+
+func adminBatchAllowed(c *gin.Context, batchID string) bool {
+	var ids []int64
+	if err := model.DB.Model(&model.ManagedInstanceOperationBatchItem{}).Where("batch_id = ?", strings.TrimSpace(batchID)).Pluck("instance_id", &ids).Error; err != nil {
+		managedInstanceOperationError(c, err)
+		return false
+	}
+	return adminInstancesAllowed(c, ids)
 }
 
 func managedInstanceOperationError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, authz.ErrDataForbidden), errors.Is(err, authz.ErrAuthorizationChanged):
+		adminDataError(c, err)
 	case errors.Is(err, managedinstance.ErrInvalidOperation):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrInstanceNotFound),

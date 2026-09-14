@@ -91,6 +91,18 @@ export async function deleteAccountDataAPI(id: number) {
   return response.data
 }
 
+export async function takeOwnershipOfAccountDataAPI(id: number) {
+  const response = await api.put<Response<AccountDataAPI>>(
+    `/api/account-data-apis/${id}`,
+    { takeover: true },
+    { skipErrorHandler: true }
+  )
+  if (!response.data.success) {
+    throw new Error('account_data_api_takeover_failed')
+  }
+  return response.data.data
+}
+
 export async function previewAccountDataAPI(input: AccountDataAPIInput) {
   const response = await api.post<Response<AccountDataAPIPreview>>(
     '/api/account-data-apis/preview',

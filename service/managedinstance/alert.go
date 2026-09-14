@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -12,6 +13,7 @@ import (
 const defaultManagedInstanceAlertFailureThreshold = 3
 
 type AlertListFilter struct {
+	Access     *authz.DataAccess
 	InstanceID int64
 	Status     string
 	Page       int
@@ -26,6 +28,17 @@ type AlertListResult struct {
 }
 
 func ListAlerts(filter AlertListFilter) (*AlertListResult, error) {
+	if a := filter.Access; a != nil {
+		if err := a.Current(model.DB); err != nil {
+			return nil, err
+		}
+		if filter.InstanceID > 0 && !a.HasInstance(filter.InstanceID) {
+			return nil, authz.ErrDataForbidden
+		}
+		if filter.Status != "" && !a.HasField("status") {
+			return nil, authz.ErrDataForbidden
+		}
+	}
 	if filter.InstanceID < 0 {
 		return nil, ErrInvalidInstance
 	}
@@ -39,6 +52,9 @@ func ListAlerts(filter AlertListFilter) (*AlertListResult, error) {
 		filter.PageSize = 100
 	}
 	query := model.DB.Model(&model.ManagedInstanceAlert{})
+	if filter.Access != nil {
+		query = filter.Access.ScopeQuery(query, "instance_id")
+	}
 	if filter.InstanceID > 0 {
 		query = query.Where("instance_id = ?", filter.InstanceID)
 	}

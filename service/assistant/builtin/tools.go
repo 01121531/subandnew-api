@@ -179,6 +179,7 @@ func NewRegistry(db *gorm.DB) (*tool.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	registry.SetBoundary(access.Boundary(db))
 	if err := registerListInstances(registry, db); err != nil {
 		return nil, err
 	}

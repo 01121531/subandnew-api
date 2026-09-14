@@ -6,12 +6,14 @@ import (
 	"os"
 	"testing"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRunAlertExportCreatesReusableCSV(t *testing.T) {
 	setupRepositoryTestDB(t)
+	require.NoError(t, model.DB.Create(&model.User{Id: 1, Username: "root-export", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	t.Setenv("BILLING_ALERT_EXPORT_DIR", t.TempDir())
 
 	events := []*model.BillingAlertEvent{

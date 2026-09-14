@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
 	"github.com/01121531/subandnew-api/service/supplier"
 	"github.com/gin-gonic/gin"
@@ -22,10 +23,19 @@ func supplierControllerTest(t *testing.T) (*gin.Engine, *supplier.Service) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "supplier.db")), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.Supplier{}, &model.SupplierSession{}, &model.SupplierBinding{}, &model.SupplierOAuthFlow{}, &model.SupplierAudit{}, &model.SupplierPolicyDefault{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	model.DB = db
 	t.Cleanup(func() { model.DB = old; sqlDB, _ := db.DB(); sqlDB.Close() })
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/suppliers") {
+			c.Set("id", 1)
+			c.Set("role", common.RoleRootUser)
+		}
+		c.Next()
+	})
 	group := engine.Group("/supplier-api/v1")
 	group.Use(SupplierAuditTrail())
 	group.POST("/auth/login", LoginSupplierPortal)

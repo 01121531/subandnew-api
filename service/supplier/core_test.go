@@ -107,6 +107,8 @@ func newCoreFixture(t *testing.T) *coreFixture {
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&model.Supplier{}, &model.SupplierBinding{}, &model.SupplierSession{}, &model.SupplierOAuthFlow{}, &model.SupplierAudit{}, &model.SupplierPolicyDefault{}, &model.ManagedInstance{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	t.Setenv("MANAGED_INSTANCE_SECRET_KEY", base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
 	t.Setenv("MANAGED_INSTANCE_SECRET_KEY_VERSION", "core-test-v1")
 	redisEnabled := common.RedisEnabled

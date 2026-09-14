@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/assistant/access"
 	"github.com/01121531/subandnew-api/service/assistant/binding"
 	"github.com/01121531/subandnew-api/service/assistant/builtin"
 	"github.com/01121531/subandnew-api/service/assistant/channel/wechatilink"
@@ -278,6 +278,10 @@ func (p *Processor) ProcessReserved(ctx context.Context, reservation *TurnReserv
 	}
 	progress.Stop()
 	outcome.Answer = safeAssistantAnswer(outcome.Answer)
+	currentFingerprint, fingerprintErr := p.scopeFingerprint(ctx, identity)
+	if fingerprintErr != nil || currentFingerprint != conversation.ScopeFingerprint {
+		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "authorization_changed", Cause: authz.ErrAuthorizationChanged, Specs: specs, Started: started})
+	}
 	if err := p.persistSuccessfulRun(ctx, &runRow, specs, outcome, started); err != nil {
 		return p.failRunAndEvent(ctx, event, &runRow, assistantRunFailure{Code: "run_persist_failed", Stage: assistantErrorStageMessagePersistence, Cause: err, Outcome: &outcome, Specs: specs, Started: started})
 	}
@@ -554,6 +558,17 @@ func (p *Processor) Deliver(ctx context.Context, outboxID int64) error {
 	if err := json.Unmarshal(plaintext, &payload); err != nil {
 		return p.failOutbox(ctx, &outbox, "outbox_decode_failed", err)
 	}
+	if outbox.RunID > 0 {
+		identity, err := p.activeIdentity(ctx, outbox.ChannelID, payload.ToUserID)
+		if err != nil {
+			return p.failOutbox(ctx, &outbox, "authorization_changed", err)
+		}
+		fingerprint, err := p.scopeFingerprint(ctx, identity)
+		var message model.AssistantMessage
+		if err != nil || p.db.Where("run_id = ? AND role = ?", outbox.RunID, model.AssistantMessageRoleAssistant).First(&message).Error != nil || message.ScopeFingerprint != fingerprint {
+			return p.failOutbox(ctx, &outbox, "authorization_changed", authz.ErrAuthorizationChanged)
+		}
+	}
 	client, _, err := p.channels.ConnectedClient(ctx, outbox.ChannelID)
 	if err != nil {
 		return p.failOutbox(ctx, &outbox, "channel_unavailable", err)
@@ -612,8 +627,11 @@ func (p *Processor) activeIdentity(ctx context.Context, channelID int64, externa
 	if err := p.db.WithContext(ctx).First(&user, identity.UserID).Error; err != nil {
 		return nil, err
 	}
-	if user.Status != common.UserStatusEnabled || !authz.Can(user.Id, user.Role, authz.AssistantAccess) {
+	if user.Status != common.UserStatusEnabled {
 		return nil, errors.New("assistant identity user is not authorized")
+	}
+	if _, err := access.IdentityDataAccess(p.db, &identity); err != nil {
+		return nil, err
 	}
 	return &identity, nil
 }
@@ -644,19 +662,15 @@ func (p *Processor) scopeFingerprint(ctx context.Context, identity *model.Assist
 	if identity == nil || identity.ID <= 0 {
 		return "", errors.New("assistant identity is invalid")
 	}
-	instanceIDs := make([]int64, 0)
-	if identity.AllowedInstanceScope == model.AssistantInstanceScopeSelected {
-		if err := p.db.WithContext(ctx).Model(&model.AssistantIdentityInstanceScope{}).Where("identity_id = ?", identity.ID).Order("instance_id ASC").Pluck("instance_id", &instanceIDs).Error; err != nil {
-			return "", err
-		}
+	var current model.AssistantIdentity
+	if err := p.db.WithContext(ctx).First(&current, identity.ID).Error; err != nil {
+		return "", err
 	}
-	sort.Slice(instanceIDs, func(i, j int) bool { return instanceIDs[i] < instanceIDs[j] })
-	digest := sha256.New()
-	_, _ = fmt.Fprintf(digest, "%d:%d:%s:%s", identity.ID, identity.UserID, identity.Status, identity.AllowedInstanceScope)
-	for _, instanceID := range instanceIDs {
-		_, _ = fmt.Fprintf(digest, ":%d", instanceID)
+	fingerprint, err := access.Fingerprint(p.db.WithContext(ctx), &current)
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("%x", digest.Sum(nil)), nil
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(fingerprint))), nil
 }
 
 func (p *Processor) enqueueReply(ctx context.Context, event *model.AssistantInboundEvent, conversationID int64, runID int64, contextToken string, text string) error {

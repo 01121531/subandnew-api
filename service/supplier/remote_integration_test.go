@@ -32,6 +32,8 @@ func TestRemoteServiceComposition(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&model.ManagedInstance{}, &model.Supplier{}, &model.SupplierBinding{}, &model.SupplierSession{}, &model.SupplierOAuthFlow{}, &model.SupplierAudit{}, &model.SupplierPolicyDefault{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}))
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 
 	var proxyWrites, exchanges atomic.Int64
 	var uncertainExchange atomic.Bool

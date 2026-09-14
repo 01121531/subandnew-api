@@ -146,6 +146,14 @@ type PortalBinding struct {
 }
 
 func (s *Service) PortalBindings(supplierID int64) ([]PortalBinding, error) {
+	owner, err := s.Supplier(supplierID)
+	if err != nil {
+		return nil, err
+	}
+	a, err := s.ownerAccess(owner)
+	if err != nil {
+		return nil, err
+	}
 	items, err := s.Bindings(supplierID, true)
 	if err != nil {
 		return nil, err
@@ -156,6 +164,10 @@ func (s *Service) PortalBindings(supplierID int64) ([]PortalBinding, error) {
 	}
 	result := make([]PortalBinding, 0, len(items))
 	for _, item := range items {
+		if !a.HasInstance(item.InstanceID) {
+			continue
+		}
+		intersectPolicy(item.EffectivePolicy, a)
 		name := fmt.Sprintf("线路 %d", item.ID)
 		if item.DisplayName != nil && *item.DisplayName != "" {
 			name = *item.DisplayName

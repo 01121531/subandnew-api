@@ -20,6 +20,7 @@ import (
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/logger"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"gorm.io/gorm"
@@ -51,6 +52,7 @@ var accessLogCleanup struct {
 }
 
 type ConfigInput struct {
+	Takeover           bool                                `json:"takeover"`
 	Name               string                              `json:"name"`
 	Description        string                              `json:"description"`
 	Status             string                              `json:"status"`
@@ -83,6 +85,10 @@ type KeyView struct {
 }
 
 type View struct {
+	configRevision     string
+	keyID              int64
+	sessionID          int64
+	Access             *authz.DataAccess                   `json:"-"`
 	ID                 int64                               `json:"id"`
 	Name               string                              `json:"name"`
 	Description        string                              `json:"description"`
@@ -169,11 +175,23 @@ type Authenticated struct {
 }
 
 func Create(ctx context.Context, input ConfigInput, actorID int) (*CreateResult, error) {
+	a, err := ownerAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
 	prepared, query, err := prepareInput(input)
 	if err != nil {
 		return nil, err
 	}
-	preview, err := managedaccount.Execute(ctx, query)
+	if err := checkQuery(a, query); err != nil {
+		return nil, err
+	}
+	for _, field := range prepared.Fields {
+		if !fieldAllowed(a, field) {
+			return nil, ErrDisabled
+		}
+	}
+	preview, err := managedaccount.Execute(authz.WithDataAccess(ctx, a), query)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +209,9 @@ func Create(ctx context.Context, input ConfigInput, actorID int) (*CreateResult,
 	}
 	var secret string
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := a.Current(tx); err != nil {
+			return ErrDisabled
+		}
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
@@ -218,6 +239,13 @@ func Create(ctx context.Context, input ConfigInput, actorID int) (*CreateResult,
 }
 
 func Update(ctx context.Context, id int64, input ConfigInput, actorID int) (*View, error) {
+	if err := CheckOwner(id, actorID); err != nil {
+		return nil, err
+	}
+	a, err := ownerAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
 	prepared, query, err := prepareInput(input)
 	if err != nil || id <= 0 {
 		if err != nil {
@@ -229,9 +257,30 @@ func Update(ctx context.Context, id int64, input ConfigInput, actorID int) (*Vie
 	if err := model.DB.First(&current, id).Error; err != nil {
 		return nil, mapNotFound(err)
 	}
+	if err := checkQuery(a, query); err != nil {
+		return nil, err
+	}
+	owner, err := ownerAccess(current.CreatedBy)
+	if prepared.Takeover {
+		if a.Role < common.RoleRootUser {
+			return nil, ErrDisabled
+		}
+		owner, err = a, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := checkQuery(owner, query); err != nil {
+		return nil, err
+	}
+	for _, field := range prepared.Fields {
+		if !fieldAllowed(a, field) || !fieldAllowed(owner, field) {
+			return nil, ErrDisabled
+		}
+	}
 	matchedCount, observedAt := current.MatchedCount, current.LastObservedAt
 	if prepared.Status == model.ManagedAccountAPIEnabled {
-		preview, err := managedaccount.Execute(ctx, query)
+		preview, err := managedaccount.Execute(authz.WithDataAccess(ctx, owner), query)
 		if err != nil {
 			return nil, err
 		}
@@ -248,6 +297,18 @@ func Update(ctx context.Context, id int64, input ConfigInput, actorID int) (*Vie
 		var entry model.ManagedAccountAPI
 		if err := tx.First(&entry, id).Error; err != nil {
 			return mapNotFound(err)
+		}
+		if entry.CreatedBy != current.CreatedBy || a.Current(tx) != nil || owner.Current(tx) != nil {
+			return ErrDisabled
+		}
+		if prepared.Takeover {
+			entry.CreatedBy = actorID
+			if err := tx.Model(&model.ManagedAccountAPIKey{}).Where("api_id = ? AND revoked_at = 0", id).Update("revoked_at", common.GetTimestamp()).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("api_id = ?", id).Delete(&model.ManagedAccountAPIPortalSession{}).Error; err != nil {
+				return err
+			}
 		}
 		revokePortalSessions, portalErr := applyPortalInput(&entry, prepared, false)
 		if portalErr != nil {
@@ -281,6 +342,18 @@ func Preview(ctx context.Context, input ConfigInput) (*PreviewResult, error) {
 		return nil, err
 	}
 	query.Page, query.PageSize = 1, 5
+	a := authz.DataAccessFrom(ctx)
+	if a == nil || a.Current(model.DB) != nil {
+		return nil, ErrDisabled
+	}
+	if err := checkQuery(a, query); err != nil {
+		return nil, err
+	}
+	for _, field := range prepared.Fields {
+		if !fieldAllowed(a, field) {
+			return nil, ErrDisabled
+		}
+	}
 	result, err := managedaccount.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -294,6 +367,10 @@ func Preview(ctx context.Context, input ConfigInput) (*PreviewResult, error) {
 }
 
 func FilterOptions(ctx context.Context, input FilterOptionsInput) (*FilterOptionsResult, error) {
+	a := authz.DataAccessFrom(ctx)
+	if a == nil || a.Current(model.DB) != nil || len(input.InstanceIDs) == 0 || a.CheckInstances(input.InstanceIDs) != nil {
+		return nil, ErrDisabled
+	}
 	query, err := managedaccount.NormalizeQuery(managedaccount.Query{
 		InstanceIDs: input.InstanceIDs,
 		Dataset:     input.Dataset,
@@ -319,7 +396,7 @@ func FilterOptions(ctx context.Context, input FilterOptionsInput) (*FilterOption
 		return nil, err
 	}
 	return &FilterOptionsResult{
-		FilterOptions: result.FilterOptions,
+		FilterOptions: allowedFilterOptions(a, result.FilterOptions),
 		Sources:       result.Sources,
 		ObservedAt:    result.ObservedAt,
 		Stale:         result.Stale,
@@ -338,7 +415,7 @@ func Get(id int64) (*View, error) {
 	return viewFor(&entry)
 }
 
-func List(search, status string, page, pageSize int) (*ListResult, error) {
+func List(search, status string, page, pageSize int, actors ...int) (*ListResult, error) {
 	if page <= 0 {
 		page = 1
 	}
@@ -349,6 +426,15 @@ func List(search, status string, page, pageSize int) (*ListResult, error) {
 		pageSize = 100
 	}
 	query := model.DB.Model(&model.ManagedAccountAPI{})
+	if len(actors) > 0 {
+		a, err := authz.LoadDataAccess(model.DB, actors[0])
+		if err != nil {
+			return nil, ErrDisabled
+		}
+		if a.Role < common.RoleRootUser {
+			query = query.Where("created_by = ?", a.UserID)
+		}
+	}
 	if search = strings.TrimSpace(search); search != "" {
 		like := "%" + search + "%"
 		query = query.Where("name LIKE ? OR description LIKE ?", like, like)
@@ -375,9 +461,17 @@ func List(search, status string, page, pageSize int) (*ListResult, error) {
 	return &ListResult{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
 }
 
-func ListInstanceOptions() ([]InstanceOption, error) {
+func ListInstanceOptions(actors ...int) ([]InstanceOption, error) {
 	var entries []model.ManagedInstance
-	if err := model.DB.Select("id", "name", "kind", "status").Order("name, id").Find(&entries).Error; err != nil {
+	q := model.DB.Model(&model.ManagedInstance{})
+	if len(actors) > 0 {
+		a, err := authz.LoadDataAccess(model.DB, actors[0])
+		if err != nil {
+			return nil, ErrDisabled
+		}
+		q = a.ScopeQuery(q, "id")
+	}
+	if err := q.Select("id", "name", "kind", "status").Order(model.ManagedInstanceOrderSQL).Find(&entries).Error; err != nil {
 		return nil, err
 	}
 	result := make([]InstanceOption, 0, len(entries))
@@ -408,6 +502,9 @@ func Delete(id int64) error {
 }
 
 func CreateKey(apiID int64, name string, expiresAt int64, actorID int) (*KeyView, string, error) {
+	if err := CheckOwner(apiID, actorID); err != nil {
+		return nil, "", err
+	}
 	if apiID <= 0 {
 		return nil, "", ErrInvalid
 	}
@@ -483,6 +580,10 @@ func Authenticate(token, clientIP string) (*Authenticated, error) {
 		return nil, err
 	}
 	auth := &Authenticated{API: &entry, Key: &key, View: view}
+	view.keyID = key.ID
+	if _, err := effectiveView(&entry, view); err != nil {
+		return auth, err
+	}
 	if entry.Status != model.ManagedAccountAPIEnabled {
 		return auth, ErrDisabled
 	}
@@ -495,6 +596,9 @@ func Authenticate(token, clientIP string) (*Authenticated, error) {
 func QueryExternal(ctx context.Context, auth *Authenticated, page, pageSize int, search, sortBy, sortOrder string) (*managedaccount.Result, error) {
 	if auth == nil || auth.View == nil {
 		return nil, ErrUnauthorized
+	}
+	if _, err := effectiveView(auth.API, auth.View); err != nil {
+		return nil, err
 	}
 	if pageSize <= 0 {
 		pageSize = auth.View.PageSize
@@ -514,7 +618,7 @@ func QueryExternal(ctx context.Context, auth *Authenticated, page, pageSize int,
 	if query.SortOrder == "" {
 		query.SortOrder = auth.View.SortOrder
 	}
-	result, err := managedaccount.Execute(ctx, query)
+	result, err := executeDelegated(ctx, auth.API, auth.View, query)
 	if err != nil {
 		return nil, err
 	}
@@ -752,7 +856,8 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 		keyViews = append(keyViews, keyView(&keys[index]))
 	}
 	return &View{ID: entry.ID, Name: entry.Name, Description: entry.Description, Status: entry.Status, Dataset: entry.Dataset,
-		PresetDays: entry.PresetDays, Timezone: entry.Timezone, InstanceIDs: ids, IncludeTerms: include, ExcludeTerms: exclude,
+		configRevision: configRevision(entry, ids),
+		PresetDays:     entry.PresetDays, Timezone: entry.Timezone, InstanceIDs: ids, IncludeTerms: include, ExcludeTerms: exclude,
 		MatchMode: entry.MatchMode, Rules: rules, Fields: fields, SortBy: entry.SortBy, SortOrder: entry.SortOrder,
 		PageSize: entry.PageSize, RateLimitPerMinute: entry.RateLimitPerMinute, AllowedCIDRs: cidrs,
 		PortalEnabled: entry.PortalEnabled, PortalConfigured: entry.PortalPasswordHash != "", PortalURL: portalURL(entry), PortalPasswordAt: entry.PortalPasswordAt,

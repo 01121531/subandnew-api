@@ -10,6 +10,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 )
 
 const accountOutputCollectionTimeout = 30 * time.Second
@@ -43,6 +44,9 @@ type AccountOutputResult struct {
 }
 
 func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWindow) (*ObservationView, error) {
+	if err := authz.CheckContextInstances(ctx, instanceID); err != nil {
+		return nil, err
+	}
 	instance, adapter, connector, credential, err := observationClient(instanceID)
 	if err != nil {
 		return nil, err

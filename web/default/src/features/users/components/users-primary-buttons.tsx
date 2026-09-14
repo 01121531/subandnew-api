@@ -16,15 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus } from 'lucide-react'
+import { Plus, ShieldPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
+import { useAdminEditorLabels } from '../lib/admin-editor-labels'
 import { useUsers } from './users-provider'
 
 export function UsersPrimaryButtons() {
   const { t } = useTranslation()
+  const label = useAdminEditorLabels()
+  const isRoot = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
   const { setOpen, setCurrentRow } = useUsers()
 
   const handleCreate = () => {
@@ -33,7 +40,19 @@ export function UsersPrimaryButtons() {
   }
 
   return (
-    <div className='flex gap-2'>
+    <div className='flex flex-wrap gap-2'>
+      {isRoot && (
+        <Button
+          size='sm'
+          onClick={() => {
+            setCurrentRow(null)
+            setOpen('create-admin')
+          }}
+        >
+          <ShieldPlus className='h-4 w-4' />
+          {label('create')}
+        </Button>
+      )}
       <Button size='sm' onClick={handleCreate}>
         <Plus className='h-4 w-4' />
         {t('Add User')}

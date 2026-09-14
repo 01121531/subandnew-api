@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { AdminDataPolicy } from '@/lib/admin-data-policy'
 import type { AdminPermissionMatrix } from '@/lib/admin-permissions'
 
 export interface User {
@@ -38,11 +39,13 @@ export interface User {
   DeletedAt?: unknown | null
   remark?: string
   admin_permissions?: AdminPermissionMatrix
+  admin_data_policy?: AdminDataPolicy
 }
 
 export interface ApiResponse<T = unknown> {
   success: boolean
   message?: string
+  code?: string
   data?: T
 }
 
@@ -71,6 +74,7 @@ export interface UserFormData {
   role?: number
   remark?: string
   admin_permissions?: AdminPermissionMatrix
+  admin_data_policy?: AdminDataPolicy
 }
 
 export type ManageUserAction =
@@ -80,4 +84,4 @@ export type ManageUserAction =
   | 'disable'
   | 'delete'
 
-export type UsersDialogType = 'create' | 'update' | 'delete'
+export type UsersDialogType = 'create' | 'create-admin' | 'update' | 'delete'

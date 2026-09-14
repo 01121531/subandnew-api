@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/supplier"
 	"github.com/gin-gonic/gin"
+	"strconv"
 )
 
 func ListSuppliers(c *gin.Context) {
@@ -11,7 +14,7 @@ func ListSuppliers(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, err := supplierService().List(page, size)
+	items, total, err := supplierService().ListOwned(c.GetInt("id"), page, size)
 	if err != nil {
 		supplierFailure(c, err)
 		return
@@ -42,7 +45,7 @@ func SaveSupplier(c *gin.Context) {
 	if !supplierDecode(c, &in) {
 		return
 	}
-	item, err := supplierService().Save(id, in)
+	item, err := supplierService().SaveOwned(c.Request.Context(), c.GetInt("id"), id, in)
 	if err != nil {
 		supplierFailure(c, err)
 		return
@@ -92,12 +95,17 @@ func RevokeSupplierSessions(c *gin.Context) {
 	supplierSuccess(c, gin.H{"completed": true})
 }
 func ListSupplierInstances(c *gin.Context) {
+	a, err := authz.LoadDataAccess(model.DB, c.GetInt("id"))
+	if err != nil {
+		supplierFailure(c, &supplier.Error{Status: 403, Code: "supplier_permission_denied"})
+		return
+	}
 	items := []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
 		Kind string `json:"kind"`
 	}{}
-	if err := model.DB.Model(&model.ManagedInstance{}).Select("id, name, kind").Where("kind = ?", model.ManagedInstanceKindClaudeGateway).Order("name ASC").Find(&items).Error; err != nil {
+	if err := a.ScopeQuery(model.DB.Model(&model.ManagedInstance{}), "id").Select("id, name, kind").Where("kind = ?", model.ManagedInstanceKindClaudeGateway).Order(model.ManagedInstanceOrderSQL).Find(&items).Error; err != nil {
 		supplierFailure(c, err)
 		return
 	}
@@ -133,6 +141,10 @@ func SaveSupplierBinding(c *gin.Context) {
 	}
 	var in supplier.BindingInput
 	if !supplierDecode(c, &in) {
+		return
+	}
+	if err := supplierService().CheckBindingGrant(c.GetInt("id"), id, bindingID, in.InstanceID); err != nil {
+		supplierFailure(c, err)
 		return
 	}
 	item, err := supplierService().SaveBinding(c.Request.Context(), id, bindingID, in)
@@ -214,6 +226,9 @@ func ListSupplierAudits(c *gin.Context) {
 	items := []model.SupplierAudit{}
 	var total int64
 	q := model.DB.Model(&model.SupplierAudit{}).Where("supplier_id = ? OR (supplier_id = 0 AND action = ?)", id, "PUT /api/suppliers/default-policy")
+	if a := authz.DataAccessFrom(c.Request.Context()); a != nil && a.Role < common.RoleRootUser {
+		q = model.DB.Model(&model.SupplierAudit{}).Where("supplier_id = ?", id)
+	}
 	if err := q.Count(&total).Error; err != nil {
 		supplierFailure(c, err)
 		return
@@ -223,4 +238,39 @@ func ListSupplierAudits(c *gin.Context) {
 		return
 	}
 	supplierSuccess(c, gin.H{"items": items, "total": total})
+}
+
+func SupplierAdminAccess(c *gin.Context) {
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	bindingID, _ := strconv.ParseInt(c.Param("binding_id"), 10, 64)
+	a, err := supplierService().CheckAdmin(c.GetInt("id"), id, bindingID)
+	if err != nil {
+		supplierFailure(c, err)
+		c.Abort()
+		return
+	}
+	c.Request = c.Request.WithContext(authz.WithDataAccess(c.Request.Context(), a))
+	c.Next()
+}
+
+func SupplierRootOnly(c *gin.Context) {
+	a, err := authz.LoadDataAccess(model.DB, c.GetInt("id"))
+	if err != nil || a.Role < common.RoleRootUser {
+		supplierFailure(c, &supplier.Error{Status: 403, Code: "supplier_permission_denied"})
+		c.Abort()
+		return
+	}
+	c.Next()
+}
+
+func TakeoverSupplier(c *gin.Context) {
+	id := supplierID(c, "id")
+	if id == 0 {
+		return
+	}
+	if err := supplierService().Takeover(c.Request.Context(), id, c.GetInt("id"), c.ClientIP()); err != nil {
+		supplierFailure(c, err)
+		return
+	}
+	supplierSuccess(c, gin.H{"completed": true})
 }

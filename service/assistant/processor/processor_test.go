@@ -449,6 +449,8 @@ func TestConversationHistoryExcludesOldScopeAndUsesWholeTurnBudget(t *testing.T)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.AssistantIdentity{}, &model.AssistantIdentityInstanceScope{}, &model.AssistantMessage{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}))
+	require.NoError(t, db.Create(&model.User{Id: 9, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	cipher, err := secrets.New(map[string][]byte{"v1": bytes.Repeat([]byte{7}, 32)}, "v1")
 	require.NoError(t, err)
 	processor := &Processor{db: db, cipher: cipher, now: time.Now}

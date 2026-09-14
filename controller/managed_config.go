@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/gin-gonic/gin"
 )
@@ -29,16 +30,19 @@ type managedConfigApplyPlanRequest struct {
 }
 
 func ListManagedConfigSchemas(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": managedinstance.ListConfigSchemas()})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, managedinstance.ListConfigSchemas())
 }
 
 func ListManagedConfigTemplates(c *gin.Context) {
+	if !adminQueryAllowed(c) {
+		return
+	}
 	result, err := managedinstance.ListConfigTemplates(c.Query("kind"))
 	if err != nil {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": result})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, result)
 }
 
 func CreateManagedConfigTemplate(c *gin.Context) {
@@ -52,7 +56,7 @@ func CreateManagedConfigTemplate(c *gin.Context) {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": template})
+	adminManagedInstanceDTOJSON(c, http.StatusCreated, template)
 }
 
 func UpdateManagedConfigTemplate(c *gin.Context) {
@@ -71,7 +75,7 @@ func UpdateManagedConfigTemplate(c *gin.Context) {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": template})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, template)
 }
 
 func DeleteManagedConfigTemplate(c *gin.Context) {
@@ -84,7 +88,7 @@ func DeleteManagedConfigTemplate(c *gin.Context) {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": id}})
+	adminDataJSON(c, http.StatusOK, gin.H{"id": id})
 }
 
 func GetManagedInstanceConfig(c *gin.Context) {
@@ -95,13 +99,13 @@ func GetManagedInstanceConfig(c *gin.Context) {
 	binding, err := managedinstance.GetConfigBinding(id)
 	if err != nil {
 		if errors.Is(err, managedinstance.ErrConfigBindingNotFound) {
-			c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": nil})
+			adminDataJSON(c, http.StatusOK, nil)
 			return
 		}
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": binding})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, binding)
 }
 
 func SetManagedInstanceConfig(c *gin.Context) {
@@ -121,7 +125,7 @@ func SetManagedInstanceConfig(c *gin.Context) {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": binding})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, binding)
 }
 
 func RefreshManagedInstanceConfig(c *gin.Context) {
@@ -134,7 +138,7 @@ func RefreshManagedInstanceConfig(c *gin.Context) {
 		managedConfigError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": preview})
+	adminManagedInstanceDTOJSON(c, http.StatusOK, preview)
 }
 
 func PlanManagedInstanceConfigApply(c *gin.Context) {
@@ -158,7 +162,7 @@ func PlanManagedInstanceConfigApply(c *gin.Context) {
 	if operation.IdempotentReplay {
 		status = http.StatusOK
 	}
-	c.JSON(status, gin.H{"success": true, "message": "", "data": operation})
+	adminManagedInstanceDTOJSON(c, status, operation)
 }
 
 func ExecuteManagedInstanceConfigApply(c *gin.Context) {
@@ -178,6 +182,8 @@ func managedConfigTemplateInput(request managedConfigTemplateRequest, actorID in
 
 func managedConfigError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, authz.ErrDataForbidden), errors.Is(err, authz.ErrAuthorizationChanged):
+		adminDataError(c, err)
 	case errors.Is(err, managedinstance.ErrInvalidConfigTemplate), errors.Is(err, managedinstance.ErrInvalidOperation):
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 	case errors.Is(err, managedinstance.ErrConfigTemplateNotFound), errors.Is(err, managedinstance.ErrConfigBindingNotFound), errors.Is(err, managedinstance.ErrInstanceNotFound):

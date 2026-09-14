@@ -78,11 +78,13 @@ interface PermissionRoleDef {
 export interface PermissionCatalog {
   resources: PermissionResourceDef[]
   roles: PermissionRoleDef[]
+  data_fields?: { key: string; label_key: string }[]
 }
 
 export const EMPTY_PERMISSION_CATALOG: PermissionCatalog = {
   resources: [],
   roles: [],
+  data_fields: [],
 }
 
 export function hasPermission(
@@ -93,6 +95,49 @@ export function hasPermission(
   if (!user) return false
   if (user.role === ROLE.SUPER_ADMIN) return true
   return user.permissions?.admin_permissions?.[resource]?.[action] === true
+}
+
+export function adminHomePath(
+  user: AuthUser | null | undefined
+): '/dashboard' | '/profile' | '/sign-in' {
+  if (!user) return '/sign-in'
+  return hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.MANAGED_INSTANCE,
+    ADMIN_PERMISSION_ACTIONS.VIEW
+  )
+    ? '/dashboard'
+    : '/profile'
+}
+
+export function adminLoginRedirect(
+  user: AuthUser | null | undefined,
+  requested?: string
+): string {
+  const home = adminHomePath(user)
+  if (
+    !user ||
+    !requested?.startsWith('/') ||
+    requested.startsWith('//') ||
+    requested.includes('\\')
+  ) {
+    return home
+  }
+  const path = requested.split(/[?#]/)[0].replace(/\/$/, '') || '/'
+  if (['/', '/sign-in', '/otp', '/403', '/oauth'].includes(path)) return home
+  const hasFunctions =
+    user.role === ROLE.SUPER_ADMIN ||
+    Object.values(user.permissions?.admin_permissions ?? {}).some((actions) =>
+      Object.values(actions).some((allowed) => allowed === true)
+    )
+  if (!hasFunctions && path !== '/profile') return '/profile'
+  if (
+    (path === '/dashboard' || path.startsWith('/instances')) &&
+    home !== '/dashboard'
+  ) {
+    return home
+  }
+  return requested
 }
 
 // roleGrants returns the baseline grant matrix for the given role key.

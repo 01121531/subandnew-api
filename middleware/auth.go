@@ -43,6 +43,16 @@ func authHelper(c *gin.Context, minRole int) {
 	username = user.Username
 	role = user.Role
 	status = user.Status
+	version, present := session.Get("authorization_version").(int64)
+	if !present {
+		version = 1
+	}
+	if user.AuthorizationVersion > 1 && version != user.AuthorizationVersion {
+		session.Clear()
+		_ = session.Save()
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "message": "admin_authorization_changed"})
+		return
+	}
 	if status != common.UserStatusEnabled {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
@@ -66,6 +76,18 @@ func authHelper(c *gin.Context, minRole int) {
 		})
 		c.Abort()
 		return
+	}
+	if role >= common.RoleAdminUser {
+		access, err := authz.LoadDataAccess(model.DB, id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "admin_data_forbidden"})
+			return
+		}
+		if err := access.SyncPermissions(); err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "message": "admin_data_forbidden"})
+			return
+		}
+		c.Request = c.Request.WithContext(authz.WithDataAccess(c.Request.Context(), access))
 	}
 
 	c.Set("username", username)

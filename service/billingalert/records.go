@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -49,7 +50,11 @@ type AlertRecordPage struct {
 	PageSize int                `json:"page_size"`
 }
 
-func ListAlertRecords(filter AlertRecordFilter) (*AlertRecordPage, error) {
+func ListAlertRecords(filter AlertRecordFilter, access ...*authz.DataAccess) (*AlertRecordPage, error) {
+	a := OptionalAccess(access)
+	if err := ValidateRecordFilter(filter, a); err != nil {
+		return nil, err
+	}
 	if filter.Page <= 0 {
 		filter.Page = 1
 	}
@@ -59,7 +64,7 @@ func ListAlertRecords(filter AlertRecordFilter) (*AlertRecordPage, error) {
 	if filter.PageSize > 200 {
 		filter.PageSize = 200
 	}
-	query := applyAlertRecordFilter(model.DB.Model(&model.BillingAlertEvent{}), filter)
+	query := ScopeEvents(applyAlertRecordFilter(model.DB.Model(&model.BillingAlertEvent{}), filter), a)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
@@ -80,13 +85,16 @@ func ListAlertRecords(filter AlertRecordFilter) (*AlertRecordPage, error) {
 	return &AlertRecordPage{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
 }
 
-func GetAlertRecord(id int64) (*AlertRecordView, error) {
+func GetAlertRecord(id int64, access ...*authz.DataAccess) (*AlertRecordView, error) {
 	var event model.BillingAlertEvent
 	if err := model.DB.First(&event, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrBillingNotFound
 		}
 		return nil, err
+	}
+	if a := OptionalAccess(access); a != nil && !(event.InstanceID == 0 && a.Policy.InstanceScope == "all") && !a.HasInstance(event.InstanceID) {
+		return nil, authz.ErrDataForbidden
 	}
 	return alertRecordView(&event)
 }
@@ -173,7 +181,7 @@ func instanceAlertDeliveries(event *model.BillingAlertEvent) []*AlertDeliveryVie
 		return []*AlertDeliveryView{}
 	}
 	var alert model.ManagedInstanceAlert
-	if err := model.DB.First(&alert, event.SourceRecordID).Error; err != nil {
+	if err := model.DB.Where("instance_id = ?", event.InstanceID).First(&alert, event.SourceRecordID).Error; err != nil {
 		return []*AlertDeliveryView{}
 	}
 	phase := "failure"

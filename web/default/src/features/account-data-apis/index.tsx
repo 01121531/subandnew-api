@@ -88,6 +88,7 @@ import {
   revokeAccountDataAPIKey,
   updateAccountDataAPI,
 } from './api'
+import { AccountDataOwnership } from './take-ownership'
 import type {
   AccountDataAPI,
   AccountDataAPIAccessLog,
@@ -610,6 +611,7 @@ export function AccountDataAPIs() {
             open={editing !== undefined}
             item={editing ?? null}
             prefill={prefill}
+            onTaken={setEditing}
             onOpenChange={(open) => {
               if (!open) {
                 setEditing(undefined)
@@ -756,6 +758,7 @@ function AuthorizationEditor(props: {
   open: boolean
   item: AccountDataAPI | null
   prefill: DraftHandoff | null
+  onTaken: (item: AccountDataAPI) => void
   onOpenChange: (open: boolean) => void
   onCreated: (
     name: string,
@@ -947,6 +950,13 @@ function AuthorizationEditor(props: {
           <DialogDescription>
             {t('授权固定读取后台账号快照，不会直接请求目标平台。')}
           </DialogDescription>
+          {props.item && (
+            <AccountDataOwnership
+              item={props.item}
+              disabled={saveMutation.isPending || previewMutation.isPending}
+              onTaken={props.onTaken}
+            />
+          )}
           <div
             className='grid grid-cols-2 gap-1 pt-2 sm:grid-cols-4'
             aria-label={t('创建步骤')}

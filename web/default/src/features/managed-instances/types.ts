@@ -87,9 +87,15 @@ export interface ManagedInstanceCredentialInput {
 
 export interface ManagedInstanceList {
   items: ManagedInstance[]
-  total: number
+  total?: number
+  has_more?: boolean
   page: number
   page_size: number
+}
+
+export interface ManagedInstanceOrder {
+  version: number
+  items: Pick<ManagedInstance, 'id' | 'name' | 'kind'>[]
 }
 
 export interface ManagedInstanceFilters {

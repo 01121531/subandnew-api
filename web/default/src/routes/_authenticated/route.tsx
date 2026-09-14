@@ -19,11 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { AuthenticatedLayout } from '@/components/layout'
+import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 // 内存中的验证标记，避免同一会话中重复验证
 let sessionVerified = false
+
+useAuthStore.subscribe((state, previous) => {
+  if (
+    adminDataAuthorizationKey(state.auth.user) !==
+    adminDataAuthorizationKey(previous.auth.user)
+  ) {
+    sessionVerified = false
+  }
+})
 
 export const Route = createFileRoute('/_authenticated')({
   beforeLoad: async ({ location }) => {

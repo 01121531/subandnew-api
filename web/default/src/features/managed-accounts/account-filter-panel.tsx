@@ -199,7 +199,11 @@ export function AccountFilterPanel(props: {
     queryFn: listAccountFilterTemplates,
     enabled: props.templatesEnabled !== false,
   })
-  const templates = templatesQuery.data?.data ?? []
+  const templates = (templatesQuery.data?.data ?? []).filter(
+    (template) =>
+      !props.allowedFields ||
+      template.rules.every((rule) => props.allowedFields?.includes(rule.field))
+  )
   const selectedTemplate = templates.find(
     (template) => template.id === selectedTemplateID
   )

@@ -343,21 +343,24 @@ type BillingAudit struct {
 func (BillingAudit) TableName() string { return "billing_audits" }
 
 type BillingAlertExport struct {
-	ID          int64  `json:"id" gorm:"primaryKey"`
-	TaskID      string `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
-	ActorID     int    `json:"actor_id" gorm:"not null;index"`
-	Query       string `json:"query" gorm:"type:text;not null"`
-	Status      string `json:"status" gorm:"type:varchar(32);not null;index"`
-	FileName    string `json:"file_name" gorm:"type:varchar(255)"`
-	FilePath    string `json:"-" gorm:"type:text"`
-	FileSize    int64  `json:"file_size" gorm:"bigint;not null;default:0"`
-	RecordCount int64  `json:"record_count" gorm:"bigint;not null;default:0"`
-	ErrorCode   string `json:"error_code" gorm:"type:varchar(128)"`
-	StartedAt   int64  `json:"started_at" gorm:"bigint;not null;default:0"`
-	FinishedAt  int64  `json:"finished_at" gorm:"bigint;not null;default:0"`
-	ExpiresAt   int64  `json:"expires_at" gorm:"bigint;not null;default:0;index"`
-	CreatedAt   int64  `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt   int64  `json:"updated_at" gorm:"bigint;not null;index"`
+	DataPolicy           *AdminDataPolicy `json:"-" gorm:"serializer:json;type:text"`
+	AuthorizationVersion int64            `json:"-" gorm:"not null;default:0"`
+	ActorRole            int              `json:"-" gorm:"not null;default:0"`
+	ID                   int64            `json:"id" gorm:"primaryKey"`
+	TaskID               string           `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
+	ActorID              int              `json:"actor_id" gorm:"not null;index"`
+	Query                string           `json:"query" gorm:"type:text;not null"`
+	Status               string           `json:"status" gorm:"type:varchar(32);not null;index"`
+	FileName             string           `json:"file_name" gorm:"type:varchar(255)"`
+	FilePath             string           `json:"-" gorm:"type:text"`
+	FileSize             int64            `json:"file_size" gorm:"bigint;not null;default:0"`
+	RecordCount          int64            `json:"record_count" gorm:"bigint;not null;default:0"`
+	ErrorCode            string           `json:"error_code" gorm:"type:varchar(128)"`
+	StartedAt            int64            `json:"started_at" gorm:"bigint;not null;default:0"`
+	FinishedAt           int64            `json:"finished_at" gorm:"bigint;not null;default:0"`
+	ExpiresAt            int64            `json:"expires_at" gorm:"bigint;not null;default:0;index"`
+	CreatedAt            int64            `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt            int64            `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 func (BillingAlertExport) TableName() string { return "billing_alert_exports" }

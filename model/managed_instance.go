@@ -31,6 +31,7 @@ const (
 
 type ManagedInstance struct {
 	Id                    int64  `json:"id" gorm:"primaryKey"`
+	SortOrder             int64  `json:"sort_order" gorm:"bigint;not null;default:0;index"`
 	Name                  string `json:"name" gorm:"type:varchar(128);not null;uniqueIndex"`
 	Kind                  string `json:"kind" gorm:"type:varchar(32);not null;index"`
 	BaseURL               string `json:"base_url" gorm:"type:varchar(512);not null;uniqueIndex"`

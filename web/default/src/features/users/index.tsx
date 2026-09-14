@@ -43,7 +43,11 @@ function UsersContent() {
       </SectionPageLayout>
 
       <UsersMutateDrawer
-        open={open === 'create' || open === 'update'}
+        key={
+          open === 'update' ? `update-${currentRow?.id}` : (open ?? 'closed')
+        }
+        open={open === 'create' || open === 'create-admin' || open === 'update'}
+        createAdmin={open === 'create-admin'}
         onOpenChange={(isOpen) => !isOpen && setOpen(null)}
         currentRow={open === 'update' ? currentRow || undefined : undefined}
       />

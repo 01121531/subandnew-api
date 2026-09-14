@@ -37,6 +37,11 @@ func GetSelf(c *gin.Context) {
 		return
 	}
 	setting := user.GetSetting()
+	dataPolicy, err := userDataPolicy(userID, userRole)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -46,6 +51,7 @@ func GetSelf(c *gin.Context) {
 			"github_id": user.GitHubId, "discord_id": user.DiscordId, "oidc_id": user.OidcId,
 			"wechat_id": user.WeChatId, "telegram_id": user.TelegramId, "linux_do_id": user.LinuxDOId,
 			"language": setting.Language, "admin_permissions": authz.Capabilities(userID, userRole),
+			"admin_data_policy": dataPolicy, "authorization_version": user.AuthorizationVersion,
 		},
 	})
 }
@@ -114,23 +120,36 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 
-	if request.Action == "demote" {
-		if err := model.DB.Transaction(func(tx *gorm.DB) error {
-			if err := user.UpdateWithTx(tx, false); err != nil {
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := user.UpdateWithTx(tx, false); err != nil {
+			return err
+		}
+		if request.Action == "demote" {
+			if err := authz.ClearUserAuthorizationInTx(tx, user.Id); err != nil {
 				return err
 			}
-			return authz.ClearUserAuthorizationInTx(tx, user.Id)
-		}); err != nil {
-			common.ApiError(c, err)
-			return
+			if err := tx.Where("user_id = ?", user.Id).Delete(&model.AdminDataPolicy{}).Error; err != nil {
+				return err
+			}
 		}
+		if request.Action == "promote" {
+			if err := authz.SetUserPermissionsInTx(tx, user.Id, authz.DenyAllPermissions()); err != nil {
+				return err
+			}
+			if err := authz.SaveDataPolicy(tx, user.Id, nil, true); err != nil {
+				return err
+			}
+		}
+		return authz.BumpAuthorizationVersion(tx, user.Id)
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if request.Action == "demote" || request.Action == "promote" {
 		if err := authz.ReloadPolicy(); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-	} else if err := user.Update(false); err != nil {
-		common.ApiError(c, err)
-		return
 	}
 
 	if err := model.InvalidateUserCache(user.Id); err != nil {
@@ -253,6 +272,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 	session.Set("username", user.Username)
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
+	session.Set("authorization_version", user.AuthorizationVersion)
 	err := session.Save()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
@@ -367,6 +387,11 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
+	user.AdminDataPolicy, err = userDataPolicy(user.Id, user.Role)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -417,14 +442,26 @@ func UpdateUser(c *gin.Context) {
 		updatedUser.Password = "" // rollback to what it should be
 	}
 	updatePassword := updatedUser.Password != ""
+	requestedPolicy := updatedUser.AdminDataPolicy
+	requestedPermissions := updatedUser.AdminPermissions
+	if requestedPolicy != nil && myRole != common.RoleRootUser {
+		common.ApiError(c, authz.ErrDataForbidden)
+		return
+	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
 			return err
 		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
+		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, requestedPermissions)
 		authzTouched = touched
-		return err
+		if err != nil {
+			return err
+		}
+		if originUser.Role == common.RoleAdminUser {
+			return authz.SaveDataPolicy(tx, updatedUser.Id, requestedPolicy, false)
+		}
+		return nil
 	}); err != nil {
 		common.ApiError(c, err)
 		return
@@ -439,8 +476,10 @@ func UpdateUser(c *gin.Context) {
 		common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", updatedUser.Id, err.Error()))
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
-		"username": originUser.Username,
-		"id":       updatedUser.Id,
+		"username":          originUser.Username,
+		"id":                updatedUser.Id,
+		"admin_data_policy": requestedPolicy,
+		"admin_permissions": requestedPermissions,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -615,6 +654,17 @@ func CreateUser(c *gin.Context) {
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
 	}
+	if cleanUser.Role == common.RoleAdminUser {
+		permissions := authz.DenyAllPermissions()
+		for resource, actions := range user.AdminPermissions {
+			for action, allowed := range actions {
+				if _, known := permissions[resource][action]; known {
+					permissions[resource][action] = allowed
+				}
+			}
+		}
+		user.AdminPermissions = permissions
+	}
 	authzTouched := false
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
 		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
@@ -622,7 +672,13 @@ func CreateUser(c *gin.Context) {
 		}
 		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
 		authzTouched = touched
-		return err
+		if err != nil {
+			return err
+		}
+		if cleanUser.Role == common.RoleAdminUser {
+			return authz.SaveDataPolicy(tx, cleanUser.Id, user.AdminDataPolicy, true)
+		}
+		return nil
 	}); err != nil {
 		common.ApiError(c, err)
 		return
@@ -659,7 +715,21 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 	if userRole < common.RoleAdminUser {
 		return true, authz.ClearUserAuthorizationInTx(tx, userID)
 	}
-	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
+	if err := authz.SetUserPermissionsInTx(tx, userID, permissions); err != nil {
+		return false, err
+	}
+	return true, authz.BumpAuthorizationVersion(tx, userID)
+}
+
+func userDataPolicy(id, role int) (*model.AdminDataPolicy, error) {
+	if role < common.RoleAdminUser {
+		return nil, nil
+	}
+	a, err := authz.LoadDataAccess(model.DB, id)
+	if err != nil {
+		return nil, err
+	}
+	return &a.Policy, nil
 }
 
 // ManageUser Only admin user can do this

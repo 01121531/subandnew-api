@@ -19,6 +19,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -750,6 +751,9 @@ func CollectInventory(ctx context.Context, instanceID int64, resourceKind string
 }
 
 func CollectInventoryWithCommitGuard(ctx context.Context, instanceID int64, resourceKind string, cursor string, guard CommitGuard) (*ObservationView, error) {
+	if err := authz.CheckContextInstances(ctx, instanceID); err != nil {
+		return nil, err
+	}
 	return collectInventory(ctx, instanceID, resourceKind, cursor, guard)
 }
 
@@ -1091,6 +1095,9 @@ func CollectSummaryData(ctx context.Context, instanceID int64, window TimeWindow
 }
 
 func CollectRealtimeMetrics(ctx context.Context, instanceID int64) (*ObservationView, error) {
+	if err := authz.CheckContextInstances(ctx, instanceID); err != nil {
+		return nil, err
+	}
 	state, ok, err := CurrentManagedRealtime(instanceID)
 	if err != nil {
 		return nil, err

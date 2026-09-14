@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/managedaccount"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 	"github.com/glebarez/sqlite"
@@ -23,7 +25,8 @@ func setupAPIServiceTest(t *testing.T) (*gorm.DB, model.ManagedInstance) {
 	require.NoError(t, db.AutoMigrate(&model.ManagedInstance{}, &model.ManagedInstanceCredential{}, &model.ManagedInstanceSnapshot{},
 		&model.ManagedAccountSnapshot{}, &model.SystemTask{}, &model.SystemTaskScopeLock{}, &model.ManagedAccountAPI{},
 		&model.ManagedAccountAPIInstance{}, &model.ManagedAccountAPIKey{}, &model.ManagedAccountAPIAccessLog{},
-		&model.ManagedAccountAPIPortalSession{}))
+		&model.ManagedAccountAPIPortalSession{}, &model.User{}, &model.AdminDataPolicy{}))
+	require.NoError(t, db.Create(&model.User{Id: 7, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	model.DB = db
 	t.Cleanup(func() { model.DB = previous })
 	instance := model.ManagedInstance{Name: "accounts", Kind: model.ManagedInstanceKindSub2API, BaseURL: "https://example.invalid"}
@@ -117,7 +120,9 @@ func TestCreateDefaultsToVendorNameWithoutVendorEmail(t *testing.T) {
 
 func TestFilterOptionsReturnsVendorsFromTheCompleteSnapshot(t *testing.T) {
 	_, instance := setupAPIServiceTest(t)
-	result, err := FilterOptions(t.Context(), FilterOptionsInput{
+	a, err := authz.LoadDataAccess(model.DB, 7)
+	require.NoError(t, err)
+	result, err := FilterOptions(authz.WithDataAccess(t.Context(), a), FilterOptionsInput{
 		Dataset: managedaccount.DatasetInventory, PresetDays: 7, InstanceIDs: []int64{instance.Id},
 	})
 	require.NoError(t, err)

@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import '@/styles/supplier-portal.css'
 import { hasPermission } from '@/lib/admin-permissions'
+import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { adminApi } from './admin-api'
@@ -39,6 +40,7 @@ import { PortalSettingsDialog } from './components/portal-settings'
 import { ResetPassword } from './components/reset-password'
 import { SupplierActions } from './components/supplier-actions'
 import { SupplierForm } from './components/supplier-form'
+import { SupplierOwnership } from './components/take-ownership'
 import { useAdminMutation } from './hooks/use-admin-mutation'
 import type { FormLeaveGuard } from './hooks/use-form-leave-guard'
 import type { Binding, Supplier } from './types'
@@ -46,6 +48,7 @@ import type { Binding, Supplier } from './types'
 export function Suppliers() {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
+  const isRoot = user?.role === ROLE.SUPER_ADMIN
   const canManage = hasPermission(user, 'supplier', 'manage')
   const canAudit = hasPermission(user, 'supplier', 'audit')
   const loginUrl = new URL('/supplier/sign-in', window.location.origin).href
@@ -107,13 +110,13 @@ export function Suppliers() {
   )
   return (
     <div className='supplier-portal flex min-h-0 flex-1 flex-col'>
-      {portalSettingsOpen && (
+      {portalSettingsOpen && isRoot && (
         <PortalSettingsDialog
           canManage={canManage}
           onClose={() => setPortalSettingsOpen(false)}
         />
       )}
-      {defaultsOpen && (
+      {defaultsOpen && isRoot && (
         <DefaultPolicyDialog
           canManage={canManage}
           onClose={() => setDefaultsOpen(false)}
@@ -122,14 +125,21 @@ export function Suppliers() {
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('supplier.title')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions className='w-full justify-start sm:w-auto sm:justify-end'>
-          <Button variant='outline' onClick={() => setPortalSettingsOpen(true)}>
-            <Settings />
-            {t('supplier.portalSettings')}
-          </Button>
-          <Button variant='outline' onClick={() => setDefaultsOpen(true)}>
-            <Settings />
-            {t('supplier.defaultPolicy')}
-          </Button>
+          {isRoot && (
+            <Button
+              variant='outline'
+              onClick={() => setPortalSettingsOpen(true)}
+            >
+              <Settings />
+              {t('supplier.portalSettings')}
+            </Button>
+          )}
+          {isRoot && (
+            <Button variant='outline' onClick={() => setDefaultsOpen(true)}>
+              <Settings />
+              {t('supplier.defaultPolicy')}
+            </Button>
+          )}
           <div className='flex items-center gap-1'>
             <a
               href={loginUrl}
@@ -424,6 +434,15 @@ function SupplierDetail(props: {
             <X />
           </Button>
         </header>
+        <SupplierOwnership
+          supplier={supplier}
+          disabled={pending}
+          onTaken={(saved) => {
+            setSupplier(saved)
+            setBinding(null)
+            setView('bindings')
+          }}
+        />
         <Tabs
           value={view}
           onValueChange={(value) => {

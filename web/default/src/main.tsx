@@ -28,6 +28,7 @@ import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
 
+import { installAdminAuthCacheBoundary } from '@/lib/admin-auth-cache'
 import { getStatus } from '@/lib/api'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applyFaviconToDom } from '@/lib/dom-utils'
@@ -110,6 +111,13 @@ const router = createRouter({
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
+})
+
+installAdminAuthCacheBoundary(queryClient, () => {
+  void router.navigate({
+    to: '/sign-in',
+    search: { redirect: router.history.location.href },
+  })
 })
 
 // Register the router instance for type safety

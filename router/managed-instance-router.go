@@ -56,6 +56,8 @@ func registerManagedInstanceRoutes(apiRouter *gin.RouterGroup) {
 
 	routeGroup := apiRouter.Group("/managed-instances")
 	routeGroup.Use(middleware.AdminAuth())
+	routeGroup.GET("/order", middleware.RootAuth(), controller.GetManagedInstanceOrder)
+	routeGroup.PUT("/order", middleware.RootAuth(), controller.PutManagedInstanceOrder)
 	for _, route := range managedInstancePermissionRoutes {
 		routeGroup.Handle(route.method, route.path, middleware.RequirePermission(route.permission), route.handler)
 	}

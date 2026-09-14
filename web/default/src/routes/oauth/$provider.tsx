@@ -12,6 +12,7 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
+import { adminHomePath } from '@/lib/admin-permissions'
 import { api, getSelf } from '@/lib/api'
 import { type AuthUser, useAuthStore } from '@/stores/auth-store'
 
@@ -48,7 +49,7 @@ function OAuthCallback() {
         useAuthStore.getState().auth.setUser(self.data)
         window.localStorage.setItem('uid', String(self.data.id))
         toast.success(i18next.t('Signed in successfully!'))
-        await navigate({ to: '/instances', replace: true })
+        await navigate({ to: adminHomePath(self.data), replace: true })
       } catch (error) {
         toast.error(
           error instanceof Error ? error.message : i18next.t('OAuth failed')

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 )
 
 const (
@@ -98,6 +99,9 @@ type UsageRecordExportArtifact struct {
 type UsageRecordExportProgressCallback func(UsageRecordExportProgress) error
 
 func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordPage, error) {
+	if err := authz.CheckContextQuery(ctx, instanceID, input); err != nil {
+		return nil, err
+	}
 	client, err := newUsageRecordClient(instanceID)
 	if err != nil {
 		return nil, err
@@ -113,6 +117,9 @@ func ListUsageRecords(ctx context.Context, instanceID int64, input url.Values) (
 }
 
 func GetUsageRecordFilterOptions(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordFilterOptions, error) {
+	if err := authz.CheckContextQuery(ctx, instanceID, input); err != nil {
+		return nil, err
+	}
 	client, err := newUsageRecordClient(instanceID)
 	if err != nil {
 		return nil, err
@@ -148,6 +155,9 @@ func GetUsageRecordFilterOptions(ctx context.Context, instanceID int64, input ur
 }
 
 func GetUsageRecordSummary(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordSummary, error) {
+	if err := authz.CheckContextQuery(ctx, instanceID, input); err != nil {
+		return nil, err
+	}
 	client, err := newUsageRecordClient(instanceID)
 	if err != nil {
 		return nil, err
@@ -168,6 +178,9 @@ func StreamUsageRecordsCSV(ctx context.Context, instanceID int64, input url.Valu
 }
 
 func PrepareUsageRecordsCSV(ctx context.Context, instanceID int64, input url.Values) (*UsageRecordCSVExport, error) {
+	if err := authz.CheckContextQuery(ctx, instanceID, input); err != nil {
+		return nil, err
+	}
 	client, err := newUsageRecordClient(instanceID)
 	if err != nil {
 		return nil, err
@@ -204,6 +217,16 @@ func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, write
 	}
 	csvWriter := csv.NewWriter(writer)
 	headers, fields := usageCSVSchema(export.client.instance.Kind)
+	if a := authz.DataAccessFrom(ctx); a != nil && !a.AllFields() {
+		allowedHeaders, allowedFields := []string{}, []usageCSVField{}
+		for index, field := range fields {
+			if !usageCSVFieldAllowed(a, field) {
+				continue
+			}
+			allowedHeaders, allowedFields = append(allowedHeaders, headers[index]), append(allowedFields, field)
+		}
+		headers, fields = allowedHeaders, allowedFields
+	}
 	if err := csvWriter.Write(headers); err != nil {
 		return 0, err
 	}
@@ -216,6 +239,9 @@ func (export *UsageRecordCSVExport) WriteWithProgress(ctx context.Context, write
 		return written, err
 	}
 	for {
+		if err := authz.CheckContextInstances(ctx, export.client.instance.Id); err != nil {
+			return written, err
+		}
 		if len(page.Items) == 0 && int64(written) < total {
 			return written, ErrUsageExportIncomplete
 		}
@@ -1393,6 +1419,20 @@ func oneOf(values ...string) usageQueryValidator {
 type usageCSVField struct {
 	paths   [][]string
 	derived string
+}
+
+func usageCSVFieldAllowed(a *authz.DataAccess, field usageCSVField) bool {
+	if field.derived != "" {
+		return field.derived == "account_billed_cost" && a.HasField("amount")
+	}
+	for _, path := range field.paths {
+		for _, part := range path {
+			if a.CheckDataField(part) != nil {
+				return false
+			}
+		}
+	}
+	return len(field.paths) > 0
 }
 
 func derivedField(name string) usageCSVField { return usageCSVField{derived: name} }

@@ -14,6 +14,23 @@ afterEach(() => {
 })
 
 describe('supplier admin API', () => {
+  test('takeover is an explicit POST without stale configuration or credentials', async () => {
+    request = spyOn(api, 'request').mockResolvedValueOnce({
+      data: { success: true, data: { completed: true } },
+    })
+    expect(await adminApi.takeOwnership(7)).toEqual({ completed: true })
+    expect(request).toHaveBeenCalledWith({
+      url: '/api/suppliers/7/takeover',
+      method: 'POST',
+      data: undefined,
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+    request.mockResolvedValueOnce({
+      data: { success: false, message: 'private diagnostic' },
+    })
+    await expect(adminApi.takeOwnership(7)).rejects.toThrow('REQUEST_FAILED')
+  })
   test('soft delete uses the supplier endpoint without credential data', async () => {
     request = spyOn(api, 'request').mockResolvedValueOnce({
       data: { success: true, data: { completed: true } },

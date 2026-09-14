@@ -19,6 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 import {
+  adminDataPolicySchema,
+  createDefaultAdminDataPolicy,
+  withAdminInstanceScope,
+} from '@/lib/admin-data-policy'
+import {
   type AdminPermissionMatrix,
   type PermissionCatalog,
   normalizeAdminPermissions,
@@ -36,6 +41,7 @@ export const userFormSchema = z.object({
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
+  admin_data_policy: adminDataPolicySchema.optional(),
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
@@ -49,6 +55,32 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   admin_permissions: {},
 }
 
+export function explicitAdminPermissions(
+  value: AdminPermissionMatrix | undefined,
+  catalog: PermissionCatalog
+): AdminPermissionMatrix {
+  return Object.fromEntries(
+    catalog.resources.map((resource) => [
+      resource.resource,
+      Object.fromEntries(
+        resource.actions.map((action) => [
+          action.action,
+          value?.[resource.resource]?.[action.action] === true,
+        ])
+      ),
+    ])
+  )
+}
+
+export function createAdminFormDefaults(): UserFormValues {
+  return {
+    ...USER_FORM_DEFAULT_VALUES,
+    role: ROLE.ADMIN,
+    admin_permissions: {},
+    admin_data_policy: createDefaultAdminDataPolicy(),
+  }
+}
+
 export function transformFormDataToPayload(
   data: UserFormValues,
   userId?: number,
@@ -60,11 +92,37 @@ export function transformFormDataToPayload(
     password: data.password || undefined,
   }
   const role = userId === undefined ? data.role || 1 : (data.role ?? 0)
+  if (
+    role === ROLE.ADMIN &&
+    userId === undefined &&
+    !catalog?.resources.length
+  ) {
+    throw new Error('Permission catalog required to create an administrator')
+  }
   if (role >= ROLE.ADMIN && catalog) {
-    payload.admin_permissions = normalizeAdminPermissions(
-      data.admin_permissions as AdminPermissionMatrix | undefined,
-      catalog
-    )
+    if (userId === undefined) {
+      payload.admin_permissions = explicitAdminPermissions(
+        data.admin_permissions,
+        catalog
+      )
+    } else if (data.admin_permissions !== undefined) {
+      payload.admin_permissions = normalizeAdminPermissions(
+        data.admin_permissions,
+        catalog
+      )
+    }
+  }
+  if (role === ROLE.ADMIN) {
+    if (data.admin_data_policy !== undefined) {
+      payload.admin_data_policy = adminDataPolicySchema.parse(
+        withAdminInstanceScope(
+          data.admin_data_policy,
+          data.admin_data_policy.instance_scope
+        )
+      )
+    } else if (userId === undefined) {
+      payload.admin_data_policy = createDefaultAdminDataPolicy()
+    }
   }
   if (userId === undefined) payload.role = role
   else {
@@ -82,5 +140,6 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     role: user.role,
     remark: user.remark || '',
     admin_permissions: user.admin_permissions ?? {},
+    admin_data_policy: user.admin_data_policy,
   }
 }

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
+import { fetchAllManagedInstances } from './pagination'
 import type {
   ApiResponse,
   ManagedInstance,
@@ -35,6 +36,7 @@ import type {
   ManagedInstanceInventoryPage,
   ManagedInstanceInput,
   ManagedInstanceList,
+  ManagedInstanceOrder,
   ManagedInstanceObservation,
   ManagedInstanceOperation,
   ManagedInstanceOperationExecuteInput,
@@ -103,37 +105,43 @@ export async function refreshManagedDashboard(
 }
 
 export async function getManagedInstances(
-  filters: ManagedInstanceFilters
+  filters: ManagedInstanceFilters,
+  signal?: AbortSignal
 ): Promise<ApiResponse<ManagedInstanceList>> {
-  const pageSize = 100
-  const params = new URLSearchParams({ page: '1', page_size: String(pageSize) })
-  if (filters.search) params.set('search', filters.search)
-  if (filters.kind) params.set('kind', filters.kind)
-  if (filters.status) params.set('status', filters.status)
-  const firstResponse = await api.get<ApiResponse<ManagedInstanceList>>(
-    `/api/managed-instances?${params.toString()}`
-  )
-  const first = firstResponse.data
-  if (!first.success || first.data.items.length >= first.data.total) {
-    return first
-  }
-
-  const pageCount = Math.ceil(first.data.total / pageSize)
-  const remaining = await Promise.all(
-    Array.from({ length: pageCount - 1 }, async (_, index) => {
-      const pageParams = new URLSearchParams(params)
-      pageParams.set('page', String(index + 2))
-      const response = await api.get<ApiResponse<ManagedInstanceList>>(
-        `/api/managed-instances?${pageParams.toString()}`
-      )
-      return response.data.data.items
+  return fetchAllManagedInstances(async (page, pageSize) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
     })
-  )
-  const items = [first.data.items, ...remaining].flat()
-  return {
-    ...first,
-    data: { ...first.data, items, page: 1, page_size: items.length },
-  }
+    if (filters.search) params.set('search', filters.search)
+    if (filters.kind) params.set('kind', filters.kind)
+    if (filters.status) params.set('status', filters.status)
+    const response = await api.get<ApiResponse<ManagedInstanceList>>(
+      `/api/managed-instances?${params.toString()}`,
+      { signal }
+    )
+    return response.data
+  })
+}
+
+export async function getManagedInstanceOrder(): Promise<
+  ApiResponse<ManagedInstanceOrder>
+> {
+  const response = await api.get('/api/managed-instances/order', {
+    disableDuplicate: true,
+  })
+  return response.data
+}
+
+export async function saveManagedInstanceOrder(
+  version: number,
+  instanceIDs: number[]
+): Promise<ApiResponse<ManagedInstanceOrder>> {
+  const response = await api.put('/api/managed-instances/order', {
+    version,
+    instance_ids: instanceIDs,
+  })
+  return response.data
 }
 
 export async function getManagedInstance(

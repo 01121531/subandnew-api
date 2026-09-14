@@ -104,6 +104,13 @@ func EnqueueBillingAlertExport(filter billingalert.AlertRecordFilter, actorID in
 	if actorID <= 0 {
 		return nil, billingalert.ErrInvalidBillingInput
 	}
+	access, err := billingalert.LoadExportAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
+	if err := billingalert.ValidateRecordFilter(filter, access); err != nil {
+		return nil, err
+	}
 	encoded, err := json.Marshal(filter)
 	if err != nil {
 		return nil, err
@@ -114,6 +121,7 @@ func EnqueueBillingAlertExport(filter billingalert.AlertRecordFilter, actorID in
 	}
 	record := &model.BillingAlertExport{
 		TaskID: task.TaskID, ActorID: actorID, Query: string(encoded), Status: "pending",
+		DataPolicy: &access.Policy, AuthorizationVersion: access.Version, ActorRole: access.Role,
 	}
 	if err := model.DB.Create(record).Error; err != nil {
 		_ = model.DB.Delete(task).Error

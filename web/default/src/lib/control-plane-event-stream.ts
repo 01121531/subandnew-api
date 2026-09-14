@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useAuthStore } from '@/stores/auth-store'
 
+import { adminDataAuthorizationKey } from './admin-data-policy'
+
 function emitEventBlock(
   block: string,
   onEvent: (eventType: string, data: string) => void
@@ -36,28 +38,65 @@ export async function consumeControlPlaneEventStream(
   signal: AbortSignal,
   onEvent: (eventType: string, data: string) => void
 ) {
-  const response = await fetch(url, {
-    credentials: 'include',
-    headers: { Accept: 'text/event-stream' },
-    signal,
+  const authorizationKey = adminDataAuthorizationKey(
+    useAuthStore.getState().auth.user
+  )
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signal.addEventListener('abort', abort, { once: true })
+  if (signal.aborted) abort()
+  const unsubscribe = useAuthStore.subscribe((state) => {
+    if (adminDataAuthorizationKey(state.auth.user) !== authorizationKey) abort()
   })
-  if (response.status === 401) {
-    useAuthStore.getState().auth.reset()
+  const dispatch = (eventType: string, data: string) => {
+    if (controller.signal.aborted) return
+    if (
+      [
+        'authorization_revoked',
+        'authorization_changed',
+        'admin_authorization_changed',
+      ].includes(eventType)
+    ) {
+      useAuthStore.getState().auth.reset()
+      abort()
+      return
+    }
+    onEvent(eventType, data)
   }
-  if (!response.ok || !response.body) {
-    throw new Error(`HTTP ${response.status}`)
+  try {
+    const response = await fetch(url, {
+      credentials: 'include',
+      headers: { Accept: 'text/event-stream' },
+      signal: controller.signal,
+    })
+    if (response.status === 401) {
+      useAuthStore.getState().auth.reset()
+    }
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      buffer = buffer.replaceAll('\r\n', '\n')
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() ?? ''
+      for (const block of blocks) emitEventBlock(block, dispatch)
+      if (controller.signal.aborted) {
+        await reader.cancel()
+        return
+      }
+    }
+    buffer += decoder.decode().replaceAll('\r\n', '\n')
+    if (buffer.trim()) emitEventBlock(buffer, dispatch)
+    if (!controller.signal.aborted) throw new Error('Event stream disconnected')
+  } finally {
+    unsubscribe()
+    signal.removeEventListener('abort', abort)
+    controller.abort()
   }
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n')
-    const blocks = buffer.split('\n\n')
-    buffer = blocks.pop() ?? ''
-    for (const block of blocks) emitEventBlock(block, onEvent)
-  }
-  buffer += decoder.decode().replaceAll('\r\n', '\n')
-  if (buffer.trim()) emitEventBlock(buffer, onEvent)
 }

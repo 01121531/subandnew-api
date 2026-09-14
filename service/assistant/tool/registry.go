@@ -25,10 +25,16 @@ type registeredTool struct {
 // Registry stores immutable read-only tools and executes them behind a
 // mandatory authorization callback. It is safe for concurrent use.
 type Registry struct {
+	boundary  BoundaryFunc
 	mu        sync.RWMutex
 	authorize AuthorizeFunc
 	tools     map[string]registeredTool
 }
+
+type BoundaryFunc func(context.Context, ExecutionContext) (context.Context, func(Result) (Result, error), error)
+
+// SetBoundary is configured before publishing the registry to callers.
+func (registry *Registry) SetBoundary(boundary BoundaryFunc) { registry.boundary = boundary }
 
 // NewRegistry constructs a fail-closed registry. Authorization is mandatory
 // because all tool calls originate from model-controlled output.
@@ -103,7 +109,18 @@ func (registry *Registry) Execute(ctx context.Context, execution ExecutionContex
 	if !exists {
 		return Result{}, fmt.Errorf("%w: %s", ErrToolNotFound, name)
 	}
-	return entry.execute(ctx, execution, arguments)
+	if registry.boundary == nil {
+		return entry.execute(ctx, execution, arguments)
+	}
+	bounded, finish, err := registry.boundary(ctx, execution)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %v", ErrAuthorizationDenied, err)
+	}
+	result, err := entry.execute(bounded, execution, arguments)
+	if err != nil {
+		return Result{}, err
+	}
+	return finish(result)
 }
 
 // List returns registered specifications in stable name order. Returned schema

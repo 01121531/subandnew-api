@@ -24,31 +24,32 @@ const (
 var ErrManagedUsageExportConflict = errors.New("managed usage export status conflict")
 
 type ManagedUsageExport struct {
-	ID           int64  `json:"id" gorm:"primaryKey"`
-	TaskID       string `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
-	InstanceID   int64  `json:"instance_id" gorm:"not null;index"`
-	InstanceName string `json:"instance_name" gorm:"type:varchar(128);not null"`
-	InstanceKind string `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
-	ActorID      int    `json:"actor_id" gorm:"not null;index"`
-	ActorName    string `json:"actor_name" gorm:"type:varchar(128);not null"`
-	ExportKind   string `json:"export_kind" gorm:"type:varchar(32);not null;default:'usage_records';index"`
-	FileFormat   string `json:"file_format" gorm:"type:varchar(16);not null;default:'csv'"`
-	Source       string `json:"source,omitempty" gorm:"type:varchar(32)"`
-	Query        string `json:"-" gorm:"type:text;not null"`
-	Status       string `json:"status" gorm:"type:varchar(32);not null;index"`
-	Progress     int    `json:"progress" gorm:"not null;default:0"`
-	Processed    int64  `json:"processed" gorm:"bigint;not null;default:0"`
-	Total        int64  `json:"total" gorm:"bigint;not null;default:0"`
-	FileName     string `json:"file_name" gorm:"type:varchar(255)"`
-	FileSize     int64  `json:"file_size" gorm:"bigint;not null;default:0"`
-	RecordCount  int    `json:"record_count" gorm:"not null;default:0"`
-	WarningCount int    `json:"warning_count" gorm:"not null;default:0"`
-	ErrorCode    string `json:"error_code" gorm:"type:varchar(128)"`
-	StartedAt    int64  `json:"started_at" gorm:"bigint;not null;default:0"`
-	FinishedAt   int64  `json:"finished_at" gorm:"bigint;not null;default:0"`
-	ExpiresAt    int64  `json:"expires_at" gorm:"bigint;not null;default:0;index"`
-	CreatedAt    int64  `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt    int64  `json:"updated_at" gorm:"bigint;not null;index"`
+	ID           int64            `json:"id" gorm:"primaryKey"`
+	TaskID       string           `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
+	InstanceID   int64            `json:"instance_id" gorm:"not null;index"`
+	InstanceName string           `json:"instance_name" gorm:"type:varchar(128);not null"`
+	InstanceKind string           `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
+	ActorID      int              `json:"actor_id" gorm:"not null;index"`
+	ActorName    string           `json:"actor_name" gorm:"type:varchar(128);not null"`
+	ExportKind   string           `json:"export_kind" gorm:"type:varchar(32);not null;default:'usage_records';index"`
+	FileFormat   string           `json:"file_format" gorm:"type:varchar(16);not null;default:'csv'"`
+	Source       string           `json:"source,omitempty" gorm:"type:varchar(32)"`
+	Query        string           `json:"-" gorm:"type:text;not null"`
+	DataPolicy   *AdminDataPolicy `json:"-" gorm:"serializer:json;type:text"`
+	Status       string           `json:"status" gorm:"type:varchar(32);not null;index"`
+	Progress     int              `json:"progress" gorm:"not null;default:0"`
+	Processed    int64            `json:"processed" gorm:"bigint;not null;default:0"`
+	Total        int64            `json:"total" gorm:"bigint;not null;default:0"`
+	FileName     string           `json:"file_name" gorm:"type:varchar(255)"`
+	FileSize     int64            `json:"file_size" gorm:"bigint;not null;default:0"`
+	RecordCount  int              `json:"record_count" gorm:"not null;default:0"`
+	WarningCount int              `json:"warning_count" gorm:"not null;default:0"`
+	ErrorCode    string           `json:"error_code" gorm:"type:varchar(128)"`
+	StartedAt    int64            `json:"started_at" gorm:"bigint;not null;default:0"`
+	FinishedAt   int64            `json:"finished_at" gorm:"bigint;not null;default:0"`
+	ExpiresAt    int64            `json:"expires_at" gorm:"bigint;not null;default:0;index"`
+	CreatedAt    int64            `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt    int64            `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 type ManagedExportItem struct {
@@ -90,12 +91,13 @@ func (export *ManagedUsageExport) BeforeCreate(_ *gorm.DB) error {
 }
 
 type ManagedUsageExportListFilter struct {
-	Status     string
-	ExportKind string
-	InstanceID int64
-	ActorID    int
-	Page       int
-	PageSize   int
+	AllowedInstanceIDs *[]int64
+	Status             string
+	ExportKind         string
+	InstanceID         int64
+	ActorID            int
+	Page               int
+	PageSize           int
 }
 
 type ManagedUsageExportList struct {
@@ -188,6 +190,15 @@ func ListManagedUsageExports(filter ManagedUsageExportListFilter) (*ManagedUsage
 
 func managedUsageExportListQuery(filter ManagedUsageExportListFilter) *gorm.DB {
 	query := DB.Model(&ManagedUsageExport{})
+	if filter.AllowedInstanceIDs != nil {
+		ids := *filter.AllowedInstanceIDs
+		if len(ids) == 0 {
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("(instance_id = 0 OR instance_id IN ?)", ids).
+				Where("NOT EXISTS (SELECT 1 FROM managed_export_items WHERE managed_export_items.task_id = managed_usage_exports.task_id AND managed_export_items.instance_id NOT IN ?)", ids)
+		}
+	}
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/01121531/subandnew-api/common"
 	"github.com/01121531/subandnew-api/model"
+	"github.com/01121531/subandnew-api/service/authz"
 	"gorm.io/gorm"
 )
 
@@ -26,16 +27,41 @@ func BillingAlertExportDirectory() string {
 }
 
 func ListAlertExports(actorID int, includeAll bool) ([]*model.BillingAlertExport, error) {
-	query := model.DB.Order("created_at DESC, id DESC").Limit(200)
+	a, err := LoadExportAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
+	includeAll = includeAll && a.Role >= common.RoleRootUser
+	query := model.DB.Order("created_at DESC, id DESC")
 	if !includeAll {
 		query = query.Where("actor_id = ?", actorID)
 	}
 	var exports []*model.BillingAlertExport
-	err := query.Find(&exports).Error
-	return exports, err
+	if err := query.Find(&exports).Error; err != nil {
+		return nil, err
+	}
+	result := make([]*model.BillingAlertExport, 0)
+	for _, record := range exports {
+		if err := CheckAlertExportAccess(record, a); err != nil {
+			if errors.Is(err, authz.ErrDataForbidden) {
+				continue
+			}
+			return nil, err
+		}
+		result = append(result, record)
+		if len(result) == 200 {
+			break
+		}
+	}
+	return result, nil
 }
 
 func GetAlertExport(taskID string, actorID int, includeAll bool) (*model.BillingAlertExport, error) {
+	a, err := LoadExportAccess(actorID)
+	if err != nil {
+		return nil, err
+	}
+	includeAll = includeAll && a.Role >= common.RoleRootUser
 	query := model.DB.Where("task_id = ?", taskID)
 	if !includeAll {
 		query = query.Where("actor_id = ?", actorID)
@@ -47,6 +73,9 @@ func GetAlertExport(taskID string, actorID int, includeAll bool) (*model.Billing
 		}
 		return nil, err
 	}
+	if err := CheckAlertExportAccess(&record, a); err != nil {
+		return nil, err
+	}
 	return &record, nil
 }
 
@@ -54,6 +83,10 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 	var record model.BillingAlertExport
 	if err := model.DB.First(&record, exportID).Error; err != nil {
 		return err
+	}
+	access, err := executionExportAccess(&record)
+	if err != nil {
+		return finishAlertExport(&record, "failed", err.Error(), "", 0, 0)
 	}
 	var filter AlertRecordFilter
 	if err := json.Unmarshal([]byte(record.Query), &filter); err != nil {
@@ -82,10 +115,16 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 	}
 	defer os.Remove(temporaryPath)
 	writer := csv.NewWriter(file)
-	_ = writer.Write([]string{"来源", "事件类型", "实例", "系统类型", "规则", "监控范围", "指标", "条件", "观测值", "档位", "币种", "阈值", "美元消耗", "人民币账单", "折扣", "汇率", "汇率来源", "汇率日期", "收件人", "错误代码", "创建时间"})
-	query := applyAlertRecordFilter(model.DB.Model(&model.BillingAlertEvent{}), filter).Order("created_at ASC, id ASC")
+	headers := []string{"来源", "事件类型", "实例", "系统类型", "规则", "监控范围", "指标", "条件", "观测值", "档位", "币种", "阈值", "美元消耗", "人民币账单", "折扣", "汇率", "汇率来源", "汇率日期", "收件人", "错误代码", "创建时间"}
+	columns := alertExportColumns(access)
+	_ = writer.Write(selectAlertCSVColumns(headers, columns))
+	query := ScopeEvents(applyAlertRecordFilter(model.DB.Model(&model.BillingAlertEvent{}), filter), access).Order("created_at ASC, id ASC")
 	var count int64
 	for offset := 0; ; offset += 1000 {
+		if _, err := executionExportAccess(&record); err != nil {
+			_ = file.Close()
+			return finishAlertExport(&record, "failed", err.Error(), "", 0, 0)
+		}
 		if err := ctx.Err(); err != nil {
 			_ = file.Close()
 			return err
@@ -103,13 +142,20 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 			if err != nil {
 				discountRate = event.DiscountRate
 			}
-			_ = writer.Write(alertCSVRow([]string{
+			values := []string{
 				event.SourceType, event.EventType, event.InstanceName, event.InstanceKind, event.RuleName,
 				event.ScopeMode, event.MetricKey, event.Conditions, event.ObservedValues, event.ThresholdName,
 				event.Currency, event.Threshold, event.USDTotal, event.CNYTotal, discountRate,
 				event.ExchangeRate, event.ExchangeSource, event.ExchangeObservedDate, event.Recipients,
 				event.ErrorCode, time.Unix(event.CreatedAt, 0).Format(time.RFC3339),
-			}))
+			}
+			if !access.AllFields() && !MetricAllowed(access, event.MetricKey) && event.SourceType != model.AlertSourceBilling {
+				values[6], values[11] = "", ""
+			}
+			if event.SourceType == model.AlertSourceBilling && !access.HasField("amount") {
+				values[11] = ""
+			}
+			_ = writer.Write(alertCSVRow(selectAlertCSVColumns(values, columns)))
 			count++
 			if count > billingAlertExportLimit {
 				writer.Flush()
@@ -126,6 +172,9 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 	if err := file.Close(); err != nil {
 		return finishAlertExport(&record, "failed", "close_export_failed", "", 0, 0)
 	}
+	if _, err := executionExportAccess(&record); err != nil {
+		return finishAlertExport(&record, "failed", err.Error(), "", 0, 0)
+	}
 	if err := os.Rename(temporaryPath, finalPath); err != nil {
 		return finishAlertExport(&record, "failed", "finalize_export_failed", "", 0, 0)
 	}
@@ -134,6 +183,31 @@ func RunAlertExport(ctx context.Context, exportID int64) error {
 		return err
 	}
 	return finishAlertExport(&record, "succeeded", "", finalPath, count, info.Size())
+}
+
+func alertExportColumns(a *authz.DataAccess) []int {
+	fields := []string{"", "status", "", "", "", "", "metric", "opaque", "opaque", "opaque", "amount", "metric", "amount", "amount", "amount", "amount", "amount", "amount", "email", "status", "time"}
+	columns := []int{}
+	for index, field := range fields {
+		allowed := field == "" || a.HasField(field) || a.AllFields()
+		if field == "metric" {
+			for _, group := range []string{"amount", "requests", "tokens", "rpm", "accounts", "concurrency", "rates", "status"} {
+				allowed = allowed || a.HasField(group)
+			}
+		}
+		if allowed {
+			columns = append(columns, index)
+		}
+	}
+	return columns
+}
+
+func selectAlertCSVColumns(values []string, columns []int) []string {
+	result := make([]string, 0, len(columns))
+	for _, index := range columns {
+		result = append(result, values[index])
+	}
+	return result
 }
 
 func alertCSVRow(values []string) []string {

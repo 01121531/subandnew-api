@@ -7,27 +7,28 @@ import (
 	"strings"
 
 	"github.com/01121531/subandnew-api/service"
+	"github.com/01121531/subandnew-api/service/authz"
 	"github.com/01121531/subandnew-api/service/billingalert"
 	"github.com/01121531/subandnew-api/service/metricalert"
 	"github.com/gin-gonic/gin"
 )
 
 func ListAlertTasks(c *gin.Context) {
-	billingRules, billingErr := billingalert.ListRules()
+	billingRules, billingErr := billingalert.ListRules(authz.DataAccessFrom(c.Request.Context()))
 	if billingErr != nil {
 		billingError(c, billingErr)
 		return
 	}
-	metricRules, metricErr := metricalert.ListRules()
+	metricRules, metricErr := metricalert.ListRules(authz.DataAccessFrom(c.Request.Context()))
 	if metricErr != nil {
 		metricAlertError(c, metricErr)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"billing": billingRules, "metric": metricRules}})
+	alertDataJSON(c, http.StatusOK, gin.H{"billing": billingRules, "metric": metricRules})
 }
 
 func ListMetricAlertRules(c *gin.Context) {
-	data, err := metricalert.ListRules()
+	data, err := metricalert.ListRules(authz.DataAccessFrom(c.Request.Context()))
 	metricAlertJSON(c, data, err)
 }
 
@@ -36,7 +37,7 @@ func GetMetricAlertRule(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := metricalert.GetRule(id)
+	data, err := metricalert.GetRule(id, authz.DataAccessFrom(c.Request.Context()))
 	metricAlertJSON(c, data, err)
 }
 
@@ -46,13 +47,16 @@ func CreateMetricAlertRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_metric_alert_input"})
 		return
 	}
+	if !metricInputAllowed(c, input) {
+		return
+	}
 	data, err := metricalert.CreateRule(input, c.GetInt("id"))
 	metricalert.Audit(c.GetInt("id"), "create", dataID(data), metricOutcome(err), input)
 	if err != nil {
 		metricAlertError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"success": true, "message": "", "data": data})
+	alertDataJSON(c, http.StatusCreated, data)
 }
 
 func UpdateMetricAlertRule(c *gin.Context) {
@@ -65,6 +69,12 @@ func UpdateMetricAlertRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid_metric_alert_input"})
 		return
 	}
+	if !alertRuleAllowed(c, id, "metric") {
+		return
+	}
+	if !metricInputAllowed(c, input) {
+		return
+	}
 	data, err := metricalert.UpdateRule(id, input, c.GetInt("id"))
 	metricalert.Audit(c.GetInt("id"), "update", id, metricOutcome(err), input)
 	metricAlertJSON(c, data, err)
@@ -73,6 +83,9 @@ func UpdateMetricAlertRule(c *gin.Context) {
 func DeleteMetricAlertRule(c *gin.Context) {
 	id, ok := metricAlertID(c)
 	if !ok {
+		return
+	}
+	if !alertRuleAllowed(c, id, "metric") {
 		return
 	}
 	err := metricalert.DeleteRule(id)
@@ -89,24 +102,32 @@ func EvaluateMetricAlertRule(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !alertRuleAllowed(c, id, "metric") {
+		return
+	}
 	task, created, err := service.EnqueueMetricAlertEvaluation(id)
 	metricalert.Audit(c.GetInt("id"), "evaluate", id, metricOutcome(err), nil)
 	if err != nil {
 		metricAlertError(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"success": true, "message": "", "data": gin.H{"task": task.ToResponse(), "created": created}})
+	alertDataJSON(c, http.StatusAccepted, gin.H{"task": task.ToResponse(), "created": created})
 }
 
 func ListMetricAlertCapabilities(c *gin.Context) {
 	ids := make([]int64, 0)
 	for _, value := range strings.Split(c.Query("instance_ids"), ",") {
-		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-		if err == nil && id > 0 {
-			ids = append(ids, id)
+		if strings.TrimSpace(value) == "" && c.Query("instance_ids") == "" {
+			continue
 		}
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id <= 0 {
+			metricAlertError(c, metricalert.ErrInvalidInput)
+			return
+		}
+		ids = append(ids, id)
 	}
-	data, err := metricalert.Capabilities(ids, c.DefaultQuery("scope_mode", metricalert.ScopePerInstance))
+	data, err := metricalert.Capabilities(ids, c.DefaultQuery("scope_mode", metricalert.ScopePerInstance), authz.DataAccessFrom(c.Request.Context()))
 	metricAlertJSON(c, data, err)
 }
 
@@ -124,10 +145,14 @@ func metricAlertJSON(c *gin.Context, data any, err error) {
 		metricAlertError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": data})
+	alertDataJSON(c, http.StatusOK, data)
 }
 
 func metricAlertError(c *gin.Context, err error) {
+	if errors.Is(err, authz.ErrDataForbidden) || errors.Is(err, authz.ErrAuthorizationChanged) {
+		adminDataError(c, err)
+		return
+	}
 	status := http.StatusInternalServerError
 	if errors.Is(err, metricalert.ErrInvalidInput) {
 		status = http.StatusBadRequest
@@ -142,4 +167,18 @@ func metricOutcome(err error) string {
 		return "success"
 	}
 	return "failed"
+}
+
+func metricInputAllowed(c *gin.Context, input metricalert.RuleInput) bool {
+	if !adminInstancesAllowed(c, input.InstanceIDs) || !alertFieldsAllowed(c, "email", "status") {
+		return false
+	}
+	a := authz.DataAccessFrom(c.Request.Context())
+	for _, condition := range input.Conditions {
+		if !billingalert.MetricAllowed(a, condition.Metric) {
+			adminDataError(c, authz.ErrDataForbidden)
+			return false
+		}
+	}
+	return true
 }

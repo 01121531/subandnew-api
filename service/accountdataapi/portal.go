@@ -146,6 +146,7 @@ func AuthenticatePortal(slug, token, csrf, clientIP string, requireCSRF bool) (*
 		return nil, ErrPortalUnauthorized
 	}
 	_ = model.DB.Model(&model.ManagedAccountAPIPortalSession{}).Where("id = ?", session.ID).Update("last_used_at", now).Error
+	view.sessionID = session.ID
 	return &PortalAuthenticated{API: entry, View: view, Session: &session, Token: token}, nil
 }
 
@@ -205,6 +206,9 @@ func QueryPortal(ctx context.Context, auth *PortalAuthenticated, input PortalQue
 	if auth == nil || auth.View == nil {
 		return nil, ErrPortalUnauthorized
 	}
+	if _, err := effectiveView(auth.API, auth.View); err != nil {
+		return nil, ErrPortalUnauthorized
+	}
 	filterFields := PortalFilterFields(auth.View.Fields)
 	if err := validatePortalRules(input.Rules, filterFields); err != nil {
 		return nil, err
@@ -219,7 +223,7 @@ func QueryPortal(ctx context.Context, auth *PortalAuthenticated, input PortalQue
 		return nil, ErrInvalid
 	}
 	query := portalManagedQuery(auth.View, input)
-	result, err := managedaccount.Execute(ctx, query)
+	result, err := executeDelegated(ctx, auth.API, auth.View, query)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -277,6 +281,9 @@ func ExportPortal(ctx context.Context, auth *PortalAuthenticated, input PortalEx
 	if err != nil {
 		return nil, err
 	}
+	if err := CheckResponse(auth.View); err != nil {
+		return nil, err
+	}
 	MarkPortalUsed(auth, result)
 	return &PortalExport{FileName: "accounts-" + time.Now().Format("20060102-150405") + ".xlsx", Data: data, Count: len(items)}, nil
 }
@@ -301,6 +308,9 @@ func queryPortalLarge(ctx context.Context, auth *PortalAuthenticated, input Port
 	if auth == nil || auth.View == nil {
 		return nil, ErrPortalUnauthorized
 	}
+	if _, err := effectiveView(auth.API, auth.View); err != nil {
+		return nil, ErrPortalUnauthorized
+	}
 	filterFields := PortalFilterFields(auth.View.Fields)
 	if err := validatePortalRules(input.Rules, filterFields); err != nil {
 		return nil, err
@@ -310,7 +320,7 @@ func queryPortalLarge(ctx context.Context, auth *PortalAuthenticated, input Port
 	}
 	query := portalManagedQuery(auth.View, input)
 	query.AllowLargePage = true
-	result, err := managedaccount.Execute(ctx, query)
+	result, err := executeDelegated(ctx, auth.API, auth.View, query)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -386,6 +396,9 @@ func loadPortal(slug, clientIP string) (*model.ManagedAccountAPI, *View, error) 
 	}
 	view, err := viewFor(&entry)
 	if err != nil || !ipAllowed(clientIP, view.AllowedCIDRs) {
+		return nil, nil, ErrPortalUnauthorized
+	}
+	if _, err := effectiveView(&entry, view); err != nil {
 		return nil, nil, ErrPortalUnauthorized
 	}
 	return &entry, view, nil
