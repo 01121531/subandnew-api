@@ -27,7 +27,7 @@ func SetWebRouter(router *gin.Engine, assets ThemeAssets) {
 	router.Use(static.Serve("/", webFS))
 	router.NoRoute(func(c *gin.Context) {
 		c.Set(middleware.RouteTagKey, "web")
-		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/supplier-api/") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
+		if strings.HasPrefix(c.Request.RequestURI, "/v1") || strings.HasPrefix(c.Request.RequestURI, "/api") || strings.HasPrefix(c.Request.RequestURI, "/supplier-api/") || strings.HasPrefix(c.Request.RequestURI, "/mailbox-api/") || strings.HasPrefix(c.Request.RequestURI, "/assets") {
 			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "route not found"})
 			return
 		}

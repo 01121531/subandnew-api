@@ -10,13 +10,16 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SupplierRouteRouteImport } from './routes/supplier/route'
+import { Route as MailboxRouteRouteImport } from './routes/mailbox/route'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as authRouteRouteImport } from './routes/(auth)/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SupplierIndexRouteImport } from './routes/supplier/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
+import { Route as MailboxIndexRouteImport } from './routes/mailbox/index'
 import { Route as SupplierSignInRouteImport } from './routes/supplier/sign-in'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
+import { Route as MailboxSignInRouteImport } from './routes/mailbox/sign-in'
 import { Route as AccountDataSlugRouteImport } from './routes/account-data/$slug'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
@@ -33,6 +36,7 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSuppliersIndexRouteImport } from './routes/_authenticated/suppliers/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
+import { Route as AuthenticatedMailboxManagementIndexRouteImport } from './routes/_authenticated/mailbox-management/index'
 import { Route as AuthenticatedInterfaceManagementIndexRouteImport } from './routes/_authenticated/interface-management/index'
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
 import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_authenticated/export-records/index'
@@ -52,6 +56,11 @@ import { Route as AuthenticatedSystemSettingsAuthSectionRouteImport } from './ro
 const SupplierRouteRoute = SupplierRouteRouteImport.update({
   id: '/supplier',
   path: '/supplier',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MailboxRouteRoute = MailboxRouteRouteImport.update({
+  id: '/mailbox',
+  path: '/mailbox',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
@@ -77,6 +86,11 @@ const SetupIndexRoute = SetupIndexRouteImport.update({
   path: '/setup/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MailboxIndexRoute = MailboxIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => MailboxRouteRoute,
+} as any)
 const SupplierSignInRoute = SupplierSignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
@@ -86,6 +100,11 @@ const OauthProviderRoute = OauthProviderRouteImport.update({
   id: '/oauth/$provider',
   path: '/oauth/$provider',
   getParentRoute: () => rootRouteImport,
+} as any)
+const MailboxSignInRoute = MailboxSignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => MailboxRouteRoute,
 } as any)
 const AccountDataSlugRoute = AccountDataSlugRouteImport.update({
   id: '/account-data/$slug',
@@ -171,6 +190,12 @@ const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
     path: '/profile/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedMailboxManagementIndexRoute =
+  AuthenticatedMailboxManagementIndexRouteImport.update({
+    id: '/mailbox-management/',
+    path: '/mailbox-management/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedInterfaceManagementIndexRoute =
@@ -266,6 +291,7 @@ const AuthenticatedSystemSettingsAuthSectionRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/mailbox': typeof MailboxRouteRouteWithChildren
   '/supplier': typeof SupplierRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/oauth': typeof authOauthRoute
@@ -277,8 +303,10 @@ export interface FileRoutesByFullPath {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
+  '/mailbox/sign-in': typeof MailboxSignInRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/supplier/sign-in': typeof SupplierSignInRoute
+  '/mailbox/': typeof MailboxIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/supplier/': typeof SupplierIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -292,6 +320,7 @@ export interface FileRoutesByFullPath {
   '/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
   '/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
+  '/mailbox-management/': typeof AuthenticatedMailboxManagementIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/suppliers/': typeof AuthenticatedSuppliersIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -314,8 +343,10 @@ export interface FileRoutesByTo {
   '/500': typeof errors500Route
   '/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
+  '/mailbox/sign-in': typeof MailboxSignInRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/supplier/sign-in': typeof SupplierSignInRoute
+  '/mailbox': typeof MailboxIndexRoute
   '/setup': typeof SetupIndexRoute
   '/supplier': typeof SupplierIndexRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -329,6 +360,7 @@ export interface FileRoutesByTo {
   '/export-records': typeof AuthenticatedExportRecordsIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
   '/interface-management': typeof AuthenticatedInterfaceManagementIndexRoute
+  '/mailbox-management': typeof AuthenticatedMailboxManagementIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/suppliers': typeof AuthenticatedSuppliersIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
@@ -345,6 +377,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/(auth)': typeof authRouteRouteWithChildren
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/mailbox': typeof MailboxRouteRouteWithChildren
   '/supplier': typeof SupplierRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/oauth': typeof authOauthRoute
@@ -356,8 +389,10 @@ export interface FileRoutesById {
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
   '/account-data/$slug': typeof AccountDataSlugRoute
+  '/mailbox/sign-in': typeof MailboxSignInRoute
   '/oauth/$provider': typeof OauthProviderRoute
   '/supplier/sign-in': typeof SupplierSignInRoute
+  '/mailbox/': typeof MailboxIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/supplier/': typeof SupplierIndexRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
@@ -371,6 +406,7 @@ export interface FileRoutesById {
   '/_authenticated/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
   '/_authenticated/interface-management/': typeof AuthenticatedInterfaceManagementIndexRoute
+  '/_authenticated/mailbox-management/': typeof AuthenticatedMailboxManagementIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/suppliers/': typeof AuthenticatedSuppliersIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -386,6 +422,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/mailbox'
     | '/supplier'
     | '/system-settings'
     | '/oauth'
@@ -397,8 +434,10 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/account-data/$slug'
+    | '/mailbox/sign-in'
     | '/oauth/$provider'
     | '/supplier/sign-in'
+    | '/mailbox/'
     | '/setup/'
     | '/supplier/'
     | '/errors/$error'
@@ -412,6 +451,7 @@ export interface FileRouteTypes {
     | '/export-records/'
     | '/instances/'
     | '/interface-management/'
+    | '/mailbox-management/'
     | '/profile/'
     | '/suppliers/'
     | '/system-info/'
@@ -434,8 +474,10 @@ export interface FileRouteTypes {
     | '/500'
     | '/503'
     | '/account-data/$slug'
+    | '/mailbox/sign-in'
     | '/oauth/$provider'
     | '/supplier/sign-in'
+    | '/mailbox'
     | '/setup'
     | '/supplier'
     | '/errors/$error'
@@ -449,6 +491,7 @@ export interface FileRouteTypes {
     | '/export-records'
     | '/instances'
     | '/interface-management'
+    | '/mailbox-management'
     | '/profile'
     | '/suppliers'
     | '/system-info'
@@ -464,6 +507,7 @@ export interface FileRouteTypes {
     | '/'
     | '/(auth)'
     | '/_authenticated'
+    | '/mailbox'
     | '/supplier'
     | '/_authenticated/system-settings'
     | '/(auth)/oauth'
@@ -475,8 +519,10 @@ export interface FileRouteTypes {
     | '/(errors)/500'
     | '/(errors)/503'
     | '/account-data/$slug'
+    | '/mailbox/sign-in'
     | '/oauth/$provider'
     | '/supplier/sign-in'
+    | '/mailbox/'
     | '/setup/'
     | '/supplier/'
     | '/_authenticated/errors/$error'
@@ -490,6 +536,7 @@ export interface FileRouteTypes {
     | '/_authenticated/export-records/'
     | '/_authenticated/instances/'
     | '/_authenticated/interface-management/'
+    | '/_authenticated/mailbox-management/'
     | '/_authenticated/profile/'
     | '/_authenticated/suppliers/'
     | '/_authenticated/system-info/'
@@ -506,6 +553,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   authRouteRoute: typeof authRouteRouteWithChildren
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  MailboxRouteRoute: typeof MailboxRouteRouteWithChildren
   SupplierRouteRoute: typeof SupplierRouteRouteWithChildren
   errors401Route: typeof errors401Route
   errors403Route: typeof errors403Route
@@ -524,6 +572,13 @@ declare module '@tanstack/react-router' {
       path: '/supplier'
       fullPath: '/supplier'
       preLoaderRoute: typeof SupplierRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mailbox': {
+      id: '/mailbox'
+      path: '/mailbox'
+      fullPath: '/mailbox'
+      preLoaderRoute: typeof MailboxRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated': {
@@ -561,6 +616,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mailbox/': {
+      id: '/mailbox/'
+      path: '/'
+      fullPath: '/mailbox/'
+      preLoaderRoute: typeof MailboxIndexRouteImport
+      parentRoute: typeof MailboxRouteRoute
+    }
     '/supplier/sign-in': {
       id: '/supplier/sign-in'
       path: '/sign-in'
@@ -574,6 +636,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/oauth/$provider'
       preLoaderRoute: typeof OauthProviderRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/mailbox/sign-in': {
+      id: '/mailbox/sign-in'
+      path: '/sign-in'
+      fullPath: '/mailbox/sign-in'
+      preLoaderRoute: typeof MailboxSignInRouteImport
+      parentRoute: typeof MailboxRouteRoute
     }
     '/account-data/$slug': {
       id: '/account-data/$slug'
@@ -685,6 +754,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile/'
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/mailbox-management/': {
+      id: '/_authenticated/mailbox-management/'
+      path: '/mailbox-management'
+      fullPath: '/mailbox-management/'
+      preLoaderRoute: typeof AuthenticatedMailboxManagementIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/interface-management/': {
@@ -853,6 +929,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedExportRecordsIndexRoute: typeof AuthenticatedExportRecordsIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
   AuthenticatedInterfaceManagementIndexRoute: typeof AuthenticatedInterfaceManagementIndexRoute
+  AuthenticatedMailboxManagementIndexRoute: typeof AuthenticatedMailboxManagementIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedSuppliersIndexRoute: typeof AuthenticatedSuppliersIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
@@ -876,6 +953,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
   AuthenticatedInterfaceManagementIndexRoute:
     AuthenticatedInterfaceManagementIndexRoute,
+  AuthenticatedMailboxManagementIndexRoute:
+    AuthenticatedMailboxManagementIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedSuppliersIndexRoute: AuthenticatedSuppliersIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
@@ -885,6 +964,20 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
 
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
+interface MailboxRouteRouteChildren {
+  MailboxSignInRoute: typeof MailboxSignInRoute
+  MailboxIndexRoute: typeof MailboxIndexRoute
+}
+
+const MailboxRouteRouteChildren: MailboxRouteRouteChildren = {
+  MailboxSignInRoute: MailboxSignInRoute,
+  MailboxIndexRoute: MailboxIndexRoute,
+}
+
+const MailboxRouteRouteWithChildren = MailboxRouteRoute._addFileChildren(
+  MailboxRouteRouteChildren,
+)
 
 interface SupplierRouteRouteChildren {
   SupplierSignInRoute: typeof SupplierSignInRoute
@@ -904,6 +997,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   authRouteRoute: authRouteRouteWithChildren,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  MailboxRouteRoute: MailboxRouteRouteWithChildren,
   SupplierRouteRoute: SupplierRouteRouteWithChildren,
   errors401Route: errors401Route,
   errors403Route: errors403Route,

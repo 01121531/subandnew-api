@@ -57,6 +57,9 @@ var auditRouteActions = map[string]string{
 // 必然经过 AdminAuth/RootAuth，将审计兜底内聚到鉴权链路即可保证「新增接口自动留痕」，
 // 无需在路由上再单独挂一层审计中间件（避免漏挂）。
 func beginAdminAudit(c *gin.Context) *auditResponseWriter {
+	if common.GetContextKeyBool(c, constant.ContextKeyAuditLogged) {
+		return nil
+	}
 	method := c.Request.Method
 	if method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" {
 		return nil

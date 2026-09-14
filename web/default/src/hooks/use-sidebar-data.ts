@@ -11,6 +11,7 @@ import {
   Bot,
   Braces,
   LayoutDashboard,
+  Mail,
   FileClock,
   ScrollText,
   Server,
@@ -21,6 +22,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import { canAccessMailbox } from '@/features/mailbox-management/lib/permissions'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -67,6 +69,15 @@ export function useSidebarData(): SidebarData {
         title: t('Control plane'),
         items: [
           { title: t('Profile'), url: '/profile', icon: Users },
+          ...(canAccessMailbox(user)
+            ? [
+                {
+                  title: t('mailbox.admin.title'),
+                  url: '/mailbox-management',
+                  icon: Mail,
+                },
+              ]
+            : []),
           ...(user?.role === ROLE.SUPER_ADMIN
             ? [{ title: t('Users'), url: '/users', icon: Users }]
             : []),

@@ -12,6 +12,8 @@
 
 详细设计与执行状态见 [多实例统一管理二开方案](./docs/MULTI-INSTANCE-MANAGEMENT-DESIGN.zh-CN.md)。
 
+邮箱批量导入、独立操作员和截图审核的使用及私有存储配置见 [邮箱管理部署说明](./docs/MAILBOX-MANAGEMENT.zh-CN.md)。
+
 ## 当前能力
 
 - 纳管多个 New API、HUICHUAN-AI、Sub2API 和通用 HTTP 健康端点。
@@ -135,6 +137,7 @@ go build ./...
 | `TRUSTED_PROXIES` | 可选反向代理 IP/CIDR 白名单；未设置时默认信任本机代理和 Cloudflare 官方网段，设置后完全覆盖默认值 |
 | `MANAGED_INSTANCE_SECRET_KEY` | 32 字节标准 Base64 主密钥 |
 | `MANAGED_INSTANCE_SECRET_KEY_VERSION` | 当前凭据密钥版本 |
+| `MAILBOX_ATTACHMENT_DIR` | 邮箱截图私有持久化目录，默认 `./data/mailbox-attachments`；多节点须共享，禁止公开静态访问 |
 | `MANAGED_INSTANCE_PROBE_MAX_CONCURRENCY` | 巡检全局并发上限，默认 `8` |
 | `MANAGED_INSTANCE_OPERATION_MAX_CONCURRENCY` | 受控操作全局并发上限，默认 `4` |
 | `MANAGED_INSTANCE_OPERATION_MAX_PER_HOST` | 同一远端主机的操作并发上限，默认 `2` |

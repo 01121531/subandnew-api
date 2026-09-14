@@ -34,11 +34,17 @@ import { NotFoundError } from '@/features/errors/not-found-error'
 import { getSetupStatus } from '@/features/setup/api'
 import { useSystemConfig } from '@/hooks/use-system-config'
 
+function isIndependentPortal(pathname: string): boolean {
+  return ['/supplier', '/mailbox'].some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  )
+}
+
 function RootComponent() {
   // Load system configuration (logo, system name, etc.) from backend
   const pathname = useLocation({ select: (location) => location.pathname })
   useSystemConfig({
-    autoLoad: pathname !== '/supplier' && !pathname.startsWith('/supplier/'),
+    autoLoad: !isIndependentPortal(pathname),
   })
 
   return (
@@ -47,8 +53,7 @@ function RootComponent() {
       <Outlet />
       <Toaster closeButton duration={5000} position='top-center' richColors />
       {import.meta.env.MODE === 'development' &&
-        pathname !== '/supplier' &&
-        !pathname.startsWith('/supplier/') && (
+        !isIndependentPortal(pathname) && (
           <>
             <ReactQueryDevtools buttonPosition='bottom-left' />
             <TanStackRouterDevtools position='bottom-right' />
@@ -96,7 +101,7 @@ export const Route = createRootRouteWithContext<{
   // 应用初始化与路由解析前统一校验会话
   beforeLoad: async ({ location }) => {
     const pathname = location?.pathname || ''
-    if (pathname === '/supplier' || pathname.startsWith('/supplier/')) return
+    if (isIndependentPortal(pathname)) return
     const needsSetupCheck =
       !setupStatusChecked && !pathname.startsWith('/setup')
 

@@ -39,6 +39,7 @@ func SetApiRouter(router *gin.Engine) {
 	registerBillingAlertRoutes(api)
 	registerAccountDataAPIRoutes(router, api)
 	registerSupplierRoutes(router, api)
+	registerMailboxRoutes(router, api)
 }
 
 func registerControlPlaneUserRoutes(api *gin.RouterGroup, requestBodyLimit gin.HandlerFunc) {

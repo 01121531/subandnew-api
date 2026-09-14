@@ -104,6 +104,7 @@ func main() {
 		service.StartManagedDashboardCollector()
 		service.StartManagedConductorRealtimeCollector()
 		service.StartManagedPollingRealtimeCollector()
+		service.StartMailboxCleanup()
 		if !strings.EqualFold(strings.TrimSpace(os.Getenv("ASSISTANT_WORKER_ENABLED")), "false") {
 			configuredWorker, workerErr := assistantworker.NewDefault(model.DB, common.NodeName)
 			switch {
@@ -119,6 +120,7 @@ func main() {
 		}
 	}
 	controlPlaneLeader := service.StartControlPlaneLeader(startControlPlaneServices, func() {
+		service.CancelMailboxCleanup()
 		select {
 		case leadershipLost <- struct{}{}:
 		default:
@@ -234,6 +236,9 @@ func main() {
 	}
 	if err := service.StopSystemTaskRunner(ctx); err != nil {
 		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := service.StopMailboxCleanup(ctx); err != nil {
+		common.SysError("mailbox cleanup did not stop before shutdown deadline")
 	}
 	if err := controlPlaneLeader.Stop(ctx); err != nil {
 		common.SysError("control plane leader did not stop before shutdown deadline: " + err.Error())

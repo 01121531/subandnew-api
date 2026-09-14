@@ -1,0 +1,50 @@
+package router
+
+import (
+	"github.com/01121531/subandnew-api/controller"
+	"github.com/01121531/subandnew-api/middleware"
+	"github.com/01121531/subandnew-api/service/authz"
+	"github.com/gin-gonic/gin"
+)
+
+func registerMailboxRoutes(engine *gin.Engine, api *gin.RouterGroup) {
+	admin := api.Group("/mailbox-management")
+	admin.Use(controller.MailboxAuditTrail(), middleware.AdminAuth(), controller.MailboxAdminOriginGuard)
+	view := controller.MailboxGuard(authz.MailboxView)
+	manage := controller.MailboxGuard(authz.MailboxManage)
+	assign := controller.MailboxGuard(authz.MailboxAssign)
+	operators := controller.MailboxGuard(authz.MailboxOperators)
+	review := controller.MailboxGuard(authz.MailboxReview)
+	admin.GET("/accounts", view, controller.ListMailboxAccounts)
+	admin.GET("/accounts/:id", view, controller.GetMailboxAccount)
+	admin.GET("/account-operators", view, controller.MailboxAccountOperators)
+	admin.POST("/accounts/:id/credentials", controller.MailboxGuard(authz.MailboxCredentials), controller.GetMailboxCredentials)
+	admin.POST("/imports/preview", manage, controller.ImportMailboxAccounts(true))
+	admin.POST("/imports", manage, controller.ImportMailboxAccounts(false))
+	admin.POST("/assignments", assign, controller.AssignMailboxAccounts)
+	admin.GET("/operator-options", assign, controller.MailboxOperatorOptions)
+	admin.GET("/operators", operators, controller.ListMailboxOperators)
+	admin.POST("/operators", operators, controller.SaveMailboxOperator)
+	admin.PUT("/operators/:id", operators, controller.SaveMailboxOperator)
+	admin.POST("/operators/:id/password", operators, controller.ResetMailboxOperatorPassword)
+	admin.POST("/operators/:id/revoke-sessions", operators, controller.RevokeMailboxOperatorSessions)
+	admin.GET("/submissions", review, controller.ListMailboxSubmissions)
+	admin.POST("/submissions/:id/review", review, controller.ReviewMailboxSubmission)
+	admin.GET("/attachments/:id", controller.MailboxAttachmentGuard, controller.ReadMailboxAttachment)
+	admin.GET("/audits", controller.MailboxGuard(authz.MailboxAudit), controller.ListMailboxAudits)
+
+	portal := engine.Group("/mailbox-api/v1")
+	portal.Use(middleware.RouteTag("api"), middleware.GlobalAPIRateLimit(), controller.MailboxAuditTrail())
+	portal.POST("/auth/login", middleware.AnonymousRequestBodyLimit(), controller.LoginMailboxPortal)
+	portal.GET("/auth/session", controller.GetMailboxPortalSession)
+	portal.Use(controller.MailboxPortalGuard)
+	portal.POST("/auth/logout", controller.LogoutMailboxPortal)
+	portal.POST("/auth/password", controller.ChangeMailboxPortalPassword)
+	portal.GET("/accounts", controller.ListMailboxAccounts)
+	portal.GET("/accounts/:id", controller.GetMailboxAccount)
+	portal.POST("/accounts/:id/credentials", controller.GetMailboxCredentials)
+	portal.GET("/submissions", controller.ListMailboxSubmissions)
+	portal.POST("/assignments/:id/attachments", controller.UploadMailboxAttachment)
+	portal.POST("/assignments/:id/submit", controller.SubmitMailboxScreenshots)
+	portal.GET("/attachments/:id", controller.ReadMailboxAttachment)
+}

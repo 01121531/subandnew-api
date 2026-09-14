@@ -30,6 +30,8 @@ import ru from './locales/ru.json'
 import vi from './locales/vi.json'
 import zhTW from './locales/zh-TW.json'
 import zhCN from './locales/zh.json'
+import { mailboxEn, mailboxZh } from './mailbox'
+import { mailboxPortalEn, mailboxPortalZh } from './mailbox-portal'
 import { supplierEn, supplierZh } from './supplier'
 
 const resources = {
@@ -38,6 +40,8 @@ const resources = {
     translation: {
       ...en.translation,
       supplier: supplierEn,
+      mailbox: mailboxEn,
+      mailboxPortal: mailboxPortalEn,
       adminData: adminDataEn,
       instanceOrder: instanceOrderEn,
     },
@@ -47,6 +51,8 @@ const resources = {
     translation: {
       ...zhCN.translation,
       supplier: supplierZh,
+      mailbox: mailboxZh,
+      mailboxPortal: mailboxPortalZh,
       adminData: adminDataZh,
       instanceOrder: instanceOrderZh,
     },
@@ -59,6 +65,8 @@ const resources = {
     ...zhTW,
     translation: {
       ...zhTW.translation,
+      mailbox: mailboxZh,
+      mailboxPortal: mailboxPortalZh,
       adminData: adminDataZh,
       instanceOrder: instanceOrderZh,
     },

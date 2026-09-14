@@ -27,8 +27,8 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.46.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.4.3
@@ -49,6 +49,7 @@ require (
 require (
 	github.com/Azure/go-ntlmssp v0.1.1
 	github.com/xuri/excelize/v2 v2.11.0
+	golang.org/x/image v0.45.0
 )
 
 require (
