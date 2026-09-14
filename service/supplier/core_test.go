@@ -27,6 +27,7 @@ type coreRemote struct {
 	writeErr                error
 	verifies, reads, writes int
 	onRead                  func()
+	onWrite                 func()
 	method, resource        string
 	body                    map[string]any
 }
@@ -48,6 +49,9 @@ func (r *coreRemote) Read(context.Context, string, url.Values) (map[string]any, 
 
 func (r *coreRemote) Write(_ context.Context, method, resource string, body any) (map[string]any, error) {
 	r.writes++
+	if r.onWrite != nil {
+		r.onWrite()
+	}
 	r.method, r.resource = method, resource
 	encoded, err := json.Marshal(body)
 	if err != nil {

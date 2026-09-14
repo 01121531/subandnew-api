@@ -18,9 +18,12 @@ var SupplierPolicyKeys = []string{
 }
 
 type SupplierPolicyDefault struct {
-	ID       int64          `json:"-" gorm:"primaryKey"`
-	Policy   SupplierPolicy `json:"policy" gorm:"serializer:json;type:text;not null"`
-	Revision int64          `json:"revision" gorm:"not null"`
+	PortalTitle    string          `json:"-" gorm:"type:varchar(256);not null;default:工作台"`
+	UploadMethods  map[string]bool `json:"-" gorm:"serializer:json;type:text"`
+	PortalRevision int64           `json:"-" gorm:"not null;default:1"`
+	ID             int64           `json:"-" gorm:"primaryKey"`
+	Policy         SupplierPolicy  `json:"policy" gorm:"serializer:json;type:text;not null"`
+	Revision       int64           `json:"revision" gorm:"not null"`
 }
 
 func (SupplierPolicyDefault) TableName() string { return "supplier_policy_defaults" }

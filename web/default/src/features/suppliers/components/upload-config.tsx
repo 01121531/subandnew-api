@@ -108,6 +108,7 @@ export function UploadConfig(props: {
           props.onSubmit(
             {
               ...data,
+              portal_revision: props.options.portal_revision,
               naming_revision: props.options.effective_naming?.version,
             },
             credentials
@@ -121,7 +122,7 @@ export function UploadConfig(props: {
           id='upload-method'
           label={t('supplier.addMethod')}
           layout='methods'
-          options={(['login', 'setup_token', 'rt', 'sk'] as const).map(
+          options={(props.options.allowed_upload_methods ?? []).map(
             (method) => ({
               value: method,
               label: t(`supplier.method_${method}`),

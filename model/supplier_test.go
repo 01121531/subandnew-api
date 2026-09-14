@@ -22,6 +22,32 @@ func supplierModelDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+type legacySupplierPolicyDefault struct {
+	ID       int64          `gorm:"primaryKey"`
+	Policy   SupplierPolicy `gorm:"serializer:json;type:text;not null"`
+	Revision int64          `gorm:"not null"`
+}
+
+func (legacySupplierPolicyDefault) TableName() string { return "supplier_policy_defaults" }
+
+func TestSupplierPortalSettingsUpgradePreservesExistingPolicy(t *testing.T) {
+	db := supplierModelDB(t)
+	require.NoError(t, db.AutoMigrate(&legacySupplierPolicyDefault{}))
+	old := legacySupplierPolicyDefault{ID: 1, Policy: InitialSupplierPolicy(), Revision: 7}
+	require.NoError(t, db.Create(&old).Error)
+	for i := 0; i < 2; i++ {
+		require.NoError(t, db.AutoMigrate(&SupplierPolicyDefault{}, &SupplierBinding{}))
+		require.NoError(t, MigrateSupplierPolicies(db))
+	}
+	var got SupplierPolicyDefault
+	require.NoError(t, db.First(&got, 1).Error)
+	require.Equal(t, old.Policy, got.Policy)
+	require.Equal(t, int64(7), got.Revision)
+	require.Equal(t, "工作台", got.PortalTitle)
+	require.Equal(t, int64(1), got.PortalRevision)
+	require.Nil(t, got.UploadMethods)
+}
+
 func TestSupplierModelUniqueIdentitySurvivesSoftDelete(t *testing.T) {
 	db := supplierModelDB(t)
 	s := Supplier{Name: "Vendor", Username: "vendor", PasswordHash: "test-hash", Enabled: true, ViewAccounts: true, ViewUsage: true}

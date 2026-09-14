@@ -73,6 +73,9 @@ func (s *Service) ImportAccounts(ctx context.Context, p *Principal, kind string,
 	if current.EffectiveNaming.Version != in.NamingRevision {
 		return nil, fail(409, "supplier_naming_changed")
 	}
+	if _, err := s.checkUploadMethod(kind, in.PortalRevision); err != nil {
+		return nil, err
+	}
 	defer s.invalidate(b)
 	result, err := remote.Write(ctx, "POST", "account-upload/import-"+kind, body)
 	if err == nil && result != nil {

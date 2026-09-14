@@ -14,19 +14,38 @@ const fixture: AuthSession = {
   csrf_token: 'fixture-csrf',
   supplier: {
     id: 1,
-    name: 'Fixture',
-    username: 'fixture',
-    enabled: true,
     view_accounts: true,
     view_usage: true,
     manage_proxies: false,
     upload_accounts: false,
-    created_at: 0,
-    updated_at: 0,
   },
 }
 
 describe('isolated supplier session cache', () => {
+  test('a new portal configuration revision discards stale binding and upload options', async () => {
+    const portal = {
+      title: 'Workspace',
+      revision: 1,
+      upload_methods: { login: true, setup_token: true, rt: true, sk: true },
+    }
+    globalThis.fetch = mock(async () =>
+      Response.json({ success: true, data: { ...fixture, portal } })
+    ) as unknown as typeof fetch
+    await supplierClient.fetchQuery(sessionOptions)
+    supplierClient.setQueryData(['supplier', 'upload-options', 7], {
+      oldOptions: true,
+    })
+    globalThis.fetch = mock(async () =>
+      Response.json({
+        success: true,
+        data: { ...fixture, portal: { ...portal, revision: 2 } },
+      })
+    ) as unknown as typeof fetch
+    await supplierClient.fetchQuery(sessionOptions)
+    expect(
+      supplierClient.getQueryData(['supplier', 'upload-options', 7])
+    ).toBeUndefined()
+  })
   test('logout removes all supplier data and leaves no authenticated session', () => {
     supplierClient.setQueryData(sessionOptions.queryKey, fixture)
     supplierClient.setQueryData(['supplier', 'accounts', 7], {

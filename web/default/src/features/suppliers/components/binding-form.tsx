@@ -96,6 +96,7 @@ export function BindingForm(props: {
   const form = useForm<BindingInput>({
     resolver: zodResolver(schema),
     defaultValues: {
+      display_name: props.binding?.display_name ?? '',
       instance_id: props.binding?.instance_id ?? 0,
       identifier: '',
       password: '',
@@ -209,6 +210,24 @@ export function BindingForm(props: {
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
+              </Field>
+              <Field
+                id='binding-display-name'
+                label={t('supplier.bindingDisplayName')}
+                error={
+                  form.formState.errors.display_name
+                    ? t('supplier.portalTextInvalid')
+                    : undefined
+                }
+              >
+                <Input
+                  id='binding-display-name'
+                  aria-invalid={!!form.formState.errors.display_name}
+                  {...form.register('display_name')}
+                />
+                <p className='text-muted-foreground text-xs'>
+                  {t('supplier.bindingDisplayNameHint')}
+                </p>
               </Field>
               <Field
                 id='binding-identifier'

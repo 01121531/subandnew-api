@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { validPortalText } from './portal-settings'
+
 export const loginSchema = z.object({
   username: z.string().trim().min(1),
   password: z.string().min(1),
@@ -32,6 +34,10 @@ export const supplierDefaults = {
   upload_accounts: false,
 }
 export const bindingSchema = z.object({
+  display_name: z
+    .string()
+    .refine((value) => validPortalText(value, true))
+    .optional(),
   instance_id: z.number().int().positive(),
   identifier: z.string().trim(),
   password: z.string(),

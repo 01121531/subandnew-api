@@ -128,6 +128,12 @@ func (s *Service) Read(ctx context.Context, p *Principal, bindingID int64, resou
 	redactPolicy(result, resource, current.EffectivePolicy, q)
 	if resource == "account-upload/options" {
 		result["effective_naming"] = current.EffectiveNaming
+		settings, err := s.PortalSettings()
+		if err != nil {
+			return nil, err
+		}
+		result["allowed_upload_methods"] = allowedUploadMethods(settings, *current)
+		result["portal_revision"] = settings.Revision
 	}
 	return result, nil
 }

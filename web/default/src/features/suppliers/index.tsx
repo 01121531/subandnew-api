@@ -35,6 +35,7 @@ import {
 } from './components/common'
 import { DefaultPolicyDialog } from './components/default-policy'
 import { NamingSummary } from './components/naming-summary'
+import { PortalSettingsDialog } from './components/portal-settings'
 import { ResetPassword } from './components/reset-password'
 import { SupplierActions } from './components/supplier-actions'
 import { SupplierForm } from './components/supplier-form'
@@ -59,6 +60,7 @@ export function Suppliers() {
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState(false)
   const [defaultsOpen, setDefaultsOpen] = useState(false)
+  const [portalSettingsOpen, setPortalSettingsOpen] = useState(false)
   const [detail, setDetail] = useState<{
     supplier: Supplier
     view: 'bindings' | 'audits' | 'edit'
@@ -105,6 +107,12 @@ export function Suppliers() {
   )
   return (
     <div className='supplier-portal flex min-h-0 flex-1 flex-col'>
+      {portalSettingsOpen && (
+        <PortalSettingsDialog
+          canManage={canManage}
+          onClose={() => setPortalSettingsOpen(false)}
+        />
+      )}
       {defaultsOpen && (
         <DefaultPolicyDialog
           canManage={canManage}
@@ -114,6 +122,10 @@ export function Suppliers() {
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('supplier.title')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions className='w-full justify-start sm:w-auto sm:justify-end'>
+          <Button variant='outline' onClick={() => setPortalSettingsOpen(true)}>
+            <Settings />
+            {t('supplier.portalSettings')}
+          </Button>
           <Button variant='outline' onClick={() => setDefaultsOpen(true)}>
             <Settings />
             {t('supplier.defaultPolicy')}

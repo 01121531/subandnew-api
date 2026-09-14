@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input'
 
 import { Field, QueryState } from './components/common'
 import { useSupplierMutation } from './hooks/use-portal-query'
+import { usePortalTitle } from './hooks/use-portal-title'
 import { errorKey } from './lib/errors'
 import { loginSchema } from './lib/schemas'
 import { portalApi } from './portal-api'
@@ -23,6 +24,7 @@ export function SupplierSignIn() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const session = useQuery(sessionOptions)
+  const title = usePortalTitle(session.data?.portal?.title)
   const [showPassword, setShowPassword] = useState(false)
   const form = useForm({
     resolver: zodResolver(loginSchema),
@@ -38,17 +40,14 @@ export function SupplierSignIn() {
   return (
     <main className='supplier-portal supplier-experience supplier-page text-foreground flex min-h-dvh flex-col gap-8 pb-8'>
       <header className='supplier-topbar flex items-center justify-between gap-3 border-b px-5 py-3 sm:px-8'>
-        <span className='flex items-center gap-2 font-semibold'>
-          <ShieldCheck className='text-primary size-5' />
-          Claude Gateway
+        <span className='flex min-w-0 items-center gap-2 font-semibold [overflow-wrap:anywhere]'>
+          <ShieldCheck className='text-primary size-5 shrink-0' />
+          {title}
         </span>
         <ThemeSwitch contentClassName='supplier-portal supplier-experience' />
       </header>
       <div className='supplier-login-form m-auto w-[calc(100%-2rem)] max-w-[420px] p-6 sm:p-8'>
         <div className='mb-8 grid gap-3'>
-          <p className='text-muted-foreground text-sm'>
-            {t('supplier.portal')}
-          </p>
           <h1 className='text-2xl font-semibold'>{t('supplier.signIn')}</h1>
         </div>
         <QueryState

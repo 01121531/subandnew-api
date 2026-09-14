@@ -20,6 +20,24 @@ export interface DefaultPolicy {
   policy: PolicyOverrides
   revision: number
 }
+export interface PortalSettings {
+  title: string
+  upload_methods: Record<UploadMethod, boolean>
+  revision: number
+}
+export type PortalSupplier = Pick<
+  Supplier,
+  'id' | 'view_accounts' | 'view_usage' | 'manage_proxies' | 'upload_accounts'
+>
+export interface PortalBinding {
+  id: number
+  display_name: string
+  enabled: boolean
+  effective_policy?: EffectivePolicy
+  effective_naming?: EffectiveNaming
+  allowed_upload_methods: UploadMethod[]
+  portal_revision: number
+}
 export interface Supplier {
   naming_rule?: NamingRule | null
   effective_naming?: EffectiveNaming
@@ -50,6 +68,7 @@ export type SupplierInput = Pick<Supplier, 'name' | 'username' | 'enabled'> &
     naming_revision?: string
   }
 export interface Binding {
+  display_name?: string | null
   naming_override?: NamingRule | null
   effective_naming?: EffectiveNaming
   id: number
@@ -62,6 +81,7 @@ export interface Binding {
   effective_policy?: EffectivePolicy
 }
 export interface BindingInput {
+  display_name?: string
   naming_override?: NamingRule | null
   naming_revision?: string
   instance_id: number
@@ -94,8 +114,13 @@ export interface Snapshot {
   stale: boolean
 }
 export type Session =
-  | { authenticated: true; supplier: Supplier; csrf_token: string }
-  | { authenticated: false }
+  | {
+      authenticated: true
+      supplier: PortalSupplier
+      csrf_token: string
+      portal?: PortalSettings
+    }
+  | { authenticated: false; portal?: Pick<PortalSettings, 'title'> }
 export type AuthSession = Extract<Session, { authenticated: true }>
 export interface Account {
   id: string
@@ -175,6 +200,8 @@ export interface PolicyTemplate {
   >
 }
 export interface UploadOptions extends Snapshot {
+  allowed_upload_methods?: UploadMethod[]
+  portal_revision?: number
   effective_naming?: EffectiveNaming
   groups: Array<{ id: string; name: string }>
   policies: PolicyTemplate[]
@@ -182,6 +209,7 @@ export interface UploadOptions extends Snapshot {
   proxies: Array<{ id: string; name: string; host: string; port: number }>
 }
 export interface UploadInput {
+  portal_revision?: number
   name_time_mode?: NameTimeMode
   naming_revision?: string
   oauth_flow?: 'login' | 'setup_token'

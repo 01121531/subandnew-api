@@ -62,7 +62,8 @@ func (s *Service) SaveDefaultPolicy(policy model.SupplierPolicy, revision int64)
 		if old.Revision != revision {
 			return fail(409, "supplier_policy_changed")
 		}
-		result = model.SupplierPolicyDefault{ID: 1, Policy: policy, Revision: old.Revision + 1}
+		result = old
+		result.Policy, result.Revision = policy, old.Revision+1
 		changes = policyChanges(old.Policy, policy)
 		var suppliers []model.Supplier
 		if err := tx.Find(&suppliers).Error; err != nil {
@@ -158,7 +159,11 @@ func (s *Service) saveBindingPolicy(supplierID, id int64, in BindingInput) (*mod
 		if err := updateBindingNaming(&b, owner, in); err != nil {
 			return err
 		}
-		if in.PolicyOverrides != nil {
+		if in.DisplayName != nil {
+			b.DisplayName = in.DisplayName
+		}
+		policyChanged := in.PolicyOverrides != nil && policyChanges(b.PolicyOverrides, *in.PolicyOverrides) != ""
+		if policyChanged {
 			b.PolicyChanges = policyChanges(b.PolicyOverrides, *in.PolicyOverrides)
 			b.PolicyOverrides = *in.PolicyOverrides
 			if b.PolicyOverrides == nil {
@@ -166,11 +171,12 @@ func (s *Service) saveBindingPolicy(supplierID, id int64, in BindingInput) (*mod
 			}
 			b.PolicyVersion++
 		}
+		enabledChanged := in.Enabled != nil && *in.Enabled != b.Enabled
 		b.Enabled = boolean(in.Enabled, b.Enabled)
 		if err := tx.Save(&b).Error; err != nil {
 			return err
 		}
-		if in.PolicyOverrides == nil && in.Enabled == nil {
+		if !policyChanged && !enabledChanged {
 			if b.NamingChanges == "" {
 				return nil
 			}

@@ -5,15 +5,15 @@ import { Button } from '@/components/ui/button'
 import { NativeSelectOption } from '@/components/ui/native-select'
 
 import type { portalViews } from '../lib/portal-views'
-import type { Binding } from '../types'
+import type { PortalBinding } from '../types'
 import { SelectField } from './common'
 
 export function PortalNavigation(props: {
   mobile: boolean
-  name: string
+  title: string
   views: ReturnType<typeof portalViews>
   current: string
-  bindings: Binding[]
+  bindings: PortalBinding[]
   bindingId: number
   disabled: boolean
   onBinding: (id: number) => void
@@ -25,12 +25,8 @@ export function PortalNavigation(props: {
       <div className='flex min-h-20 items-center gap-3 border-b px-4 py-4'>
         <ShieldCheck className='text-primary size-6 shrink-0' />
         <div className='min-w-0'>
-          <p className='text-sm font-semibold'>Claude Gateway</p>
-          <p
-            className='text-muted-foreground text-xs [overflow-wrap:anywhere] break-words'
-            title={props.name}
-          >
-            {props.name}
+          <p className='text-sm font-semibold [overflow-wrap:anywhere]'>
+            {props.title}
           </p>
         </div>
       </div>
@@ -47,7 +43,7 @@ export function PortalNavigation(props: {
           </NativeSelectOption>
           {props.bindings.map((item) => (
             <NativeSelectOption key={item.id} value={item.id}>
-              {item.instance_name}
+              {item.display_name}
             </NativeSelectOption>
           ))}
         </SelectField>

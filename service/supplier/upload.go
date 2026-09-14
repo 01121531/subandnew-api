@@ -17,6 +17,7 @@ import (
 var resourceID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 type UploadInput struct {
+	PortalRevision int64    `json:"portal_revision,omitempty"`
 	OAuthFlow      string   `json:"oauth_flow,omitempty"`
 	BindingID      int64    `json:"binding_id"`
 	Name           string   `json:"name"`
@@ -88,6 +89,11 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	if err != nil {
 		return nil, err
 	}
+	settings, err := s.checkUploadMethod(in.OAuthFlow, in.PortalRevision)
+	if err != nil {
+		return nil, err
+	}
+	in.PortalRevision = settings.Revision
 	c, err := cipher()
 	if err != nil {
 		return nil, fail(503, "supplier_encryption_unavailable")
@@ -116,6 +122,9 @@ func (s *Service) StartUpload(ctx context.Context, p *Principal, in UploadInput)
 	flow := model.SupplierOAuthFlow{TokenHash: digest(raw), SupplierID: p.Supplier.ID, SessionID: p.Session.ID, BindingID: b.ID, BindingRevision: b.Revision, ExpiresAt: s.Now().Add(10 * time.Minute).Unix()}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPolicy(tx); err != nil {
+			return err
+		}
+		if _, err := (&Service{DB: tx}).checkUploadMethod(in.OAuthFlow, in.PortalRevision); err != nil {
 			return err
 		}
 		current, err := (&Service{DB: tx, Now: s.Now}).authorize(p, b.ID, "upload")
@@ -209,6 +218,9 @@ func (s *Service) Exchange(ctx context.Context, p *Principal, flowToken, callbac
 	if json.Unmarshal([]byte(payload.Secret), &frozen) != nil {
 		return nil, fail(500, "supplier_invalid_oauth_flow")
 	}
+	if _, err := s.checkUploadMethod(frozen.Parameters.OAuthFlow, 0); err != nil {
+		return nil, err
+	}
 	code, err := callbackCode(callback, frozen.State)
 	if err != nil {
 		return nil, err
@@ -220,6 +232,9 @@ func (s *Service) Exchange(ctx context.Context, p *Principal, flowToken, callbac
 	// Consume before dispatch: an uncertain network result must never replay an exchange.
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := lockPolicy(tx); err != nil {
+			return err
+		}
+		if _, err := (&Service{DB: tx}).checkUploadMethod(frozen.Parameters.OAuthFlow, 0); err != nil {
 			return err
 		}
 		current, err := (&Service{DB: tx, Now: s.Now}).authorize(p, b.ID, "upload")

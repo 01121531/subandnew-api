@@ -59,6 +59,8 @@ func TestSupplierPortalCookieIsolationAndCSRF(t *testing.T) {
 	probe := supplierControllerRequest(r, "GET", "/supplier-api/v1/auth/session", "", nil, "", "")
 	require.Equal(t, 200, probe.Code)
 	require.Contains(t, probe.Body.String(), `"authenticated":false`)
+	require.Contains(t, probe.Body.String(), `"title":"工作台"`)
+	require.NotContains(t, probe.Body.String(), "upload_methods")
 	consoleCookie := &http.Cookie{Name: "session", Value: "not-a-supplier-session"}
 	require.Equal(t, 401, supplierControllerRequest(r, "GET", "/supplier-api/v1/accounts?binding_id=1", "", consoleCookie, "", "").Code)
 	loginBody := `{"username":"vendor@example.com","password":"test-password-42"}`
@@ -84,6 +86,9 @@ func TestSupplierPortalCookieIsolationAndCSRF(t *testing.T) {
 	require.Len(t, response.Data.CSRF, 64)
 	require.NotContains(t, login.Body.String(), "password_hash")
 	require.NotContains(t, login.Body.String(), "test-password-42")
+	require.NotContains(t, login.Body.String(), "Test supplier")
+	require.NotContains(t, login.Body.String(), "vendor@example.com")
+	require.Contains(t, login.Body.String(), "upload_methods")
 	require.Equal(t, 403, supplierControllerRequest(r, "POST", "/supplier-api/v1/auth/logout", `{}`, cookie, "", "").Code)
 	require.Equal(t, 403, supplierControllerRequest(r, "POST", "/supplier-api/v1/auth/logout", `{}`, cookie, response.Data.CSRF, "https://attacker.example").Code)
 	logout := supplierControllerRequest(r, "POST", "/supplier-api/v1/auth/logout", `{}`, cookie, response.Data.CSRF, "https://portal.example")

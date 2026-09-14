@@ -4,7 +4,7 @@ import type {
   AccountPage,
   AccountQuery,
   AccountSummary,
-  Binding,
+  PortalBinding,
   Envelope,
   ImportResult,
   OAuthFlow,
@@ -112,7 +112,7 @@ export const portalApi = {
     body: { current_password: string; password: string }
   ) => request<unknown>('/auth/password', { method: 'POST', csrf, body }),
   bindings: (signal?: AbortSignal, refresh = false) =>
-    request<Binding[]>(`/bindings?${params({}, refresh)}`, { signal }),
+    request<PortalBinding[]>(`/bindings?${params({}, refresh)}`, { signal }),
   accounts: (query: AccountQuery, signal?: AbortSignal, refresh = false) =>
     request<AccountPage>(`/accounts?${params(query, refresh)}`, { signal }),
   summary: (binding_id: number, signal?: AbortSignal, refresh = false) =>

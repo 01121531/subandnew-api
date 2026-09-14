@@ -5,6 +5,7 @@ import { portalApi } from './portal-api'
 import type { Session } from './types'
 
 let currentSupplierId: number | null = null
+let currentPortalRevision: number | undefined
 
 // This cache never shares console credentials, auth redirects, or supplier data with the console client.
 export const supplierClient = new QueryClient({
@@ -22,12 +23,20 @@ export const supplierClient = new QueryClient({
       if (query.queryKey[0] !== 'supplier-session') return
       const session = data as Session
       const id = session.authenticated ? session.supplier.id : null
-      if (id !== currentSupplierId || !session.authenticated) {
+      const revision = session.authenticated
+        ? session.portal?.revision
+        : undefined
+      if (
+        id !== currentSupplierId ||
+        !session.authenticated ||
+        revision !== currentPortalRevision
+      ) {
         void supplierClient.cancelQueries({ queryKey: ['supplier'] })
         supplierClient.removeQueries({ queryKey: ['supplier'] })
         supplierClient.getMutationCache().clear()
       }
       currentSupplierId = id
+      currentPortalRevision = revision
     },
   }),
 })

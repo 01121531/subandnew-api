@@ -1,8 +1,8 @@
 import { BarChart3, KeyRound, Network, Users } from 'lucide-react'
 
-import type { Supplier } from '../types'
+import type { PortalSupplier } from '../types'
 
-export function portalViews(supplier: Supplier) {
+export function portalViews(supplier: PortalSupplier) {
   return [
     {
       id: 'accounts',

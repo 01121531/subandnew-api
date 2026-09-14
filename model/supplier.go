@@ -27,6 +27,7 @@ type Supplier struct {
 }
 
 type SupplierBinding struct {
+	DisplayName     *string                  `json:"display_name" gorm:"type:varchar(256)"`
 	ID              int64                    `json:"id" gorm:"primaryKey"`
 	SupplierID      int64                    `json:"supplier_id" gorm:"not null;uniqueIndex:uidx_supplier_instance"`
 	InstanceID      int64                    `json:"instance_id" gorm:"not null;uniqueIndex:uidx_supplier_instance;uniqueIndex:uidx_supplier_remote"`

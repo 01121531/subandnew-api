@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -13,10 +14,10 @@ import {
 import { useSupplierUploadPreferences } from '@/stores/supplier-upload-preferences'
 
 import { usePortalQuery, useSupplierMutation } from '../hooks/use-portal-query'
-import { errorKey, sessionExpired } from '../lib/errors'
+import { errorKey, sessionExpired, uploadSettingsChanged } from '../lib/errors'
 import { safeOAuthUrl, timestampMs } from '../lib/schemas'
 import { portalApi, SupplierRequestError } from '../portal-api'
-import { clearSupplierSession } from '../session'
+import { clearSupplierSession, sessionOptions } from '../session'
 import type {
   AccountImportCredentials,
   AccountImportResult,
@@ -38,7 +39,9 @@ export function UploadWizard(props: {
 }) {
   const { t } = useTranslation()
   const client = useQueryClient()
-  const [method, setMethod] = useState<UploadMethod>('login')
+  const [selectedMethod, setMethod] = useState<UploadMethod>('login')
+  const [formEpoch, setFormEpoch] = useState(0)
+  const [loadedRevision, setLoadedRevision] = useState<number>()
   const [draft, setDraft] = useState<UploadInput>()
   const [importResult, setImportResult] = useState<AccountImportResult | null>(
     null
@@ -50,6 +53,10 @@ export function UploadWizard(props: {
     ['upload-options', props.bindingId],
     (signal, refresh) => portalApi.options(props.bindingId, signal, refresh)
   )
+  const methods = options.data?.allowed_upload_methods ?? []
+  const method = methods.includes(selectedMethod)
+    ? selectedMethod
+    : (methods[0] ?? 'login')
   const [flow, setFlow] = useState<OAuthFlow | null>(null)
   const [callback, setCallback] = useState('')
   const [completed, setCompleted] = useState(false)
@@ -93,6 +100,12 @@ export function UploadWizard(props: {
       }
     } catch (error) {
       if (sessionExpired(error)) clearSupplierSession()
+      if (uploadSettingsChanged(error)) {
+        setDraft(undefined)
+        setFormEpoch((value) => value + 1)
+        options.refresh()
+        void client.invalidateQueries({ queryKey: sessionOptions.queryKey })
+      }
       setImportError(errorKey(error))
     } finally {
       importLock.current = false
@@ -136,6 +149,40 @@ export function UploadWizard(props: {
     (!Number.isFinite(timestampMs(flow.expires_at)) ||
       timestampMs(flow.expires_at) <= now)
   const pending = authorize.isPending || exchange.isPending || importing
+  const settingsError =
+    uploadSettingsChanged(authorize.error) ||
+    uploadSettingsChanged(exchange.error)
+  const optionsRevision = options.data?.portal_revision
+  useEffect(() => {
+    if (pending) return
+    const changed =
+      loadedRevision !== undefined &&
+      optionsRevision !== undefined &&
+      loadedRevision !== optionsRevision
+    if (optionsRevision !== undefined) setLoadedRevision(optionsRevision)
+    if (!settingsError && !changed) return
+    setDraft(undefined)
+    setFlow(null)
+    setCallback('')
+    submitted.current = null
+    setDirty(false)
+    setFormEpoch((value) => value + 1)
+    if (changed) toast.info(t('supplier.uploadSettingsChanged'))
+    authorize.reset()
+    exchange.reset()
+    options.refresh()
+    void client.invalidateQueries({ queryKey: sessionOptions.queryKey })
+  }, [
+    settingsError,
+    pending,
+    loadedRevision,
+    optionsRevision,
+    authorize,
+    exchange,
+    options,
+    client,
+    t,
+  ])
   const close = () => {
     if (pending) return
     if (!completed && (dirty || flow || callback)) setConfirmClose(true)
@@ -255,8 +302,14 @@ export function UploadWizard(props: {
                   refresh={options.refresh}
                 />
               </div>
-              {options.data && (
+              {options.data && methods.length === 0 && (
+                <p role='status' className='text-muted-foreground text-sm'>
+                  {t('supplier.noUploadMethods')}
+                </p>
+              )}
+              {options.data && methods.length > 0 && (
                 <UploadConfig
+                  key={`${formEpoch}-${options.data.portal_revision ?? 0}`}
                   supplierId={props.supplierId}
                   method={method}
                   initial={draft}
@@ -310,7 +363,12 @@ export function UploadWizard(props: {
             <Button
               type='submit'
               form='supplier-upload-config'
-              disabled={pending || !options.data || !!options.error}
+              disabled={
+                pending ||
+                !options.data ||
+                !!options.error ||
+                methods.length === 0
+              }
             >
               {t(submitLabel)}
             </Button>

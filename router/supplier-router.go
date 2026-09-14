@@ -17,6 +17,8 @@ func registerSupplierRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	admin.GET("/instances", manage, controller.ListSupplierInstances)
 	admin.GET("/default-policy", view, controller.GetSupplierDefaultPolicy)
 	admin.PUT("/default-policy", manage, controller.SaveSupplierDefaultPolicy)
+	admin.GET("/portal-settings", view, controller.GetSupplierPortalSettings)
+	admin.PUT("/portal-settings", manage, controller.SaveSupplierPortalSettings)
 	admin.GET("/:id", view, controller.GetSupplier)
 	admin.PUT("/:id", manage, controller.SaveSupplier)
 	admin.DELETE("/:id", manage, controller.DeleteSupplier)

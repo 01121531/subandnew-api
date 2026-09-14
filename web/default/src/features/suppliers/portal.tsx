@@ -17,6 +17,7 @@ import { Proxies } from './components/proxies'
 import { UploadWizard } from './components/upload-wizard'
 import { UsageView } from './components/usage'
 import { usePortalQuery, useSupplierMutation } from './hooks/use-portal-query'
+import { usePortalTitle } from './hooks/use-portal-title'
 import { bindingCapabilities } from './lib/permissions'
 import { portalViews } from './lib/portal-views'
 import { portalApi } from './portal-api'
@@ -27,6 +28,7 @@ import '@/styles/supplier-portal.css'
 
 export function SupplierPortal() {
   const session = useQuery(sessionOptions)
+  usePortalTitle(session.data?.portal?.title)
   if (session.data && !session.data.authenticated) {
     return <Navigate to='/supplier/sign-in' replace />
   }
@@ -64,12 +66,17 @@ function PortalContent(props: { session: AuthSession }) {
     props.session.supplier,
     binding?.effective_policy
   )
+  supplier.upload_accounts =
+    supplier.upload_accounts &&
+    (binding?.allowed_upload_methods ?? []).some(
+      (method) => props.session.portal?.upload_methods[method]
+    )
   const views = portalViews(supplier)
   const current = views.find((item) => item.id === view)?.id ?? views[0].id
   const navigation = (mobile: boolean) => (
     <PortalNavigation
       mobile={mobile}
-      name={supplier.name}
+      title={props.session.portal?.title ?? t('supplier.workspaceTitle')}
       views={views}
       current={current}
       bindings={available}
@@ -111,11 +118,11 @@ function PortalContent(props: { session: AuthSession }) {
             <Menu />
           </Button>
           <div className='min-w-0 flex-1'>
-            <p className='text-muted-foreground text-xs'>
-              {t('supplier.portal')}
+            <p className='text-muted-foreground text-xs [overflow-wrap:anywhere]'>
+              {props.session.portal?.title ?? t('supplier.workspaceTitle')}
             </p>
             <p className='text-sm font-medium [overflow-wrap:anywhere] break-words'>
-              {binding?.instance_name ?? supplier.name}
+              {binding?.display_name ?? t('supplier.chooseBinding')}
             </p>
           </div>
           <ThemeSwitch contentClassName='supplier-portal supplier-experience' />
@@ -192,10 +199,10 @@ function PortalContent(props: { session: AuthSession }) {
       </div>
       {uploadOpen && binding && supplier.upload_accounts && (
         <UploadWizard
-          key={binding.id}
+          key={`${binding.id}-${props.session.portal?.revision ?? 0}`}
           supplierId={supplier.id}
           bindingId={binding.id}
-          bindingName={binding.instance_name}
+          bindingName={binding.display_name}
           csrf={props.session.csrf_token}
           onClose={() => setUploadOpen(false)}
         />

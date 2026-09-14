@@ -1,4 +1,17 @@
 export const supplierZh = {
+  workspaceTitle: '工作台',
+  portalSettings: '门户设置',
+  portalTitle: '页面标题',
+  uploadMethods: '允许的上传方式',
+  portalTextInvalid:
+    '请输入不含控制字符的文本，标题须为 1～64 个字符，对外名称可留空。',
+  portalMethodsInvalid: '请完整设置四种上传方式。',
+  portalSettingsHint:
+    '对所有供货商统一生效。修改上传方式将使未完成的授权失效；全部关闭后不再提供上传入口。',
+  bindingDisplayName: '对外名称',
+  bindingDisplayNameHint: '供货商仅看到此名称；留空时显示固定的线路编号。',
+  uploadSettingsChanged: '上传配置已更新或授权已失效，请刷新配置后重新操作。',
+  noUploadMethods: '当前没有可用的上传方式。',
   defaultPolicy: '默认权限',
   policyReset: '全部恢复继承',
   policyInherit: '继承',
@@ -191,7 +204,7 @@ export const supplierZh = {
   loginLinkCopied: '供货商登录地址已复制',
   loginLinkCopyFailed: '复制失败，请手动复制登录入口的链接。',
   portal: '供货商门户',
-  signIn: '登录供货商门户',
+  signIn: '登录',
   username: '用户名',
   password: '密码',
   name: '名称',
@@ -330,6 +343,21 @@ export const supplierZh = {
   permissionConfirm: '确认授予写入权限？供货商将可以执行所选管理操作。',
 }
 export const supplierEn: Record<keyof typeof supplierZh, string> = {
+  workspaceTitle: 'Workspace',
+  portalSettings: 'Portal settings',
+  portalTitle: 'Page title',
+  uploadMethods: 'Allowed upload methods',
+  portalTextInvalid:
+    'Use text without control characters. Titles require 1–64 characters; display names may be empty.',
+  portalMethodsInvalid: 'Configure all four upload methods.',
+  portalSettingsHint:
+    'Applies to all suppliers. Changing upload methods invalidates pending authorizations. Disabling all methods removes the upload entry.',
+  bindingDisplayName: 'Public display name',
+  bindingDisplayNameHint:
+    'Suppliers see only this name. Leave empty to use a stable route number.',
+  uploadSettingsChanged:
+    'Upload settings changed or authorization expired. Refresh the settings and start again.',
+  noUploadMethods: 'No upload methods are currently available.',
   defaultPolicy: 'Default Permissions',
   policyReset: 'Restore All Inheritance',
   policyInherit: 'Inherit',
@@ -534,7 +562,7 @@ export const supplierEn: Record<keyof typeof supplierZh, string> = {
   loginLinkCopied: 'Supplier sign-in URL copied',
   loginLinkCopyFailed: 'Could not copy. Copy the sign-in link manually.',
   portal: 'Supplier portal',
-  signIn: 'Sign in to supplier portal',
+  signIn: 'Sign in',
   username: 'Username',
   password: 'Password',
   name: 'Name',

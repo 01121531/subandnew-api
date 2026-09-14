@@ -37,7 +37,7 @@ func LoginSupplierPortal(c *gin.Context) {
 	}
 	c.Set("supplier_id", p.Supplier.ID)
 	supplierCookie(c, raw, int(supplier.SessionTTL.Seconds()))
-	supplierSuccess(c, gin.H{"authenticated": true, "supplier": p.Supplier, "csrf_token": supplier.CSRF(raw)})
+	supplierPortalSessionResponse(c, p, raw)
 }
 func GetSupplierPortalSession(c *gin.Context) {
 	raw, _ := c.Cookie(supplierCookieName)
@@ -51,11 +51,23 @@ func GetSupplierPortalSession(c *gin.Context) {
 		if raw != "" {
 			supplierCookie(c, "", -1)
 		}
-		supplierSuccess(c, gin.H{"authenticated": false})
+		supplierPortalSessionResponse(c, nil, "")
 		return
 	}
 	c.Set("supplier_id", p.Supplier.ID)
-	supplierSuccess(c, gin.H{"authenticated": true, "supplier": p.Supplier, "csrf_token": supplier.CSRF(raw)})
+	supplierPortalSessionResponse(c, p, raw)
+}
+func supplierPortalSessionResponse(c *gin.Context, p *supplier.Principal, raw string) {
+	settings, err := supplierService().PortalSettings()
+	if err != nil {
+		supplierFailure(c, err)
+		return
+	}
+	if p == nil {
+		supplierSuccess(c, gin.H{"authenticated": false, "portal": gin.H{"title": settings.Title}})
+		return
+	}
+	supplierSuccess(c, gin.H{"authenticated": true, "supplier": supplier.PortalIdentity(p.Supplier), "csrf_token": supplier.CSRF(raw), "portal": settings})
 }
 func LogoutSupplierPortal(c *gin.Context) {
 	p, ok := supplierPrincipal(c, true)
@@ -93,7 +105,7 @@ func ListSupplierPortalBindings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := supplierService().Bindings(p.Supplier.ID, true)
+	items, err := supplierService().PortalBindings(p.Supplier.ID)
 	if err != nil {
 		supplierFailure(c, err)
 		return

@@ -2,6 +2,13 @@ import { SupplierRequestError } from '../portal-api'
 
 export function errorKey(error: unknown): string {
   if (error instanceof SupplierRequestError) {
+    if (uploadSettingsChanged(error)) return 'supplier.uploadSettingsChanged'
+    if (error.code === 'supplier_invalid_portal_text') {
+      return 'supplier.portalTextInvalid'
+    }
+    if (error.code === 'supplier_invalid_upload_methods') {
+      return 'supplier.portalMethodsInvalid'
+    }
     if (error.code === 'supplier_naming_changed') {
       return 'supplier.namingChanged'
     }
@@ -79,6 +86,17 @@ export function errorKey(error: unknown): string {
     if (error.status === 403) return 'supplier.forbidden'
   }
   return 'supplier.requestFailed'
+}
+
+export function uploadSettingsChanged(error: unknown): boolean {
+  return (
+    error instanceof SupplierRequestError &&
+    [
+      'supplier_portal_settings_changed',
+      'supplier_upload_method_disabled',
+      'supplier_oauth_flow_expired_or_used',
+    ].includes(error.code)
+  )
 }
 
 export function sessionExpired(error: unknown): boolean {

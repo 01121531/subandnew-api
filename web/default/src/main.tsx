@@ -132,10 +132,16 @@ if (!rootElement) {
       window.location.pathname === '/supplier' ||
       window.location.pathname.startsWith('/supplier/')
     ) {
-      document.title = 'Claude Gateway'
+      document.title = ''
       return
     }
     const apply = (name: string) => {
+      if (
+        window.location.pathname === '/supplier' ||
+        window.location.pathname.startsWith('/supplier/')
+      ) {
+        return
+      }
       document.title = name
       const metaTitle = document.querySelector(
         'meta[name="title"]'

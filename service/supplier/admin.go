@@ -227,6 +227,7 @@ func (s *Service) Password(id int64, password, current string, self bool) error 
 }
 
 type BindingInput struct {
+	DisplayName     *string               `json:"display_name"`
 	InstanceID      int64                 `json:"instance_id"`
 	Identifier      string                `json:"identifier"`
 	Password        string                `json:"password"`
@@ -269,6 +270,13 @@ func (s *Service) Bindings(id int64, active bool) ([]model.SupplierBinding, erro
 	return result, nil
 }
 func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in BindingInput) (*model.SupplierBinding, error) {
+	if in.DisplayName != nil {
+		name, err := portalText(*in.DisplayName, true)
+		if err != nil {
+			return nil, err
+		}
+		in.DisplayName = &name
+	}
 	if _, err := parseNamingOverride(in.NamingOverride); err != nil {
 		return nil, err
 	}
@@ -277,7 +285,7 @@ func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in Bind
 			return nil, err
 		}
 	}
-	if id != 0 && (in.PolicyOverrides != nil || len(in.NamingOverride) > 0) && in.Identifier == "" && in.Password == "" {
+	if id != 0 && (in.DisplayName != nil || in.PolicyOverrides != nil || len(in.NamingOverride) > 0) && in.Identifier == "" && in.Password == "" {
 		return s.saveBindingPolicy(supplierID, id, in)
 	}
 	if _, err := s.Supplier(supplierID); err != nil {
@@ -380,6 +388,9 @@ func (s *Service) SaveBinding(ctx context.Context, supplierID, id int64, in Bind
 		b.PolicyChanges = policyChanges(before, b.PolicyOverrides)
 		b.PolicyVersion++
 		b.InstanceID = in.InstanceID
+		if in.DisplayName != nil {
+			b.DisplayName = in.DisplayName
+		}
 		b.RemoteUserID = identity.ID
 		b.RemoteUsername = identity.Username
 		b.Enabled = boolean(in.Enabled, true)

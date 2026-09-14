@@ -13,6 +13,7 @@ import type {
   SupplierInput,
   TestResult,
   DefaultPolicy,
+  PortalSettings,
 } from './types'
 
 async function request<T>(
@@ -44,6 +45,9 @@ async function request<T>(
 }
 
 export const adminApi = {
+  portalSettings: () => request<PortalSettings>('/portal-settings'),
+  savePortalSettings: (data: PortalSettings) =>
+    request<PortalSettings>('/portal-settings', 'PUT', data),
   get: (id: number) => request<Supplier>(`/${id}`),
   defaults: () => request<DefaultPolicy>('/default-policy'),
   saveDefaults: (data: DefaultPolicy) =>

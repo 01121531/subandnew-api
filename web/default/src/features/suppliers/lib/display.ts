@@ -14,6 +14,8 @@ export function formatNumber(
 
 const auditActions: Record<string, string> = {
   'GET /api/suppliers/default-policy': 'defaultPolicy',
+  'GET /api/suppliers/portal-settings': 'portalSettings',
+  'PUT /api/suppliers/portal-settings': 'portalSettings',
   'PUT /api/suppliers/default-policy': 'defaultPolicy',
   'GET /api/suppliers': 'title',
   'POST /api/suppliers': 'create',

@@ -4,7 +4,7 @@ import type {
   DefaultPolicy,
   EffectivePolicy,
   PolicyOverrides,
-  Supplier,
+  PortalSupplier,
 } from '../types'
 
 export function globalEffectivePolicy(policy: DefaultPolicy): EffectivePolicy {
@@ -74,10 +74,10 @@ export function applyOverrides(
   }
   return result
 }
-export function bindingCapabilities(
-  supplier: Supplier,
+export function bindingCapabilities<T extends PortalSupplier>(
+  supplier: T,
   policy?: EffectivePolicy
-): Supplier {
+): T {
   return {
     ...supplier,
     view_accounts: policy?.values.view_accounts ?? false,
