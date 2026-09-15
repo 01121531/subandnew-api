@@ -40,7 +40,17 @@ type cvvStore struct {
 func newCVVStore() *cvvStore { return &cvvStore{items: make(map[int64]*temporaryCVV)} }
 
 func temporaryCVVEnabled() bool {
-	return os.Getenv("MAILBOX_TEMP_CVV_MODE") == "single_node" && common.IsMasterNode && os.Getenv("NODE_TYPE") != "slave"
+	return temporaryCVVUnavailableReason() == ""
+}
+
+func temporaryCVVUnavailableReason() string {
+	if os.Getenv("MAILBOX_TEMP_CVV_MODE") != "single_node" {
+		return "not_enabled"
+	}
+	if !common.IsMasterNode || os.Getenv("NODE_TYPE") == "slave" {
+		return "node_unsupported"
+	}
+	return ""
 }
 
 func (s *Service) cvvStore() *cvvStore {

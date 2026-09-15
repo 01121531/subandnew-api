@@ -20,14 +20,18 @@ type IssueInput struct {
 	AttachmentIDs []string `json:"attachment_ids"`
 }
 
-func (s *Service) ImportOptions(actor Actor) (map[string]bool, error) {
+func (s *Service) ImportOptions(actor Actor) (map[string]any, error) {
 	if actor.Admin == nil {
 		return nil, fail(403, "mailbox_permission_denied")
 	}
 	if err := s.CheckActor(actor, authz.MailboxManage); err != nil {
 		return nil, err
 	}
-	return map[string]bool{"temporary_cvv_enabled": temporaryCVVEnabled() && actor.Admin.Can(authz.MailboxCredentials)}, nil
+	reason := temporaryCVVUnavailableReason()
+	if !actor.Admin.Can(authz.MailboxCredentials) {
+		reason = "permission_denied"
+	}
+	return map[string]any{"temporary_cvv_enabled": reason == "", "temporary_cvv_unavailable_reason": reason}, nil
 }
 
 type IssueCredentials struct {

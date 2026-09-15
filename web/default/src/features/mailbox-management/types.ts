@@ -15,6 +15,7 @@ export interface Page<T> {
   has_more: boolean
 }
 export interface ListQuery {
+  archived?: boolean
   kind?: string
   assignment_id?: number
   account_type?: AccountType
@@ -25,6 +26,8 @@ export interface ListQuery {
   operator_id?: number
 }
 export interface Account {
+  archived_at?: number
+  archived_by?: number
   account_type?: AccountType
   card_last4?: string
   id: number

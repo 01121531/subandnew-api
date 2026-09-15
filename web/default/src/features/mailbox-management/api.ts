@@ -31,6 +31,7 @@ import type {
   Page,
   ReviewInput,
   Submission,
+  VersionedID,
 } from './types'
 
 const base = '/api/mailbox-management'
@@ -94,13 +95,10 @@ export const mailboxApi = {
       signal
     ),
   importOptions: (signal?: AbortSignal) =>
-    request<{ temporary_cvv_enabled: boolean }>(
-      '/import-options',
-      'GET',
-      undefined,
-      undefined,
-      signal
-    ),
+    request<{
+      temporary_cvv_enabled: boolean
+      temporary_cvv_unavailable_reason?: string
+    }>('/import-options', 'GET', undefined, undefined, signal),
   issues: async (query: ListQuery, signal?: AbortSignal) =>
     pageMetadata(
       await request<Page<Issue>>('/issues', 'GET', undefined, query, signal),
@@ -187,6 +185,11 @@ export const mailboxApi = {
     request<unknown>('/assignments', 'POST', {
       ...input,
       account_type: input.account_type ?? 'refund',
+    }),
+  archive: (accountType: AccountType, items: VersionedID[], restore: boolean) =>
+    request<unknown>(`/accounts/${restore ? 'restore' : 'archive'}`, 'POST', {
+      account_type: accountType,
+      items,
     }),
   credentials: (
     id: number,

@@ -118,6 +118,11 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 		return nil, err
 	}
 	if !preview.Valid {
+		for _, issue := range preview.Issues {
+			if issue.Code == "mailbox_import_archived" {
+				return nil, fail(409, "mailbox_import_archived")
+			}
+		}
 		return nil, fail(400, "mailbox_import_invalid")
 	}
 	cipher, err := s.Cipher()
@@ -158,6 +163,10 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 				return fail(500, "mailbox_service_unavailable")
 			}
 			if insert.RowsAffected != 1 {
+				var existing model.MailboxAccount
+				if err := tx.Select("archived_at").Where("account_type = ? AND email = ?", s.pool(), row.email).First(&existing).Error; err == nil && existing.ArchivedAt != 0 {
+					return fail(409, "mailbox_import_archived")
+				}
 				return fail(409, "mailbox_import_conflict")
 			}
 			encoded, err := json.Marshal(row.secret)
@@ -392,14 +401,18 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		emails = append(emails, email)
 	}
 	for start := 0; start < len(emails); start += 200 {
-		var existing []string
-		if err := s.DB.Model(&model.MailboxAccount{}).Where("account_type = ?", s.pool()).Where("LOWER(email) IN ?", emails[start:min(start+200, len(emails))]).Pluck("email", &existing).Error; err != nil {
+		var existing []model.MailboxAccount
+		if err := s.DB.Select("email", "archived_at").Where("account_type = ?", s.pool()).Where("LOWER(email) IN ?", emails[start:min(start+200, len(emails))]).Find(&existing).Error; err != nil {
 			return nil, nil, fail(500, "mailbox_service_unavailable")
 		}
-		for _, email := range existing {
+		for _, account := range existing {
 			for _, row := range preview.Rows {
-				if row.Email == strings.ToLower(email) {
-					addIssue(row.Row, "mailbox_import_exists")
+				if row.Email == strings.ToLower(account.Email) {
+					code := "mailbox_import_exists"
+					if account.ArchivedAt != 0 {
+						code = "mailbox_import_archived"
+					}
+					addIssue(row.Row, code)
 				}
 			}
 		}

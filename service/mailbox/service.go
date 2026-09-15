@@ -155,6 +155,14 @@ func (s *Service) AccountForActor(actor Actor, id int64, credentials bool, accou
 		}
 		return nil, err
 	}
+	if account.ArchivedAt != 0 {
+		if credentials {
+			return nil, fail(403, "mailbox_account_archived")
+		}
+		if actor.Admin == nil {
+			return nil, fail(404, "mailbox_not_found")
+		}
+	}
 	if actor.Admin != nil {
 		return &account, nil
 	}
@@ -206,6 +214,7 @@ type Page[T any] struct {
 	HasMore  bool  `json:"has_more"`
 }
 type ListQuery struct {
+	Archived     bool
 	Kind         string
 	AssignmentID int64
 	AccountType  string `json:"account_type"`

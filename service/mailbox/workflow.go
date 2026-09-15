@@ -14,6 +14,8 @@ import (
 )
 
 type AccountView struct {
+	ArchivedAt           int64  `json:"archived_at"`
+	ArchivedBy           int    `json:"archived_by"`
 	TemporaryCVVID       string `json:"temporary_cvv_id,omitempty"`
 	TemporaryCVVStatus   string `json:"temporary_cvv_status,omitempty"`
 	AccountType          string `json:"account_type"`
@@ -113,6 +115,9 @@ func (s *Service) workflowAccount(id int64) (*model.MailboxAccount, error) {
 	if err := s.DB.Clauses(clause.Locking{Strength: "UPDATE"}).Where("account_type = ?", s.pool()).First(&account, id).Error; err != nil {
 		return nil, workflowNotFound(err)
 	}
+	if account.ArchivedAt != 0 {
+		return nil, fail(409, "mailbox_account_archived")
+	}
 	if err := workflowCAS(s.DB.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", id, account.Version).Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": s.Now().Unix()})); err != nil {
 		return nil, err
 	}
@@ -148,9 +153,13 @@ func (s *Service) accountQuery(actor Actor) *gorm.DB {
 	return q
 }
 
-const accountViewSelect = "a.id, a.account_type, a.card_last4, a.email, a.version, COALESCE(t.id, 0) AS assignment_id, COALESCE(t.version, 0) AS assignment_version, COALESCE(t.operator_id, 0) AS operator_id, COALESCE(o.display_name, '') AS operator_name, COALESCE(t.status, 'unassigned') AS status, COALESCE(t.created_at, 0) AS assigned_at"
+const accountViewSelect = "a.id, a.account_type, a.card_last4, a.email, a.version, a.archived_at, a.archived_by, COALESCE(t.id, 0) AS assignment_id, COALESCE(t.version, 0) AS assignment_version, COALESCE(t.operator_id, 0) AS operator_id, COALESCE(o.display_name, '') AS operator_name, COALESCE(t.status, 'unassigned') AS status, COALESCE(t.created_at, 0) AS assigned_at"
 
 func accountCredentials(actor Actor, view *AccountView) {
+	if view.ArchivedAt != 0 {
+		view.CredentialsAvailable = false
+		return
+	}
 	if actor.Admin != nil {
 		view.CredentialsAvailable = actor.Admin.Can(authz.MailboxCredentials)
 		return
@@ -170,6 +179,14 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 	}
 	query = normalizePage(query)
 	q := s.accountQuery(actor)
+	if query.Archived {
+		if actor.Admin == nil {
+			return nil, fail(403, "mailbox_permission_denied")
+		}
+		q = q.Where("a.archived_at > 0")
+	} else {
+		q = q.Where("a.archived_at = 0")
+	}
 	if query.Search != "" {
 		q = q.Where("LOWER(a.email) LIKE ?", "%"+strings.ToLower(query.Search)+"%")
 	}

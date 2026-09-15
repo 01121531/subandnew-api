@@ -32,6 +32,8 @@ export function accountMetadata(
     status: value.status,
     assigned_at: value.assigned_at,
     credentials_available: value.credentials_available,
+    archived_at: value.archived_at ?? 0,
+    archived_by: value.archived_by ?? 0,
   }
 }
 

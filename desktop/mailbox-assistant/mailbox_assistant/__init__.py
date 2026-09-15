@@ -1,3 +1,3 @@
 """Mailbox operator desktop application."""
 
-__version__ = "1.2.82"
+__version__ = "1.2.83"

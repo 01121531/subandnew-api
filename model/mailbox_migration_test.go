@@ -35,6 +35,9 @@ func TestMailboxPoolMigrationPreservesLegacyIDsAndHistory(t *testing.T) {
 	require.EqualValues(t, 7, account.Version)
 	require.EqualValues(t, 91, account.ActiveAssignmentID)
 	require.Empty(t, account.CardCiphertext)
+	require.Zero(t, account.ArchivedAt)
+	require.Zero(t, account.ArchivedBy)
+	require.True(t, db.Migrator().HasIndex(&MailboxAccount{}, "idx_mailbox_accounts_archived_at"))
 	var submission MailboxSubmission
 	require.NoError(t, db.First(&submission, 101).Error)
 	require.EqualValues(t, 91, submission.AssignmentID)
@@ -60,4 +63,18 @@ func TestMailboxPoolMigrationPreservesLegacyIDsAndHistory(t *testing.T) {
 	require.NoError(t, db.Save(&opening).Error)
 	require.NoError(t, db.First(&opening, opening.ID).Error)
 	require.Equal(t, MailboxAccountTypeOpening, opening.AccountType)
+}
+
+func TestMailboxArchiveMigrationPreservesArchivedRecords(t *testing.T) {
+	db := useControlPlaneMigrationTestDB(t)
+	require.NoError(t, MigrateMailboxPools(db))
+	account := MailboxAccount{Email: "archived@example.test", Ciphertext: "synthetic encrypted data", KeyVersion: "test", Version: 4, ArchivedAt: 1780000000, ArchivedBy: 7}
+	require.NoError(t, db.Create(&account).Error)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, MigrateMailboxPools(db))
+	}
+	var current MailboxAccount
+	require.NoError(t, db.First(&current, account.ID).Error)
+	require.Equal(t, account, current)
+	require.Error(t, db.Create(&MailboxAccount{Email: account.Email, Ciphertext: "other", KeyVersion: "test"}).Error)
 }

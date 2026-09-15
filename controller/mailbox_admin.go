@@ -99,6 +99,25 @@ func ListMailboxAccounts(c *gin.Context) {
 	}
 	mailboxSuccess(c, data)
 }
+
+func ArchiveMailboxAccounts(restore bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input mailbox.ArchiveInput
+		if !mailboxDecode(c, &input) {
+			return
+		}
+		accountType, ok := mailboxAccountType(c, input.AccountType)
+		if !ok {
+			return
+		}
+		input.AccountType = accountType
+		if err := mailboxService().ArchiveAccounts(c.Request.Context(), mailboxActor(c), input, restore); err != nil {
+			mailboxFailure(c, err)
+			return
+		}
+		mailboxSuccess(c, gin.H{"updated": len(input.Items)})
+	}
+}
 func GetMailboxAccount(c *gin.Context) {
 	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
 	if !ok {

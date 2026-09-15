@@ -1,4 +1,29 @@
 export const mailboxEn = {
+  archive: {
+    view: 'Mailbox view',
+    active: 'Mailbox pool',
+    archived: 'Archived mailboxes',
+    delete: 'Delete',
+    restore: 'Restore',
+    archivedAt: 'Archived at',
+    confirm:
+      'Move {{count}} mailbox(es) to the archive? This is reversible and retains encrypted data and history. Assigned mailboxes must be recalled first; the whole selection is rejected if any mailbox is assigned or has changed.',
+    restoreConfirm:
+      'Restore {{count}} mailbox(es) as unassigned? Previous assignments, tasks and temporary CVV will not be restored.',
+    cvv: {
+      enabled:
+        'Temporary CVV is enabled. The optional sixth column is available.',
+      not_enabled:
+        'Temporary CVV is not enabled. Use the five-column format; this page will not change deployment settings.',
+      node_unsupported:
+        'This node does not support temporary CVV delivery. Use the five-column format.',
+      permission_denied:
+        'Credential access permission is required to import temporary CVV.',
+      loading: 'Checking temporary CVV availability...',
+      load_failed:
+        'Unable to check temporary CVV availability. Retry before copying the six-column example.',
+    },
+  },
   issues: {
     title: 'Issue reports',
     report: 'Report a problem',
@@ -190,6 +215,8 @@ export const mailboxEn = {
     adminActor: 'Admin #{{id}}',
     operatorActor: 'Operator #{{id}}',
     auditActions: {
+      archive: 'Archive mailbox',
+      restore: 'Restore mailbox',
       import: 'Import',
       import_preview: 'Import preview',
       assign: 'Assign',
@@ -258,9 +285,15 @@ export const mailboxEn = {
       'Mailbox records changed. Preview the import again.',
     mailbox_import_duplicate: 'Duplicate email in this import.',
     mailbox_import_exists: 'This email already exists.',
+    mailbox_import_archived:
+      'This email is archived. Restore it before importing.',
+    mailbox_account_archived:
+      'This mailbox is archived. Restore it before accessing credentials or assigning it.',
+    mailbox_archive_assigned:
+      'Recall assigned mailboxes first. No mailboxes were archived.',
     mailbox_import_empty: 'No mailbox records found.',
     mailbox_import_columns:
-      'Each row must have exactly 3 fields for refund or 5 for opening. Do not include CVV or extra columns.',
+      'Each row needs 3 fields for refund or 5 for opening; a sixth CVV field is supported only when temporary delivery is available. Other extra fields are rejected.',
     mailbox_import_invalid_email: 'Invalid email address.',
     mailbox_import_invalid_password: 'Invalid or empty password.',
     mailbox_import_invalid_otp: 'Invalid TOTP secret or configuration.',
@@ -302,6 +335,26 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  archive: {
+    view: '邮箱视图',
+    active: '邮箱池',
+    archived: '归档邮箱',
+    delete: '删除',
+    restore: '恢复',
+    archivedAt: '归档时间',
+    confirm:
+      '将 {{count}} 个邮箱移入归档，可恢复。加密资料和历史记录会保留。已分配邮箱须先回收；若任一邮箱仍已分配或版本变化，本次整批不执行。',
+    restoreConfirm:
+      '将 {{count}} 个邮箱恢复为未分配？不会恢复原操作员分配、旧任务或临时 CVV。',
+    cvv: {
+      enabled: '临时 CVV 已开启，可使用可选的第六列。',
+      not_enabled: '临时 CVV 未开启，请使用五列格式。本页面不会修改部署配置。',
+      node_unsupported: '当前节点不支持临时 CVV 交付，请使用五列格式。',
+      permission_denied: '导入临时 CVV 还需要凭据访问权限。',
+      loading: '正在读取临时 CVV 功能状态…',
+      load_failed: '临时 CVV 状态读取失败，请重试后再复制六列示例。',
+    },
+  },
   issues: {
     title: '异常反馈',
     report: '反馈问题',
@@ -483,6 +536,8 @@ export const mailboxZh: typeof mailboxEn = {
     adminActor: '管理员 #{{id}}',
     operatorActor: '操作员 #{{id}}',
     auditActions: {
+      archive: '归档邮箱',
+      restore: '恢复邮箱',
       import: '导入邮箱',
       import_preview: '导入预览',
       assign: '分配邮箱',
@@ -545,9 +600,12 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_import_conflict: '邮箱记录已变化，请重新预览。',
     mailbox_import_duplicate: '本次导入中存在重复邮箱。',
     mailbox_import_exists: '该邮箱已存在。',
+    mailbox_import_archived: '邮箱已归档，请先恢复。',
+    mailbox_account_archived: '邮箱已归档，请先恢复后再分配或读取凭据。',
+    mailbox_archive_assigned: '请先回收已分配的邮箱，本次未归档任何邮箱。',
     mailbox_import_empty: '未找到邮箱记录。',
     mailbox_import_columns:
-      '退款邮箱每行必须恰好 3 列，开号邮箱恰好 5 列，禁止包含 CVV 或额外列。',
+      '退款邮箱每行必须恰好 3 列，开号邮箱 5 列；临时 CVV 可用时支持第 6 列，不允许其他额外列。',
     mailbox_import_invalid_email: '邮箱地址无效。',
     mailbox_import_invalid_password: '密码无效或为空。',
     mailbox_import_invalid_otp: 'TOTP 密钥或配置无效。',

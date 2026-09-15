@@ -17,6 +17,49 @@ const success = {
   },
 }
 describe('mailbox control-plane API', () => {
+  test('archive and restore send explicit pool and versions, without credentials', async () => {
+    request = spyOn(api, 'request').mockResolvedValue(success)
+    for (const restore of [false, true]) {
+      await mailboxApi.archive('opening', [{ id: 3, version: 7 }], restore)
+      expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+        method: 'POST',
+        url: `/api/mailbox-management/accounts/${restore ? 'restore' : 'archive'}`,
+        data: { account_type: 'opening', items: [{ id: 3, version: 7 }] },
+      })
+    }
+    await mailboxApi.accounts({
+      page: 1,
+      page_size: 20,
+      archived: true,
+      account_type: 'opening',
+    })
+    expect(request.mock.calls.at(-1)?.[0].params).toMatchObject({
+      archived: true,
+      account_type: 'opening',
+    })
+  })
+  test('CVV options preserve availability reasons', async () => {
+    request = spyOn(api, 'request')
+    for (const reason of [
+      'not_enabled',
+      'node_unsupported',
+      'permission_denied',
+    ]) {
+      request.mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            temporary_cvv_enabled: false,
+            temporary_cvv_unavailable_reason: reason,
+          },
+        },
+      })
+      expect(await mailboxApi.importOptions()).toEqual({
+        temporary_cvv_enabled: false,
+        temporary_cvv_unavailable_reason: reason,
+      })
+    }
+  })
   test('temporary CVV handoff is scoped, versioned and never echoed into client cache', async () => {
     request = spyOn(api, 'request').mockResolvedValueOnce({
       data: { success: true, data: { expires_at: 123, cvv: '007' } },

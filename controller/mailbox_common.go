@@ -164,6 +164,11 @@ func mailboxListQuery(c *gin.Context) (mailbox.ListQuery, bool) {
 	size, e2 := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	operator, e3 := strconv.ParseInt(c.DefaultQuery("operator_id", "0"), 10, 64)
 	assignment, e4 := strconv.ParseInt(c.DefaultQuery("assignment_id", "0"), 10, 64)
+	archived, archiveErr := strconv.ParseBool(c.DefaultQuery("archived", "false"))
+	if archiveErr != nil {
+		mailboxBadRequest(c, "mailbox_invalid_query")
+		return mailbox.ListQuery{}, false
+	}
 	if e != nil || e2 != nil || e3 != nil || e4 != nil || assignment < 0 || page < 1 || page > 100000 || size < 1 || size > 100 || operator < 0 || len(c.Query("search")) > 320 || len(c.Query("kind")) > 32 {
 		mailboxBadRequest(c, "mailbox_invalid_query")
 		return mailbox.ListQuery{}, false
@@ -172,7 +177,7 @@ func mailboxListQuery(c *gin.Context) (mailbox.ListQuery, bool) {
 	if !ok {
 		return mailbox.ListQuery{}, false
 	}
-	return mailbox.ListQuery{Page: page, PageSize: size, OperatorID: operator, Search: c.Query("search"), Status: c.Query("status"), AccountType: accountType, Kind: c.Query("kind"), AssignmentID: assignment}, true
+	return mailbox.ListQuery{Archived: archived, Page: page, PageSize: size, OperatorID: operator, Search: c.Query("search"), Status: c.Query("status"), AccountType: accountType, Kind: c.Query("kind"), AssignmentID: assignment}, true
 }
 
 func mailboxAccountType(c *gin.Context, value string) (string, bool) {

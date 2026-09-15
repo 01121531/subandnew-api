@@ -1,4 +1,11 @@
-import { Eye, FileUp, KeyRound, UserRoundCheck } from 'lucide-react'
+import {
+  Eye,
+  FileUp,
+  KeyRound,
+  UserRoundCheck,
+  Trash2,
+  ArchiveRestore,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -19,6 +26,7 @@ import { useMailboxQuery } from '../hooks'
 import { canMailbox } from '../lib/permissions'
 import type { Account, AccountType, VersionedID } from '../types'
 import { AccountOperatorFilter } from './account-operator-filter'
+import { ArchiveDialog } from './archive-dialog'
 import { AssignDialog } from './assign-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
@@ -42,6 +50,9 @@ function AccountPool(props: { accountType: AccountType }) {
   const view = canMailbox(user, 'view')
   const assign = canMailbox(user, 'assign')
   const credentials = canMailbox(user, 'credentials')
+  const manage = canMailbox(user, 'manage')
+  const [archived, setArchived] = useState(false)
+  const [archiveItems, setArchiveItems] = useState<VersionedID[]>()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
@@ -53,11 +64,12 @@ function AccountPool(props: { accountType: AccountType }) {
   const [accountID, setAccountID] = useState('')
   const [cvvAccount, setCvvAccount] = useState<Account>()
   const query = useMailboxQuery(
-    ['accounts', props.accountType, page, search, status, operator],
+    ['accounts', props.accountType, archived, page, search, status, operator],
     (signal) =>
       mailboxApi.accounts(
         {
           account_type: props.accountType,
+          archived,
           page,
           page_size: 20,
           search,
@@ -87,16 +99,33 @@ function AccountPool(props: { accountType: AccountType }) {
     const row = rows.find((item) => item.id === id)
     return (
       <div className='flex shrink-0 items-center gap-1'>
-        <Button
-          variant='ghost'
-          size='icon'
-          title={t('mailbox.admin.details')}
-          aria-label={t('mailbox.admin.details')}
-          onClick={() => setDetail(id)}
-        >
-          <Eye />
-        </Button>
+        {!archived && (
+          <Button
+            variant='ghost'
+            size='icon'
+            title={t('mailbox.admin.details')}
+            aria-label={t('mailbox.admin.details')}
+            onClick={() => setDetail(id)}
+          >
+            <Eye />
+          </Button>
+        )}
+        {manage && row && (
+          <Button
+            variant='ghost'
+            size='icon'
+            title={t(`mailbox.archive.${archived ? 'restore' : 'delete'}`)}
+            aria-label={t(`mailbox.archive.${archived ? 'restore' : 'delete'}`)}
+            disabled={query.isFetching || query.isError}
+            onClick={() =>
+              setArchiveItems([{ id: row.id, version: row.version }])
+            }
+          >
+            {archived ? <ArchiveRestore /> : <Trash2 />}
+          </Button>
+        )}
         {row &&
+          !archived &&
           props.accountType === 'opening' &&
           credentials &&
           canMailbox(user, 'manage') &&
@@ -117,13 +146,37 @@ function AccountPool(props: { accountType: AccountType }) {
   return (
     <section className='min-w-0 space-y-3'>
       <div className='flex flex-wrap items-center gap-2 pt-4'>
-        {canMailbox(user, 'manage') && (
+        {view && (
+          <div
+            className='flex flex-wrap gap-1'
+            role='group'
+            aria-label={t('mailbox.archive.view')}
+          >
+            {[false, true].map((value) => (
+              <Button
+                key={String(value)}
+                variant={archived === value ? 'secondary' : 'ghost'}
+                aria-pressed={archived === value}
+                onClick={() => {
+                  setArchived(value)
+                  setStatus('')
+                  setOperator('')
+                  setSearch('')
+                  changePage(1)
+                }}
+              >
+                {t(`mailbox.archive.${value ? 'archived' : 'active'}`)}
+              </Button>
+            ))}
+          </div>
+        )}
+        {manage && !archived && (
           <Button onClick={() => setShowImport(true)}>
             <FileUp />
             {t('mailbox.admin.importTitle')}
           </Button>
         )}
-        {assign && (
+        {assign && !archived && (
           <Button
             variant='outline'
             disabled={
@@ -133,6 +186,17 @@ function AccountPool(props: { accountType: AccountType }) {
           >
             <UserRoundCheck />
             {t('mailbox.admin.assign')}
+            {selected.length > 0 && ` (${selected.length})`}
+          </Button>
+        )}
+        {manage && view && (
+          <Button
+            variant='outline'
+            disabled={!selected.length || query.isFetching || query.isError}
+            onClick={() => setArchiveItems([...selected])}
+          >
+            {archived ? <ArchiveRestore /> : <Trash2 />}
+            {t(`mailbox.archive.${archived ? 'restore' : 'delete'}`)}
             {selected.length > 0 && ` (${selected.length})`}
           </Button>
         )}
@@ -171,25 +235,31 @@ function AccountPool(props: { accountType: AccountType }) {
               setSearch(value)
               changePage(1)
             }}
-            status={status}
-            onStatus={(value) => {
-              setStatus(value)
-              changePage(1)
-            }}
+            status={archived ? undefined : status}
+            onStatus={
+              archived
+                ? undefined
+                : (value) => {
+                    setStatus(value)
+                    changePage(1)
+                  }
+            }
             pending={query.isFetching}
             refresh={() => {
               setSelected([])
               void query.refetch()
             }}
           >
-            <AccountOperatorFilter
-              accountType={props.accountType}
-              value={operator}
-              onChange={(value) => {
-                setOperator(value)
-                changePage(1)
-              }}
-            />
+            {!archived && (
+              <AccountOperatorFilter
+                accountType={props.accountType}
+                value={operator}
+                onChange={(value) => {
+                  setOperator(value)
+                  changePage(1)
+                }}
+              />
+            )}
           </SearchBar>
           <QueryState
             pending={query.isPending}
@@ -201,7 +271,7 @@ function AccountPool(props: { accountType: AccountType }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {assign && (
+                    {(assign || manage) && (
                       <TableHead className='w-10'>
                         <input
                           type='checkbox'
@@ -228,7 +298,13 @@ function AccountPool(props: { accountType: AccountType }) {
                     <TableHead>{t('mailbox.admin.email')}</TableHead>
                     <TableHead>{t('mailbox.admin.status')}</TableHead>
                     <TableHead>{t('mailbox.admin.operator')}</TableHead>
-                    <TableHead>{t('mailbox.admin.assignedAt')}</TableHead>
+                    <TableHead>
+                      {t(
+                        archived
+                          ? 'mailbox.archive.archivedAt'
+                          : 'mailbox.admin.assignedAt'
+                      )}
+                    </TableHead>
                     <TableHead>
                       <span className='sr-only'>
                         {t('mailbox.admin.actions')}
@@ -239,7 +315,7 @@ function AccountPool(props: { accountType: AccountType }) {
                 <TableBody>
                   {rows.map((row) => (
                     <TableRow key={row.id}>
-                      {assign && (
+                      {(assign || manage) && (
                         <TableCell>
                           <input
                             type='checkbox'
@@ -269,13 +345,21 @@ function AccountPool(props: { accountType: AccountType }) {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Status value={row.status} />
+                        {archived ? (
+                          t('mailbox.archive.archived')
+                        ) : (
+                          <Status value={row.status} />
+                        )}
                       </TableCell>
                       <TableCell className='max-w-48 break-all whitespace-normal'>
                         {row.operator_name || '--'}
                       </TableCell>
                       <TableCell>
-                        <Time value={row.assigned_at} />
+                        <Time
+                          value={
+                            archived ? (row.archived_at ?? 0) : row.assigned_at
+                          }
+                        />
                       </TableCell>
                       <TableCell>{openButton(row.id)}</TableCell>
                     </TableRow>
@@ -290,7 +374,7 @@ function AccountPool(props: { accountType: AccountType }) {
                   className='min-w-0 space-y-3 rounded-lg border p-3'
                 >
                   <div className='flex items-start gap-3'>
-                    {assign && (
+                    {(assign || manage) && (
                       <input
                         className='mt-1'
                         type='checkbox'
@@ -314,7 +398,11 @@ function AccountPool(props: { accountType: AccountType }) {
                     {openButton(row.id)}
                   </div>
                   <div className='flex flex-wrap items-center justify-between gap-2 text-sm'>
-                    <Status value={row.status} />
+                    {archived ? (
+                      t('mailbox.archive.archived')
+                    ) : (
+                      <Status value={row.status} />
+                    )}
                     <span className='break-all'>
                       {row.operator_name || '--'}
                     </span>
@@ -323,7 +411,11 @@ function AccountPool(props: { accountType: AccountType }) {
                     <span>
                       #{row.id} / v{row.version}
                     </span>
-                    <Time value={row.assigned_at} />
+                    <Time
+                      value={
+                        archived ? (row.archived_at ?? 0) : row.assigned_at
+                      }
+                    />
                   </div>
                 </article>
               ))}
@@ -337,6 +429,18 @@ function AccountPool(props: { accountType: AccountType }) {
             onPage={changePage}
           />
         </>
+      )}
+      {archiveItems && (
+        <ArchiveDialog
+          accountType={props.accountType}
+          items={archiveItems}
+          restore={archived}
+          onClose={() => {
+            setArchiveItems(undefined)
+            setSelected([])
+            void query.refetch()
+          }}
+        />
       )}
       {cvvAccount && (
         <TemporaryCvvDialog

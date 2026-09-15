@@ -50,6 +50,8 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 		c.Next()
 	}, MailboxAdminOriginGuard)
 	admin.GET("/accounts", MailboxGuard(authz.MailboxView), ListMailboxAccounts)
+	admin.POST("/accounts/archive", MailboxGuard(authz.MailboxManage), ArchiveMailboxAccounts(false))
+	admin.POST("/accounts/restore", MailboxGuard(authz.MailboxManage), ArchiveMailboxAccounts(true))
 	admin.GET("/accounts/:id", MailboxGuard(authz.MailboxView), GetMailboxAccount)
 	admin.POST("/accounts/:id/credentials", MailboxGuard(authz.MailboxCredentials), GetMailboxCredentials)
 	admin.POST("/assignments", MailboxGuard(authz.MailboxAssign), AssignMailboxAccounts)

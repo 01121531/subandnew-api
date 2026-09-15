@@ -16,7 +16,7 @@ func MigrateMailboxPools(db *gorm.DB) error {
 				return err
 			}
 		} else {
-			for _, field := range []string{"AccountType", "CardCiphertext", "CardKeyVersion", "CardLast4"} {
+			for _, field := range []string{"AccountType", "CardCiphertext", "CardKeyVersion", "CardLast4", "ArchivedAt", "ArchivedBy"} {
 				if !migrator.HasColumn(&MailboxAccount{}, field) {
 					if err := migrator.AddColumn(&MailboxAccount{}, field); err != nil {
 						return err
@@ -32,7 +32,7 @@ func MigrateMailboxPools(db *gorm.DB) error {
 		}
 		// Use GORM's dialect-aware, table-scoped metadata and known v1.2.77
 		// index name, never a catalog-wide search for an arbitrary email index.
-		for _, index := range []string{"idx_mailbox_accounts_type_email", "idx_mailbox_accounts_active_assignment_id"} {
+		for _, index := range []string{"idx_mailbox_accounts_type_email", "idx_mailbox_accounts_active_assignment_id", "idx_mailbox_accounts_archived_at"} {
 			if !migrator.HasIndex(&MailboxAccount{}, index) {
 				if err := migrator.CreateIndex(&MailboxAccount{}, index); err != nil {
 					return err

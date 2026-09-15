@@ -25,10 +25,15 @@ export function ImportExamples(props: {
       toast.error(t('mailbox.admin.copyFailed'))
     }
   }
-  const variants =
-    props.accountType === 'opening' && options.data?.temporary_cvv_enabled
-      ? [false, true]
-      : [false]
+  const variants = props.accountType === 'opening' ? [false, true] : [false]
+  const cvvAvailable =
+    !options.isError &&
+    !options.isFetching &&
+    options.data?.temporary_cvv_enabled === true
+  let reason = options.data?.temporary_cvv_unavailable_reason || 'not_enabled'
+  if (options.data?.temporary_cvv_enabled) reason = 'enabled'
+  if (options.isFetching) reason = 'loading'
+  if (options.isError) reason = 'load_failed'
   const columns =
     props.accountType === 'opening'
       ? 'mailbox.issues.exampleColumnsOpening'
@@ -48,7 +53,7 @@ export function ImportExamples(props: {
             <Button
               variant='outline'
               size='sm'
-              disabled={props.pending}
+              disabled={props.pending || (cvv && !cvvAvailable)}
               onClick={() => void copy(importExample(props.accountType, cvv))}
             >
               <Copy />
@@ -59,9 +64,26 @@ export function ImportExamples(props: {
             {importExample(props.accountType, cvv)}
           </pre>
           {cvv && (
-            <p className='text-muted-foreground text-xs'>
-              {t('mailbox.admin.temporaryCvvNotice')}
-            </p>
+            <div className='space-y-2' role='status'>
+              <p className='text-sm'>
+                {t(
+                  `mailbox.archive.cvv.${['load_failed', 'loading', 'enabled', 'not_enabled', 'node_unsupported', 'permission_denied'].includes(reason) ? reason : 'not_enabled'}`
+                )}
+              </p>
+              {options.isError && (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={props.pending || options.isFetching}
+                  onClick={() => void options.refetch()}
+                >
+                  {t('mailbox.admin.retry')}
+                </Button>
+              )}
+              <p className='text-muted-foreground text-xs'>
+                {t('mailbox.admin.temporaryCvvNotice')}
+              </p>
+            </div>
           )}
         </div>
       ))}

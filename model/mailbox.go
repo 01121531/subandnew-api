@@ -4,6 +4,8 @@ const MailboxAccountTypeRefund = "refund"
 const MailboxAccountTypeOpening = "opening"
 
 type MailboxAccount struct {
+	ArchivedAt         int64  `json:"archived_at" gorm:"not null;default:0;index"`
+	ArchivedBy         int    `json:"archived_by" gorm:"not null;default:0"`
 	ID                 int64  `json:"id" gorm:"primaryKey"`
 	AccountType        string `json:"account_type" gorm:"size:16;not null;default:refund;uniqueIndex:idx_mailbox_accounts_type_email,priority:1;<-:create"`
 	Email              string `json:"email" gorm:"size:320;not null;uniqueIndex:idx_mailbox_accounts_type_email,priority:2"`
