@@ -191,7 +191,7 @@ func (s *Service) draftAssignment(actor Actor, id int64) (*model.MailboxAssignme
 		return nil, fail(403, "mailbox_permission_denied")
 	}
 	var assignment model.MailboxAssignment
-	err := s.DB.Table("mailbox_assignments").Joins("JOIN mailbox_accounts ON mailbox_accounts.active_assignment_id = mailbox_assignments.id AND mailbox_accounts.id = mailbox_assignments.account_id").Where("mailbox_assignments.id = ? AND mailbox_assignments.operator_id = ? AND mailbox_assignments.revoked_at = 0", id, actor.OperatorID).Select("mailbox_assignments.*").Take(&assignment).Error
+	err := s.DB.Table("mailbox_assignments").Joins("JOIN mailbox_accounts ON mailbox_accounts.active_assignment_id = mailbox_assignments.id AND mailbox_accounts.id = mailbox_assignments.account_id").Where("mailbox_accounts.account_type = ?", s.pool()).Where("mailbox_assignments.id = ? AND mailbox_assignments.operator_id = ? AND mailbox_assignments.revoked_at = 0", id, actor.OperatorID).Select("mailbox_assignments.*").Take(&assignment).Error
 	if err != nil {
 		return nil, workflowNotFound(err)
 	}
@@ -201,7 +201,12 @@ func (s *Service) draftAssignment(actor Actor, id int64) (*model.MailboxAssignme
 	return &assignment, nil
 }
 
-func (s *Service) UploadAttachment(ctx context.Context, actor Actor, assignmentID int64, reader io.Reader) (*AttachmentView, error) {
+func (s *Service) UploadAttachment(ctx context.Context, actor Actor, assignmentID int64, reader io.Reader, accountTypes ...string) (*AttachmentView, error) {
+	var err error
+	s, err = s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if _, err := s.draftAssignment(actor, assignmentID); err != nil {
 		return nil, err
@@ -304,6 +309,13 @@ func (s *Service) attachmentForActor(actor Actor, id string) (*model.MailboxAtta
 	if err := s.DB.Where("id = ?", id).First(&attachment).Error; err != nil {
 		return nil, workflowNotFound(err)
 	}
+	var poolCount int64
+	if err := s.DB.Table("mailbox_assignments AS t").Joins("JOIN mailbox_accounts AS a ON a.id = t.account_id").Where("t.id = ? AND a.account_type = ?", attachment.AssignmentID, s.pool()).Count(&poolCount).Error; err != nil {
+		return nil, err
+	}
+	if poolCount != 1 {
+		return nil, fail(404, "mailbox_not_found")
+	}
 	if actor.Admin == nil {
 		if attachment.OperatorID != actor.OperatorID {
 			return nil, fail(404, "mailbox_not_found")
@@ -328,7 +340,12 @@ func (s *Service) attachmentForActor(actor Actor, id string) (*model.MailboxAtta
 	return &attachment, nil
 }
 
-func (s *Service) ReadAttachment(ctx context.Context, actor Actor, id string) ([]byte, string, error) {
+func (s *Service) ReadAttachment(ctx context.Context, actor Actor, id string, accountTypes ...string) ([]byte, string, error) {
+	var err error
+	s, err = s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, "", err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	attachment, err := s.attachmentForActor(actor, id)
 	if err != nil {

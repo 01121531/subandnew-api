@@ -18,7 +18,15 @@ afterEach(() => {
   globalThis.fetch = originalFetch
   cancelMailboxRequests()
 })
-function record(data: unknown = {}) {
+function record(
+  data: unknown = {
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 20,
+    has_more: false,
+  }
+) {
   const calls: { url: string; init?: RequestInit }[] = []
   globalThis.fetch = mock(
     async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -60,6 +68,7 @@ describe('mailbox independent wire contract', () => {
       () =>
         mailboxApi.password('', { current_password: 'old', password: 'new' }),
       () => mailboxApi.credentials('', 3, 'password'),
+      () => mailboxApi.credentials('', 3, 'card', undefined, 'opening'),
       () => mailboxApi.upload('', 4, file),
       () => mailboxApi.submit('', 4, 8, ['image']),
     ]
@@ -80,9 +89,9 @@ describe('mailbox independent wire contract', () => {
     )
     await mailboxApi.submit('csrf-fixture', 4, 8, ['private-image'])
     expect(calls.map((call) => call.url)).toEqual([
-      '/mailbox-api/v1/accounts/3/credentials',
-      '/mailbox-api/v1/assignments/4/attachments',
-      '/mailbox-api/v1/assignments/4/submit',
+      '/mailbox-api/v1/accounts/3/credentials?account_type=refund',
+      '/mailbox-api/v1/assignments/4/attachments?account_type=refund',
+      '/mailbox-api/v1/assignments/4/submit?account_type=refund',
     ])
     for (const call of calls) {
       const headers = new Headers(call.init?.headers)
@@ -118,6 +127,7 @@ describe('mailbox independent wire contract', () => {
       status: 'rejected',
       page: '2',
       page_size: '20',
+      account_type: 'refund',
     })
     expect(calls).toHaveLength(1)
     expect(new Headers(calls[0].init?.headers).get('X-Mailbox-Request')).toBe(
@@ -125,7 +135,7 @@ describe('mailbox independent wire contract', () => {
     )
   })
   test('session and account reads also carry the request marker without authenticated-write CSRF', async () => {
-    const calls = record({ authenticated: false })
+    const calls = record({ authenticated: false, items: [] })
     await mailboxApi.session()
     await mailboxApi.account(3)
     await mailboxApi.submissions({ page: 1, page_size: 20 })
@@ -278,7 +288,7 @@ describe('credential read reauthorization', () => {
       readCredential('csrf', account, 'otp', new AbortController().signal)
     ).rejects.toMatchObject({ code: 'mailbox_assignment_changed' })
     expect(calls.map((call) => call.url)).toEqual([
-      '/mailbox-api/v1/accounts/3',
+      '/mailbox-api/v1/accounts/3?account_type=refund',
     ])
   })
 })

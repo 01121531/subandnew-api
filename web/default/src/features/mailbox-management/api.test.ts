@@ -6,12 +6,192 @@ import { api } from '@/lib/api'
 
 import { importBody, mailboxApi, unwrap } from './api'
 import { MailboxError } from './lib/errors'
-import type { Envelope, ImportSource } from './types'
+import type { Account, Envelope, ImportSource } from './types'
 
 let request: ReturnType<typeof spyOn<typeof api, 'request'>> | undefined
 afterEach(() => request?.mockRestore())
-const success = { data: { success: true, data: {} } }
+const success = {
+  data: {
+    success: true,
+    data: { items: [], rows: [], issues: [], total: 0, valid: true },
+  },
+}
 describe('mailbox control-plane API', () => {
+  for (const accountType of ['refund', 'opening'] as const) {
+    test(`${accountType} scopes lists, detail, credentials, review and private images explicitly`, async () => {
+      request = spyOn(api, 'request').mockResolvedValue(success)
+      const controller = new AbortController()
+      await mailboxApi.accounts({
+        page: 2,
+        page_size: 20,
+        account_type: accountType,
+        operator_id: 9,
+      })
+      await mailboxApi.accountOperators(controller.signal, accountType)
+      await mailboxApi.submissions({
+        page: 3,
+        page_size: 20,
+        status: 'approved',
+        account_type: accountType,
+      })
+      await mailboxApi.audits({
+        page: 4,
+        page_size: 20,
+        account_type: accountType,
+      })
+      request.mockResolvedValueOnce({
+        data: { success: true, data: { id: 4, account_type: accountType } },
+      })
+      await mailboxApi.account(4, controller.signal, accountType)
+      for (const kind of ['password', 'otp', 'card'] as const) {
+        await mailboxApi.credentials(4, kind, controller.signal, accountType)
+        expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+          url: '/api/mailbox-management/accounts/4/credentials',
+          method: 'POST',
+          signal: controller.signal,
+        })
+        expect(request.mock.calls.at(-1)?.[0].data).toEqual({ kind })
+      }
+      await mailboxApi.review(5, {
+        account_type: accountType,
+        version: 6,
+        status: 'approved',
+        reason: '',
+      })
+      expect(request.mock.calls.at(-1)?.[0].data).toEqual({
+        version: 6,
+        status: 'approved',
+        reason: '',
+      })
+      request.mockResolvedValueOnce({
+        data: new Blob(['image'], { type: 'image/png' }),
+      })
+      await mailboxApi.attachment('private/id', controller.signal, accountType)
+      expect(request.mock.calls.at(-1)?.[0].url).toBe(
+        '/api/mailbox-management/attachments/private%2Fid'
+      )
+      for (const [config] of request.mock.calls) {
+        expect(config.params).toMatchObject({ account_type: accountType })
+      }
+    })
+    test(`${accountType} import preview and commit preserve exact source and scope`, async () => {
+      request = spyOn(api, 'request').mockResolvedValue(success)
+      const source: ImportSource = {
+        account_type: accountType,
+        format: 'text',
+        text: `synthetic@example.test\t password \tTESTONLY${accountType === 'opening' ? '\t4111111111111111\t12/30' : ''}`,
+      }
+      await mailboxApi.preview(source)
+      await mailboxApi.import(source)
+      for (const [config] of request.mock.calls) {
+        expect(config.data).toEqual(source)
+      }
+      const file = new File(['synthetic only'], 'sample.xlsx')
+      const body = importBody({
+        account_type: accountType,
+        format: 'xlsx',
+        file,
+      }) as FormData
+      expect([...body.keys()].sort()).toEqual(['account_type', 'file'])
+      expect(body.get('account_type')).toBe(accountType)
+      await mailboxApi.assign({
+        account_type: accountType,
+        items: [{ id: 3, version: 8 }],
+        operator_id: 9,
+      })
+      expect(request.mock.calls.at(-1)?.[0].data).toEqual({
+        account_type: accountType,
+        items: [{ id: 3, version: 8 }],
+        operator_id: 9,
+      })
+    })
+  }
+  test('legacy detail and action calls explicitly select refund', async () => {
+    request = spyOn(api, 'request').mockResolvedValue(success)
+    request.mockResolvedValueOnce({ data: { success: true, data: { id: 4 } } })
+    expect((await mailboxApi.account(4)).account_type).toBe('refund')
+    await mailboxApi.credentials(4, 'password')
+    await mailboxApi.review(5, { version: 6, status: 'approved', reason: '' })
+    for (const [config] of request.mock.calls) {
+      expect(config.params).toEqual({ account_type: 'refund' })
+    }
+  })
+  test('metadata strips unexpected card secrets before entering the query cache and rejects wrong-pool detail', async () => {
+    const raw = {
+      id: 4,
+      account_type: 'opening',
+      card_last4: '1111',
+      card_number: '4111111111111111',
+      card_expiry: '12/30',
+      cvv: '000',
+    }
+    request = spyOn(api, 'request').mockResolvedValue({
+      data: { success: true, data: raw },
+    })
+    const result = await mailboxApi.account(4, undefined, 'opening')
+    expect(result.card_last4).toBe('1111')
+    expect(result).not.toHaveProperty('card_number')
+    expect(result).not.toHaveProperty('card_expiry')
+    expect(result).not.toHaveProperty('cvv')
+    await expect(mailboxApi.account(4)).rejects.toMatchObject({
+      code: 'mailbox_not_found',
+    })
+    request.mockResolvedValueOnce({
+      data: { success: true, data: { items: [raw], total: 1 } },
+    })
+    const page = await mailboxApi.accounts({
+      page: 1,
+      page_size: 20,
+      account_type: 'opening',
+    })
+    expect(page.items[0]).toEqual(result)
+    request.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { items: [raw as unknown as Account], total: 1 },
+      },
+    })
+    await expect(
+      mailboxApi.accounts({ page: 1, page_size: 20 })
+    ).rejects.toMatchObject({ code: 'mailbox_not_found' })
+  })
+  test('preview exposes only valid last-four metadata, never full PAN or unrecognized fields', async () => {
+    request = spyOn(api, 'request').mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          rows: [
+            {
+              row: 1,
+              email: 'synthetic@example.test',
+              card_last4: '1111',
+              card_number: '4111111111111111',
+              cvv: '000',
+            },
+            {
+              row: 2,
+              email: 'other@example.test',
+              card_last4: '4111111111111111',
+            },
+          ],
+          issues: [],
+          total: 2,
+          valid: true,
+          card_number: '4111111111111111',
+        },
+      },
+    })
+    const preview = await mailboxApi.preview({
+      format: 'text',
+      account_type: 'opening',
+      text: 'synthetic',
+    })
+    expect(preview.rows[0].card_last4).toBe('1111')
+    expect(preview.rows[1].card_last4).toBe('')
+    expect(JSON.stringify(preview)).not.toContain('4111111111111111')
+    expect(preview.rows[0]).not.toHaveProperty('cvv')
+    expect(preview).not.toHaveProperty('card_number')
+  })
   test('account operator metadata includes disabled operators without calling management or credential endpoints', async () => {
     const operators = [
       { id: 3, username: 'enabled-user', display_name: 'Enabled' },
@@ -96,7 +276,8 @@ describe('mailbox control-plane API', () => {
         const uploaded = body.get('file') as File
         expect(uploaded.name).toBe(file.name)
         expect(await uploaded.arrayBuffer()).toEqual(await file.arrayBuffer())
-        expect(body.get('format')).toBe(format)
+        expect([...body.keys()].sort()).toEqual(['account_type', 'file'])
+        expect(body.get('account_type')).toBe('refund')
       }
       expect(importBody(source)).toBeInstanceOf(FormData)
     }

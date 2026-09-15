@@ -50,10 +50,50 @@ type Actor struct {
 	TargetOperatorID int64
 }
 type Service struct {
-	DB         *gorm.DB
-	Now        func() time.Time
-	Cipher     func() (*managedinstance.CredentialCipher, error)
-	StorageDir string
+	DB          *gorm.DB
+	Now         func() time.Time
+	Cipher      func() (*managedinstance.CredentialCipher, error)
+	StorageDir  string
+	accountType string
+}
+
+const AccountTypeRefund = model.MailboxAccountTypeRefund
+const AccountTypeOpening = model.MailboxAccountTypeOpening
+
+func resolveAccountType(value string, accountTypes ...string) (string, error) {
+	if len(accountTypes) > 1 {
+		return "", fail(400, "mailbox_invalid_account_type")
+	}
+	if len(accountTypes) == 1 && accountTypes[0] != "" {
+		if value != "" && value != accountTypes[0] {
+			return "", fail(400, "mailbox_invalid_account_type")
+		}
+		value = accountTypes[0]
+	}
+	if value == "" {
+		value = AccountTypeRefund
+	}
+	if value != AccountTypeRefund && value != AccountTypeOpening {
+		return "", fail(400, "mailbox_invalid_account_type")
+	}
+	return value, nil
+}
+
+func (s *Service) pool() string {
+	if s.accountType == "" {
+		return AccountTypeRefund
+	}
+	return s.accountType
+}
+
+func (s *Service) withAccountType(value string, accountTypes ...string) (*Service, error) {
+	kind, err := resolveAccountType(value, accountTypes...)
+	if err != nil {
+		return nil, err
+	}
+	copy := *s
+	copy.accountType = kind
+	return &copy, nil
 }
 
 func New(db *gorm.DB) *Service {
@@ -93,7 +133,12 @@ func (s *Service) CheckActor(actor Actor, permission authz.Permission) error {
 	return nil
 }
 
-func (s *Service) AccountForActor(actor Actor, id int64, credentials bool) (*model.MailboxAccount, error) {
+func (s *Service) AccountForActor(actor Actor, id int64, credentials bool, accountTypes ...string) (*model.MailboxAccount, error) {
+	var err error
+	s, err = s.withAccountType(s.accountType, accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	permission := authz.MailboxView
 	if credentials {
 		permission = authz.MailboxCredentials
@@ -102,7 +147,7 @@ func (s *Service) AccountForActor(actor Actor, id int64, credentials bool) (*mod
 		return nil, err
 	}
 	var account model.MailboxAccount
-	if err := s.DB.First(&account, id).Error; err != nil {
+	if err := s.DB.Where("account_type = ?", s.pool()).First(&account, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fail(404, "mailbox_not_found")
 		}
@@ -121,12 +166,34 @@ func (s *Service) AccountForActor(actor Actor, id int64, credentials bool) (*mod
 	return &account, nil
 }
 
-func (s *Service) Audit(actor Actor, action string, accountID, assignmentID int64, status int, code string) error {
+func (s *Service) Audit(actor Actor, action string, accountID, assignmentID int64, status int, code string, accountTypes ...string) error {
+	var err error
+	s, err = s.withAccountType(s.accountType, accountTypes...)
+	if err != nil {
+		return err
+	}
 	adminID := 0
 	if actor.Admin != nil {
 		adminID = actor.Admin.UserID
 	}
-	return s.DB.Create(&model.MailboxAudit{AdminID: adminID, OperatorID: actor.OperatorID, TargetOperatorID: actor.TargetOperatorID, AccountID: accountID, AssignmentID: assignmentID, Action: action, StatusCode: status, ErrorCode: code, IPAddress: actor.IP, CreatedAt: s.Now().Unix()}).Error
+	kind := s.pool()
+	if accountID == 0 && assignmentID > 0 {
+		var assignment model.MailboxAssignment
+		if err := s.DB.Select("account_id").First(&assignment, assignmentID).Error; err == nil {
+			accountID = assignment.AccountID
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	if accountID > 0 {
+		var account model.MailboxAccount
+		if err := s.DB.Select("account_type").First(&account, accountID).Error; err == nil {
+			kind = account.AccountType
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	return s.DB.Create(&model.MailboxAudit{AccountType: kind, AdminID: adminID, OperatorID: actor.OperatorID, TargetOperatorID: actor.TargetOperatorID, AccountID: accountID, AssignmentID: assignmentID, Action: action, StatusCode: status, ErrorCode: code, IPAddress: actor.IP, CreatedAt: s.Now().Unix()}).Error
 }
 
 type Page[T any] struct {
@@ -137,11 +204,12 @@ type Page[T any] struct {
 	HasMore  bool  `json:"has_more"`
 }
 type ListQuery struct {
-	Search     string
-	Status     string
-	OperatorID int64
-	Page       int
-	PageSize   int
+	AccountType string `json:"account_type"`
+	Search      string
+	Status      string
+	OperatorID  int64
+	Page        int
+	PageSize    int
 }
 
 func normalizePage(q ListQuery) ListQuery {

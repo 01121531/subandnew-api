@@ -14,6 +14,8 @@ import (
 )
 
 type AccountView struct {
+	AccountType          string `json:"account_type"`
+	CardLast4            string `json:"card_last4"`
 	ID                   int64  `json:"id"`
 	Email                string `json:"email"`
 	Version              int64  `json:"version"`
@@ -32,11 +34,14 @@ type AssignItem struct {
 }
 
 type AssignInput struct {
-	Items      []AssignItem `json:"items"`
-	OperatorID int64        `json:"operator_id"`
+	AccountType string       `json:"account_type"`
+	Items       []AssignItem `json:"items"`
+	OperatorID  int64        `json:"operator_id"`
 }
 
 type SubmissionView struct {
+	AccountType  string           `json:"account_type"`
+	CardLast4    string           `json:"card_last4"`
 	ID           int64            `json:"id"`
 	AssignmentID int64            `json:"assignment_id"`
 	AccountID    int64            `json:"account_id"`
@@ -103,7 +108,7 @@ func (s *Service) workflowActor(actor Actor, permission authz.Permission) error 
 // also serializes SQLite, where SELECT FOR UPDATE is not available.
 func (s *Service) workflowAccount(id int64) (*model.MailboxAccount, error) {
 	var account model.MailboxAccount
-	if err := s.DB.Clauses(clause.Locking{Strength: "UPDATE"}).First(&account, id).Error; err != nil {
+	if err := s.DB.Clauses(clause.Locking{Strength: "UPDATE"}).Where("account_type = ?", s.pool()).First(&account, id).Error; err != nil {
 		return nil, workflowNotFound(err)
 	}
 	if err := workflowCAS(s.DB.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", id, account.Version).Updates(map[string]any{"version": gorm.Expr("version + 1"), "updated_at": s.Now().Unix()})); err != nil {
@@ -132,7 +137,7 @@ func (s *Service) workflowAssignment(actor Actor, id int64) (*model.MailboxAssig
 }
 
 func (s *Service) accountQuery(actor Actor) *gorm.DB {
-	q := s.DB.Table("mailbox_accounts AS a").
+	q := s.DB.Table("mailbox_accounts AS a").Where("a.account_type = ?", s.pool()).
 		Joins("LEFT JOIN mailbox_assignments AS t ON t.id = a.active_assignment_id AND t.account_id = a.id AND t.revoked_at = 0").
 		Joins("LEFT JOIN mailbox_operators AS o ON o.id = t.operator_id")
 	if actor.Admin == nil {
@@ -141,7 +146,7 @@ func (s *Service) accountQuery(actor Actor) *gorm.DB {
 	return q
 }
 
-const accountViewSelect = "a.id, a.email, a.version, COALESCE(t.id, 0) AS assignment_id, COALESCE(t.version, 0) AS assignment_version, COALESCE(t.operator_id, 0) AS operator_id, COALESCE(o.display_name, '') AS operator_name, COALESCE(t.status, 'unassigned') AS status, COALESCE(t.created_at, 0) AS assigned_at"
+const accountViewSelect = "a.id, a.account_type, a.card_last4, a.email, a.version, COALESCE(t.id, 0) AS assignment_id, COALESCE(t.version, 0) AS assignment_version, COALESCE(t.operator_id, 0) AS operator_id, COALESCE(o.display_name, '') AS operator_name, COALESCE(t.status, 'unassigned') AS status, COALESCE(t.created_at, 0) AS assigned_at"
 
 func accountCredentials(actor Actor, view *AccountView) {
 	if actor.Admin != nil {
@@ -151,7 +156,12 @@ func accountCredentials(actor Actor, view *AccountView) {
 	view.CredentialsAvailable = view.Status == StatusPending || view.Status == StatusSubmitted || view.Status == StatusRejected
 }
 
-func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery) (*Page[AccountView], error) {
+func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery, accountTypes ...string) (*Page[AccountView], error) {
+	var err error
+	s, err = s.withAccountType(query.AccountType, accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
@@ -184,7 +194,12 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 	return page, nil
 }
 
-func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64) (*AccountView, error) {
+func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64, accountTypes ...string) (*AccountView, error) {
+	var err error
+	s, err = s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
@@ -194,13 +209,34 @@ func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64) (*Accou
 		return nil, workflowNotFound(err)
 	}
 	accountCredentials(actor, &view)
-	if _, err := s.AccountForActor(actor, id, false); err != nil {
+	current, err := s.AccountForActor(actor, id, false)
+	if err != nil {
+		return nil, err
+	}
+	if current.Version != view.Version || current.ActiveAssignmentID != view.AssignmentID || current.AccountType != view.AccountType || current.CardLast4 != view.CardLast4 {
+		return nil, fail(409, "mailbox_version_conflict")
+	}
+	if current.ActiveAssignmentID != 0 {
+		var assignment model.MailboxAssignment
+		if err := s.DB.First(&assignment, current.ActiveAssignmentID).Error; err != nil {
+			return nil, workflowNotFound(err)
+		}
+		if assignment.AccountID != id || assignment.RevokedAt != 0 || assignment.Version != view.AssignmentVersion || assignment.Status != view.Status || assignment.OperatorID != view.OperatorID {
+			return nil, fail(409, "mailbox_version_conflict")
+		}
+	}
+	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
 	}
 	return &view, nil
 }
 
-func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput) error {
+func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, accountTypes ...string) error {
+	var err error
+	s, err = s.withAccountType(input.AccountType, accountTypes...)
+	if err != nil {
+		return err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxAssign); err != nil {
 		return err
@@ -269,14 +305,14 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput) er
 }
 
 func (s *Service) submissionQuery(actor Actor) *gorm.DB {
-	q := s.DB.Table("mailbox_submissions AS u").Joins("JOIN mailbox_assignments AS t ON t.id = u.assignment_id AND t.operator_id = u.operator_id").Joins("JOIN mailbox_accounts AS a ON a.id = t.account_id").Joins("JOIN mailbox_operators AS o ON o.id = u.operator_id")
+	q := s.DB.Table("mailbox_submissions AS u").Joins("JOIN mailbox_assignments AS t ON t.id = u.assignment_id AND t.operator_id = u.operator_id").Joins("JOIN mailbox_accounts AS a ON a.id = t.account_id").Joins("JOIN mailbox_operators AS o ON o.id = u.operator_id").Where("a.account_type = ?", s.pool())
 	if actor.Admin == nil {
 		q = q.Where("u.operator_id = ?", actor.OperatorID)
 	}
 	return q
 }
 
-const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
+const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
 
 func (s *Service) submissionAttachments(views []SubmissionView) error {
 	if len(views) == 0 {
@@ -302,7 +338,12 @@ func (s *Service) submissionAttachments(views []SubmissionView) error {
 	return nil
 }
 
-func (s *Service) ListSubmissions(ctx context.Context, actor Actor, query ListQuery) (*Page[SubmissionView], error) {
+func (s *Service) ListSubmissions(ctx context.Context, actor Actor, query ListQuery, accountTypes ...string) (*Page[SubmissionView], error) {
+	var err error
+	s, err = s.withAccountType(query.AccountType, accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxReview); err != nil {
 		return nil, err
@@ -335,7 +376,12 @@ func (s *Service) ListSubmissions(ctx context.Context, actor Actor, query ListQu
 	return page, nil
 }
 
-func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version int64, attachmentIDs []string) (*SubmissionView, error) {
+func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version int64, attachmentIDs []string, accountTypes ...string) (*SubmissionView, error) {
+	var err error
+	s, err = s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
@@ -354,7 +400,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 		seen[id] = true
 	}
 	var view SubmissionView
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxView); err != nil {
 			return err
@@ -410,7 +456,12 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 	return &view, nil
 }
 
-func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, input ReviewInput) error {
+func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, input ReviewInput, accountTypes ...string) error {
+	var err error
+	s, err = s.withAccountType("", accountTypes...)
+	if err != nil {
+		return err
+	}
 	s = s.WithDB(s.DB.WithContext(ctx))
 	if err := s.CheckActor(actor, authz.MailboxReview); err != nil {
 		return err

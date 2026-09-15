@@ -26,8 +26,10 @@ const mailboxImportMaxBytes = 10 << 20
 const mailboxImportUnzipBytes = 32 << 20
 
 type ImportPreviewRow struct {
-	Row   int    `json:"row"`
-	Email string `json:"email"`
+	AccountType string `json:"account_type"`
+	CardLast4   string `json:"card_last4"`
+	Row         int    `json:"row"`
+	Email       string `json:"email"`
 }
 
 type ImportIssue struct {
@@ -49,6 +51,7 @@ type ImportResult struct {
 type mailboxImportRow struct {
 	email  string
 	secret mailboxCredentialSecret
+	card   mailboxCardSecret
 }
 
 func (s *Service) checkMailboxImportActor(actor Actor) error {
@@ -61,9 +64,14 @@ func (s *Service) checkMailboxImportActor(actor Actor) error {
 	return nil
 }
 
-func (s *Service) PreviewImport(ctx context.Context, actor Actor, format string, data []byte) (preview *ImportPreview, err error) {
+func (s *Service) PreviewImport(ctx context.Context, actor Actor, format string, data []byte, accountTypes ...string) (preview *ImportPreview, err error) {
 	s = s.WithDB(s.DB.WithContext(ctx))
 	defer func() { s.auditMailboxFailure(actor, "import_preview", 0, err) }()
+	scoped, err := s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
+	s = scoped
 	if err := s.checkMailboxImportActor(actor); err != nil {
 		return nil, err
 	}
@@ -84,9 +92,14 @@ func (s *Service) PreviewImport(ctx context.Context, actor Actor, format string,
 	return preview, nil
 }
 
-func (s *Service) Import(ctx context.Context, actor Actor, format string, data []byte) (result *ImportResult, err error) {
+func (s *Service) Import(ctx context.Context, actor Actor, format string, data []byte, accountTypes ...string) (result *ImportResult, err error) {
 	s = s.WithDB(s.DB.WithContext(ctx))
 	defer func() { s.auditMailboxFailure(actor, "import", 0, err) }()
+	scoped, err := s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
+	s = scoped
 	if err := s.checkMailboxImportActor(actor); err != nil {
 		return nil, err
 	}
@@ -108,7 +121,7 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 		}
 		now := s.Now().Unix()
 		for _, row := range rows {
-			account := model.MailboxAccount{Email: row.email, Version: 1, CreatedBy: actor.Admin.UserID, CreatedAt: now, UpdatedAt: now}
+			account := model.MailboxAccount{AccountType: s.pool(), Email: row.email, Version: 1, CreatedBy: actor.Admin.UserID, CreatedAt: now, UpdatedAt: now}
 			// Reserve the numeric ID inside the transaction before binding ciphertext to it.
 			insert := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&account)
 			if insert.Error != nil {
@@ -125,8 +138,21 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 			if err != nil {
 				return fail(503, "mailbox_credentials_unavailable")
 			}
-			update := tx.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", account.ID, account.Version).
-				Updates(map[string]interface{}{"ciphertext": ciphertext, "key_version": version})
+			updates := map[string]interface{}{"ciphertext": ciphertext, "key_version": version}
+			if s.pool() == AccountTypeOpening {
+				encodedCard, err := json.Marshal(row.card)
+				if err != nil {
+					return fail(500, "mailbox_service_unavailable")
+				}
+				cardCiphertext, cardVersion, _, err := cipher.Encrypt(account.ID, mailboxCardCredentialKind, managedinstance.CredentialPayload{Secret: string(encodedCard)})
+				if err != nil {
+					return fail(503, "mailbox_credentials_unavailable")
+				}
+				updates["card_ciphertext"] = cardCiphertext
+				updates["card_key_version"] = cardVersion
+				updates["card_last4"] = row.card.Number[len(row.card.Number)-4:]
+			}
+			update := tx.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", account.ID, account.Version).Updates(updates)
 			if update.Error != nil || update.RowsAffected != 1 {
 				return fail(500, "mailbox_service_unavailable")
 			}
@@ -149,16 +175,20 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 	preview := &ImportPreview{Rows: []ImportPreviewRow{}, Issues: []ImportIssue{}}
 	rows := []mailboxImportRow{}
 	seen := map[string]int{}
+	columns := 3
+	if s.pool() == AccountTypeOpening {
+		columns = 5
+	}
 	addIssue := func(row int, code string) { preview.Issues = append(preview.Issues, ImportIssue{Row: row, Code: code}) }
 	consume := func(row int, cells []string, header bool) error {
-		if header && mailboxImportHeader(cells) {
+		if header && mailboxImportHeader(cells, s.pool()) {
 			return nil
 		}
 		preview.Total++
 		if preview.Total > mailboxImportMaxRows {
 			return fail(400, "mailbox_import_too_many_rows")
 		}
-		if len(cells) != 3 {
+		if len(cells) != columns {
 			addIssue(row, "mailbox_import_columns")
 			return nil
 		}
@@ -169,7 +199,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			return nil
 		}
 		// Only a validated email is ever included in the preview, even on invalid rows.
-		preview.Rows = append(preview.Rows, ImportPreviewRow{Row: row, Email: email})
+		preview.Rows = append(preview.Rows, ImportPreviewRow{Row: row, Email: email, AccountType: s.pool()})
 		if original, exists := seen[email]; exists {
 			addIssue(row, "mailbox_import_duplicate")
 			if original != 0 {
@@ -188,7 +218,21 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			addIssue(row, "mailbox_import_invalid_otp")
 			return nil
 		}
-		rows = append(rows, mailboxImportRow{email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}})
+		var card mailboxCardSecret
+		if columns == 5 {
+			card.Number, err = normalizeMailboxPAN(cells[3])
+			if err != nil {
+				addIssue(row, "mailbox_import_invalid_card_number")
+				return nil
+			}
+			card.Expiry, err = normalizeMailboxExpiry(cells[4], s.Now())
+			if err != nil {
+				addIssue(row, "mailbox_import_invalid_card_expiry")
+				return nil
+			}
+			preview.Rows[len(preview.Rows)-1].CardLast4 = card.Number[len(card.Number)-4:]
+		}
+		rows = append(rows, mailboxImportRow{email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card})
 		return nil
 	}
 	if len(data) > mailboxImportMaxBytes {
@@ -246,7 +290,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 				}
 				row, _ := reader.FieldPos(0)
 				record := data[recordOffset:reader.InputOffset()]
-				if len(cells) == 3 {
+				if len(cells) == columns {
 					cells[1] = mailboxCSVPassword(record, recordLine, reader)
 				}
 				recordOffset = reader.InputOffset()
@@ -259,7 +303,17 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			}
 		}
 	case "xlsx":
-		err = readMailboxXLSX(data, consume)
+		err = readMailboxXLSXRows(data, func(row int, cells []string, header bool, code string) error {
+			if code != "" {
+				preview.Total++
+				if preview.Total > mailboxImportMaxRows {
+					return fail(400, "mailbox_import_too_many_rows")
+				}
+				addIssue(row, code)
+				return nil
+			}
+			return consume(row, cells, header)
+		}, s.pool())
 	default:
 		return nil, nil, fail(400, "mailbox_import_invalid_format")
 	}
@@ -276,7 +330,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 	}
 	for start := 0; start < len(emails); start += 200 {
 		var existing []string
-		if err := s.DB.Model(&model.MailboxAccount{}).Where("LOWER(email) IN ?", emails[start:min(start+200, len(emails))]).Pluck("email", &existing).Error; err != nil {
+		if err := s.DB.Model(&model.MailboxAccount{}).Where("account_type = ?", s.pool()).Where("LOWER(email) IN ?", emails[start:min(start+200, len(emails))]).Pluck("email", &existing).Error; err != nil {
 			return nil, nil, fail(500, "mailbox_service_unavailable")
 		}
 		for _, email := range existing {
@@ -309,14 +363,24 @@ func mailboxCSVPassword(record []byte, recordLine int, reader *csv.Reader) strin
 	return password
 }
 
-func mailboxImportHeader(cells []string) bool {
-	if len(cells) != 3 {
+func mailboxImportHeader(cells []string, accountTypes ...string) bool {
+	kind, err := resolveAccountType("", accountTypes...)
+	if err != nil {
+		return false
+	}
+	columns := 3
+	if kind == AccountTypeOpening {
+		columns = 5
+	}
+	if len(cells) != columns {
 		return false
 	}
 	aliases := [][]string{
 		{"email", "\u90ae\u7bb1", "\u90ae\u7bb1\u5730\u5740", "\u7535\u5b50\u90ae\u7bb1"},
 		{"password", "\u5bc6\u7801"},
 		{"2fa", "totp", "\u4e8c\u6b65\u9a8c\u8bc1", "\u4e24\u6b65\u9a8c\u8bc1", "\u53cc\u91cd\u9a8c\u8bc1", "\u4e8c\u6b65\u9a8c\u8bc1\u5bc6\u94a5"},
+		{"pan", "card_number", "\u5361\u53f7"},
+		{"expiry", "card_expiry", "\u6709\u6548\u671f"},
 	}
 	for i, cell := range cells {
 		matched := false
@@ -333,7 +397,20 @@ func mailboxImportHeader(cells []string) bool {
 	return true
 }
 
-func readMailboxXLSX(data []byte, consume func(int, []string, bool) error) error {
+func readMailboxXLSX(data []byte, consume func(int, []string, bool) error, accountTypes ...string) error {
+	kind, err := resolveAccountType("", accountTypes...)
+	if err != nil {
+		return err
+	}
+	return readMailboxXLSXRows(data, func(row int, cells []string, header bool, code string) error {
+		if code != "" {
+			return fail(400, code)
+		}
+		return consume(row, cells, header)
+	}, kind)
+}
+
+func readMailboxXLSXRows(data []byte, consume func(int, []string, bool, string) error, kind string) error {
 	invalid := func() error { return fail(400, "mailbox_import_invalid_xlsx") }
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -398,7 +475,19 @@ func readMailboxXLSX(data []byte, consume func(int, []string, bool) error) error
 		if len(cells) == 0 {
 			continue
 		}
-		if err := consume(row, cells, first); err != nil {
+		rowCode := ""
+		if kind == AccountTypeOpening && len(cells) >= 4 && !(first && mailboxImportHeader(cells, kind)) {
+			cell, _ := excelize.CoordinatesToCellName(4, row)
+			cellType, err := book.GetCellType(sheets[0], cell)
+			if err != nil {
+				return invalid()
+			}
+			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
+				rowCode = "mailbox_import_card_number_text_required"
+				cells = nil
+			}
+		}
+		if err := consume(row, cells, first, rowCode); err != nil {
 			return err
 		}
 		first = false

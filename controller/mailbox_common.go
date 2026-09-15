@@ -167,7 +167,23 @@ func mailboxListQuery(c *gin.Context) (mailbox.ListQuery, bool) {
 		mailboxBadRequest(c, "mailbox_invalid_query")
 		return mailbox.ListQuery{}, false
 	}
-	return mailbox.ListQuery{Page: page, PageSize: size, OperatorID: operator, Search: c.Query("search"), Status: c.Query("status")}, true
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return mailbox.ListQuery{}, false
+	}
+	return mailbox.ListQuery{Page: page, PageSize: size, OperatorID: operator, Search: c.Query("search"), Status: c.Query("status"), AccountType: accountType}, true
+}
+
+func mailboxAccountType(c *gin.Context, value string) (string, bool) {
+	if value == "" {
+		value = "refund"
+	}
+	if value != "refund" && value != "opening" {
+		mailboxBadRequest(c, "mailbox_invalid_account_type")
+		return "", false
+	}
+	c.Set("mailbox_account_type", value)
+	return value, true
 }
 func MailboxAuditTrail() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -185,7 +201,7 @@ func MailboxAuditTrail() gin.HandlerFunc {
 		if len(action) > 64 {
 			action = action[:64]
 		}
-		if err := mailboxService().Audit(actor, action, c.GetInt64("mailbox_account_id"), c.GetInt64("mailbox_assignment_id"), c.Writer.Status(), c.GetString("mailbox_error")); err != nil {
+		if err := mailboxService().Audit(actor, action, c.GetInt64("mailbox_account_id"), c.GetInt64("mailbox_assignment_id"), c.Writer.Status(), c.GetString("mailbox_error"), c.GetString("mailbox_account_type")); err != nil {
 			common.SysError("mailbox audit could not be recorded")
 		}
 	}

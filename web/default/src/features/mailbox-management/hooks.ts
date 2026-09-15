@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -29,8 +29,16 @@ export function useMailboxMutation<V>(
   const client = useQueryClient()
   const { t } = useTranslation()
   const lock = useRef(false)
+  const mounted = useRef(true)
   // Mutation variables and results must not retain import bodies or passwords.
   const input = useRef<{ value: V } | undefined>(undefined)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      input.current = undefined
+    }
+  }, [])
   const mutation = useMutation({
     mutationFn: async () => {
       if (!input.current) return
@@ -45,14 +53,16 @@ export function useMailboxMutation<V>(
     retry: false,
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['mailbox-admin'] })
-      success?.()
+      if (mounted.current) success?.()
     },
-    onError: (error) =>
+    onError: (error) => {
+      if (!mounted.current) return
       toast.error(
         t(errorKey(error), {
           defaultValue: t('mailbox.errors.mailbox_request_failed'),
         })
-      ),
+      )
+    },
   })
   return {
     ...mutation,

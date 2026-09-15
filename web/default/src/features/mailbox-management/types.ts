@@ -1,3 +1,5 @@
+export type AccountType = 'refund' | 'opening'
+export type CredentialKind = 'password' | 'otp' | 'card'
 export type MailboxStatus =
   | 'unassigned'
   | 'pending'
@@ -12,6 +14,7 @@ export interface Page<T> {
   has_more: boolean
 }
 export interface ListQuery {
+  account_type?: AccountType
   page: number
   page_size: number
   search?: string
@@ -19,6 +22,8 @@ export interface ListQuery {
   operator_id?: number
 }
 export interface Account {
+  account_type?: AccountType
+  card_last4?: string
   id: number
   email: string
   version: number
@@ -63,6 +68,7 @@ export interface VersionedID {
   version: number
 }
 export interface AssignInput {
+  account_type?: AccountType
   items: VersionedID[]
   operator_id: number
 }
@@ -77,6 +83,8 @@ export interface Attachment {
   deleted_at: number
 }
 export interface Submission {
+  account_type?: AccountType
+  card_last4?: string
   id: number
   assignment_id: number
   account_id: number
@@ -92,11 +100,14 @@ export interface Submission {
   attachments: Attachment[]
 }
 export interface ReviewInput {
+  account_type?: AccountType
   version: number
   status: 'approved' | 'rejected'
   reason: string
 }
 export interface Audit {
+  account_type?: AccountType
+  card_last4?: string
   target_operator_id?: number
   id: number
   admin_id: number
@@ -110,16 +121,24 @@ export interface Audit {
   created_at: number
 }
 export type ImportFormat = 'text' | 'csv' | 'xlsx'
-export type ImportSource =
+export type ImportSource = { account_type?: AccountType } & (
   | { format: ImportFormat; file: File; text?: never }
   | { format: 'text' | 'csv'; text: string; file?: never }
+)
 export interface ImportPreview {
-  rows: Array<{ row: number; email: string }>
+  rows: Array<{
+    row: number
+    email: string
+    account_type?: AccountType
+    card_last4?: string
+  }>
   issues: Array<{ row: number; code: string }>
   total: number
   valid: boolean
 }
 export interface Credential {
+  card_number?: string
+  card_expiry?: string
   password?: string
   code?: string
   expires_at?: number

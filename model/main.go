@@ -169,6 +169,9 @@ func configureConnectionPool(sqlDB *sql.DB, databaseType common.DatabaseType) er
 }
 
 func migrateDB() error {
+	if err := MigrateMailboxPools(DB); err != nil {
+		return err
+	}
 	if err := prepareSQLiteControlPlaneMigrations(); err != nil {
 		return err
 	}
@@ -234,7 +237,7 @@ func controlPlaneModels() []interface{} {
 		&SupplierSession{},
 		&SupplierOAuthFlow{},
 		&SupplierAudit{},
-		&MailboxAccount{},
+		// MailboxAccount is migrated explicitly by MigrateMailboxPools.
 		&MailboxOperator{},
 		&MailboxSession{},
 		&MailboxLoginAttempt{},

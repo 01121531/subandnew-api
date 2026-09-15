@@ -11,11 +11,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { mailboxApi } from '../api'
 import { useMailboxMutation } from '../hooks'
 import { reviewSchema } from '../lib/schemas'
-import type { Submission } from '../types'
+import type { AccountType, Submission } from '../types'
 import { Confirm, Field, Modal, Status, Time } from './common'
 import { PrivateImage } from './private-image'
 
 export function ReviewDialog(props: {
+  accountType: AccountType
   submission: Submission
   onClose: () => void
 }) {
@@ -27,6 +28,7 @@ export function ReviewDialog(props: {
   })
   const mutation = useMailboxMutation(async () => {
     await mailboxApi.review(props.submission.id, {
+      account_type: props.accountType,
       ...form.getValues(),
       version: props.submission.version,
     })
@@ -38,6 +40,7 @@ export function ReviewDialog(props: {
     <>
       <Modal
         title={props.submission.email}
+        description={t(`mailbox.admin.pools.${props.accountType}`)}
         dirty={form.formState.isDirty}
         pending={mutation.isPending}
         onClose={props.onClose}
@@ -59,10 +62,14 @@ export function ReviewDialog(props: {
             <span className='break-all'>{props.submission.operator_name}</span>
             <Time value={props.submission.created_at} />
           </div>
+          <p className='border-l-2 border-amber-500 pl-3 text-sm'>
+            {t('mailbox.admin.screenshotRedaction')}
+          </p>
           <div className='grid gap-3 sm:grid-cols-2'>
             {props.submission.attachments?.map((attachment, index) => (
               <PrivateImage
-                key={attachment.id}
+                key={`${props.accountType}:${attachment.id}`}
+                accountType={props.accountType}
                 attachment={attachment}
                 index={index}
               />

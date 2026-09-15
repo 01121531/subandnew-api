@@ -17,14 +17,25 @@ import { useAuthStore } from '@/stores/auth-store'
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
 import { canMailbox } from '../lib/permissions'
-import type { VersionedID } from '../types'
+import type { AccountType, VersionedID } from '../types'
 import { AccountOperatorFilter } from './account-operator-filter'
 import { AssignDialog } from './assign-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
 import { ImportDialog } from './import-dialog'
+import { PoolScope } from './pool-scope'
 
 export function Accounts() {
+  return (
+    <PoolScope>
+      {(accountType) => (
+        <AccountPool key={accountType} accountType={accountType} />
+      )}
+    </PoolScope>
+  )
+}
+
+function AccountPool(props: { accountType: AccountType }) {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const view = canMailbox(user, 'view')
@@ -40,10 +51,11 @@ export function Accounts() {
   const [detail, setDetail] = useState<number>()
   const [accountID, setAccountID] = useState('')
   const query = useMailboxQuery(
-    ['accounts', page, search, status, operator],
+    ['accounts', props.accountType, page, search, status, operator],
     (signal) =>
       mailboxApi.accounts(
         {
+          account_type: props.accountType,
           page,
           page_size: 20,
           search,
@@ -151,6 +163,7 @@ export function Accounts() {
             }}
           >
             <AccountOperatorFilter
+              accountType={props.accountType}
               value={operator}
               onChange={(value) => {
                 setOperator(value)
@@ -224,6 +237,13 @@ export function Accounts() {
                       )}
                       <TableCell className='max-w-72 break-all whitespace-normal'>
                         <span className='font-medium'>{row.email}</span>
+                        {props.accountType === 'opening' && row.card_last4 && (
+                          <div className='text-muted-foreground text-xs'>
+                            {t('mailbox.admin.cardEnding', {
+                              last4: row.card_last4,
+                            })}
+                          </div>
+                        )}
                         <div className='text-muted-foreground text-xs'>
                           #{row.id} / v{row.version}
                         </div>
@@ -263,6 +283,13 @@ export function Accounts() {
                     )}
                     <h3 className='min-w-0 flex-1 text-sm font-medium break-all'>
                       {row.email}
+                      {props.accountType === 'opening' && row.card_last4 && (
+                        <span className='text-muted-foreground block text-xs font-normal'>
+                          {t('mailbox.admin.cardEnding', {
+                            last4: row.card_last4,
+                          })}
+                        </span>
+                      )}
                     </h3>
                     {openButton(row.id)}
                   </div>
@@ -291,9 +318,15 @@ export function Accounts() {
           />
         </>
       )}
-      {showImport && <ImportDialog onClose={() => setShowImport(false)} />}
+      {showImport && (
+        <ImportDialog
+          accountType={props.accountType}
+          onClose={() => setShowImport(false)}
+        />
+      )}
       {showAssign && (
         <AssignDialog
+          accountType={props.accountType}
           items={selected}
           onClose={() => {
             setShowAssign(false)
@@ -303,6 +336,7 @@ export function Accounts() {
       )}
       {detail !== undefined && (
         <CredentialDetail
+          accountType={props.accountType}
           key={detail}
           id={detail}
           canView={view}

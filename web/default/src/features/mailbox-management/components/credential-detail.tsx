@@ -1,5 +1,5 @@
 import { Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -8,10 +8,12 @@ import { mailboxApi } from '../api'
 import { useMailboxMutation, useMailboxQuery } from '../hooks'
 import { errorKey } from '../lib/errors'
 import { otpRemaining } from '../lib/schemas'
-import type { Credential } from '../types'
+import type { AccountType, Credential } from '../types'
+import { CardCredential } from './card-credential'
 import { CopyButton, Modal, QueryState, Status, Time } from './common'
 
 export function CredentialDetail(props: {
+  accountType: AccountType
   id: number
   canView: boolean
   canCredentials: boolean
@@ -19,8 +21,8 @@ export function CredentialDetail(props: {
 }) {
   const { t } = useTranslation()
   const account = useMailboxQuery(
-    ['account', props.id],
-    (signal) => mailboxApi.account(props.id, signal),
+    ['account', props.accountType, props.id],
+    (signal) => mailboxApi.account(props.id, signal, props.accountType),
     props.canView
   )
   const [password, setPassword] = useState('')
@@ -28,10 +30,36 @@ export function CredentialDetail(props: {
   const [otpEnabled, setOtpEnabled] = useState(false)
   const [tick, setTick] = useState(0)
   const [generation, setGeneration] = useState(0)
+  const [cardGeneration, setCardGeneration] = useState(0)
   const [otpPending, setOtpPending] = useState(false)
   const [error, setError] = useState<unknown>()
   const offset = useRef(0)
   const passwordController = useRef<AbortController | undefined>(undefined)
+  const allowed =
+    props.canCredentials &&
+    (!props.canView || (!!account.data && !account.isError))
+  const snapshot = `${props.accountType}:${props.id}:${account.data?.version ?? 0}:${account.data?.assignment_id ?? 0}:${account.data?.assignment_version ?? 0}`
+  const credentialFailure = useCallback((failure: unknown) => {
+    passwordController.current?.abort()
+    setPassword('')
+    setOtp(undefined)
+    setOtpEnabled(false)
+    setOtpPending(false)
+    setCardGeneration((value) => value + 1)
+    setError(failure)
+  }, [])
+  useEffect(() => {
+    passwordController.current?.abort()
+    setPassword('')
+    setOtp(undefined)
+    setOtpEnabled(false)
+    setOtpPending(false)
+  }, [allowed, snapshot])
+  useEffect(() => {
+    if (!password) return
+    const expiry = window.setTimeout(() => setPassword(''), 60000)
+    return () => window.clearTimeout(expiry)
+  }, [password])
   const passwordRequest = useMailboxMutation(async () => {
     passwordController.current?.abort()
     const controller = new AbortController()
@@ -41,7 +69,8 @@ export function CredentialDetail(props: {
       const result = await mailboxApi.credentials(
         props.id,
         'password',
-        controller.signal
+        controller.signal,
+        props.accountType
       )
       if (
         !controller.signal.aborted &&
@@ -51,10 +80,7 @@ export function CredentialDetail(props: {
       }
     } catch (failure) {
       if (!controller.signal.aborted) {
-        setPassword('')
-        setOtp(undefined)
-        setOtpEnabled(false)
-        setError(failure)
+        credentialFailure(failure)
       }
     }
   })
@@ -74,13 +100,13 @@ export function CredentialDetail(props: {
     }
   }, [])
   useEffect(() => {
-    if (!otpEnabled) return
+    if (!otpEnabled || !allowed) return
     const controller = new AbortController()
     setOtp(undefined)
     setOtpPending(true)
     setError(undefined)
     void mailboxApi
-      .credentials(props.id, 'otp', controller.signal)
+      .credentials(props.id, 'otp', controller.signal, props.accountType)
       .then((result) => {
         if (
           controller.signal.aborted ||
@@ -89,21 +115,30 @@ export function CredentialDetail(props: {
           return
         }
         offset.current = result.server_time * 1000 - Date.now()
-        setOtp(result)
+        setOtp({
+          code: result.code,
+          expires_at: result.expires_at,
+          server_time: result.server_time,
+        })
       })
       .catch((failure: unknown) => {
         if (!controller.signal.aborted) {
-          setPassword('')
-          setOtp(undefined)
-          setOtpEnabled(false)
-          setError(failure)
+          credentialFailure(failure)
         }
       })
       .finally(() => {
         if (!controller.signal.aborted) setOtpPending(false)
       })
     return () => controller.abort()
-  }, [props.id, otpEnabled, generation])
+  }, [
+    props.id,
+    props.accountType,
+    otpEnabled,
+    generation,
+    allowed,
+    snapshot,
+    credentialFailure,
+  ])
   useEffect(() => {
     if (!otp?.expires_at || !otpEnabled) return
     const expiresAt = otp.expires_at
@@ -120,9 +155,6 @@ export function CredentialDetail(props: {
     ? otpRemaining(otp.expires_at, offset.current)
     : 0
   void tick
-  const allowed =
-    props.canCredentials &&
-    (!props.canView || (!!account.data && !account.isError))
   return (
     <Modal
       title={
@@ -130,6 +162,7 @@ export function CredentialDetail(props: {
         t('mailbox.admin.accountDetail', { id: props.id })
       }
       onClose={props.onClose}
+      description={t(`mailbox.admin.pools.${props.accountType}`)}
     >
       <div className='space-y-5'>
         {props.canCredentials && (
@@ -159,12 +192,29 @@ export function CredentialDetail(props: {
                 </dd>
                 <dt>{t('mailbox.admin.version')}</dt>
                 <dd>{account.data.version}</dd>
+                {props.accountType === 'opening' && account.data.card_last4 && (
+                  <>
+                    <dt>{t('mailbox.admin.card')}</dt>
+                    <dd>
+                      {t('mailbox.admin.cardEnding', {
+                        last4: account.data.card_last4,
+                      })}
+                    </dd>
+                  </>
+                )}
               </dl>
             )}
           </QueryState>
         )}
         {allowed && (
           <>
+            {props.accountType === 'opening' && (
+              <CardCredential
+                key={`${snapshot}:${cardGeneration}`}
+                id={props.id}
+                onError={credentialFailure}
+              />
+            )}
             <section className='space-y-3 border-t pt-4'>
               <h3 className='flex items-center gap-2 text-sm font-medium'>
                 <KeyRound className='size-4' />

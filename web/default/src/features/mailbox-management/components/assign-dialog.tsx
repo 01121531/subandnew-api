@@ -8,10 +8,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { mailboxApi } from '../api'
 import { useMailboxMutation, useMailboxQuery } from '../hooks'
 import { parseVersionedIDs } from '../lib/schemas'
-import type { VersionedID } from '../types'
+import type { AccountType, VersionedID } from '../types'
 import { Confirm, Field, Modal, QueryState } from './common'
 
 export function AssignDialog(props: {
+  accountType: AccountType
   items: VersionedID[]
   onClose: () => void
 }) {
@@ -25,6 +26,7 @@ export function AssignDialog(props: {
   )
   const mutation = useMailboxMutation(async () => {
     await mailboxApi.assign({
+      account_type: props.accountType,
       items: props.items.length ? props.items : parseVersionedIDs(manual),
       operator_id: Number(operator),
     })
@@ -55,6 +57,9 @@ export function AssignDialog(props: {
         }
       >
         <div className='space-y-4'>
+          <p className='text-sm font-medium'>
+            {t(`mailbox.admin.pools.${props.accountType}`)}
+          </p>
           {props.items.length ? (
             <p>{t('mailbox.admin.selected', { count: props.items.length })}</p>
           ) : (

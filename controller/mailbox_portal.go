@@ -87,6 +87,10 @@ func ChangeMailboxPortalPassword(c *gin.Context) {
 	c.JSON(200, gin.H{"success": true, "data": gin.H{"authenticated": false}})
 }
 func UploadMailboxAttachment(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
 	id := mailboxID(c)
 	if id == 0 {
 		return
@@ -109,7 +113,7 @@ func UploadMailboxAttachment(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	data, err := mailboxService().UploadAttachment(c.Request.Context(), mailboxActor(c), id, file)
+	data, err := mailboxService().UploadAttachment(c.Request.Context(), mailboxActor(c), id, file, accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return
@@ -117,6 +121,10 @@ func UploadMailboxAttachment(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 func SubmitMailboxScreenshots(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
 	id := mailboxID(c)
 	if id == 0 {
 		return
@@ -129,7 +137,7 @@ func SubmitMailboxScreenshots(c *gin.Context) {
 	if !mailboxDecode(c, &input) {
 		return
 	}
-	data, err := mailboxService().Submit(c.Request.Context(), mailboxActor(c), id, input.Version, input.AttachmentIDs)
+	data, err := mailboxService().Submit(c.Request.Context(), mailboxActor(c), id, input.Version, input.AttachmentIDs, accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return
@@ -137,7 +145,11 @@ func SubmitMailboxScreenshots(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 func ReadMailboxAttachment(c *gin.Context) {
-	data, contentType, err := mailboxService().ReadAttachment(c.Request.Context(), mailboxActor(c), c.Param("id"))
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
+	data, contentType, err := mailboxService().ReadAttachment(c.Request.Context(), mailboxActor(c), c.Param("id"), accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return

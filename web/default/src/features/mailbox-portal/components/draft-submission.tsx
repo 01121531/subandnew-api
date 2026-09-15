@@ -57,7 +57,8 @@ export function DraftSubmission(props: {
             props.account,
             await mailboxApi.account(
               props.account.id,
-              controller.current.signal
+              controller.current.signal,
+              props.account.account_type ?? 'refund'
             ),
             'submit'
           )
@@ -65,13 +66,15 @@ export function DraftSubmission(props: {
             props.csrf,
             props.account.assignment_id,
             draft.file,
-            controller.current.signal
+            controller.current.signal,
+            props.account.account_type ?? 'refund'
           )
           assertCurrentAssignment(
             props.account,
             await mailboxApi.account(
               props.account.id,
-              controller.current.signal
+              controller.current.signal,
+              props.account.account_type ?? 'refund'
             ),
             'submit'
           )
@@ -102,7 +105,11 @@ export function DraftSubmission(props: {
     mutationFn: async () => {
       assertCurrentAssignment(
         props.account,
-        await mailboxApi.account(props.account.id, controller.current.signal),
+        await mailboxApi.account(
+          props.account.id,
+          controller.current.signal,
+          props.account.account_type ?? 'refund'
+        ),
         'submit'
       )
       const ids = drafts.map((item) => item.attachment?.id ?? '')
@@ -118,7 +125,9 @@ export function DraftSubmission(props: {
         props.csrf,
         props.account.assignment_id,
         props.account.assignment_version,
-        ids
+        ids,
+        controller.current.signal,
+        props.account.account_type ?? 'refund'
       )
     },
     onSuccess: () => {
@@ -134,7 +143,12 @@ export function DraftSubmission(props: {
       if (!controller.current.signal.aborted) setError(failure)
       // Reconcile an ambiguous response before allowing another attempt.
       void mailboxClient.invalidateQueries({
-        queryKey: ['mailbox', 'account', props.account.id],
+        queryKey: [
+          'mailbox',
+          'account',
+          props.account.id,
+          props.account.account_type ?? 'refund',
+        ],
       })
     },
     onSettled: () => {
@@ -170,6 +184,13 @@ export function DraftSubmission(props: {
   if (!canSubmit(props.account)) return null
   return (
     <section className='grid gap-4 py-5'>
+      <p
+        id='mailbox-redaction-warning'
+        role='note'
+        className='border-l-2 border-amber-500 pl-3 text-sm text-amber-800 dark:text-amber-300'
+      >
+        {t('mailboxPortal.redactCardWarning')}
+      </p>
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <h3 className='text-sm font-semibold'>
           {t('mailboxPortal.screenshots')}{' '}
@@ -185,6 +206,7 @@ export function DraftSubmission(props: {
           multiple
           disabled={pending || drafts.length >= 5}
           aria-label={t('mailboxPortal.upload')}
+          aria-describedby='mailbox-redaction-warning'
           onChange={(event) => {
             select([...(event.target.files ?? [])])
             event.target.value = ''
@@ -193,6 +215,7 @@ export function DraftSubmission(props: {
         <Button
           variant='outline'
           disabled={pending || drafts.length >= 5}
+          aria-describedby='mailbox-redaction-warning'
           onClick={() => input.current?.click()}
         >
           <Upload />

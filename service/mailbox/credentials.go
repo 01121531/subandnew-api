@@ -18,6 +18,8 @@ import (
 const mailboxCredentialKind = "mailbox-account:v1"
 
 type CredentialView struct {
+	CardNumber string `json:"card_number,omitempty"`
+	CardExpiry string `json:"card_expiry,omitempty"`
 	Password   string `json:"password,omitempty"`
 	Code       string `json:"code,omitempty"`
 	ExpiresAt  int64  `json:"expires_at,omitempty"`
@@ -144,54 +146,78 @@ func (s *Service) credentialAccount(actor Actor, accountID int64) (*model.Mailbo
 	return account, nil
 }
 
-func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64, kind string) (view *CredentialView, err error) {
+func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64, kind string, accountTypes ...string) (view *CredentialView, err error) {
 	s = s.WithDB(s.DB.WithContext(ctx))
 	// Never put client-supplied kind or decrypted material into an audit entry.
 	action := "credentials"
-	if kind == "password" || kind == "otp" {
+	if kind == "password" || kind == "otp" || kind == "card" {
 		action += "_" + kind
 	}
 	defer func() { s.auditMailboxFailure(actor, action, accountID, err) }()
+	scoped, err := s.withAccountType("", accountTypes...)
+	if err != nil {
+		return nil, err
+	}
+	s = scoped
 	account, err := s.credentialAccount(actor, accountID)
 	if err != nil {
 		return nil, err
 	}
-	if kind != "password" && kind != "otp" {
+	if kind != "password" && kind != "otp" && kind != "card" || kind == "card" && account.AccountType != AccountTypeOpening {
 		return nil, fail(400, "mailbox_invalid_credential_kind")
 	}
 	cipher, err := s.Cipher()
 	if err != nil {
 		return nil, fail(503, "mailbox_credentials_unavailable")
 	}
-	payload, err := cipher.Decrypt(account.ID, mailboxCredentialKind, account.KeyVersion, account.Ciphertext)
-	if err != nil {
-		return nil, fail(503, "mailbox_credentials_unavailable")
+	cipherKind, keyVersion, ciphertext := mailboxCredentialKind, account.KeyVersion, account.Ciphertext
+	if kind == "card" {
+		cipherKind, keyVersion, ciphertext = mailboxCardCredentialKind, account.CardKeyVersion, account.CardCiphertext
 	}
-	var secret mailboxCredentialSecret
-	if json.Unmarshal([]byte(payload.Secret), &secret) != nil || secret.Password == "" || !validMailboxText(secret.Password) {
+	payload, err := cipher.Decrypt(account.ID, cipherKind, keyVersion, ciphertext)
+	if err != nil {
 		return nil, fail(503, "mailbox_credentials_unavailable")
 	}
 	now := s.Now()
 	view = &CredentialView{ServerTime: now.Unix()}
-	if kind == "password" {
-		view.Password = secret.Password
-	} else {
-		view.Code, err = secret.OTP.code(now)
-		if err != nil {
+	if kind == "card" {
+		var card mailboxCardSecret
+		if json.Unmarshal([]byte(payload.Secret), &card) != nil {
 			return nil, fail(503, "mailbox_credentials_unavailable")
 		}
-		period := int64(secret.OTP.Period)
-		view.ExpiresAt = (now.Unix()/period + 1) * period
+		number, numberErr := normalizeMailboxPAN(card.Number)
+		expiry, expiryErr := parseMailboxExpiry(card.Expiry)
+		if numberErr != nil || expiryErr != nil || number != card.Number || expiry != card.Expiry || number[len(number)-4:] != account.CardLast4 {
+			return nil, fail(503, "mailbox_credentials_unavailable")
+		}
+		view.CardNumber, view.CardExpiry = number, expiry
+	} else {
+		var secret mailboxCredentialSecret
+		if json.Unmarshal([]byte(payload.Secret), &secret) != nil || secret.Password == "" || !validMailboxText(secret.Password) {
+			return nil, fail(503, "mailbox_credentials_unavailable")
+		}
+		if kind == "password" {
+			view.Password = secret.Password
+		} else {
+			view.Code, err = secret.OTP.code(now)
+			if err != nil {
+				return nil, fail(503, "mailbox_credentials_unavailable")
+			}
+			period := int64(secret.OTP.Period)
+			view.ExpiresAt = (now.Unix()/period + 1) * period
+		}
 	}
+	if err := s.Audit(actor, action, account.ID, account.ActiveAssignmentID, 200, ""); err != nil {
+		return nil, fail(500, "mailbox_service_unavailable")
+	}
+	// Audit I/O can race with revocation or ciphertext rotation. Perform the
+	// final authorization and complete snapshot check after that write.
 	current, err := s.credentialAccount(actor, accountID)
 	if err != nil {
 		return nil, err
 	}
-	if current.Version != account.Version || current.ActiveAssignmentID != account.ActiveAssignmentID || current.Ciphertext != account.Ciphertext || current.KeyVersion != account.KeyVersion {
+	if current.Version != account.Version || current.ActiveAssignmentID != account.ActiveAssignmentID || current.Ciphertext != account.Ciphertext || current.KeyVersion != account.KeyVersion || current.AccountType != account.AccountType || current.CardCiphertext != account.CardCiphertext || current.CardKeyVersion != account.CardKeyVersion || current.CardLast4 != account.CardLast4 {
 		return nil, fail(409, "mailbox_credentials_changed")
-	}
-	if err := s.Audit(actor, action, account.ID, account.ActiveAssignmentID, 200, ""); err != nil {
-		return nil, fail(500, "mailbox_service_unavailable")
 	}
 	return view, nil
 }

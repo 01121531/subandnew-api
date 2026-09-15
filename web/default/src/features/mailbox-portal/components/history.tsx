@@ -8,20 +8,35 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { mailboxApi } from '../api'
+import type { AccountType } from '../types'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
+import { MaskedCard } from './masked-card'
 import { PrivateImage } from './private-image'
 
-export function History() {
+export function History(props: { accountType: AccountType }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const query = useQuery({
-    queryKey: ['mailbox', 'submissions', filter, status, page],
+    queryKey: [
+      'mailbox',
+      'submissions',
+      props.accountType,
+      filter,
+      status,
+      page,
+    ],
     queryFn: ({ signal }) =>
       mailboxApi.submissions(
-        { search: filter, status, page, page_size: 20 },
+        {
+          account_type: props.accountType,
+          search: filter,
+          status,
+          page,
+          page_size: 20,
+        },
         signal
       ),
   })
@@ -96,6 +111,9 @@ export function History() {
                   <h2 className='text-sm font-semibold [overflow-wrap:anywhere]'>
                     {submission.email}
                   </h2>
+                  {props.accountType === 'opening' && (
+                    <MaskedCard last4={submission.card_last4} />
+                  )}
                   <span className='text-muted-foreground text-xs'>
                     {t('mailboxPortal.submission', { id: submission.id })} /{' '}
                     <Time value={submission.created_at} />
@@ -117,7 +135,11 @@ export function History() {
               )}
               <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
                 {(submission.attachments ?? []).map((attachment) => (
-                  <PrivateImage key={attachment.id} attachment={attachment} />
+                  <PrivateImage
+                    key={attachment.id}
+                    attachment={attachment}
+                    accountType={props.accountType}
+                  />
                 ))}
               </div>
             </article>

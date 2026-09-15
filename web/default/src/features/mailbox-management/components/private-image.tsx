@@ -6,10 +6,14 @@ import { Button } from '@/components/ui/button'
 
 import { mailboxApi } from '../api'
 import { MailboxError, errorKey } from '../lib/errors'
-import type { Attachment } from '../types'
+import type { AccountType, Attachment } from '../types'
 import { Modal } from './common'
 
-export function PrivateImage(props: { attachment: Attachment; index: number }) {
+export function PrivateImage(props: {
+  accountType: AccountType
+  attachment: Attachment
+  index: number
+}) {
   const { t } = useTranslation()
   const [url, setURL] = useState('')
   const [error, setError] = useState<unknown>()
@@ -19,6 +23,7 @@ export function PrivateImage(props: { attachment: Attachment; index: number }) {
     let objectURL = ''
     let expiry: ReturnType<typeof setTimeout> | undefined
     setURL('')
+    setExpanded(false)
     setError(undefined)
     if (
       props.attachment.deleted_at ||
@@ -28,7 +33,7 @@ export function PrivateImage(props: { attachment: Attachment; index: number }) {
       return
     }
     void mailboxApi
-      .attachment(props.attachment.id, controller.signal)
+      .attachment(props.attachment.id, controller.signal, props.accountType)
       .then((blob) => {
         if (controller.signal.aborted) return
         objectURL = URL.createObjectURL(blob)
@@ -56,6 +61,7 @@ export function PrivateImage(props: { attachment: Attachment; index: number }) {
       if (expiry) clearTimeout(expiry)
     }
   }, [
+    props.accountType,
     props.attachment.id,
     props.attachment.deleted_at,
     props.attachment.expires_at,

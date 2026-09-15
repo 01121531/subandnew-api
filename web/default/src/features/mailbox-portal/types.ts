@@ -1,3 +1,6 @@
+export type AccountType = 'refund' | 'opening'
+export type CredentialKind = 'password' | 'otp' | 'card'
+
 type AccountStatus =
   | 'unassigned'
   | 'pending'
@@ -15,6 +18,8 @@ export type Session =
     }
 
 export type Account = {
+  account_type?: AccountType
+  card_last4?: string
   id: number
   email: string
   version: number
@@ -39,6 +44,8 @@ export type Attachment = {
 }
 
 export type Submission = {
+  account_type?: AccountType
+  card_last4?: string
   id: number
   assignment_id: number
   account_id: number
@@ -62,12 +69,15 @@ export type Page<T> = {
   has_more: boolean
 }
 export type ListQuery = {
+  account_type?: AccountType
   search?: string
   status?: string
   page: number
   page_size: number
 }
 export type Credential = {
+  card_number?: string
+  card_expiry?: string
   password?: string
   code?: string
   expires_at?: number

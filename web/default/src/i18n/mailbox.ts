@@ -1,5 +1,20 @@
 export const mailboxEn = {
   admin: {
+    accountType: 'Account pool',
+    pools: { refund: 'Refund pool', opening: 'Opening pool' },
+    refundImport: 'Exactly 3 fields per row: email, password, 2FA.',
+    openingImport:
+      'Exactly 5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY).',
+    excelPanText:
+      'In Excel, set the PAN column to Text before entering or pasting card numbers to avoid lost digits or scientific notation. Keep expiry as MM/YY text.',
+    noCvv: 'Do not include CVV. Extra columns are rejected by the server.',
+    card: 'Payment card',
+    cardEnding: 'Card **** {{last4}}',
+    cardNumber: 'Card number (PAN)',
+    cardExpiry: 'Expiry (MM/YY)',
+    revealCard: 'Reveal card details',
+    screenshotRedaction:
+      'Screenshots must redact CVV and the full card number. Only the last 4 digits may remain visible.',
     portalEntry: 'Operator sign in',
     operatorFilter: 'Filter by operator',
     allOperators: 'All operators',
@@ -130,6 +145,7 @@ export const mailboxEn = {
       review: 'Review',
       credentials_password: 'Read password',
       credentials_otp: 'Read verification code',
+      credentials_card: 'Read card details',
       operator_create: 'Create operator',
       operator_update: 'Update operator',
       operator_password_reset: 'Reset operator password',
@@ -148,11 +164,17 @@ export const mailboxEn = {
     manage: 'Import mailboxes',
     assign: 'Assign and recall mailboxes',
     review: 'Review submissions',
-    credentials: 'Read passwords and verification codes',
+    credentials: 'Read passwords, verification codes and card details',
     operators: 'Manage operators',
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_invalid_account_type:
+      'Invalid account pool. Choose refund or opening.',
+    mailbox_import_invalid_card_number: 'Invalid card number (PAN).',
+    mailbox_import_invalid_card_expiry: 'Invalid card expiry. Use MM/YY.',
+    mailbox_import_card_number_text_required:
+      'The PAN cell must be text. Set the Excel column to Text before entering the number.',
     mailbox_invalid_file: 'Invalid or oversized import file.',
     mailbox_invalid_id: 'Invalid record ID.',
     mailbox_invalid_query: 'Invalid list filters or pagination.',
@@ -180,7 +202,7 @@ export const mailboxEn = {
     mailbox_import_exists: 'This email already exists.',
     mailbox_import_empty: 'No mailbox records found.',
     mailbox_import_columns:
-      'Each row must contain exactly email, password and 2FA.',
+      'Each row must have exactly 3 fields for refund or 5 for opening. Do not include CVV or extra columns.',
     mailbox_import_invalid_email: 'Invalid email address.',
     mailbox_import_invalid_password: 'Invalid or empty password.',
     mailbox_import_invalid_otp: 'Invalid TOTP secret or configuration.',
@@ -217,6 +239,20 @@ export const mailboxEn = {
 
 export const mailboxZh: typeof mailboxEn = {
   admin: {
+    accountType: '账号池',
+    pools: { refund: '退款邮箱', opening: '开号邮箱' },
+    refundImport: '每行恰好 3 列：邮箱、密码、2FA。',
+    openingImport:
+      '每行恰好 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY）。',
+    excelPanText:
+      '在 Excel 中输入或粘贴卡号前，请将 PAN 列设置为文本，避免精度丢失或科学计数法。有效期也请保留为 MM/YY 文本。',
+    noCvv: '禁止包含 CVV。服务端会拒绝额外列。',
+    card: '支付卡',
+    cardEnding: '卡号 **** {{last4}}',
+    cardNumber: '卡号（PAN）',
+    cardExpiry: '有效期（MM/YY）',
+    revealCard: '查看卡片详情',
+    screenshotRedaction: '截图必须遮盖 CVV 和完整卡号，卡号最多只保留后 4 位。',
     portalEntry: '操作员登录入口',
     operatorFilter: '按操作员筛选',
     allOperators: '全部操作员',
@@ -342,6 +378,7 @@ export const mailboxZh: typeof mailboxEn = {
       review: '审核提交',
       credentials_password: '查看密码',
       credentials_otp: '查看验证码',
+      credentials_card: '查看卡片详情',
       operator_create: '创建操作员',
       operator_update: '更新操作员',
       operator_password_reset: '重置操作员密码',
@@ -360,11 +397,16 @@ export const mailboxZh: typeof mailboxEn = {
     manage: '导入邮箱',
     assign: '分配和收回邮箱',
     review: '审核提交',
-    credentials: '查看密码和验证码',
+    credentials: '查看密码、验证码和卡片详情',
     operators: '管理操作员',
     audit: '查看邮箱审计日志',
   },
   errors: {
+    mailbox_invalid_account_type: '邮箱类型无效，请选择退款邮箱或开号邮箱。',
+    mailbox_import_invalid_card_number: '卡号（PAN）无效。',
+    mailbox_import_invalid_card_expiry: '卡片有效期无效，请使用 MM/YY 格式。',
+    mailbox_import_card_number_text_required:
+      'PAN 单元格必须为文本，请先将 Excel 列设置为文本后重新输入卡号。',
     mailbox_invalid_file: '导入文件无效或过大。',
     mailbox_invalid_id: '记录 ID 无效。',
     mailbox_invalid_query: '筛选或分页参数无效。',
@@ -387,7 +429,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_import_duplicate: '本次导入中存在重复邮箱。',
     mailbox_import_exists: '该邮箱已存在。',
     mailbox_import_empty: '未找到邮箱记录。',
-    mailbox_import_columns: '每行必须恰好包含邮箱、密码和 2FA 三列。',
+    mailbox_import_columns:
+      '退款邮箱每行必须恰好 3 列，开号邮箱恰好 5 列，禁止包含 CVV 或额外列。',
     mailbox_import_invalid_email: '邮箱地址无效。',
     mailbox_import_invalid_password: '密码无效或为空。',
     mailbox_import_invalid_otp: 'TOTP 密钥或配置无效。',

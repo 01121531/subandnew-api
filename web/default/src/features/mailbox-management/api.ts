@@ -3,12 +3,21 @@ import { isAxiosError } from 'axios'
 import { api } from '@/lib/api'
 
 import { MailboxError, safeCode } from './lib/errors'
+import {
+  accountMetadata,
+  auditMetadata,
+  importMetadata,
+  pageMetadata,
+  submissionMetadata,
+} from './lib/pools'
 import type {
   Account,
+  AccountType,
   AccountOperator,
   AssignInput,
   Audit,
   Credential,
+  CredentialKind,
   Envelope,
   ImportPreview,
   ImportSource,
@@ -24,14 +33,18 @@ import type {
 const base = '/api/mailbox-management'
 export function importBody(
   source: ImportSource
-): FormData | { format: string; text: string } {
+): FormData | { format: string; text: string; account_type: AccountType } {
   if (source.file) {
     const body = new FormData()
-    body.append('format', source.format)
+    body.append('account_type', source.account_type ?? 'refund')
     body.append('file', source.file)
     return body
   }
-  return { format: source.format, text: source.text }
+  return {
+    format: source.format,
+    text: source.text,
+    account_type: source.account_type ?? 'refund',
+  }
 }
 export function unwrap<T>(body: Envelope<T>, status = 0): T {
   if (body?.success !== true) {
@@ -43,7 +56,7 @@ async function request<T>(
   path: string,
   method = 'GET',
   data?: unknown,
-  params?: ListQuery,
+  params?: Partial<ListQuery>,
   signal?: AbortSignal
 ): Promise<T> {
   try {
@@ -69,30 +82,71 @@ async function request<T>(
   }
 }
 export const mailboxApi = {
-  accounts: (query: ListQuery, signal?: AbortSignal) =>
-    request<Page<Account>>('/accounts', 'GET', undefined, query, signal),
-  accountOperators: (signal?: AbortSignal) =>
+  accounts: async (query: ListQuery, signal?: AbortSignal) => {
+    const accountType = query.account_type ?? 'refund'
+    const page = await request<Page<Account>>(
+      '/accounts',
+      'GET',
+      undefined,
+      { ...query, account_type: accountType },
+      signal
+    )
+    return pageMetadata(page, (item) => accountMetadata(item, accountType))
+  },
+  accountOperators: (
+    signal?: AbortSignal,
+    accountType: AccountType = 'refund'
+  ) =>
     request<AccountOperator[]>(
       '/account-operators',
       'GET',
       undefined,
-      undefined,
+      { account_type: accountType },
       signal
     ),
-  account: (id: number, signal?: AbortSignal) =>
-    request<Account>(`/accounts/${id}`, 'GET', undefined, undefined, signal),
-  preview: (source: ImportSource) =>
-    request<ImportPreview>('/imports/preview', 'POST', importBody(source)),
+  account: async (
+    id: number,
+    signal?: AbortSignal,
+    accountType: AccountType = 'refund'
+  ) =>
+    accountMetadata(
+      await request<Account>(
+        `/accounts/${id}`,
+        'GET',
+        undefined,
+        { account_type: accountType },
+        signal
+      ),
+      accountType
+    ),
+  preview: async (source: ImportSource, signal?: AbortSignal) =>
+    importMetadata(
+      await request<ImportPreview>(
+        '/imports/preview',
+        'POST',
+        importBody(source),
+        undefined,
+        signal
+      )
+    ),
   import: (source: ImportSource) =>
     request<{ imported: number }>('/imports', 'POST', importBody(source)),
   assign: (input: AssignInput) =>
-    request<unknown>('/assignments', 'POST', input),
-  credentials: (id: number, kind: 'password' | 'otp', signal?: AbortSignal) =>
+    request<unknown>('/assignments', 'POST', {
+      ...input,
+      account_type: input.account_type ?? 'refund',
+    }),
+  credentials: (
+    id: number,
+    kind: CredentialKind,
+    signal?: AbortSignal,
+    accountType: AccountType = 'refund'
+  ) =>
     request<Credential>(
       `/accounts/${id}/credentials`,
       'POST',
       { kind },
-      undefined,
+      { account_type: accountType },
       signal
     ),
   operators: (query: ListQuery, signal?: AbortSignal) =>
@@ -117,17 +171,45 @@ export const mailboxApi = {
     }),
   revoke: (id: number) =>
     request<unknown>(`/operators/${id}/revoke-sessions`, 'POST'),
-  submissions: (query: ListQuery, signal?: AbortSignal) =>
-    request<Page<Submission>>('/submissions', 'GET', undefined, query, signal),
+  submissions: async (query: ListQuery, signal?: AbortSignal) => {
+    const accountType = query.account_type ?? 'refund'
+    const page = await request<Page<Submission>>(
+      '/submissions',
+      'GET',
+      undefined,
+      { ...query, account_type: accountType },
+      signal
+    )
+    return pageMetadata(page, (item) => submissionMetadata(item, accountType))
+  },
   review: (id: number, input: ReviewInput) =>
-    request<unknown>(`/submissions/${id}/review`, 'POST', input),
-  audits: (query: ListQuery, signal?: AbortSignal) =>
-    request<Page<Audit>>('/audits', 'GET', undefined, query, signal),
-  attachment: async (id: string, signal?: AbortSignal): Promise<Blob> => {
+    request<unknown>(
+      `/submissions/${id}/review`,
+      'POST',
+      { version: input.version, status: input.status, reason: input.reason },
+      { account_type: input.account_type ?? 'refund' }
+    ),
+  audits: async (query: ListQuery, signal?: AbortSignal) =>
+    pageMetadata(
+      await request<Page<Audit>>(
+        '/audits',
+        'GET',
+        undefined,
+        { ...query, account_type: query.account_type ?? 'refund' },
+        signal
+      ),
+      auditMetadata
+    ),
+  attachment: async (
+    id: string,
+    signal?: AbortSignal,
+    accountType: AccountType = 'refund'
+  ): Promise<Blob> => {
     try {
       const response = await api.request<Blob>({
         url: `${base}/attachments/${encodeURIComponent(id)}`,
         responseType: 'blob',
+        params: { account_type: accountType },
         signal,
         skipBusinessError: true,
         skipErrorHandler: true,

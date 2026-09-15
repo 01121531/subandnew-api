@@ -12,54 +12,66 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func mailboxImportInput(c *gin.Context) (string, []byte, bool) {
+func mailboxImportInput(c *gin.Context) (string, []byte, string, bool) {
 	media, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if media == "multipart/form-data" {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 12<<20)
 		if err := c.Request.ParseMultipartForm(12 << 20); err != nil {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, false
+			return "", nil, "", false
 		}
 		defer c.Request.MultipartForm.RemoveAll()
+		for key, values := range c.Request.MultipartForm.Value {
+			if (key != "account_type" && key != "format") || len(values) != 1 {
+				mailboxBadRequest(c, "mailbox_invalid_request")
+				return "", nil, "", false
+			}
+		}
+		accountType, ok := mailboxAccountType(c, c.Request.FormValue("account_type"))
+		if !ok {
+			return "", nil, "", false
+		}
 		files := c.Request.MultipartForm.File["file"]
-		if len(files) != 1 {
+		if len(files) != 1 || len(c.Request.MultipartForm.File) != 1 {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, false
+			return "", nil, "", false
 		}
 		file, err := files[0].Open()
 		if err != nil {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, false
+			return "", nil, "", false
 		}
 		defer file.Close()
 		data, err := io.ReadAll(io.LimitReader(file, (10<<20)+1))
 		if err != nil || len(data) > 10<<20 {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, false
+			return "", nil, "", false
 		}
 		format := strings.TrimPrefix(strings.ToLower(filepath.Ext(files[0].Filename)), ".")
 		if format == "txt" {
 			format = "text"
 		}
-		return format, data, true
+		return format, data, accountType, true
 	}
 	var input struct {
-		Format string `json:"format"`
-		Text   string `json:"text"`
+		Format      string `json:"format"`
+		Text        string `json:"text"`
+		AccountType string `json:"account_type"`
 	}
 	if !mailboxDecode(c, &input) {
-		return "", nil, false
+		return "", nil, "", false
 	}
-	return input.Format, []byte(input.Text), true
+	accountType, ok := mailboxAccountType(c, input.AccountType)
+	return input.Format, []byte(input.Text), accountType, ok
 }
 func ImportMailboxAccounts(preview bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		format, data, ok := mailboxImportInput(c)
+		format, data, accountType, ok := mailboxImportInput(c)
 		if !ok {
 			return
 		}
 		if preview {
-			result, err := mailboxService().PreviewImport(c.Request.Context(), mailboxActor(c), format, data)
+			result, err := mailboxService().PreviewImport(c.Request.Context(), mailboxActor(c), format, data, accountType)
 			if err != nil {
 				mailboxFailure(c, err)
 				return
@@ -67,7 +79,7 @@ func ImportMailboxAccounts(preview bool) gin.HandlerFunc {
 			mailboxSuccess(c, result)
 			return
 		}
-		result, err := mailboxService().Import(c.Request.Context(), mailboxActor(c), format, data)
+		result, err := mailboxService().Import(c.Request.Context(), mailboxActor(c), format, data, accountType)
 		if err != nil {
 			mailboxFailure(c, err)
 			return
@@ -88,12 +100,16 @@ func ListMailboxAccounts(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 func GetMailboxAccount(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
 	id := mailboxID(c)
 	if id == 0 {
 		return
 	}
 	c.Set("mailbox_account_id", id)
-	data, err := mailboxService().GetAccount(c.Request.Context(), mailboxActor(c), id)
+	data, err := mailboxService().GetAccount(c.Request.Context(), mailboxActor(c), id, accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return
@@ -101,6 +117,10 @@ func GetMailboxAccount(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 func GetMailboxCredentials(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
 	id := mailboxID(c)
 	if id == 0 {
 		return
@@ -112,12 +132,12 @@ func GetMailboxCredentials(c *gin.Context) {
 	if !mailboxDecode(c, &input) {
 		return
 	}
-	data, err := mailboxService().Credentials(c.Request.Context(), mailboxActor(c), id, input.Kind)
+	data, err := mailboxService().Credentials(c.Request.Context(), mailboxActor(c), id, input.Kind, accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return
 	}
-	if _, err := mailboxService().AccountForActor(mailboxActor(c), id, true); err != nil {
+	if _, err := mailboxService().AccountForActor(mailboxActor(c), id, true, accountType); err != nil {
 		mailboxFailure(c, err)
 		return
 	}
@@ -128,6 +148,11 @@ func AssignMailboxAccounts(c *gin.Context) {
 	if !mailboxDecode(c, &input) {
 		return
 	}
+	accountType, ok := mailboxAccountType(c, input.AccountType)
+	if !ok {
+		return
+	}
+	input.AccountType = accountType
 	if err := mailboxService().Assign(c.Request.Context(), mailboxActor(c), input); err != nil {
 		mailboxFailure(c, err)
 		return
@@ -230,6 +255,10 @@ func ListMailboxSubmissions(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 func ReviewMailboxSubmission(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
 	id := mailboxID(c)
 	if id == 0 {
 		return
@@ -238,7 +267,7 @@ func ReviewMailboxSubmission(c *gin.Context) {
 	if !mailboxDecode(c, &input) {
 		return
 	}
-	if err := mailboxService().Review(c.Request.Context(), mailboxActor(c), id, input); err != nil {
+	if err := mailboxService().Review(c.Request.Context(), mailboxActor(c), id, input, accountType); err != nil {
 		mailboxFailure(c, err)
 		return
 	}
@@ -249,7 +278,7 @@ func ListMailboxAudits(c *gin.Context) {
 	if !ok {
 		return
 	}
-	query := model.DB.Model(&model.MailboxAudit{})
+	query := model.DB.Model(&model.MailboxAudit{}).Where("account_type = ?", q.AccountType)
 	if q.OperatorID > 0 {
 		query = query.Where("operator_id = ?", q.OperatorID)
 	}

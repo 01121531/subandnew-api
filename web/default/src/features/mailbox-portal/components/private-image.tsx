@@ -8,9 +8,13 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { mailboxApi, onAuthFailure } from '../api'
 import { useVisible } from '../hooks/use-visible'
 import { errorKey } from '../lib/errors'
-import type { Attachment } from '../types'
+import { onMailboxWorkspaceClear } from '../session'
+import type { AccountType, Attachment } from '../types'
 
-export function PrivateImage(props: { attachment: Attachment }) {
+export function PrivateImage(props: {
+  attachment: Attachment
+  accountType: AccountType
+}) {
   const { t } = useTranslation()
   const { ref, visible } = useVisible()
   const [url, setUrl] = useState('')
@@ -31,12 +35,14 @@ export function PrivateImage(props: { attachment: Attachment }) {
       setOpen(false)
     }
     const unsubscribe = onAuthFailure(clear)
+    const unsubscribeWorkspace = onMailboxWorkspaceClear(clear)
     async function load() {
       setError(null)
       try {
         const blob = await mailboxApi.attachment(
           props.attachment.id,
-          controller.signal
+          controller.signal,
+          props.accountType
         )
         if (controller.signal.aborted) return
         objectUrl = URL.createObjectURL(blob)
@@ -57,9 +63,11 @@ export function PrivateImage(props: { attachment: Attachment }) {
       clear()
       clearTimeout(timer)
       unsubscribe()
+      unsubscribeWorkspace()
     }
   }, [
     props.attachment.id,
+    props.accountType,
     props.attachment.expires_at,
     expired,
     visible,

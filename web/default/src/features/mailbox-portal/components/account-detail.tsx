@@ -13,11 +13,14 @@ import {
 
 import { mailboxApi } from '../api'
 import { canSubmit } from '../lib/guards'
+import type { AccountType } from '../types'
 import { QueryState, Status } from './common'
 import { Credentials } from './credentials'
 import { DraftSubmission, type LeaveState } from './draft-submission'
+import { MaskedCard } from './masked-card'
 
 export function AccountDetail(props: {
+  accountType: AccountType
   id: number
   csrf: string
   onClose: () => void
@@ -26,8 +29,9 @@ export function AccountDetail(props: {
   const { t } = useTranslation()
   const leave = useRef<LeaveState>({ dirty: false, pending: false })
   const query = useQuery({
-    queryKey: ['mailbox', 'account', props.id],
-    queryFn: ({ signal }) => mailboxApi.account(props.id, signal),
+    queryKey: ['mailbox', 'account', props.id, props.accountType],
+    queryFn: ({ signal }) =>
+      mailboxApi.account(props.id, signal, props.accountType),
   })
   function close() {
     if (leave.current.pending) return
@@ -74,7 +78,7 @@ export function AccountDetail(props: {
           >
             {account && (
               <div
-                key={`${account.assignment_id}:${account.assignment_version}:${account.status}`}
+                key={`${account.account_type}:${account.assignment_id}:${account.assignment_version}:${account.status}`}
               >
                 <div className='flex flex-wrap items-center justify-between gap-2 border-b py-4'>
                   <span className='text-muted-foreground text-xs'>
@@ -84,6 +88,11 @@ export function AccountDetail(props: {
                   </span>
                   <Status status={account.status} />
                 </div>
+                {props.accountType === 'opening' && (
+                  <div className='border-b py-3'>
+                    <MaskedCard last4={account.card_last4} />
+                  </div>
+                )}
                 <Credentials account={account} csrf={props.csrf} />
                 {canSubmit(account) && (
                   <DraftSubmission

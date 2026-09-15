@@ -25,6 +25,7 @@ export function assertCurrentAssignment(
   // Draft uploads bump the account row version without changing the assignment.
   if (
     actual.id !== expected.id ||
+    (actual.account_type ?? 'refund') !== (expected.account_type ?? 'refund') ||
     actual.assignment_id !== expected.assignment_id ||
     actual.assignment_version !== expected.assignment_version
   ) {
@@ -32,6 +33,9 @@ export function assertCurrentAssignment(
   }
   if (purpose === 'credentials' && !canReadCredentials(actual)) {
     throw new MailboxRequestError('mailbox_credentials_revoked', 403)
+  }
+  if (purpose === 'credentials' && actual.status !== expected.status) {
+    throw new MailboxRequestError('mailbox_assignment_changed', 409)
   }
   if (purpose === 'submit' && !canSubmit(actual)) {
     throw new MailboxRequestError('mailbox_assignment_changed', 409)

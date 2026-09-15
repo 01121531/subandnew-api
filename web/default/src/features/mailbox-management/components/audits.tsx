@@ -15,14 +15,28 @@ import {
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
 import { safeCode } from '../lib/errors'
-import type { Audit } from '../types'
+import type { AccountType, Audit } from '../types'
 import { Pager, QueryState, Time } from './common'
+import { PoolScope } from './pool-scope'
 
 export function Audits() {
+  return (
+    <PoolScope>
+      {(accountType) => (
+        <PoolAudits key={accountType} accountType={accountType} />
+      )}
+    </PoolScope>
+  )
+}
+
+function PoolAudits(props: { accountType: AccountType }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
-  const query = useMailboxQuery(['audits', page], (signal) =>
-    mailboxApi.audits({ page, page_size: 20 }, signal)
+  const query = useMailboxQuery(['audits', props.accountType, page], (signal) =>
+    mailboxApi.audits(
+      { page, page_size: 20, account_type: props.accountType },
+      signal
+    )
   )
   const rows = query.data?.items ?? []
   function result(code: string, status: number) {

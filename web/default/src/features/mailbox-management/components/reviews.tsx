@@ -14,20 +14,40 @@ import {
 
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
-import type { Submission } from '../types'
+import type { AccountType, Submission } from '../types'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
+import { PoolScope } from './pool-scope'
 import { ReviewDialog } from './review-dialog'
 
 export function Reviews() {
+  return (
+    <PoolScope>
+      {(accountType) => (
+        <PoolReviews key={accountType} accountType={accountType} />
+      )}
+    </PoolScope>
+  )
+}
+
+function PoolReviews(props: { accountType: AccountType }) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('pending')
   const [selected, setSelected] = useState<Submission>()
   const query = useMailboxQuery(
-    ['submissions', page, search, status],
+    ['submissions', props.accountType, page, search, status],
     (signal) =>
-      mailboxApi.submissions({ page, page_size: 20, search, status }, signal)
+      mailboxApi.submissions(
+        {
+          page,
+          page_size: 20,
+          search,
+          status,
+          account_type: props.accountType,
+        },
+        signal
+      )
   )
   const rows = query.data?.items ?? []
   function open(item: Submission) {
@@ -138,6 +158,7 @@ export function Reviews() {
       />
       {selected && (
         <ReviewDialog
+          accountType={props.accountType}
           submission={selected}
           onClose={() => setSelected(undefined)}
         />

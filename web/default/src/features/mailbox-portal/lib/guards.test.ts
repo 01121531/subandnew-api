@@ -40,6 +40,7 @@ describe('mailbox workflow guards', () => {
       { id: 9 },
       { assignment_id: 9 },
       { assignment_version: 9 },
+      { account_type: 'opening' as const },
     ]) {
       expect(() =>
         assertCurrentAssignment(account, { ...account, ...changed }, 'submit')

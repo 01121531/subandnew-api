@@ -1,10 +1,17 @@
 package model
 
+const MailboxAccountTypeRefund = "refund"
+const MailboxAccountTypeOpening = "opening"
+
 type MailboxAccount struct {
 	ID                 int64  `json:"id" gorm:"primaryKey"`
-	Email              string `json:"email" gorm:"size:320;not null;uniqueIndex"`
+	AccountType        string `json:"account_type" gorm:"size:16;not null;default:refund;uniqueIndex:idx_mailbox_accounts_type_email,priority:1;<-:create"`
+	Email              string `json:"email" gorm:"size:320;not null;uniqueIndex:idx_mailbox_accounts_type_email,priority:2"`
 	Ciphertext         string `json:"-" gorm:"type:text;not null"`
 	KeyVersion         string `json:"-" gorm:"size:64;not null"`
+	CardCiphertext     string `json:"-" gorm:"type:text"`
+	CardKeyVersion     string `json:"-" gorm:"size:64"`
+	CardLast4          string `json:"card_last4" gorm:"size:4;not null;default:''"`
 	Version            int64  `json:"version" gorm:"not null;default:1"`
 	ActiveAssignmentID int64  `json:"-" gorm:"not null;default:0;index"`
 	CreatedBy          int    `json:"created_by"`
@@ -80,6 +87,7 @@ type MailboxAttachment struct {
 
 type MailboxAudit struct {
 	ID               int64  `json:"id" gorm:"primaryKey"`
+	AccountType      string `json:"account_type" gorm:"size:16;not null;default:refund;index"`
 	AdminID          int    `json:"admin_id" gorm:"index"`
 	OperatorID       int64  `json:"operator_id" gorm:"index"`
 	TargetOperatorID int64  `json:"target_operator_id" gorm:"index"`

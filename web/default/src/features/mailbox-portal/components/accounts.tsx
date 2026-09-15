@@ -8,10 +8,16 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { mailboxApi } from '../api'
+import type { AccountType } from '../types'
 import { AccountDetail } from './account-detail'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
+import { MaskedCard } from './masked-card'
 
-export function Accounts(props: { csrf: string; onSubmitted: () => void }) {
+export function Accounts(props: {
+  accountType: AccountType
+  csrf: string
+  onSubmitted: () => void
+}) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('')
@@ -19,10 +25,16 @@ export function Accounts(props: { csrf: string; onSubmitted: () => void }) {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<number | null>(null)
   const query = useQuery({
-    queryKey: ['mailbox', 'accounts', filter, status, page],
+    queryKey: ['mailbox', 'accounts', props.accountType, filter, status, page],
     queryFn: ({ signal }) =>
       mailboxApi.accounts(
-        { search: filter, status, page, page_size: 20 },
+        {
+          account_type: props.accountType,
+          search: filter,
+          status,
+          page,
+          page_size: 20,
+        },
         signal
       ),
   })
@@ -107,13 +119,18 @@ export function Accounts(props: { csrf: string; onSubmitted: () => void }) {
               key={account.id}
               className='grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 py-4 md:grid-cols-[minmax(0,1fr)_110px_180px_40px]'
             >
-              <button
-                type='button'
-                className='min-w-0 text-left text-sm font-medium [overflow-wrap:anywhere] underline-offset-4 hover:underline focus-visible:underline'
-                onClick={() => setSelected(account.id)}
-              >
-                {account.email}
-              </button>
+              <div className='grid min-w-0 gap-1'>
+                <button
+                  type='button'
+                  className='min-w-0 text-left text-sm font-medium [overflow-wrap:anywhere] underline-offset-4 hover:underline focus-visible:underline'
+                  onClick={() => setSelected(account.id)}
+                >
+                  {account.email}
+                </button>
+                {props.accountType === 'opening' && (
+                  <MaskedCard last4={account.card_last4} />
+                )}
+              </div>
               <div>
                 <Status status={account.status} />
               </div>
@@ -143,6 +160,7 @@ export function Accounts(props: { csrf: string; onSubmitted: () => void }) {
       />
       {selected !== null && (
         <AccountDetail
+          accountType={props.accountType}
           key={selected}
           id={selected}
           csrf={props.csrf}

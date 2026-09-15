@@ -16,10 +16,31 @@ export const mailboxClient = new QueryClient({
 })
 
 let identity: string | null = null
+const clearListeners = new Set<() => void>()
+
+export function onMailboxWorkspaceClear(listener: () => void): () => void {
+  clearListeners.add(listener)
+  return () => {
+    clearListeners.delete(listener)
+  }
+}
+
+export function clearMailboxWorkspace(): void {
+  cancelMailboxRequests()
+  for (const listener of clearListeners) listener()
+  void mailboxClient.cancelQueries({ queryKey: ['mailbox'] })
+  mailboxClient.removeQueries({ queryKey: ['mailbox'] })
+  mailboxClient.getMutationCache().clear()
+}
+
 export function clearMailboxSession(): void {
   identity = null
-  cancelMailboxRequests()
-  mailboxClient.clear()
+  clearMailboxWorkspace()
+  // Keep the query that mounted useQuery observers are subscribed to.
+  void mailboxClient.cancelQueries({
+    queryKey: ['mailbox-session'],
+    exact: true,
+  })
   mailboxClient.setQueryData(['mailbox-session'], { authenticated: false })
 }
 onAuthFailure(clearMailboxSession)
@@ -29,9 +50,7 @@ export function acceptSession(session: Session): Session {
     ? `${session.operator.id}:${session.csrf_token}`
     : null
   if (identity !== next || !session.authenticated) {
-    void mailboxClient.cancelQueries({ queryKey: ['mailbox'] })
-    mailboxClient.removeQueries({ queryKey: ['mailbox'] })
-    mailboxClient.getMutationCache().clear()
+    clearMailboxWorkspace()
   }
   identity = next
   return session

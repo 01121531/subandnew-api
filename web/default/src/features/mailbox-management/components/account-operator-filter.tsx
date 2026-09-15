@@ -7,14 +7,17 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
 import { errorKey } from '../lib/errors'
+import type { AccountType } from '../types'
 
 export function AccountOperatorFilter(props: {
+  accountType: AccountType
   value: string
   onChange: (value: string) => void
 }) {
   const { t } = useTranslation()
-  const options = useMailboxQuery(['account-operators'], (signal) =>
-    mailboxApi.accountOperators(signal)
+  const options = useMailboxQuery(
+    ['account-operators', props.accountType],
+    (signal) => mailboxApi.accountOperators(signal, props.accountType)
   )
   return (
     <div className='flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto'>

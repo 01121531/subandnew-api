@@ -1,5 +1,5 @@
 import { FileUp } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -11,22 +11,42 @@ import { Textarea } from '@/components/ui/textarea'
 import { mailboxApi } from '../api'
 import { useMailboxMutation } from '../hooks'
 import { safeCode } from '../lib/errors'
-import type { ImportFormat, ImportPreview, ImportSource } from '../types'
+import type {
+  AccountType,
+  ImportFormat,
+  ImportPreview,
+  ImportSource,
+} from '../types'
 import { Field, Modal } from './common'
 
-export function ImportDialog(props: { onClose: () => void }) {
+export function ImportDialog(props: {
+  accountType: AccountType
+  onClose: () => void
+}) {
   const { t } = useTranslation()
   const [format, setFormat] = useState<ImportFormat>('text')
   const [text, setText] = useState('')
   const [file, setFile] = useState<File>()
   const [preview, setPreview] = useState<ImportPreview>()
   const source = useRef<ImportSource | undefined>(undefined)
+  const controller = useRef<AbortController | undefined>(undefined)
+  useEffect(
+    () => () => {
+      controller.current?.abort()
+      source.current = undefined
+    },
+    []
+  )
   const previewMutation = useMailboxMutation(async (input: ImportSource) => {
-    const result = await mailboxApi.preview(input)
+    const request = new AbortController()
+    controller.current = request
+    const result = await mailboxApi.preview(input, request.signal)
+    if (request.signal.aborted) return
     source.current = input
     setPreview(result)
     // Once previewed, only the sanitized server response is rendered.
     setText('')
+    setFile(undefined)
   })
   const commit = useMailboxMutation(async () => {
     if (!source.current || !preview?.valid) return
@@ -42,14 +62,16 @@ export function ImportDialog(props: { onClose: () => void }) {
     setText('')
   }
   function runPreview() {
-    if (file) previewMutation.submit({ format, file })
-    else if (format !== 'xlsx' && text.trim()) {
-      previewMutation.submit({ format, text })
+    if (file) {
+      previewMutation.submit({ format, file, account_type: props.accountType })
+    } else if (format !== 'xlsx' && text.trim()) {
+      previewMutation.submit({ format, text, account_type: props.accountType })
     }
   }
   return (
     <Modal
       title={t('mailbox.admin.importTitle')}
+      description={t(`mailbox.admin.pools.${props.accountType}`)}
       dirty={!!text || !!file || !!preview}
       pending={pending}
       onClose={props.onClose}
@@ -77,6 +99,19 @@ export function ImportDialog(props: { onClose: () => void }) {
         )
       }
     >
+      <div className='mb-4 space-y-2 border-l-2 border-amber-500 pl-3 text-sm'>
+        <p>
+          {t(
+            props.accountType === 'opening'
+              ? 'mailbox.admin.openingImport'
+              : 'mailbox.admin.refundImport'
+          )}
+        </p>
+        {props.accountType === 'opening' && (
+          <p>{t('mailbox.admin.excelPanText')}</p>
+        )}
+        <p>{t('mailbox.admin.noCvv')}</p>
+      </div>
       {!preview ? (
         <div className='grid gap-4'>
           <Field id='mailbox-format' label={t('mailbox.admin.format')}>
@@ -159,9 +194,14 @@ export function ImportDialog(props: { onClose: () => void }) {
           )}
           <ol className='divide-y'>
             {preview.rows.map((row) => (
-              <li key={row.row} className='flex gap-3 py-2 text-sm'>
+              <li key={row.row} className='flex flex-wrap gap-3 py-2 text-sm'>
                 <span className='text-muted-foreground'>{row.row}</span>
                 <span className='min-w-0 break-all'>{row.email}</span>
+                {props.accountType === 'opening' && row.card_last4 && (
+                  <span className='text-muted-foreground'>
+                    {t('mailbox.admin.cardEnding', { last4: row.card_last4 })}
+                  </span>
+                )}
               </li>
             ))}
           </ol>

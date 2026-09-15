@@ -13,8 +13,12 @@ import { Accounts } from './components/accounts'
 import { ErrorMessage, QueryState } from './components/common'
 import { History } from './components/history'
 import { Security } from './components/security'
-import { clearMailboxSession, sessionOptions } from './session'
-import type { Session } from './types'
+import {
+  clearMailboxSession,
+  clearMailboxWorkspace,
+  sessionOptions,
+} from './session'
+import type { AccountType, Session } from './types'
 
 type Tab = 'accounts' | 'submissions' | 'security'
 const tabs = [
@@ -49,9 +53,16 @@ function Workspace(props: {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('accounts')
   const [drawer, setDrawer] = useState(false)
+  const [accountType, setAccountType] = useState<AccountType>('refund')
+  const [signingOut, setSigningOut] = useState(false)
   const logout = useMutation({
     mutationFn: () => mailboxApi.logout(props.session.csrf_token),
+    onMutate: () => {
+      clearMailboxWorkspace()
+      setSigningOut(true)
+    },
     onSuccess: clearMailboxSession,
+    onError: () => setSigningOut(false),
   })
   useEffect(() => {
     const timer = setTimeout(
@@ -117,16 +128,56 @@ function Workspace(props: {
             </Button>
           </div>
         </header>
-        <main className='bg-background m-3 min-w-0 flex-1 px-3 sm:m-6 sm:px-5'>
+        <main
+          key={accountType}
+          className='bg-background m-3 min-w-0 flex-1 px-3 sm:m-6 sm:px-5'
+        >
+          <fieldset
+            disabled={signingOut}
+            className='flex flex-wrap items-center gap-3 border-b py-4'
+          >
+            <legend className='sr-only'>
+              {t('mailboxPortal.accountType')}
+            </legend>
+            <span className='text-muted-foreground text-sm'>
+              {t('mailboxPortal.accountType')}
+            </span>
+            <div className='bg-muted grid grid-cols-2 gap-1 rounded p-1'>
+              {(['refund', 'opening'] as const).map((type) => (
+                <label key={type} className='relative cursor-pointer'>
+                  <input
+                    type='radio'
+                    name='mailbox-account-type'
+                    value={type}
+                    checked={accountType === type}
+                    className='peer absolute inset-0 z-10 size-full cursor-pointer opacity-0'
+                    onChange={() => {
+                      if (accountType === type) return
+                      clearMailboxWorkspace()
+                      setAccountType(type)
+                    }}
+                  />
+                  <span className='peer-checked:bg-background peer-focus-visible:ring-ring block rounded px-3 py-2 text-center text-sm peer-checked:shadow-sm peer-focus-visible:ring-2'>
+                    {t(`mailboxPortal.type_${type}`)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <ErrorMessage error={logout.error} />
-          {tab === 'accounts' && (
+          {!signingOut && tab === 'accounts' && (
             <Accounts
+              accountType={accountType}
               csrf={props.session.csrf_token}
               onSubmitted={() => setTab('submissions')}
             />
           )}
-          {tab === 'submissions' && <History />}
-          {tab === 'security' && <Security csrf={props.session.csrf_token} />}
+          {!signingOut && tab === 'submissions' && (
+            <History accountType={accountType} />
+          )}
+          {!signingOut && tab === 'security' && (
+            <Security csrf={props.session.csrf_token} />
+          )}
         </main>
       </div>
       <Sheet open={drawer} onOpenChange={setDrawer}>
