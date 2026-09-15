@@ -1,0 +1,33 @@
+[project]
+name = "mailbox-assistant"
+version = "1.2.79"
+description = "Floating operator client for the mailbox workspace"
+requires-python = ">=3.12,<3.13"
+dependencies = ["PySide6==6.11.2"]
+
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mailbox_assistant*"]
+
+[project.optional-dependencies]
+dev = ["pyinstaller==6.22.3", "pytest==9.1.1", "pytest-qt==4.5.0", "ruff==0.16.7", "mypy==2.3.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+files = ["mailbox_assistant"]

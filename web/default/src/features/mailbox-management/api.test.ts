@@ -17,6 +17,21 @@ const success = {
   },
 }
 describe('mailbox control-plane API', () => {
+  test('temporary CVV handoff is scoped, versioned and never echoed into client cache', async () => {
+    request = spyOn(api, 'request').mockResolvedValueOnce({
+      data: { success: true, data: { expires_at: 123, cvv: '007' } },
+    })
+    expect(await mailboxApi.provideTemporaryCvv(4, 6, '007')).toEqual({
+      expires_at: 123,
+    })
+    expect(request.mock.calls[0][0]).toMatchObject({
+      url: '/api/mailbox-management/accounts/4/temporary-cvv',
+      method: 'POST',
+      params: { account_type: 'opening' },
+      data: { version: 6, cvv: '007' },
+      headers: { 'X-Mailbox-Request': '1' },
+    })
+  })
   for (const accountType of ['refund', 'opening'] as const) {
     test(`${accountType} scopes lists, detail, credentials, review and private images explicitly`, async () => {
       request = spyOn(api, 'request').mockResolvedValue(success)

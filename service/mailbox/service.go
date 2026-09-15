@@ -55,6 +55,7 @@ type Service struct {
 	Cipher      func() (*managedinstance.CredentialCipher, error)
 	StorageDir  string
 	accountType string
+	cvv         *cvvStore
 }
 
 const AccountTypeRefund = model.MailboxAccountTypeRefund

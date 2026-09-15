@@ -143,6 +143,30 @@ func GetMailboxCredentials(c *gin.Context) {
 	}
 	mailboxSuccess(c, data)
 }
+
+func ProvideMailboxTemporaryCVV(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
+	id := mailboxID(c)
+	if id == 0 {
+		return
+	}
+	c.Set("mailbox_account_id", id)
+	var input mailbox.TemporaryCVVInput
+	if !mailboxDecode(c, &input) {
+		return
+	}
+	data, err := mailboxService().ProvideTemporaryCVV(c.Request.Context(), mailboxActor(c), id, input, accountType)
+	input.CVV = ""
+	if err != nil {
+		mailboxFailure(c, err)
+		return
+	}
+	mailboxSuccess(c, data)
+}
+
 func AssignMailboxAccounts(c *gin.Context) {
 	var input mailbox.AssignInput
 	if !mailboxDecode(c, &input) {

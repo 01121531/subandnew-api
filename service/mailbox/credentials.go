@@ -18,6 +18,7 @@ import (
 const mailboxCredentialKind = "mailbox-account:v1"
 
 type CredentialView struct {
+	CVV        string `json:"cvv,omitempty"`
 	CardNumber string `json:"card_number,omitempty"`
 	CardExpiry string `json:"card_expiry,omitempty"`
 	Password   string `json:"password,omitempty"`
@@ -162,6 +163,9 @@ func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64,
 	account, err := s.credentialAccount(actor, accountID)
 	if err != nil {
 		return nil, err
+	}
+	if kind == "cvv" {
+		return s.claimTemporaryCVV(actor, account)
 	}
 	if kind != "password" && kind != "otp" && kind != "card" || kind == "card" && account.AccountType != AccountTypeOpening {
 		return nil, fail(400, "mailbox_invalid_credential_kind")

@@ -187,6 +187,9 @@ func (s *Service) SaveOperator(ctx context.Context, actor Actor, id int64, input
 	if err != nil {
 		return nil, err
 	}
+	if id > 0 && !input.Enabled {
+		s.invalidateCVVOperator(id)
+	}
 	return &result, nil
 }
 
@@ -240,6 +243,7 @@ func (s *Service) ResetPassword(ctx context.Context, actor Actor, id int64, pass
 	if err != nil {
 		return "", err
 	}
+	s.invalidateCVVOperator(id)
 	return password, nil
 }
 
@@ -248,7 +252,7 @@ func (s *Service) RevokeSessions(ctx context.Context, actor Actor, id int64) err
 	if err := s.checkOperatorAdmin(actor); err != nil {
 		return err
 	}
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		t := s.WithDB(tx)
 		if err := t.checkOperatorAdmin(actor); err != nil {
 			return err
@@ -263,4 +267,8 @@ func (s *Service) RevokeSessions(ctx context.Context, actor Actor, id int64) err
 		actor.TargetOperatorID = id
 		return t.Audit(actor, "operator_sessions_revoke", 0, 0, 200, "")
 	})
+	if err == nil {
+		s.invalidateCVVOperator(id)
+	}
+	return err
 }

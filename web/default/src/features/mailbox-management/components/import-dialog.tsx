@@ -110,7 +110,13 @@ export function ImportDialog(props: {
         {props.accountType === 'opening' && (
           <p>{t('mailbox.admin.excelPanText')}</p>
         )}
-        <p>{t('mailbox.admin.noCvv')}</p>
+        <p>
+          {t(
+            props.accountType === 'opening'
+              ? 'mailbox.admin.temporaryCvvNotice'
+              : 'mailbox.admin.noCvv'
+          )}
+        </p>
       </div>
       {!preview ? (
         <div className='grid gap-4'>

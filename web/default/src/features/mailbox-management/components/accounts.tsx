@@ -1,4 +1,4 @@
-import { Eye, FileUp, UserRoundCheck } from 'lucide-react'
+import { Eye, FileUp, KeyRound, UserRoundCheck } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -17,13 +17,14 @@ import { useAuthStore } from '@/stores/auth-store'
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
 import { canMailbox } from '../lib/permissions'
-import type { AccountType, VersionedID } from '../types'
+import type { Account, AccountType, VersionedID } from '../types'
 import { AccountOperatorFilter } from './account-operator-filter'
 import { AssignDialog } from './assign-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
 import { ImportDialog } from './import-dialog'
 import { PoolScope } from './pool-scope'
+import { TemporaryCvvDialog } from './temporary-cvv-dialog'
 
 export function Accounts() {
   return (
@@ -50,6 +51,7 @@ function AccountPool(props: { accountType: AccountType }) {
   const [showAssign, setShowAssign] = useState(false)
   const [detail, setDetail] = useState<number>()
   const [accountID, setAccountID] = useState('')
+  const [cvvAccount, setCvvAccount] = useState<Account>()
   const query = useMailboxQuery(
     ['accounts', props.accountType, page, search, status, operator],
     (signal) =>
@@ -82,16 +84,34 @@ function AccountPool(props: { accountType: AccountType }) {
     setPage(value)
   }
   function openButton(id: number) {
+    const row = rows.find((item) => item.id === id)
     return (
-      <Button
-        variant='ghost'
-        size='icon'
-        title={t('mailbox.admin.details')}
-        aria-label={t('mailbox.admin.details')}
-        onClick={() => setDetail(id)}
-      >
-        <Eye />
-      </Button>
+      <div className='flex shrink-0 items-center gap-1'>
+        <Button
+          variant='ghost'
+          size='icon'
+          title={t('mailbox.admin.details')}
+          aria-label={t('mailbox.admin.details')}
+          onClick={() => setDetail(id)}
+        >
+          <Eye />
+        </Button>
+        {row &&
+          props.accountType === 'opening' &&
+          credentials &&
+          canMailbox(user, 'manage') &&
+          ['unassigned', 'pending', 'rejected'].includes(row.status) && (
+            <Button
+              variant='ghost'
+              size='icon'
+              title={t('mailbox.admin.provideCvv')}
+              aria-label={t('mailbox.admin.provideCvv')}
+              onClick={() => setCvvAccount(row)}
+            >
+              <KeyRound />
+            </Button>
+          )}
+      </div>
     )
   }
   return (
@@ -317,6 +337,12 @@ function AccountPool(props: { accountType: AccountType }) {
             onPage={changePage}
           />
         </>
+      )}
+      {cvvAccount && (
+        <TemporaryCvvDialog
+          account={cvvAccount}
+          onClose={() => setCvvAccount(undefined)}
+        />
       )}
       {showImport && (
         <ImportDialog

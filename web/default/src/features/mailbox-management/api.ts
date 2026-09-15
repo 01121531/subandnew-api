@@ -82,6 +82,15 @@ async function request<T>(
   }
 }
 export const mailboxApi = {
+  provideTemporaryCvv: async (id: number, version: number, cvv: string) => {
+    const result = await request<{ expires_at: number }>(
+      `/accounts/${id}/temporary-cvv`,
+      'POST',
+      { version, cvv },
+      { account_type: 'opening' }
+    )
+    return { expires_at: result.expires_at }
+  },
   accounts: async (query: ListQuery, signal?: AbortSignal) => {
     const accountType = query.account_type ?? 'refund'
     const page = await request<Page<Account>>(

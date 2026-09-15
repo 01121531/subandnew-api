@@ -4,9 +4,14 @@ export const mailboxEn = {
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
     refundImport: 'Exactly 3 fields per row: email, password, 2FA.',
     openingImport:
-      'Exactly 5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY).',
+      '5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY). Optional sixth field: temporary CVV (single-node mode only).',
     excelPanText:
-      'In Excel, set the PAN column to Text before entering or pasting card numbers to avoid lost digits or scientific notation. Keep expiry as MM/YY text.',
+      'In Excel, PAN and optional CVV must be Text cells to preserve every digit. Keep expiry as MM/YY text.',
+    provideCvv: 'Provide temporary CVV',
+    cvvProvided:
+      'Temporary CVV provided for 10 minutes. One operator claim only.',
+    temporaryCvvNotice:
+      'Temporary CVV requires explicitly enabled single-node delivery. It expires after 10 minutes and is removed on claim or restart. Use only before authorization of a specific transaction; never retain the source file or include CVV in screenshots. This is not a compliance certification.',
     noCvv: 'Do not include CVV. Extra columns are rejected by the server.',
     card: 'Payment card',
     cardEnding: 'Card **** {{last4}}',
@@ -169,6 +174,12 @@ export const mailboxEn = {
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_cvv_disabled: 'Single-node temporary CVV delivery is not enabled.',
+    mailbox_cvv_unavailable:
+      'CVV was not provided, expired, or was already claimed.',
+    mailbox_cvv_capacity: 'Temporary delivery capacity is full. Try later.',
+    mailbox_invalid_cvv: 'CVV must be a string of 3 or 4 digits.',
+    mailbox_import_cvv_text_required: 'The Excel CVV cell must be Text.',
     mailbox_invalid_account_type:
       'Invalid account pool. Choose refund or opening.',
     mailbox_import_invalid_card_number: 'Invalid card number (PAN).',
@@ -243,9 +254,13 @@ export const mailboxZh: typeof mailboxEn = {
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
     refundImport: '每行恰好 3 列：邮箱、密码、2FA。',
     openingImport:
-      '每行恰好 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY）。',
+      '每行 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY）。可选第 6 列：临时 CVV（仅限单节点模式）。',
     excelPanText:
-      '在 Excel 中输入或粘贴卡号前，请将 PAN 列设置为文本，避免精度丢失或科学计数法。有效期也请保留为 MM/YY 文本。',
+      'Excel 中卡号和可选 CVV 必须使用文本单元格，避免丢失数字。有效期保留为 MM/YY 文本。',
+    provideCvv: '补发临时 CVV',
+    cvvProvided: '已提供临时 CVV，10 分钟内可领取一次。',
+    temporaryCvvNotice:
+      '临时 CVV 仅限显式启用的单节点交付，10 分钟到期，领取或重启即删除。仅用于具体交易授权前，不得保留原始文件或将 CVV 放入截图。这不代表已通过合规认证。',
     noCvv: '禁止包含 CVV。服务端会拒绝额外列。',
     card: '支付卡',
     cardEnding: '卡号 **** {{last4}}',
@@ -422,6 +437,11 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_credentials_changed: '凭据访问权限已变化，请重新打开邮箱。',
     mailbox_credentials_revoked: '凭据访问权限已撤销。',
     mailbox_credentials_unavailable: '凭据暂不可用。',
+    mailbox_cvv_disabled: '未启用单节点临时 CVV 交付。',
+    mailbox_cvv_unavailable: 'CVV 未提供、已过期或已领取。',
+    mailbox_cvv_capacity: '临时交付容量已满，请稍后再试。',
+    mailbox_invalid_cvv: 'CVV 必须是 3 或 4 位数字字符串。',
+    mailbox_import_cvv_text_required: 'Excel 的 CVV 单元格必须是文本类型。',
     mailbox_invalid_credential_kind: '无效的凭据类型。',
     mailbox_invalid_credentials: '凭据无效。',
     mailbox_import_invalid: '导入校验失败，请重新预览。',

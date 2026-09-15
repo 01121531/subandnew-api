@@ -52,6 +52,7 @@ type mailboxImportRow struct {
 	email  string
 	secret mailboxCredentialSecret
 	card   mailboxCardSecret
+	cvv    string
 }
 
 func (s *Service) checkMailboxImportActor(actor Actor) error {
@@ -75,9 +76,18 @@ func (s *Service) PreviewImport(ctx context.Context, actor Actor, format string,
 	if err := s.checkMailboxImportActor(actor); err != nil {
 		return nil, err
 	}
-	preview, _, err = s.prepareMailboxImport(format, data)
+	var rows []mailboxImportRow
+	preview, rows, err = s.prepareMailboxImport(format, data)
 	if err != nil {
 		return nil, err
+	}
+	for _, row := range rows {
+		if row.cvv != "" {
+			if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
+				return nil, err
+			}
+			break
+		}
 	}
 	if err := s.checkMailboxImportActor(actor); err != nil {
 		return nil, err
@@ -114,6 +124,26 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	if err != nil {
 		return nil, fail(503, "mailbox_credentials_unavailable")
 	}
+	cvvCount := 0
+	for _, row := range rows {
+		if row.cvv != "" {
+			cvvCount++
+		}
+	}
+	var cvvs *cvvStore
+	if cvvCount > 0 {
+		if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
+			return nil, err
+		}
+		cvvs = s.cvvStore()
+		cvvs.mu.Lock()
+		defer cvvs.mu.Unlock()
+		cvvs.purgeLocked(s.Now())
+		if len(cvvs.items)+cvvCount > temporaryCVVCapacity {
+			return nil, fail(503, "mailbox_cvv_capacity")
+		}
+	}
+	pendingCVVs := make(map[int64]string)
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		service := s.WithDB(tx)
 		if err := service.checkMailboxImportActor(actor); err != nil {
@@ -156,9 +186,17 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 			if update.Error != nil || update.RowsAffected != 1 {
 				return fail(500, "mailbox_service_unavailable")
 			}
+			if row.cvv != "" {
+				pendingCVVs[account.ID] = row.cvv
+			}
 		}
 		if err := service.checkMailboxImportActor(actor); err != nil {
 			return err
+		}
+		if cvvCount > 0 {
+			if err := service.CheckActor(actor, authz.MailboxCredentials); err != nil {
+				return err
+			}
 		}
 		if err := service.Audit(actor, "import", 0, 0, 200, ""); err != nil {
 			return fail(500, "mailbox_service_unavailable")
@@ -167,6 +205,13 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Start the handoff lifetime only once the entire import has committed.
+	if cvvs != nil {
+		now := s.Now()
+		for id, value := range pendingCVVs {
+			cvvs.putLocked(id, value, now, 0, 0, 0)
+		}
 	}
 	return &ImportResult{Imported: len(rows)}, nil
 }
@@ -180,17 +225,35 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		columns = 5
 	}
 	addIssue := func(row int, code string) { preview.Issues = append(preview.Issues, ImportIssue{Row: row, Code: code}) }
+	headerColumns := 0
 	consume := func(row int, cells []string, header bool) error {
 		if header && mailboxImportHeader(cells, s.pool()) {
+			headerColumns = len(cells)
+			if headerColumns == 6 && !temporaryCVVEnabled() {
+				addIssue(row, "mailbox_cvv_disabled")
+			}
 			return nil
 		}
 		preview.Total++
 		if preview.Total > mailboxImportMaxRows {
 			return fail(400, "mailbox_import_too_many_rows")
 		}
-		if len(cells) != columns {
+		withCVV := columns == 5 && len(cells) == 6
+		if (len(cells) != columns && !withCVV) || (headerColumns != 0 && len(cells) != headerColumns) {
 			addIssue(row, "mailbox_import_columns")
 			return nil
+		}
+		cvv := ""
+		if withCVV {
+			if !temporaryCVVEnabled() {
+				addIssue(row, "mailbox_cvv_disabled")
+				return nil
+			}
+			if !cvvPattern.MatchString(cells[5]) {
+				addIssue(row, "mailbox_invalid_cvv")
+				return nil
+			}
+			cvv = cells[5]
 		}
 		email := strings.ToLower(strings.TrimSpace(cells[0]))
 		address, err := mail.ParseAddress(email)
@@ -232,7 +295,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			}
 			preview.Rows[len(preview.Rows)-1].CardLast4 = card.Number[len(card.Number)-4:]
 		}
-		rows = append(rows, mailboxImportRow{email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card})
+		rows = append(rows, mailboxImportRow{email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card, cvv: cvv})
 		return nil
 	}
 	if len(data) > mailboxImportMaxBytes {
@@ -290,7 +353,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 				}
 				row, _ := reader.FieldPos(0)
 				record := data[recordOffset:reader.InputOffset()]
-				if len(cells) == columns {
+				if len(cells) == columns || (columns == 5 && len(cells) == 6) {
 					cells[1] = mailboxCSVPassword(record, recordLine, reader)
 				}
 				recordOffset = reader.InputOffset()
@@ -372,7 +435,7 @@ func mailboxImportHeader(cells []string, accountTypes ...string) bool {
 	if kind == AccountTypeOpening {
 		columns = 5
 	}
-	if len(cells) != columns {
+	if len(cells) != columns && !(columns == 5 && len(cells) == 6) {
 		return false
 	}
 	aliases := [][]string{
@@ -381,6 +444,7 @@ func mailboxImportHeader(cells []string, accountTypes ...string) bool {
 		{"2fa", "totp", "\u4e8c\u6b65\u9a8c\u8bc1", "\u4e24\u6b65\u9a8c\u8bc1", "\u53cc\u91cd\u9a8c\u8bc1", "\u4e8c\u6b65\u9a8c\u8bc1\u5bc6\u94a5"},
 		{"pan", "card_number", "\u5361\u53f7"},
 		{"expiry", "card_expiry", "\u6709\u6548\u671f"},
+		{"cvv"},
 	}
 	for i, cell := range cells {
 		matched := false
@@ -484,6 +548,17 @@ func readMailboxXLSXRows(data []byte, consume func(int, []string, bool, string) 
 			}
 			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
 				rowCode = "mailbox_import_card_number_text_required"
+				cells = nil
+			}
+		}
+		if kind == AccountTypeOpening && len(cells) == 6 && !(first && mailboxImportHeader(cells, kind)) {
+			cell, _ := excelize.CoordinatesToCellName(6, row)
+			cellType, err := book.GetCellType(sheets[0], cell)
+			if err != nil {
+				return invalid()
+			}
+			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
+				rowCode = "mailbox_import_cvv_text_required"
 				cells = nil
 			}
 		}

@@ -91,8 +91,49 @@ jobs:
           name: subandnew-api-${{ matrix.goos }}-${{ matrix.goarch }}
           path: subandnew-api-*
 
+  mailbox-desktop:
+    needs: quality
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop/mailbox-assistant
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+      - name: Test and package desktop client
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          python -m pip install -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pytest -q
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m ruff check .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m ruff format --check .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m mypy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python build.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
+          $env:PYTHONPATH = ''
+          $env:PYTHONHOME = ''
+          $check = Start-Process -FilePath ./dist/MailboxAssistant/MailboxAssistant.exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
+          if (-not $check.WaitForExit(120000)) { $check.Kill(); throw 'Desktop runtime check timed out' }
+          if ($check.ExitCode -ne 0) { exit $check.ExitCode }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mailbox-assistant-windows
+          path: |
+            desktop/mailbox-assistant/dist/mailbox-assistant-*.zip
+            desktop/mailbox-assistant/dist/mailbox-assistant-*.sha256
+
   release:
-    needs: build
+    needs: [build, mailbox-desktop]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -100,17 +141,23 @@ jobs:
         with:
           pattern: subandnew-api-*
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mailbox-assistant-windows
       - name: Generate release checksums
         shell: bash
         run: |
           sha256sum subandnew-api-*-linux-* > checksums-linux.txt
           sha256sum subandnew-api-*-macos-* > checksums-macos.txt
           sha256sum subandnew-api-*-windows-* > checksums-windows.txt
+          sha256sum mailbox-assistant-*.zip > checksums-mailbox-assistant.txt
       - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: |
             subandnew-api-*
             checksums-*.txt
+            mailbox-assistant-*.zip
+            mailbox-assistant-*.sha256
             LICENSE
             NOTICE
             THIRD-PARTY-LICENSES.md

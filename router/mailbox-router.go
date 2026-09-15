@@ -19,6 +19,7 @@ func registerMailboxRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	admin.GET("/accounts/:id", view, controller.GetMailboxAccount)
 	admin.GET("/account-operators", view, controller.MailboxAccountOperators)
 	admin.POST("/accounts/:id/credentials", controller.MailboxGuard(authz.MailboxCredentials), controller.GetMailboxCredentials)
+	admin.POST("/accounts/:id/temporary-cvv", manage, controller.MailboxGuard(authz.MailboxCredentials), controller.ProvideMailboxTemporaryCVV)
 	admin.POST("/imports/preview", manage, controller.ImportMailboxAccounts(true))
 	admin.POST("/imports", manage, controller.ImportMailboxAccounts(false))
 	admin.POST("/assignments", assign, controller.AssignMailboxAccounts)

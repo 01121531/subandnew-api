@@ -14,6 +14,8 @@ import (
 )
 
 type AccountView struct {
+	TemporaryCVVID       string `json:"temporary_cvv_id,omitempty"`
+	TemporaryCVVStatus   string `json:"temporary_cvv_status,omitempty"`
 	AccountType          string `json:"account_type"`
 	CardLast4            string `json:"card_last4"`
 	ID                   int64  `json:"id"`
@@ -171,7 +173,9 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 	if query.Search != "" {
 		q = q.Where("LOWER(a.email) LIKE ?", "%"+strings.ToLower(query.Search)+"%")
 	}
-	if query.Status != "" {
+	if query.Status == "actionable" {
+		q = q.Where("t.status IN ?", []string{StatusPending, StatusRejected})
+	} else if query.Status != "" {
 		q = q.Where("COALESCE(t.status, 'unassigned') = ?", query.Status)
 	}
 	if query.OperatorID > 0 {
@@ -228,6 +232,7 @@ func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64, account
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
 	}
+	s.temporaryCVVMetadata(actor, &view)
 	return &view, nil
 }
 
@@ -254,13 +259,14 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			return fail(400, "mailbox_invalid_assignment")
 		}
 	}
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	changes := []cvvAssignmentChange{}
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxAssign); err != nil {
 			return err
 		}
+		var operator model.MailboxOperator
 		if input.OperatorID != 0 {
-			var operator model.MailboxOperator
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND enabled = ?", input.OperatorID, true).First(&operator).Error; err != nil {
 				return workflowNotFound(err)
 			}
@@ -299,9 +305,14 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			if err := s.Audit(actor, action, account.ID, assignmentID, 200, ""); err != nil {
 				return err
 			}
+			changes = append(changes, cvvAssignmentChange{account.ID, account.ActiveAssignmentID, assignmentID, input.OperatorID, operator.AuthVersion})
 		}
 		return nil
 	})
+	if err == nil {
+		s.updateCVVAssignments(changes)
+	}
+	return err
 }
 
 func (s *Service) submissionQuery(actor Actor) *gorm.DB {
@@ -450,6 +461,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateCVVAccount(view.AccountID)
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
 	}
@@ -472,7 +484,8 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 	if submissionID <= 0 || input.Version <= 0 || (input.Status != StatusApproved && input.Status != StatusRejected) || !utf8.ValidString(input.Reason) || utf8.RuneCountInString(input.Reason) > 2000 || (input.Status == StatusRejected && strings.TrimSpace(input.Reason) == "") {
 		return fail(400, "mailbox_invalid_review")
 	}
-	return s.DB.Transaction(func(tx *gorm.DB) error {
+	var accountID int64
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxReview); err != nil {
 			return err
@@ -485,6 +498,7 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		if err != nil {
 			return err
 		}
+		accountID = account.ID
 		var submission model.MailboxSubmission
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&submission, submissionID).Error; err != nil {
 			return workflowNotFound(err)
@@ -511,4 +525,8 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		}
 		return s.Audit(actor, "review", account.ID, assignment.ID, 200, "")
 	})
+	if err == nil {
+		s.invalidateCVVAccount(accountID)
+	}
+	return err
 }
