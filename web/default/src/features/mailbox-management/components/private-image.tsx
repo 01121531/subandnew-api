@@ -1,5 +1,5 @@
 import { ImageOff, Maximize2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { mailboxApi } from '../api'
 import { MailboxError, errorKey } from '../lib/errors'
 import type { AccountType, Attachment } from '../types'
-import { Modal } from './common'
+import { ImageViewer } from './image-viewer'
 
 export function PrivateImage(props: {
   accountType: AccountType
@@ -18,12 +18,15 @@ export function PrivateImage(props: {
   const [url, setURL] = useState('')
   const [error, setError] = useState<unknown>()
   const [expanded, setExpanded] = useState(false)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
     const controller = new AbortController()
     let objectURL = ''
     let expiry: ReturnType<typeof setTimeout> | undefined
     setURL('')
     setExpanded(false)
+    setLoaded(false)
     setError(undefined)
     if (
       props.attachment.deleted_at ||
@@ -67,6 +70,11 @@ export function PrivateImage(props: {
     props.attachment.expires_at,
   ])
   const label = t('mailbox.admin.screenshot', { index: props.index + 1 })
+  const invalid = () => {
+    setExpanded(false)
+    setLoaded(false)
+    setError(new MailboxError('mailbox_attachment_invalid'))
+  }
   return (
     <figure className='min-w-0 space-y-2'>
       <div className='bg-muted/30 relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded border'>
@@ -85,14 +93,24 @@ export function PrivateImage(props: {
         ) : (
           <>
             {url ? (
-              <img
-                src={url}
-                alt={label}
-                className='h-full w-full object-contain'
-                onError={() =>
-                  setError(new MailboxError('mailbox_attachment_invalid'))
-                }
-              />
+              <button
+                type='button'
+                className='focus-visible:ring-ring h-full w-full cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset disabled:cursor-wait'
+                disabled={!loaded}
+                aria-label={`${t('mailbox.admin.expandImage')} · ${label}`}
+                onClick={(event) => {
+                  returnFocus.current = event.currentTarget
+                  setExpanded(true)
+                }}
+              >
+                <img
+                  src={url}
+                  alt={label}
+                  className='h-full w-full object-contain'
+                  onLoad={() => setLoaded(true)}
+                  onError={invalid}
+                />
+              </button>
             ) : (
               <span role='status'>{t('mailbox.admin.loading')}</span>
             )}
@@ -103,7 +121,11 @@ export function PrivateImage(props: {
                 size='icon'
                 title={t('mailbox.admin.expandImage')}
                 aria-label={t('mailbox.admin.expandImage')}
-                onClick={() => setExpanded(true)}
+                disabled={!loaded}
+                onClick={(event) => {
+                  returnFocus.current = event.currentTarget
+                  setExpanded(true)
+                }}
               >
                 <Maximize2 />
               </Button>
@@ -114,10 +136,14 @@ export function PrivateImage(props: {
       <figcaption className='text-muted-foreground text-xs'>
         {label} · {props.attachment.width} × {props.attachment.height}
       </figcaption>
-      {expanded && url && (
-        <Modal title={label} onClose={() => setExpanded(false)}>
-          <img src={url} alt={label} className='h-auto w-full object-contain' />
-        </Modal>
+      {expanded && url && error == null && (
+        <ImageViewer
+          url={url}
+          label={label}
+          returnFocus={returnFocus}
+          onClose={() => setExpanded(false)}
+          onError={invalid}
+        />
       )}
     </figure>
   )

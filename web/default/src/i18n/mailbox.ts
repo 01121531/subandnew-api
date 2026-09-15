@@ -1,4 +1,12 @@
 export const mailboxEn = {
+  viewer: {
+    zoom: 'Zoom',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fit: 'Fit to screen',
+    actual: 'Actual size (100%)',
+    image: 'Screenshot viewing area',
+  },
   archive: {
     view: 'Mailbox view',
     active: 'Mailbox pool',
@@ -335,6 +343,14 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  viewer: {
+    zoom: '缩放比例',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    fit: '适应屏幕',
+    actual: '原始尺寸（100%）',
+    image: '截图查看区域',
+  },
   archive: {
     view: '邮箱视图',
     active: '邮箱池',
