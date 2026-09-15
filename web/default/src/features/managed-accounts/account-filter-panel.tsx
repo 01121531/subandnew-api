@@ -292,10 +292,6 @@ export function AccountFilterPanel(props: {
     const merged = parseAccountFilterDisplayValues(
       [...rule.values, ...incoming].join('\n')
     )
-    if (merged.length > 50) {
-      toast.error(t('每条筛选规则最多包含 50 个值'))
-      return
-    }
     updateRule(bulkRuleID, { values: merged })
     setBulkRuleID(null)
     setBulkValues('')
@@ -426,8 +422,8 @@ export function AccountFilterPanel(props: {
                     rule.operator === 'is_not_empty'
                   const metricField = isMetricAccountFilterField(rule.field)
                   const timeField = isTimeAccountFilterField(rule.field)
-                  let maxValues = 50
-                  let limitMessage = '每条筛选规则最多包含 50 个值'
+                  let maxValues: number | undefined
+                  let limitMessage = ''
                   let valuePlaceholder = 'Enter one or more values'
                   let invalidMessage = 'Add at least one filter value'
                   if (metricField) {
@@ -787,7 +783,7 @@ export function AccountFilterPanel(props: {
             autoFocus
           />
           <p className='text-muted-foreground text-xs'>
-            {t('自动去除空值和大小写重复项；每条规则最多 50 个值。')}
+            {t('自动去除空值和大小写重复项；筛选值数量不限。')}
           </p>
           <DialogFooter>
             <Button

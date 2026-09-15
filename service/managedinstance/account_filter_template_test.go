@@ -1,11 +1,47 @@
 package managedinstance
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAccountFilterLargeValueListsRoundTrip(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.ManagedAccountFilterTemplate{}))
+	for _, count := range []int{51, 1000} {
+		values := make([]string, count)
+		for i := range values {
+			values[i] = fmt.Sprintf(" vendor-%04d ", i)
+		}
+		input := AccountFilterTemplateInput{Name: fmt.Sprintf("large-%d", count), MatchMode: AccountFilterMatchAll,
+			Rules: []AccountFilterRule{{Field: "vendor_name", Operator: "is_not", Values: append(values, "VENDOR-0000"), ValueMode: AccountFilterValueAny}}}
+		created, err := CreateAccountFilterTemplate(11, input)
+		require.NoError(t, err)
+		require.Len(t, created.Rules[0].Values, count)
+		stored, err := ListAccountFilterTemplates(11)
+		require.NoError(t, err)
+		var found bool
+		for _, item := range stored {
+			if item.Id == created.Id {
+				found = true
+				require.Equal(t, created.Rules, item.Rules)
+			}
+		}
+		require.True(t, found)
+	}
+	for _, rule := range []AccountFilterRule{
+		{Field: "name", Operator: "contains", Values: []string{strings.Repeat("a", 201)}, ValueMode: AccountFilterValueAny},
+		{Field: "amount", Operator: "gte", Values: []string{"1", "2"}, ValueMode: AccountFilterValueAny},
+		{Field: "created_at", Operator: "between", Values: []string{"1", "2", "3"}, ValueMode: AccountFilterValueAny},
+	} {
+		_, _, err := NormalizeAccountFilter(AccountFilterMatchAll, []AccountFilterRule{rule}, true)
+		require.ErrorIs(t, err, ErrInvalidAccountFilterTemplate)
+	}
+}
 
 func TestAccountFilterTemplatesAreValidatedAndActorScoped(t *testing.T) {
 	db := newManagedInstanceTestDB(t)

@@ -2,6 +2,8 @@ package managedaccount
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,40 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestLargeQuickAndAdvancedFiltersDoNotTruncate(t *testing.T) {
+	db, instance := setupQueryTest(t)
+	saveInventory(t, db, instance.Id, []managedinstance.InventoryItem{{ID: 1, Name: "target-account"}, {ID: 2, Name: "other-account"}})
+	values := make([]string, 1000)
+	for i := range values {
+		values[i] = fmt.Sprintf("missing-%04d", i)
+	}
+	values = append(values, " TARGET-ACCOUNT ", "target-account")
+	normalized, err := normalizeTerms(values)
+	require.NoError(t, err)
+	require.Len(t, normalized, 1001)
+	for _, negative := range []bool{false, true} {
+		query := Query{InstanceIDs: []int64{instance.Id}, PageSize: 10}
+		expected := "target-account"
+		if negative {
+			query.ExcludeTerms = values
+			expected = "other-account"
+		} else {
+			query.IncludeTerms = values
+		}
+		result, err := Execute(t.Context(), query)
+		require.NoError(t, err)
+		require.Equal(t, 1, result.Total)
+		require.Equal(t, 1, result.Summary.Total)
+		require.Equal(t, expected, result.Items[0].Name)
+	}
+	result, err := Execute(t.Context(), Query{InstanceIDs: []int64{instance.Id}, Rules: []managedinstance.AccountFilterRule{{Field: "name", Operator: "not_starts_with", Values: values, ValueMode: "any"}}})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, "other-account", result.Items[0].Name)
+	_, err = normalizeTerms([]string{strings.Repeat("a", 201)})
+	require.Error(t, err)
+}
 
 func setupQueryTest(t *testing.T) (*gorm.DB, model.ManagedInstance) {
 	t.Helper()

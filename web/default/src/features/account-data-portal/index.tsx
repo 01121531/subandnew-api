@@ -468,8 +468,6 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                 setQuery((old) => ({ ...old, include_terms: values, page: 1 }))
               }
               options={[]}
-              maxValues={50}
-              onLimitExceeded={() => toast.error('最多输入 50 个值')}
               placeholder='包含任一值，支持换行或逗号'
             />
             <MultiSelect
@@ -478,8 +476,6 @@ export function AccountDataPortal({ slug }: { slug: string }) {
                 setQuery((old) => ({ ...old, exclude_terms: values, page: 1 }))
               }
               options={[]}
-              maxValues={50}
-              onLimitExceeded={() => toast.error('最多输入 50 个值')}
               placeholder='排除任一值，支持换行或逗号'
             />
           </div>

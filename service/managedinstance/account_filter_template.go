@@ -207,7 +207,7 @@ func NormalizeAccountFilter(matchMode string, rules []AccountFilterRule, require
 			rule.Values = nil
 			continue
 		}
-		if len(rule.Values) == 0 || len(rule.Values) > 50 {
+		if len(rule.Values) == 0 {
 			return "", nil, fmt.Errorf("%w: rule %d values", ErrInvalidAccountFilterTemplate, index+1)
 		}
 		seen := make(map[string]struct{}, len(rule.Values))

@@ -1093,8 +1093,6 @@ function AuthorizationEditor(props: {
                     setInput({ ...input, include_terms: values })
                   }
                   allowCreate
-                  maxValues={50}
-                  onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                   placeholder={t('输入后按回车，可添加多个值')}
                   className='min-h-11'
                 />
@@ -1107,8 +1105,6 @@ function AuthorizationEditor(props: {
                     setInput({ ...input, exclude_terms: values })
                   }
                   allowCreate
-                  maxValues={50}
-                  onLimitExceeded={() => toast.error(t('最多输入 50 个筛选值'))}
                   placeholder={t('命中任一值即排除')}
                   className='min-h-11'
                 />

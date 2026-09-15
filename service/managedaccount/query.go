@@ -883,9 +883,6 @@ func normalizeTerms(values []string) ([]string, error) {
 			}
 			seen[term] = struct{}{}
 			result = append(result, term)
-			if len(result) > 50 {
-				return nil, errors.New("account quick filters cannot exceed 50 values")
-			}
 		}
 	}
 	return result, nil

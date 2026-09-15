@@ -47,6 +47,33 @@ const account = accountFilterDocument({
 })
 
 describe('account filtering', () => {
+  test('keeps more than 50 values in parsing, matching, templates and export snapshots', () => {
+    const values = Array.from(
+      { length: 1000 },
+      (_, index) => `missing-${index}`
+    )
+    values.push(' Alice Standard ', 'ALICE STANDARD')
+    const parsed = parseAccountFilterDisplayValues(values.join('\n'))
+    assert.equal(parsed.length, 1001)
+    assert.equal(parseAccountFilterTerms(values.join('\n')).length, 1001)
+    const terms = parseAccountFilterTerms(values.join('\n'))
+    assert.equal(matchesQuickAccountFilter(account, terms, []), true)
+    assert.equal(matchesQuickAccountFilter(account, [], terms), false)
+    const rule = createAccountFilterRule('name')
+    rule.values = parsed
+    rule.operator = 'not_starts_with'
+    const filter = { match_mode: 'all' as const, rules: [rule] }
+    assert.equal(matchesAdvancedAccountFilter(account, filter), false)
+    const input = accountFilterTemplateInput('large', filter)
+    const restored = accountFilterFromTemplate({
+      ...input,
+      id: 1,
+      created_at: 1,
+      updated_at: 1,
+    })
+    assert.equal(restored.rules[0].values.length, 1001)
+    assert.deepEqual(accountFilterSnapshot(restored).rules, input.rules)
+  })
   test('excludes prefixes and suffixes with consistent multi-value semantics', () => {
     for (const operator of ['not_starts_with', 'not_ends_with'] as const) {
       const rule = createAccountFilterRule('name')
