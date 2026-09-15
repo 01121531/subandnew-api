@@ -653,19 +653,24 @@ class Window(QMainWindow):
             self.load_page(self.page)
 
     def load_page(self, page: int, index: int = 0) -> None:
+        previous_page = self.page if index < 0 and self.current and self.page > page else 0
         self.clear_task(clear_draft=True)
         self.items = []
         self.has_more = False
         self.index = 0
         self.set_busy(True)
         self.page = max(1, page)
+        self.read_queue_page(self.page, index, self.page - 1 if index >= 0 else previous_page)
+
+    def read_queue_page(self, page: int, index: int, fallback_page: int) -> None:
+        self.page = page
         self.position.setText("正在读取任务…")
         self.task_notice_text.setText("正在读取任务，请稍候。")
         self.say("正在读取任务…")
 
         def loaded(data: Any, error: ApiError | None) -> None:
-            self.set_busy(False)
             if error:
+                self.set_busy(False)
                 self.position.setText("任务读取失败")
                 self.task_notice_text.setText(
                     "没有加载到任务数据。请刷新重试；这不表示没有分配任务。"
@@ -673,29 +678,49 @@ class Window(QMainWindow):
                 self.error(error)
                 return
             if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                self.set_busy(False)
                 self.position.setText("任务数据格式异常")
                 self.task_notice_text.setText("请确认服务端和邮箱助手均已更新，然后刷新任务。")
                 self.error(ApiError("mailbox_request_failed"))
                 return
-            self.items = [
-                item
+            if any(
+                not isinstance(item, dict)
+                or item.get("account_type") != self.kind
+                or item.get("operator_id") != self.operator_id
+                or item.get("status")
+                not in ("pending", "rejected", "submitted", "approved", "issue_pending")
+                or (
+                    item.get("status") in ("pending", "rejected")
+                    and not actionable(item, self.kind)
+                )
                 for item in data["items"]
-                if isinstance(item, dict) and actionable(item, self.kind)
-            ]
-            self.has_more = data.get("has_more") is True
-            if len(self.items) != len(data["items"]):
+            ):
                 self.items = []
                 self.has_more = False
+                self.set_busy(False)
                 self.position.setText("任务状态需要确认")
                 self.task_notice_text.setText(
                     "服务端返回了当前不可处理的任务。请刷新任务；若仍出现，请确认服务端已更新并联系管理员核对分配状态。"
                 )
                 self.say("")
                 return
+            self.items = [item for item in data["items"] if actionable(item, self.kind)]
+            self.has_more = data.get("has_more") is True
             if not self.items:
-                if self.page > 1:
-                    self.load_page(self.page - 1, -1)
+                if index < 0 and page > 1:
+                    self.read_queue_page(page - 1, -1, fallback_page)
                     return
+                if index < 0 and fallback_page > 0:
+                    self.read_queue_page(fallback_page, 0, 0)
+                    return
+                if index >= 0 and self.has_more:
+                    self.read_queue_page(page + 1, 0, fallback_page)
+                    return
+                if index >= 0 and fallback_page > 0:
+                    self.read_queue_page(fallback_page, -1, 0)
+                    return
+                self.has_more = False
+                self.set_busy(False)
                 self.position.setText("没有待处理或已退回任务")
                 pool_name = "开号邮箱" if self.kind == "opening" else "退款邮箱"
                 self.task_notice_text.setText(
@@ -708,9 +733,9 @@ class Window(QMainWindow):
             self.index = min(index, len(self.items) - 1) if index >= 0 else len(self.items) - 1
             self.open_current()
 
-        self.scoped_call(
-            "/accounts" + self.query(status="actionable", page=self.page, page_size=20), loaded
-        )
+        # Older servers treat "actionable" as a literal status and return no rows.
+        # Read the same assigned-account list as the web UI; never prefetch credentials.
+        self.scoped_call("/accounts" + self.query(page=page, page_size=20), loaded)
 
     def open_current(self) -> None:
         hint = self.items[self.index]

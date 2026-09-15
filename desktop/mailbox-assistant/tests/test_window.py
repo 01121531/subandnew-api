@@ -112,7 +112,7 @@ def test_empty_queue_has_visible_recovery_actions_not_dead_submission_controls(w
     assert window.busy
     assert not window.task_retry.isEnabled()
     assert window.detail_area.isHidden()
-    api.take("status=actionable")[1]({"items": [], "has_more": False}, None)
+    api.take("/accounts?")[1]({"items": [], "has_more": False}, None)
     assert not window.busy
     assert not window.current
     assert not window.task_notice.isHidden()
@@ -125,7 +125,7 @@ def test_empty_queue_has_visible_recovery_actions_not_dead_submission_controls(w
     assert window.history.isEnabled()
     assert "分配给当前操作员" in window.task_notice_text.text()
     window.task_retry.click()
-    api.take("status=actionable")[1]({"items": [account()], "has_more": False}, None)
+    api.take("/accounts?")[1]({"items": [account()], "has_more": False}, None)
     api.take("/accounts/5?")[1](account(), None)
     assert window.current["id"] == 5
     assert window.task_notice.isHidden()
@@ -139,7 +139,7 @@ def test_queue_failure_clears_old_navigation_and_is_not_an_empty_result(window):
     window, api = window
     window.has_more = True
     window.load_page(2)
-    api.take("status=actionable")[1](None, ApiError("mailbox_network_error"))
+    api.take("/accounts?")[1](None, ApiError("mailbox_network_error"))
     assert not window.items
     assert not window.has_more
     assert not window.current
@@ -149,13 +149,12 @@ def test_queue_failure_clears_old_navigation_and_is_not_an_empty_result(window):
     assert not api.calls
 
 
-def test_non_actionable_server_rows_are_not_silently_reported_as_empty(window):
+def test_invalid_actionable_server_rows_are_not_silently_reported_as_empty(window):
     window, api = window
     item = account()
-    item["status"] = "issue_pending"
     item["credentials_available"] = False
     window.load_page(1)
-    api.take("status=actionable")[1]({"items": [item], "has_more": True}, None)
+    api.take("/accounts?")[1]({"items": [item], "has_more": True}, None)
     assert window.position.text() == "任务状态需要确认"
     assert not window.items
     assert not window.has_more
@@ -168,6 +167,82 @@ def test_submit_without_screenshot_explains_required_action(window):
     window.submit()
     assert "至少一张截图" in window.message.text()
     assert not api.calls
+
+
+def test_legacy_server_filter_and_history_only_pages_do_not_hide_pending_tasks(window):
+    window, api = window
+    window.load_page(1)
+    path, callback, _ = api.take("/accounts?")
+    assert "status" not in parse_qs(urlsplit(path).query)
+    historical = account(9)
+    historical["status"] = "approved"
+    historical["credentials_available"] = False
+    callback({"items": [historical], "has_more": True}, None)
+    assert window.busy
+    path, callback, _ = api.take("/accounts?")
+    assert parse_qs(urlsplit(path).query)["page"] == ["2"]
+    pending = account(5)
+    rejected = account(4)
+    rejected["status"] = "rejected"
+    callback({"items": [pending, rejected], "has_more": False}, None)
+    assert [a["id"] for a in window.items] == [5, 4]
+    assert len(api.calls) == 1
+    assert "/accounts/5?" in api.calls[0][0]
+    assert all("/accounts/9" not in call[0] for call in api.calls)
+
+
+def test_backward_navigation_skips_history_and_all_history_finishes(window):
+    window, api = window
+    window.load_page(3, -1)
+    for page in (3, 2, 1):
+        path, callback, _ = api.take("/accounts?")
+        assert parse_qs(urlsplit(path).query)["page"] == [str(page)]
+        historical = account(page)
+        historical["status"] = "issue_pending"
+        historical["credentials_available"] = False
+        callback({"items": [historical], "has_more": True}, None)
+    assert not window.busy
+    assert not api.calls
+    assert not window.current
+    assert window.task_notice.isVisible()
+
+
+def test_empty_tail_recovers_previous_actionable_page_without_loop(window):
+    window, api = window
+    window.load_page(2)
+    api.take("/accounts?")[1]({"items": [], "has_more": True}, None)
+    api.take("/accounts?")[1]({"items": [], "has_more": False}, None)
+    path, callback, _ = api.take("/accounts?")
+    assert parse_qs(urlsplit(path).query)["page"] == ["1"]
+    callback({"items": [account()], "has_more": True}, None)
+    assert len(api.calls) == 1 and "/accounts/5?" in api.calls[0][0]
+
+
+def test_pool_change_discards_inflight_history_scan(window):
+    window, api = window
+    window.load_page(1)
+    _, callback, _ = api.take("/accounts?")
+    window.clear_task(clear_draft=True)
+    window.kind = "opening"
+    callback({"items": [account()], "has_more": True}, None)
+    assert not window.current and not api.calls
+
+
+def test_previous_at_first_actionable_page_keeps_current_task(window):
+    window, api = window
+    window.page = 3
+    window.navigate(-1)
+    for page in (2, 1):
+        path, callback, _ = api.take("/accounts?")
+        assert parse_qs(urlsplit(path).query)["page"] == [str(page)]
+        historical = account(10 + page)
+        historical["status"] = "approved"
+        historical["credentials_available"] = False
+        callback({"items": [historical], "has_more": True}, None)
+    path, callback, _ = api.take("/accounts?")
+    assert parse_qs(urlsplit(path).query)["page"] == ["3"]
+    callback({"items": [account()], "has_more": False}, None)
+    assert len(api.calls) == 1 and "/accounts/5?" in api.calls[0][0]
 
 
 def test_issue_mode_clears_secrets_and_reports_without_screenshots(window):
@@ -192,7 +267,7 @@ def test_issue_mode_clears_secrets_and_reports_without_screenshots(window):
     callback({"id": 8, "assignment_id": 105}, None)
     assert not window.issue_mode
     assert window.issue_description.toPlainText() == ""
-    assert any("status=actionable" in call[0] for call in api.calls)
+    assert any("/accounts?" in call[0] for call in api.calls)
 
 
 def test_issue_uncertain_result_is_reconciled_not_replayed(window):
@@ -293,7 +368,7 @@ def test_cross_page_navigation_only_fetches_list_then_current_details(window):
     window.has_more = True
     window.navigate(1)
     path, callback, _ = api.take("/accounts?")
-    assert parse_qs(urlsplit(path).query)["status"] == ["actionable"]
+    assert "status" not in parse_qs(urlsplit(path).query)
     assert parse_qs(urlsplit(path).query)["page"] == ["2"]
     callback({"items": [account(4), account(3)], "has_more": False}, None)
     path, _, _ = api.take("/accounts/4?")
