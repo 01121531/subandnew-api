@@ -18,6 +18,7 @@ import type {
   ImportSource,
 } from '../types'
 import { Field, Modal } from './common'
+import { ImportExamples } from './import-examples'
 
 export function ImportDialog(props: {
   accountType: AccountType
@@ -120,6 +121,7 @@ export function ImportDialog(props: {
       </div>
       {!preview ? (
         <div className='grid gap-4'>
+          <ImportExamples accountType={props.accountType} pending={pending} />
           <Field id='mailbox-format' label={t('mailbox.admin.format')}>
             <NativeSelect
               id='mailbox-format'

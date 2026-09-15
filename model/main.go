@@ -243,6 +243,7 @@ func controlPlaneModels() []interface{} {
 		&MailboxLoginAttempt{},
 		&MailboxAssignment{},
 		&MailboxSubmission{},
+		&MailboxIssue{},
 		&MailboxAttachment{},
 		&MailboxAudit{},
 		&ManagedAccountAPIInstance{},

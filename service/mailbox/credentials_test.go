@@ -126,7 +126,7 @@ func TestMailboxCredentialsAccountAndKindCipherBinding(t *testing.T) {
 }
 
 func TestMailboxCredentialsOperatorStatesAndReauthorization(t *testing.T) {
-	for _, state := range []string{StatusPending, StatusSubmitted, StatusRejected, StatusApproved, "invalid", "recalled", "disabled", "session", "version", "expired", "other-owner", "late-approved", "late-disabled", "late-recall", "late-version"} {
+	for _, state := range []string{StatusPending, StatusSubmitted, StatusRejected, StatusApproved, StatusIssuePending, "invalid", "recalled", "disabled", "session", "version", "expired", "other-owner", "late-approved", "late-issue", "late-disabled", "late-recall", "late-version"} {
 		t.Run(state, func(t *testing.T) {
 			s, admin := newMailboxImportTestService(t)
 			account := mailboxImportTestAccount(t, s, admin, "one@example.com", "sensitive-password", mailboxImportTestSecret)
@@ -152,6 +152,9 @@ func TestMailboxCredentialsOperatorStatesAndReauthorization(t *testing.T) {
 					status := state
 					if state == "late-approved" {
 						status = StatusApproved
+					}
+					if state == "late-issue" {
+						status = StatusIssuePending
 					}
 					err = s.DB.Model(&model.MailboxAssignment{}).Where("account_id = ?", account.ID).Update("status", status).Error
 				}

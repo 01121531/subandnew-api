@@ -267,7 +267,14 @@ export function SearchBar(props: {
   const { t } = useTranslation()
   const statuses = props.review
     ? ['pending', 'approved', 'rejected']
-    : ['unassigned', 'pending', 'submitted', 'approved', 'rejected']
+    : [
+        'unassigned',
+        'pending',
+        'submitted',
+        'approved',
+        'rejected',
+        'issue_pending',
+      ]
   return (
     <div className='flex flex-wrap items-center gap-2 py-4'>
       <Input

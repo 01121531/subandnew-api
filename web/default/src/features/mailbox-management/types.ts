@@ -6,6 +6,7 @@ export type MailboxStatus =
   | 'submitted'
   | 'approved'
   | 'rejected'
+  | 'issue_pending'
 export interface Page<T> {
   items: T[]
   total: number
@@ -14,6 +15,8 @@ export interface Page<T> {
   has_more: boolean
 }
 export interface ListQuery {
+  kind?: string
+  assignment_id?: number
   account_type?: AccountType
   page: number
   page_size: number
@@ -104,6 +107,44 @@ export interface ReviewInput {
   version: number
   status: 'approved' | 'rejected'
   reason: string
+}
+
+export type IssueKind = 'email_login' | 'otp' | 'card' | 'other'
+export interface Issue {
+  submitted_version: number
+  id: number
+  account_id: number
+  account_type: AccountType
+  email: string
+  card_last4: string
+  account_version: number
+  assignment_id: number
+  assignment_version: number
+  assignment_active: boolean
+  operator_id: number
+  operator_name: string
+  kind: IssueKind
+  description: string
+  status: 'pending' | 'resolved' | 'invalidated'
+  version: number
+  resolution: string
+  reply: string
+  resolved_at: number
+  created_at: number
+  attachments: Attachment[]
+}
+export interface ResolveIssueInput {
+  version: number
+  account_version: number
+  assignment_version: number
+  resolution: 'resume' | 'recall'
+  reply: string
+  credentials?: {
+    password?: string
+    otp?: string
+    card_number?: string
+    card_expiry?: string
+  }
 }
 export interface Audit {
   account_type?: AccountType

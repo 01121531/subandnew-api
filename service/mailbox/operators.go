@@ -175,6 +175,9 @@ func (s *Service) SaveOperator(ctx context.Context, actor Actor, id int64, input
 			if err := tx.Where("operator_id = ?", id).Delete(&model.MailboxSession{}).Error; err != nil {
 				return err
 			}
+			if err := t.invalidateIssues("operator_id = ?", id); err != nil {
+				return err
+			}
 		}
 		item.DisplayName = input.DisplayName
 		item.Enabled = input.Enabled

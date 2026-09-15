@@ -7,6 +7,7 @@ import {
   accountMetadata,
   auditMetadata,
   importMetadata,
+  issueMetadata,
   pageMetadata,
   submissionMetadata,
 } from './lib/pools'
@@ -21,6 +22,8 @@ import type {
   Envelope,
   ImportPreview,
   ImportSource,
+  Issue,
+  ResolveIssueInput,
   ListQuery,
   Operator,
   OperatorInput,
@@ -82,6 +85,46 @@ async function request<T>(
   }
 }
 export const mailboxApi = {
+  issueOperators: (signal?: AbortSignal) =>
+    request<AccountOperator[]>(
+      '/issue-operators',
+      'GET',
+      undefined,
+      undefined,
+      signal
+    ),
+  importOptions: (signal?: AbortSignal) =>
+    request<{ temporary_cvv_enabled: boolean }>(
+      '/import-options',
+      'GET',
+      undefined,
+      undefined,
+      signal
+    ),
+  issues: async (query: ListQuery, signal?: AbortSignal) =>
+    pageMetadata(
+      await request<Page<Issue>>('/issues', 'GET', undefined, query, signal),
+      (item) => issueMetadata(item, query.account_type ?? 'refund')
+    ),
+  issue: async (id: number, accountType: AccountType, signal?: AbortSignal) =>
+    issueMetadata(
+      await request<Issue>(
+        `/issues/${id}`,
+        'GET',
+        undefined,
+        { account_type: accountType },
+        signal
+      ),
+      accountType
+    ),
+  resolveIssue: (
+    id: number,
+    accountType: AccountType,
+    input: ResolveIssueInput
+  ) =>
+    request<unknown>(`/issues/${id}/resolve`, 'POST', input, {
+      account_type: accountType,
+    }),
   provideTemporaryCvv: async (id: number, version: number, cvv: string) => {
     const result = await request<{ expires_at: number }>(
       `/accounts/${id}/temporary-cvv`,

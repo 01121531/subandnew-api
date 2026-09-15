@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { X } from 'lucide-react'
-import { useRef } from 'react'
+import { X, MessageSquareWarning } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -25,9 +25,11 @@ export function AccountDetail(props: {
   csrf: string
   onClose: () => void
   onSubmitted: () => void
+  onReported: () => void
 }) {
   const { t } = useTranslation()
   const leave = useRef<LeaveState>({ dirty: false, pending: false })
+  const [issue, setIssue] = useState(false)
   const query = useQuery({
     queryKey: ['mailbox', 'account', props.id, props.accountType],
     queryFn: ({ signal }) =>
@@ -93,13 +95,34 @@ export function AccountDetail(props: {
                     <MaskedCard last4={account.card_last4} />
                   </div>
                 )}
-                <Credentials account={account} csrf={props.csrf} />
+                {!issue && <Credentials account={account} csrf={props.csrf} />}
+                {canSubmit(account) && (
+                  <Button
+                    variant='outline'
+                    className='my-3'
+                    onClick={() => {
+                      if (leave.current.pending) return
+                      if (
+                        leave.current.dirty &&
+                        !window.confirm(t('mailboxPortal.discardDrafts'))
+                      ) {
+                        return
+                      }
+                      setIssue(!issue)
+                    }}
+                  >
+                    <MessageSquareWarning />
+                    {t(issue ? 'mailbox.issues.back' : 'mailbox.issues.report')}
+                  </Button>
+                )}
                 {canSubmit(account) && (
                   <DraftSubmission
+                    key={String(issue)}
+                    issue={issue}
                     account={account}
                     csrf={props.csrf}
                     leave={leave}
-                    onSubmitted={props.onSubmitted}
+                    onSubmitted={issue ? props.onReported : props.onSubmitted}
                   />
                 )}
               </div>

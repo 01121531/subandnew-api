@@ -26,7 +26,7 @@ export function mailboxTabs(user: AuthUser | null | undefined): string[] {
     tabs.push('pool')
   }
   if (canMailbox(user, 'operators')) tabs.push('operators')
-  if (canMailbox(user, 'review')) tabs.push('review')
+  if (canMailbox(user, 'review')) tabs.push('review', 'issues')
   if (canMailbox(user, 'audit')) tabs.push('audit')
   return tabs
 }

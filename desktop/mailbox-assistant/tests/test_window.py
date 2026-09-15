@@ -106,6 +106,86 @@ def test_stale_response_after_navigation_never_populates_new_account(window):
     assert not window.values
 
 
+def test_issue_mode_clears_secrets_and_reports_without_screenshots(window):
+    window, api = window
+    window.values["password"] = "secret"
+    window.toggle_issue()
+    assert window.issue_mode
+    assert not window.values
+    assert window.issue_kind.findData("card") == -1
+    window.issue_description.setPlainText("Cannot sign in")
+    window.submit()
+    api.take("/accounts/5?")[1](account(), None)
+    api.take("/accounts/5?")[1](account(), None)
+    path, callback, options = api.take("/issues?")
+    assert "/assignments/105/issues" in path
+    assert options["body"] == {
+        "version": 1,
+        "kind": "email_login",
+        "description": "Cannot sign in",
+        "attachment_ids": [],
+    }
+    callback({"id": 8, "assignment_id": 105}, None)
+    assert not window.issue_mode
+    assert window.issue_description.toPlainText() == ""
+    assert any("status=actionable" in call[0] for call in api.calls)
+
+
+def test_issue_uncertain_result_is_reconciled_not_replayed(window):
+    window, api = window
+    window.toggle_issue()
+    window.issue_description.setPlainText("Cannot sign in")
+    window.finish_submit()
+    _, callback, _ = api.take("/issues?")
+    callback(None, ApiError("mailbox_network_error", uncertain=True))
+    _, callback, options = api.take("/issues?")
+    assert options.get("method", "GET") == "GET"
+    callback(
+        {
+            "items": [
+                {
+                    "assignment_id": 105,
+                    "submitted_version": 0,
+                    "kind": "email_login",
+                    "description": "Cannot sign in",
+                    "attachments": [],
+                }
+            ]
+        },
+        None,
+    )
+    assert window.uncertain_submission
+    window.submit()
+    assert all(call[2].get("method", "GET") == "GET" for call in api.calls)
+
+
+def test_issue_mode_discards_stale_credential_response(window):
+    window, api = window
+    window.fetch_credential("password")
+    _, callback, _ = api.take("credentials")
+    window.toggle_issue()
+    callback({"password": "old"}, None)
+    assert not window.values
+
+
+def test_issue_history_bounds_long_untrusted_text(window, qtbot):
+    window, _ = window
+    window.history_type.blockSignals(True)
+    window.history_type.setCurrentIndex(1)
+    window.history_type.blockSignals(False)
+    description = "<img src='file:///private'>" + "x" * 1800
+    window.history_items = [
+        {"kind": "other", "description": description, "reply": "Resolved", "attachments": []}
+    ]
+    window.stack.setCurrentIndex(2)
+    window.resize(320, 720)
+    window.show_history_item(0)
+    qtbot.wait(20)
+    assert description in window.history_details.toPlainText()
+    assert window.history_details.height() <= 180
+    assert window.width() == 320
+
+
 def test_revocation_and_network_failure_clear_all_sensitive_data(window, qapp):
     window, api = window
     window.values.update(password="secret", email="test@example.test")

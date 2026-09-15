@@ -7,6 +7,7 @@ type AccountStatus =
   | 'submitted'
   | 'approved'
   | 'rejected'
+  | 'issue_pending'
 
 export type Session =
   | { authenticated: false }

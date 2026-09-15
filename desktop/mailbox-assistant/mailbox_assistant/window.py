@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -88,6 +89,7 @@ class Window(QMainWindow):
         self.restore_operator = 0
         self.uncertain_submission: tuple[Any, ...] | None = None
         self.history_page = 1
+        self.issue_mode = False
         self.history_items: list[dict[str, Any]] = []
         self.setWindowTitle("邮箱助手")
         self.resize(400, 720)
@@ -251,6 +253,31 @@ class Window(QMainWindow):
         self.cvv_caption.setWordWrap(True)
         self.cvv_caption.setObjectName("muted")
         detail.addWidget(self.cvv_caption)
+        self.report_button = QPushButton("反馈问题")
+        self.report_button.clicked.connect(self.toggle_issue)
+        detail.addWidget(self.report_button)
+        self.issue_fields = QWidget()
+        issue_layout = QVBoxLayout(self.issue_fields)
+        issue_layout.setContentsMargins(0, 0, 0, 0)
+        self.issue_account = QLabel()
+        self.issue_account.setTextFormat(Qt.TextFormat.PlainText)
+        self.issue_account.setWordWrap(True)
+        issue_layout.addWidget(self.issue_account)
+        warning = QLabel(
+            "请勿填写密码、2FA 密钥、完整卡号或 CVV。反馈后暂停任务，管理员处理后才能继续。"
+        )
+        warning.setWordWrap(True)
+        issue_layout.addWidget(warning)
+        self.issue_kind = QComboBox()
+        self.issue_kind.setAccessibleName("问题类型")
+        issue_layout.addWidget(self.issue_kind)
+        self.issue_description = QPlainTextEdit()
+        self.issue_description.setAccessibleName("问题说明")
+        self.issue_description.setPlaceholderText("填写问题说明，最多 2,000 字")
+        self.issue_description.setMaximumHeight(110)
+        issue_layout.addWidget(self.issue_description)
+        self.issue_fields.hide()
+        detail.addWidget(self.issue_fields)
         self.paste_button = QPushButton("粘贴截图")
         self.paste_button.clicked.connect(self.paste)
         detail.addWidget(self.paste_button)
@@ -287,13 +314,19 @@ class Window(QMainWindow):
     def _history_page(self) -> None:
         page = QWidget()
         layout = QVBoxLayout(page)
+        self.history_type = QComboBox()
+        self.history_type.addItem("截图提交记录", "submissions")
+        self.history_type.addItem("异常反馈记录", "issues")
+        self.history_type.currentIndexChanged.connect(lambda _: self.load_history(1))
+        layout.addWidget(self.history_type)
         self.history_list = QListWidget()
         self.history_list.setWordWrap(True)
         self.history_list.currentRowChanged.connect(self.show_history_item)
         layout.addWidget(self.history_list, 1)
-        self.history_details = QLabel()
-        self.history_details.setTextFormat(Qt.TextFormat.PlainText)
-        self.history_details.setWordWrap(True)
+        self.history_details = QPlainTextEdit()
+        self.history_details.setReadOnly(True)
+        self.history_details.setMaximumHeight(180)
+        self.history_details.setAccessibleName("处理详情")
         layout.addWidget(self.history_details)
         self.history_images = QComboBox()
         layout.addWidget(self.history_images)
@@ -343,6 +376,10 @@ class Window(QMainWindow):
             self.fold,
             self.account_menu,
             self.pin,
+            self.report_button,
+            self.issue_kind,
+            self.issue_description,
+            self.history_type,
         ):
             control.setEnabled(not busy and self.operator_id > 0)
         self.login_button.setEnabled(not busy)
@@ -351,6 +388,42 @@ class Window(QMainWindow):
         self.username.setEnabled(not busy and self.operator_id == 0)
         for key, field in self.fields.items():
             field.button.setEnabled(not busy and key in self.values)
+        if self.uncertain_submission:
+            self.issue_kind.setEnabled(False)
+            self.issue_description.setEnabled(False)
+            self.report_button.setEnabled(False)
+
+    def toggle_issue(self) -> None:
+        if not self.current or self.uncertain_submission or not self.discard_allowed():
+            return
+        self.epoch += 1
+        self.check_pending = False
+        self.otp_pending = False
+        self.clear_secrets()
+        self.shots.clear()
+        self.render_shots()
+        self.redacted.setChecked(False)
+        self.issue_description.clear()
+        self.issue_mode = not self.issue_mode
+        for field in self.fields.values():
+            field.setVisible(not self.issue_mode)
+        self.otp_caption.setVisible(not self.issue_mode)
+        self.cvv_caption.setVisible(not self.issue_mode and self.kind == "opening")
+        self.issue_account.setText(str(self.current.get("email", "")) if self.issue_mode else "")
+        self.issue_fields.setVisible(self.issue_mode)
+        self.report_button.setText("返回截图提交" if self.issue_mode else "反馈问题")
+        self.submit_button.setText("反馈并下一条" if self.issue_mode else "提交并下一条")
+        self.issue_kind.clear()
+        for label, value in (
+            ("邮箱无法登录", "email_login"),
+            ("验证码异常", "otp"),
+            ("信用卡不可用", "card"),
+            ("其他", "other"),
+        ):
+            if value != "card" or self.kind == "opening":
+                self.issue_kind.addItem(label, value)
+        if not self.issue_mode:
+            self.open_current()
 
     def forget_local_session(self) -> None:
         try:
@@ -502,17 +575,23 @@ class Window(QMainWindow):
             self.render_shots()
             self.uncertain_submission = None
             self.redacted.setChecked(False)
+            self.issue_mode = False
+            self.issue_fields.hide()
+            self.issue_account.clear()
+            self.issue_description.clear()
+            self.report_button.setText("反馈问题")
+            self.submit_button.setText("提交并下一条")
 
     def discard_allowed(self) -> bool:
         if self.busy:
             return False
-        if not self.shots:
+        if not self.shots and not self.issue_description.toPlainText():
             return True
         return (
             QMessageBox.question(
                 self,
                 "离开当前任务",
-                "丢弃尚未提交的截图？",
+                "丢弃尚未提交的截图和反馈草稿？",
                 QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel,
             )
@@ -596,6 +675,9 @@ class Window(QMainWindow):
             )
             self.values["email"] = str(data["email"])
             self.fields["email"].set_value(self.values["email"])
+            for key in ("email", "password", "code"):
+                self.fields[key].show()
+            self.otp_caption.show()
             for key in ("card_number", "card_expiry", "cvv"):
                 self.fields[key].setVisible(self.kind == "opening")
             self.redacted.setVisible(self.kind == "opening")
@@ -789,6 +871,9 @@ class Window(QMainWindow):
     def paste(self) -> None:
         if self.busy or not self.current or self.hidden_private or self.stack.currentIndex() != 1:
             return
+        if self.uncertain_submission:
+            self.say("请先核对提交结果，不能修改截图。")
+            return
         if len(self.shots) >= 5:
             self.say("每次最多提交 5 张截图。")
             return
@@ -841,15 +926,27 @@ class Window(QMainWindow):
             dialog.exec()
 
     def remove_shot(self) -> None:
+        if self.uncertain_submission:
+            self.say("请先核对提交结果，不能修改截图。")
+            return
         index = self.shot_list.currentRow()
         if not self.busy and 0 <= index < len(self.shots):
             self.shots.pop(index)
             self.render_shots()
 
     def submit(self) -> None:
-        if self.busy or not self.current or not self.shots:
+        if self.busy or not self.current:
             return
-        if self.kind == "opening" and not self.redacted.isChecked():
+        if self.uncertain_submission:
+            self.reconcile_submission()
+            return
+        if not self.issue_mode and not self.shots:
+            return
+        if self.issue_mode and not 1 <= len(self.issue_description.toPlainText().strip()) <= 2000:
+            self.say("请填写 1～2,000 字的问题说明。")
+            self.issue_description.setFocus()
+            return
+        if self.shots and self.kind == "opening" and not self.redacted.isChecked():
             self.say("请先确认截图已遮挡完整卡号及 CVV。")
             self.redacted.setFocus()
             return
@@ -893,6 +990,7 @@ class Window(QMainWindow):
         scope = assignment_scope(self.current)
         assignment_id = self.current["assignment_id"]
         self.uncertain_submission = scope
+        reporting = self.issue_mode
         self.say("正在提交…")
 
         def submitted(data: Any, error: ApiError | None) -> None:
@@ -903,6 +1001,7 @@ class Window(QMainWindow):
                     self.reconcile_submission()
                 else:
                     self.uncertain_submission = None
+                    self.set_busy(False)
                     self.error(error)
                 return
             if not isinstance(data, dict) or data.get("assignment_id") != assignment_id:
@@ -912,12 +1011,21 @@ class Window(QMainWindow):
             self.after_submit()
 
         self.scoped_call(
-            f"/assignments/{self.current['assignment_id']}/submit" + self.query(),
+            f"/assignments/{self.current['assignment_id']}/{'issues' if reporting else 'submit'}"
+            + self.query(),
             submitted,
             method="POST",
             body={
                 "version": self.current["assignment_version"],
                 "attachment_ids": [shot.attachment_id for shot in self.shots],
+                **(
+                    {
+                        "kind": self.issue_kind.currentData(),
+                        "description": self.issue_description.toPlainText().strip(),
+                    }
+                    if reporting
+                    else {}
+                ),
             },
         )
 
@@ -926,12 +1034,20 @@ class Window(QMainWindow):
             return
         self.set_busy(True)
         assignment = self.current["assignment_id"]
+        submitted_version = self.current["assignment_version"]
+        reporting = self.issue_mode
         ids = {shot.attachment_id for shot in self.shots}
 
         def loaded(data: Any, error: ApiError | None) -> None:
             self.set_busy(False)
             if not error and isinstance(data, dict):
                 for item in data.get("items", []):
+                    if reporting and (
+                        item.get("submitted_version") != submitted_version
+                        or item.get("kind") != self.issue_kind.currentData()
+                        or item.get("description") != self.issue_description.toPlainText().strip()
+                    ):
+                        continue
                     if item.get("assignment_id") == assignment and ids == {
                         attachment.get("id") for attachment in item.get("attachments", [])
                     }:
@@ -939,7 +1055,13 @@ class Window(QMainWindow):
                         return
             self.say("提交结果尚未确认，未重复提交。请查看提交记录或稍后再次核对。")
 
-        self.scoped_call("/submissions" + self.query(page=1, page_size=100), loaded)
+        self.scoped_call(
+            ("/issues" if reporting else "/submissions")
+            + self.query(
+                page=1, page_size=100, **({"assignment_id": assignment} if reporting else {})
+            ),
+            loaded,
+        )
 
     def after_submit(self) -> None:
         self.say("提交成功")
@@ -970,7 +1092,13 @@ class Window(QMainWindow):
                 self.error(error or ApiError("mailbox_request_failed"))
                 return
             self.history_items = data.get("items", [])
-            statuses = {"pending": "待审核", "approved": "已通过", "rejected": "已退回"}
+            statuses = {
+                "pending": "待处理" if self.history_type.currentData() == "issues" else "待审核",
+                "approved": "已通过",
+                "rejected": "已退回",
+                "resolved": "已解决",
+                "invalidated": "分配已失效",
+            }
             for item in self.history_items:
                 self.history_list.addItem(
                     f"{item['email']}\n{statuses.get(item['status'], '未知状态')}"
@@ -979,13 +1107,28 @@ class Window(QMainWindow):
             self.history_next.setEnabled(data.get("has_more") is True)
             self.say("没有提交记录" if not self.history_items else "")
 
-        self.scoped_call("/submissions" + self.query(page=page, page_size=20), loaded)
+        self.scoped_call(
+            f"/{self.history_type.currentData()}" + self.query(page=page, page_size=20), loaded
+        )
 
     def show_history_item(self, index: int) -> None:
         self.history_images.clear()
         if 0 <= index < len(self.history_items):
             item = self.history_items[index]
-            self.history_details.setText(item.get("review_reason") or "")
+            if self.history_type.currentData() == "issues":
+                labels = {
+                    "email_login": "邮箱无法登录",
+                    "otp": "验证码异常",
+                    "card": "信用卡不可用",
+                    "other": "其他",
+                }
+                created = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.get("created_at", 0)))
+                self.history_details.setPlainText(
+                    f"{labels.get(str(item.get('kind')), '其他')} · {created}\n"
+                    f"{item.get('description', '')}\n管理员回复：{item.get('reply') or '暂无'}"
+                )
+            else:
+                self.history_details.setPlainText(item.get("review_reason") or "")
             for number, attachment in enumerate(item.get("attachments", [])):
                 if attachment.get("deleted_at") or attachment.get("expires_at", 0) <= time.time():
                     self.history_images.addItem(f"截图 {number + 1} 已过期", None)

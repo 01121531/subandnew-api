@@ -12,6 +12,7 @@ import { mailboxApi } from './api'
 import { Accounts } from './components/accounts'
 import { ErrorMessage, QueryState } from './components/common'
 import { History } from './components/history'
+import { Issues } from './components/issues'
 import { Security } from './components/security'
 import {
   clearMailboxSession,
@@ -20,10 +21,11 @@ import {
 } from './session'
 import type { AccountType, Session } from './types'
 
-type Tab = 'accounts' | 'submissions' | 'security'
+type Tab = 'accounts' | 'submissions' | 'issues' | 'security'
 const tabs = [
   { id: 'accounts', icon: Mail },
   { id: 'submissions', icon: ClipboardList },
+  { id: 'issues', icon: ClipboardList },
   { id: 'security', icon: KeyRound },
 ] as const
 
@@ -174,6 +176,9 @@ function Workspace(props: {
           )}
           {!signingOut && tab === 'submissions' && (
             <History accountType={accountType} />
+          )}
+          {!signingOut && tab === 'issues' && (
+            <Issues accountType={accountType} />
           )}
           {!signingOut && tab === 'security' && (
             <Security csrf={props.session.csrf_token} />

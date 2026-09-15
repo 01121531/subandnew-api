@@ -50,6 +50,7 @@ var expectedControlPlaneTables = []string{
 	"mailbox_assignments",
 	"mailbox_attachments",
 	"mailbox_audits",
+	"mailbox_issues",
 	"mailbox_login_attempts",
 	"mailbox_operators",
 	"mailbox_sessions",

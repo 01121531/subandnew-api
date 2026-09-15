@@ -36,6 +36,7 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}, &model.MailboxAccount{}, &model.MailboxOperator{}, &model.MailboxSession{}, &model.MailboxLoginAttempt{}, &model.MailboxAssignment{}, &model.MailboxSubmission{}, &model.MailboxAttachment{}, &model.MailboxAudit{}))
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, db.AutoMigrate(&model.MailboxIssue{}))
 	old := model.DB
 	model.DB = db
 	t.Cleanup(func() { model.DB = old; sqlDB, _ := db.DB(); _ = sqlDB.Close() })
@@ -54,6 +55,10 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 	admin.POST("/assignments", MailboxGuard(authz.MailboxAssign), AssignMailboxAccounts)
 	admin.GET("/audits", MailboxGuard(authz.MailboxAudit), ListMailboxAudits)
 	admin.GET("/submissions", MailboxGuard(authz.MailboxReview), ListMailboxSubmissions)
+	admin.GET("/issues", MailboxGuard(authz.MailboxReview), ListMailboxIssues)
+	admin.GET("/issues/:id", MailboxGuard(authz.MailboxReview), GetMailboxIssue)
+	admin.POST("/issues/:id/resolve", MailboxGuard(authz.MailboxReview), ResolveMailboxIssue)
+	admin.GET("/import-options", MailboxGuard(authz.MailboxManage), GetMailboxImportOptions)
 	admin.GET("/operators", MailboxGuard(authz.MailboxOperators), ListMailboxOperators)
 	admin.POST("/operators", MailboxGuard(authz.MailboxOperators), SaveMailboxOperator)
 	admin.POST("/imports/preview", MailboxGuard(authz.MailboxManage), ImportMailboxAccounts(true))
@@ -70,6 +75,9 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 	secured.GET("/accounts/:id", GetMailboxAccount)
 	secured.POST("/accounts/:id/credentials", GetMailboxCredentials)
 	secured.GET("/submissions", ListMailboxSubmissions)
+	secured.GET("/issues", ListMailboxIssues)
+	secured.GET("/issues/:id", GetMailboxIssue)
+	secured.POST("/assignments/:id/issues", SubmitMailboxIssue)
 	secured.POST("/assignments/:id/attachments", UploadMailboxAttachment)
 	secured.POST("/assignments/:id/submit", SubmitMailboxScreenshots)
 	secured.GET("/attachments/:id", ReadMailboxAttachment)
@@ -95,6 +103,43 @@ func TestMailboxHTTPOperatorFormContract(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"total":1`)
 	require.NotContains(t, w.Body.String(), "generated_password")
 	require.NotContains(t, w.Body.String(), "password_hash")
+}
+
+func TestMailboxHTTPFeedbackPausesAndRequiresCurrentAssignment(t *testing.T) {
+	r, s, admin := mailboxControllerFixture(t)
+	ctx := context.Background()
+	cookie, csrf, operatorID := mailboxTestLogin(t, r, s, admin, "issue-owner")
+	otherCookie, otherCSRF, _ := mailboxTestLogin(t, r, s, admin, "issue-other")
+	a := model.MailboxAccount{Email: "issue-http@example.test", Version: 1, Ciphertext: "synthetic", KeyVersion: "test"}
+	require.NoError(t, s.DB.Create(&a).Error)
+	require.NoError(t, s.Assign(ctx, admin, mailbox.AssignInput{Items: []mailbox.AssignItem{{ID: a.ID, Version: 1}}, OperatorID: operatorID}))
+	v, err := s.GetAccount(ctx, admin, a.ID)
+	require.NoError(t, err)
+	endpoint := fmt.Sprintf("/mailbox-api/v1/assignments/%d/issues", v.AssignmentID)
+	body := fmt.Sprintf(`{"version":%d,"kind":"email_login","description":"Cannot log in","attachment_ids":[]}`, v.AssignmentVersion)
+	w := mailboxRequest(r, "POST", endpoint, body, cookie, "")
+	require.Equal(t, 403, w.Code)
+	w = mailboxRequest(r, "POST", endpoint, body, otherCookie, otherCSRF)
+	require.Equal(t, 404, w.Code)
+	w = mailboxRequest(r, "POST", endpoint, body, cookie, csrf)
+	require.Equal(t, 200, w.Code, w.Body.String())
+	var response struct {
+		Data mailbox.IssueView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, v.AssignmentVersion, response.Data.SubmittedVersion)
+	require.Empty(t, response.Data.Attachments)
+	w = mailboxRequest(r, "POST", endpoint, body, cookie, csrf)
+	require.Equal(t, 409, w.Code)
+	w = mailboxRequest(r, "POST", fmt.Sprintf("/mailbox-api/v1/accounts/%d/credentials", a.ID), `{"kind":"password"}`, cookie, csrf)
+	require.Equal(t, 403, w.Code)
+	require.Contains(t, w.Body.String(), "mailbox_credentials_revoked")
+	w = mailboxRequest(r, "GET", fmt.Sprintf("/mailbox-api/v1/issues/%d", response.Data.ID), "", otherCookie, otherCSRF)
+	require.Equal(t, 404, w.Code)
+	w = mailboxRequest(r, "GET", fmt.Sprintf("/mailbox-api/v1/issues?assignment_id=%d", v.AssignmentID), "", cookie, csrf)
+	require.Equal(t, 200, w.Code)
+	require.Contains(t, w.Body.String(), `"total":1`)
+	require.NotContains(t, w.Body.String(), "ciphertext")
 }
 
 func mailboxRequest(r *gin.Engine, method, path, body string, cookie *http.Cookie, csrf string) *httptest.ResponseRecorder {

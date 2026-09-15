@@ -1,3 +1,6 @@
+import { issueMetadata } from '@/features/mailbox-management/lib/pools'
+import type { Issue, IssueKind } from '@/features/mailbox-management/types'
+
 import type {
   Account,
   AccountType,
@@ -282,6 +285,37 @@ function publicPage<T>(value: Page<T>, project: (item: T) => T): Page<T> {
 }
 
 export const mailboxApi = {
+  issues: (
+    query: ListQuery & { assignment_id?: number; kind?: string },
+    signal?: AbortSignal
+  ) =>
+    request<Page<Issue>>(`/issues?${params(query)}`, { signal }).then((value) =>
+      publicPage(value, (item) =>
+        issueMetadata(item, query.account_type ?? 'refund')
+      )
+    ),
+  issue: (id: number, accountType: AccountType, signal?: AbortSignal) =>
+    request<Issue>(scoped(`/issues/${id}`, accountType), { signal }).then(
+      (value) => issueMetadata(value, accountType)
+    ),
+  report: (
+    csrf: string,
+    assignment: number,
+    body: {
+      version: number
+      kind: IssueKind
+      description: string
+      attachment_ids: string[]
+    },
+    accountType: AccountType,
+    signal?: AbortSignal
+  ) =>
+    request<Issue>(scoped(`/assignments/${assignment}/issues`, accountType), {
+      post: true,
+      csrf,
+      body,
+      signal,
+    }).then((value) => issueMetadata(value, accountType)),
   session: async (signal?: AbortSignal): Promise<Session> => {
     try {
       return await request<Session>('/auth/session', { signal })

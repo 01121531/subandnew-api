@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, RefreshCw, Search } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -24,6 +24,12 @@ export function Accounts(props: {
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<number | null>(null)
+  const navigation = useRef(new AbortController())
+  useEffect(() => {
+    const active = new AbortController()
+    navigation.current = active
+    return () => active.abort()
+  }, [])
   const query = useQuery({
     queryKey: ['mailbox', 'accounts', props.accountType, filter, status, page],
     queryFn: ({ signal }) =>
@@ -79,7 +85,13 @@ export function Accounts(props: {
           }}
         >
           <option value=''>{t('mailboxPortal.allStatuses')}</option>
-          {['pending', 'submitted', 'approved', 'rejected'].map((value) => (
+          {[
+            'pending',
+            'submitted',
+            'approved',
+            'rejected',
+            'issue_pending',
+          ].map((value) => (
             <option key={value} value={value}>
               {t(`mailboxPortal.status_${value}`)}
             </option>
@@ -164,6 +176,38 @@ export function Accounts(props: {
           key={selected}
           id={selected}
           csrf={props.csrf}
+          onReported={() => {
+            const previous = selected
+            setSelected(null)
+            const signal = navigation.current.signal
+            void (async () => {
+              let first: number | undefined
+              for (let nextPage = 1; !signal.aborted; nextPage++) {
+                const result = await mailboxApi.accounts(
+                  {
+                    account_type: props.accountType,
+                    status: 'actionable',
+                    page: nextPage,
+                    page_size: 100,
+                  },
+                  signal
+                )
+                first ??= result.items[0]?.id
+                const next = result.items.find((item) => item.id < previous)
+                if (signal.aborted) return
+                if (next || !result.has_more || !result.items.length) {
+                  setSelected(next?.id ?? first ?? null)
+                  break
+                }
+              }
+            })()
+              .then(() => {
+                void query.refetch()
+              })
+              .catch(() => {
+                void query.refetch()
+              })
+          }}
           onClose={() => setSelected(null)}
           onSubmitted={() => {
             setSelected(null)

@@ -48,7 +48,9 @@ describe('mailbox grants', () => {
       const tab = ['review', 'operators', 'audit'].includes(action)
         ? action
         : 'pool'
-      expect(mailboxTabs(user)).toEqual([tab])
+      expect(mailboxTabs(user)).toEqual(
+        action === 'review' ? ['review', 'issues'] : [tab]
+      )
     }
   })
 })

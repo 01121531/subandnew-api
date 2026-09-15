@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
+import { Textarea } from '@/components/ui/textarea'
+import type { IssueKind } from '@/features/mailbox-management/types'
 
 import { mailboxApi } from '../api'
 import {
@@ -28,10 +31,15 @@ export function DraftSubmission(props: {
   csrf: string
   leave: React.RefObject<LeaveState>
   onSubmitted: () => void
+  issue?: boolean
 }) {
   const { t } = useTranslation()
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [error, setError] = useState<unknown>(null)
+  const [kind, setKind] = useState<IssueKind>('email_login')
+  const [description, setDescription] = useState('')
+  const [uncertain, setUncertain] = useState(false)
+  const uncertainRef = useRef(false)
   const input = useRef<HTMLInputElement>(null)
   const urls = useRef(new Set<string>())
   const controller = useRef(new AbortController())
@@ -114,12 +122,29 @@ export function DraftSubmission(props: {
       )
       const ids = drafts.map((item) => item.attachment?.id ?? '')
       if (
-        ids.length < 1 ||
+        (!props.issue && ids.length < 1) ||
         ids.length > 5 ||
         ids.some((id) => !id) ||
         new Set(ids).size !== ids.length
       ) {
         throw new Error('Invalid draft selection')
+      }
+      if (props.issue) {
+        uncertainRef.current = true
+        setUncertain(true)
+        await mailboxApi.report(
+          props.csrf,
+          props.account.assignment_id,
+          {
+            version: props.account.assignment_version,
+            kind,
+            description,
+            attachment_ids: ids,
+          },
+          props.account.account_type ?? 'refund',
+          controller.current.signal
+        )
+        return
       }
       await mailboxApi.submit(
         props.csrf,
@@ -141,6 +166,7 @@ export function DraftSubmission(props: {
     },
     onError: (failure) => {
       if (!controller.current.signal.aborted) setError(failure)
+      if (props.issue && uncertainRef.current) return
       // Reconcile an ambiguous response before allowing another attempt.
       void mailboxClient.invalidateQueries({
         queryKey: [
@@ -155,8 +181,40 @@ export function DraftSubmission(props: {
       lock.current = false
     },
   })
-  const pending = upload.isPending || submit.isPending
-  props.leave.current = { dirty: drafts.length > 0, pending }
+  const reconcile = useMutation({
+    mutationFn: async () => {
+      const data = await mailboxApi.issues(
+        {
+          account_type: props.account.account_type ?? 'refund',
+          assignment_id: props.account.assignment_id,
+          page: 1,
+          page_size: 100,
+        },
+        controller.current.signal
+      )
+      const ids = new Set(drafts.map((item) => item.attachment?.id))
+      const found = data.items.some(
+        (item) =>
+          item.submitted_version === props.account.assignment_version &&
+          item.kind === kind &&
+          item.description === description.trim() &&
+          item.attachments.length === ids.size &&
+          item.attachments.every((file) => ids.has(file.id))
+      )
+      if (found && !controller.current.signal.aborted) {
+        props.leave.current = { dirty: false, pending: false }
+        void mailboxClient.invalidateQueries({ queryKey: ['mailbox'] })
+        props.onSubmitted()
+      }
+    },
+    retry: false,
+    onError: (failure) => setError(failure),
+  })
+  const pending = upload.isPending || submit.isPending || reconcile.isPending
+  const submitLabel = props.issue
+    ? 'mailbox.issues.submit'
+    : 'mailboxPortal.submitReview'
+  props.leave.current = { dirty: drafts.length > 0 || !!description, pending }
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (drafts.length || pending) event.preventDefault()
@@ -184,6 +242,44 @@ export function DraftSubmission(props: {
   if (!canSubmit(props.account)) return null
   return (
     <section className='grid gap-4 py-5'>
+      {props.issue && (
+        <div className='grid gap-3'>
+          <p className='text-sm text-amber-800 dark:text-amber-300'>
+            {t('mailbox.issues.warning')}
+          </p>
+          <label className='grid gap-2 text-sm'>
+            {t('mailbox.issues.kind')}
+            <NativeSelect
+              aria-label={t('mailbox.issues.kind')}
+              disabled={pending || uncertain}
+              value={kind}
+              onChange={(e) => setKind(e.target.value as IssueKind)}
+            >
+              {(
+                [
+                  'email_login',
+                  'otp',
+                  ...(props.account.account_type === 'opening' ? ['card'] : []),
+                  'other',
+                ] as IssueKind[]
+              ).map((value) => (
+                <option key={value} value={value}>
+                  {t(`mailbox.issues.${value}`)}
+                </option>
+              ))}
+            </NativeSelect>
+          </label>
+          <label className='grid gap-2 text-sm'>
+            {t('mailbox.issues.description')}
+            <Textarea
+              maxLength={2000}
+              disabled={pending || uncertain}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
       <p
         id='mailbox-redaction-warning'
         role='note'
@@ -204,7 +300,7 @@ export function DraftSubmission(props: {
           className='hidden'
           accept='image/png,image/jpeg,image/webp'
           multiple
-          disabled={pending || drafts.length >= 5}
+          disabled={pending || uncertain || drafts.length >= 5}
           aria-label={t('mailboxPortal.upload')}
           aria-describedby='mailbox-redaction-warning'
           onChange={(event) => {
@@ -214,7 +310,7 @@ export function DraftSubmission(props: {
         />
         <Button
           variant='outline'
-          disabled={pending || drafts.length >= 5}
+          disabled={pending || uncertain || drafts.length >= 5}
           aria-describedby='mailbox-redaction-warning'
           onClick={() => input.current?.click()}
         >
@@ -246,7 +342,7 @@ export function DraftSubmission(props: {
                   <Button
                     variant='ghost'
                     size='icon'
-                    disabled={pending}
+                    disabled={pending || uncertain}
                     title={t('mailboxPortal.retry')}
                     aria-label={t('mailboxPortal.retry')}
                     onClick={() => {
@@ -262,7 +358,7 @@ export function DraftSubmission(props: {
                 <Button
                   variant='ghost'
                   size='icon'
-                  disabled={pending}
+                  disabled={pending || uncertain}
                   title={t('mailboxPortal.remove')}
                   aria-label={t('mailboxPortal.remove')}
                   onClick={() => {
@@ -286,12 +382,26 @@ export function DraftSubmission(props: {
         ))}
       </div>
       <ErrorMessage error={error} />
+      {uncertain && !pending && (
+        <div role='alert' className='grid gap-2 text-sm'>
+          <p>{t('mailbox.issues.uncertain')}</p>
+          <Button
+            variant='outline'
+            disabled={reconcile.isPending}
+            onClick={() => reconcile.mutate()}
+          >
+            <RefreshCw />
+            {t('mailbox.issues.check')}
+          </Button>
+        </div>
+      )}
       <div className='bg-background sticky bottom-0 -mx-4 border-t px-4 py-3 sm:-mx-6 sm:px-6'>
         <Button
           className='h-10 w-full'
           disabled={
             pending ||
-            !drafts.length ||
+            uncertain ||
+            (props.issue ? !description.trim() : !drafts.length) ||
             drafts.some((item) => !item.attachment || item.error)
           }
           onClick={() => {
@@ -303,7 +413,7 @@ export function DraftSubmission(props: {
           }}
         >
           <Send />
-          {t(pending ? 'mailboxPortal.loading' : 'mailboxPortal.submitReview')}
+          {t(pending ? 'mailboxPortal.loading' : submitLabel)}
         </Button>
       </div>
     </section>

@@ -25,6 +25,7 @@ func operatorTestService(t *testing.T) (*Service, Actor) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.MailboxIssue{}))
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}, &model.MailboxOperator{}, &model.MailboxSession{}, &model.MailboxLoginAttempt{}, &model.MailboxAudit{}))
 	root := model.User{Username: "mailbox-test-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}

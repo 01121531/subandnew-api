@@ -3,6 +3,7 @@ import type {
   AccountType,
   Audit,
   ImportPreview,
+  Issue,
   Page,
   Submission,
 } from '../types'
@@ -40,6 +41,42 @@ function assertPool(
 ) {
   if ((value.account_type ?? 'refund') !== accountType) {
     throw new MailboxError('mailbox_not_found', 404)
+  }
+}
+
+export function issueMetadata(value: Issue, accountType: AccountType): Issue {
+  assertPool(value, accountType)
+  return {
+    submitted_version: value.submitted_version,
+    id: value.id,
+    account_id: value.account_id,
+    account_type: accountType,
+    email: value.email,
+    card_last4: cardLast4(value.card_last4),
+    account_version: value.account_version,
+    assignment_id: value.assignment_id,
+    assignment_version: value.assignment_version,
+    assignment_active: value.assignment_active,
+    operator_id: value.operator_id,
+    operator_name: value.operator_name,
+    kind: value.kind,
+    description: value.description,
+    status: value.status,
+    version: value.version,
+    resolution: value.resolution,
+    reply: value.reply,
+    resolved_at: value.resolved_at,
+    created_at: value.created_at,
+    attachments: (value.attachments ?? []).map((item) => ({
+      id: item.id,
+      content_type: item.content_type,
+      size: item.size,
+      width: item.width,
+      height: item.height,
+      created_at: item.created_at,
+      expires_at: item.expires_at,
+      deleted_at: item.deleted_at,
+    })),
   }
 }
 

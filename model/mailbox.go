@@ -75,6 +75,7 @@ type MailboxAttachment struct {
 	AssignmentID int64  `json:"assignment_id" gorm:"not null;index"`
 	OperatorID   int64  `json:"-" gorm:"not null;index"`
 	SubmissionID int64  `json:"submission_id" gorm:"not null;default:0;index"`
+	IssueID      int64  `json:"-" gorm:"not null;default:0;index"`
 	StorageKey   string `json:"-" gorm:"size:128;not null;index"`
 	ContentType  string `json:"content_type" gorm:"size:64;not null"`
 	Size         int64  `json:"size"`
@@ -83,6 +84,24 @@ type MailboxAttachment struct {
 	CreatedAt    int64  `json:"created_at"`
 	ExpiresAt    int64  `json:"expires_at" gorm:"not null;index"`
 	DeletedAt    int64  `json:"deleted_at" gorm:"not null;default:0"`
+}
+
+type MailboxIssue struct {
+	ID               int64  `gorm:"primaryKey"`
+	AccountID        int64  `gorm:"not null;index"`
+	AssignmentID     int64  `gorm:"not null;index"`
+	OperatorID       int64  `gorm:"not null;index"`
+	OpenAssignmentID *int64 `gorm:"uniqueIndex"`
+	SubmittedVersion int64  `gorm:"not null;default:0"`
+	Kind             string `gorm:"size:32;not null"`
+	Description      string `gorm:"size:2000;not null"`
+	Status           string `gorm:"size:24;not null;index"`
+	Version          int64  `gorm:"not null;default:1"`
+	Resolution       string `gorm:"size:16"`
+	Reply            string `gorm:"size:2000"`
+	ResolvedBy       int    `gorm:"not null;default:0"`
+	ResolvedAt       int64  `gorm:"not null;default:0"`
+	CreatedAt        int64  `gorm:"not null;index"`
 }
 
 type MailboxAudit struct {

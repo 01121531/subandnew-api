@@ -26,6 +26,9 @@ const Reviews = lazy(() =>
 const Audits = lazy(() =>
   import('./components/audits').then((module) => ({ default: module.Audits }))
 )
+const Issues = lazy(() =>
+  import('./components/issues').then((module) => ({ default: module.Issues }))
+)
 
 export function MailboxManagement() {
   const user = useAuthStore((state) => state.auth.user)
@@ -88,6 +91,7 @@ function MailboxPage() {
                     {tab === 'pool' && <Accounts />}
                     {tab === 'operators' && <Operators />}
                     {tab === 'review' && <Reviews />}
+                    {tab === 'issues' && <Issues />}
                     {tab === 'audit' && <Audits />}
                   </>
                 )}

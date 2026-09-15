@@ -19,6 +19,7 @@ const StatusPending = "pending"
 const StatusSubmitted = "submitted"
 const StatusApproved = "approved"
 const StatusRejected = "rejected"
+const StatusIssuePending = "issue_pending"
 
 type Error struct {
 	Status int
@@ -161,7 +162,7 @@ func (s *Service) AccountForActor(actor Actor, id int64, credentials bool, accou
 	if account.ActiveAssignmentID == 0 || s.DB.First(&assignment, account.ActiveAssignmentID).Error != nil || assignment.AccountID != id || assignment.OperatorID != actor.OperatorID || assignment.RevokedAt != 0 {
 		return nil, fail(404, "mailbox_not_found")
 	}
-	if credentials && assignment.Status == StatusApproved {
+	if credentials && assignment.Status != StatusPending && assignment.Status != StatusSubmitted && assignment.Status != StatusRejected {
 		return nil, fail(403, "mailbox_credentials_revoked")
 	}
 	return &account, nil
@@ -205,12 +206,14 @@ type Page[T any] struct {
 	HasMore  bool  `json:"has_more"`
 }
 type ListQuery struct {
-	AccountType string `json:"account_type"`
-	Search      string
-	Status      string
-	OperatorID  int64
-	Page        int
-	PageSize    int
+	Kind         string
+	AssignmentID int64
+	AccountType  string `json:"account_type"`
+	Search       string
+	Status       string
+	OperatorID   int64
+	Page         int
+	PageSize     int
 }
 
 func normalizePage(q ListQuery) ListQuery {

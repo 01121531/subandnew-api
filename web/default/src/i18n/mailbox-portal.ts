@@ -1,4 +1,6 @@
 export const mailboxPortalEn = {
+  issues: 'My issue reports',
+  status_issue_pending: 'Issue pending',
   title: 'Mailbox workspace',
   signIn: 'Operator sign in',
   signOut: 'Sign out',
@@ -87,6 +89,8 @@ export const mailboxPortalEn = {
 }
 
 export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
+  issues: '我的反馈',
+  status_issue_pending: '异常待处理',
   title: '邮箱工作台',
   signIn: '操作员登录',
   signOut: '退出登录',

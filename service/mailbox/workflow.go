@@ -281,6 +281,9 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			}
 			now := s.Now().Unix()
 			if account.ActiveAssignmentID != 0 {
+				if err := s.invalidateIssues("assignment_id = ?", account.ActiveAssignmentID); err != nil {
+					return err
+				}
 				if err := workflowCAS(tx.Model(&model.MailboxAssignment{}).Where("id = ? AND account_id = ? AND revoked_at = 0", account.ActiveAssignmentID, account.ID).Updates(map[string]any{"revoked_at": now, "version": gorm.Expr("version + 1"), "updated_at": now})); err != nil {
 					return err
 				}
@@ -428,7 +431,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 		}
 		now := s.Now().Unix()
 		var attachments []model.MailboxAttachment
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ? AND assignment_id = ? AND operator_id = ? AND submission_id = 0 AND deleted_at = 0 AND expires_at > ?", attachmentIDs, assignmentID, actor.OperatorID, now).Find(&attachments).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN ? AND assignment_id = ? AND operator_id = ? AND submission_id = 0 AND issue_id = 0 AND deleted_at = 0 AND expires_at > ?", attachmentIDs, assignmentID, actor.OperatorID, now).Find(&attachments).Error; err != nil {
 			return err
 		}
 		if len(attachments) != len(attachmentIDs) {
@@ -438,7 +441,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 		if err := tx.Create(&submission).Error; err != nil {
 			return err
 		}
-		result := tx.Model(&model.MailboxAttachment{}).Where("id IN ? AND assignment_id = ? AND operator_id = ? AND submission_id = 0 AND deleted_at = 0 AND expires_at > ?", attachmentIDs, assignmentID, actor.OperatorID, now).Updates(map[string]any{"submission_id": submission.ID, "expires_at": now + 365*24*60*60})
+		result := tx.Model(&model.MailboxAttachment{}).Where("id IN ? AND assignment_id = ? AND operator_id = ? AND submission_id = 0 AND issue_id = 0 AND deleted_at = 0 AND expires_at > ?", attachmentIDs, assignmentID, actor.OperatorID, now).Updates(map[string]any{"submission_id": submission.ID, "expires_at": now + 365*24*60*60})
 		if result.Error != nil {
 			return result.Error
 		}

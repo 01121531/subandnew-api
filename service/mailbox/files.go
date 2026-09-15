@@ -271,7 +271,7 @@ func (s *Service) UploadAttachment(ctx context.Context, actor Actor, assignmentI
 		}
 		now := s.Now().Unix()
 		var count int64
-		if err := tx.Model(&model.MailboxAttachment{}).Where("assignment_id = ? AND submission_id = 0 AND deleted_at = 0 AND expires_at > ?", assignmentID, now).Count(&count).Error; err != nil {
+		if err := tx.Model(&model.MailboxAttachment{}).Where("assignment_id = ? AND submission_id = 0 AND issue_id = 0 AND deleted_at = 0 AND expires_at > ?", assignmentID, now).Count(&count).Error; err != nil {
 			return err
 		}
 		if count >= 10 {
@@ -316,12 +316,24 @@ func (s *Service) attachmentForActor(actor Actor, id string) (*model.MailboxAtta
 	if poolCount != 1 {
 		return nil, fail(404, "mailbox_not_found")
 	}
+	if attachment.IssueID != 0 {
+		if attachment.SubmissionID != 0 {
+			return nil, fail(404, "mailbox_not_found")
+		}
+		if err := s.CheckActor(actor, authz.MailboxReview); err != nil {
+			return nil, err
+		}
+	}
 	if actor.Admin == nil {
 		if attachment.OperatorID != actor.OperatorID {
 			return nil, fail(404, "mailbox_not_found")
 		}
 		var count int64
-		if attachment.SubmissionID != 0 {
+		if attachment.IssueID != 0 {
+			if err := s.DB.Model(&model.MailboxIssue{}).Where("id = ? AND assignment_id = ? AND operator_id = ?", attachment.IssueID, attachment.AssignmentID, actor.OperatorID).Count(&count).Error; err != nil {
+				return nil, err
+			}
+		} else if attachment.SubmissionID != 0 {
 			if err := s.DB.Model(&model.MailboxSubmission{}).Where("id = ? AND assignment_id = ? AND operator_id = ?", attachment.SubmissionID, attachment.AssignmentID, actor.OperatorID).Count(&count).Error; err != nil {
 				return nil, err
 			}
