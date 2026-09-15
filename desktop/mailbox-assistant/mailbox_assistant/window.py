@@ -298,7 +298,22 @@ class Window(QMainWindow):
         detail.addStretch()
         self.detail_area.setWidget(contents)
         layout.addWidget(self.detail_area, 1)
-        bottom = QHBoxLayout()
+        self.task_notice = QWidget()
+        notice = QVBoxLayout(self.task_notice)
+        notice.addStretch()
+        self.task_notice_text = QLabel()
+        self.task_notice_text.setWordWrap(True)
+        self.task_notice_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.task_notice_text.setTextFormat(Qt.TextFormat.PlainText)
+        notice.addWidget(self.task_notice_text)
+        self.task_retry = QPushButton("刷新任务")
+        self.task_retry.clicked.connect(self.refresh_tasks)
+        notice.addWidget(self.task_retry)
+        notice.addStretch()
+        layout.addWidget(self.task_notice, 1)
+        self.task_actions = QWidget()
+        bottom = QHBoxLayout(self.task_actions)
+        bottom.setContentsMargins(0, 0, 0, 0)
         self.previous = QPushButton("上一条")
         self.previous.clicked.connect(lambda: self.navigate(-1))
         self.next = QPushButton("下一条")
@@ -308,7 +323,7 @@ class Window(QMainWindow):
         self.submit_button.clicked.connect(self.submit)
         for button in (self.previous, self.next, self.submit_button):
             bottom.addWidget(button)
-        layout.addLayout(bottom)
+        layout.addWidget(self.task_actions)
         self.stack.addWidget(page)
 
     def _history_page(self) -> None:
@@ -380,8 +395,25 @@ class Window(QMainWindow):
             self.issue_kind,
             self.issue_description,
             self.history_type,
+            self.task_retry,
         ):
             control.setEnabled(not busy and self.operator_id > 0)
+        active = self.current is not None
+        self.detail_area.setVisible(active)
+        self.task_actions.setVisible(active)
+        self.task_notice.setVisible(not active)
+        ready = active and not busy and self.operator_id > 0 and not self.hidden_private
+        for task_control in (
+            self.submit_button,
+            self.paste_button,
+            self.report_button,
+            self.redacted,
+        ):
+            task_control.setEnabled(ready)
+        self.previous.setEnabled(ready and (self.index > 0 or self.page > 1))
+        self.next.setEnabled(ready and (self.index + 1 < len(self.items) or self.has_more))
+        self.preview_button.setEnabled(ready and bool(self.shots))
+        self.remove_button.setEnabled(ready and bool(self.shots) and not self.uncertain_submission)
         self.login_button.setEnabled(not busy)
         self.password.setEnabled(not busy)
         self.server.setEnabled(not busy and self.operator_id == 0)
@@ -581,6 +613,9 @@ class Window(QMainWindow):
             self.issue_description.clear()
             self.report_button.setText("反馈问题")
             self.submit_button.setText("提交并下一条")
+        self.position.setText("尚未读取任务")
+        self.task_notice_text.setText("点击刷新任务，读取当前类型下分配给你的邮箱。")
+        self.set_busy(self.busy)
 
     def discard_allowed(self) -> bool:
         if self.busy:
@@ -619,17 +654,27 @@ class Window(QMainWindow):
 
     def load_page(self, page: int, index: int = 0) -> None:
         self.clear_task(clear_draft=True)
+        self.items = []
+        self.has_more = False
+        self.index = 0
         self.set_busy(True)
         self.page = max(1, page)
+        self.position.setText("正在读取任务…")
+        self.task_notice_text.setText("正在读取任务，请稍候。")
         self.say("正在读取任务…")
 
         def loaded(data: Any, error: ApiError | None) -> None:
             self.set_busy(False)
             if error:
-                self.items.clear()
+                self.position.setText("任务读取失败")
+                self.task_notice_text.setText(
+                    "没有加载到任务数据。请刷新重试；这不表示没有分配任务。"
+                )
                 self.error(error)
                 return
             if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                self.position.setText("任务数据格式异常")
+                self.task_notice_text.setText("请确认服务端和邮箱助手均已更新，然后刷新任务。")
                 self.error(ApiError("mailbox_request_failed"))
                 return
             self.items = [
@@ -638,11 +683,26 @@ class Window(QMainWindow):
                 if isinstance(item, dict) and actionable(item, self.kind)
             ]
             self.has_more = data.get("has_more") is True
+            if len(self.items) != len(data["items"]):
+                self.items = []
+                self.has_more = False
+                self.position.setText("任务状态需要确认")
+                self.task_notice_text.setText(
+                    "服务端返回了当前不可处理的任务。请刷新任务；若仍出现，请确认服务端已更新并联系管理员核对分配状态。"
+                )
+                self.say("")
+                return
             if not self.items:
                 if self.page > 1:
                     self.load_page(self.page - 1, -1)
                     return
                 self.position.setText("没有待处理或已退回任务")
+                pool_name = "开号邮箱" if self.kind == "opening" else "退款邮箱"
+                self.task_notice_text.setText(
+                    f"当前没有可处理的{pool_name}。\n\n"
+                    "请确认管理员已将此类型邮箱分配给当前操作员，或切换另一种邮箱类型。\n\n"
+                    "待审核、已通过和异常待处理任务不在此列表，可在提交记录中查看。分配或恢复任务后，点击刷新任务。"
+                )
                 self.say("")
                 return
             self.index = min(index, len(self.items) - 1) if index >= 0 else len(self.items) - 1
@@ -918,6 +978,7 @@ class Window(QMainWindow):
             )
         if self.shots:
             self.shot_list.setCurrentRow(len(self.shots) - 1)
+        self.set_busy(self.busy)
 
     def preview_shot(self) -> None:
         index = self.shot_list.currentRow()
@@ -941,6 +1002,7 @@ class Window(QMainWindow):
             self.reconcile_submission()
             return
         if not self.issue_mode and not self.shots:
+            self.say("请先粘贴至少一张截图，再提交任务。")
             return
         if self.issue_mode and not 1 <= len(self.issue_description.toPlainText().strip()) <= 2000:
             self.say("请填写 1～2,000 字的问题说明。")

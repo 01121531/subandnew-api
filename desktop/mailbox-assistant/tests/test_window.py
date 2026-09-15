@@ -106,6 +106,70 @@ def test_stale_response_after_navigation_never_populates_new_account(window):
     assert not window.values
 
 
+def test_empty_queue_has_visible_recovery_actions_not_dead_submission_controls(window):
+    window, api = window
+    window.load_page(1)
+    assert window.busy
+    assert not window.task_retry.isEnabled()
+    assert window.detail_area.isHidden()
+    api.take("status=actionable")[1]({"items": [], "has_more": False}, None)
+    assert not window.busy
+    assert not window.current
+    assert not window.task_notice.isHidden()
+    assert window.detail_area.isHidden()
+    assert window.task_actions.isHidden()
+    assert not window.submit_button.isEnabled()
+    assert not window.report_button.isEnabled()
+    assert window.task_retry.isEnabled()
+    assert window.pool.isEnabled()
+    assert window.history.isEnabled()
+    assert "分配给当前操作员" in window.task_notice_text.text()
+    window.task_retry.click()
+    api.take("status=actionable")[1]({"items": [account()], "has_more": False}, None)
+    api.take("/accounts/5?")[1](account(), None)
+    assert window.current["id"] == 5
+    assert window.task_notice.isHidden()
+    assert not window.detail_area.isHidden()
+    assert window.report_button.isEnabled()
+    assert not window.previous.isEnabled()
+    assert not window.next.isEnabled()
+
+
+def test_queue_failure_clears_old_navigation_and_is_not_an_empty_result(window):
+    window, api = window
+    window.has_more = True
+    window.load_page(2)
+    api.take("status=actionable")[1](None, ApiError("mailbox_network_error"))
+    assert not window.items
+    assert not window.has_more
+    assert not window.current
+    assert window.position.text() == "任务读取失败"
+    assert "不表示没有分配任务" in window.task_notice_text.text()
+    window.navigate(1)
+    assert not api.calls
+
+
+def test_non_actionable_server_rows_are_not_silently_reported_as_empty(window):
+    window, api = window
+    item = account()
+    item["status"] = "issue_pending"
+    item["credentials_available"] = False
+    window.load_page(1)
+    api.take("status=actionable")[1]({"items": [item], "has_more": True}, None)
+    assert window.position.text() == "任务状态需要确认"
+    assert not window.items
+    assert not window.has_more
+    assert window.task_retry.isEnabled()
+    assert not api.calls
+
+
+def test_submit_without_screenshot_explains_required_action(window):
+    window, api = window
+    window.submit()
+    assert "至少一张截图" in window.message.text()
+    assert not api.calls
+
+
 def test_issue_mode_clears_secrets_and_reports_without_screenshots(window):
     window, api = window
     window.values["password"] = "secret"
