@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
+import { toIntlLocale } from '@/i18n/languages'
 
 import {
   workMetrics,
@@ -161,7 +162,7 @@ export function WorkSummaryView(props: {
   onSelect: (selection: WorkSelection) => void
 }) {
   const { t, i18n } = useTranslation()
-  const formatter = new Intl.DateTimeFormat(i18n.language, {
+  const formatter = new Intl.DateTimeFormat(toIntlLocale(i18n.language), {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',

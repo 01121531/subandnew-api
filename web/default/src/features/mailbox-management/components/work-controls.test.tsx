@@ -67,6 +67,47 @@ const account: WorkAccount = {
 }
 
 describe('operator statistics presentation', () => {
+  for (const [language, locale] of [
+    ['zhCN', 'zh-CN'],
+    ['zhTW', 'zh-TW'],
+    ['en', 'en'],
+  ] as const) {
+    test(`summary accepts the real interface language ${language} for all-time and custom ranges`, async () => {
+      const i18n = createInstance()
+      await i18n.init({ lng: language, resources: {}, fallbackLng: false })
+      const start = Date.UTC(2026, 8, 15, 16) / 1000
+      const end = start + 86400
+      for (const period of ['all', 'custom'] as const) {
+        const markup = renderToStaticMarkup(
+          <I18nextProvider i18n={i18n}>
+            <WorkSummaryView
+              operatorName='Test operator'
+              summary={summary}
+              range={{
+                period,
+                start_at: period === 'all' ? 0 : start,
+                end_at: period === 'all' ? 0 : end,
+                timezone: 'Asia/Shanghai',
+              }}
+              onSelect={() => {}}
+            />
+          </I18nextProvider>
+        )
+        expect(markup).toContain('Asia/Shanghai')
+        if (period === 'custom') {
+          const formatter = new Intl.DateTimeFormat(locale, {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          })
+          expect(markup).toContain(
+            `${formatter.format(start * 1000)} - ${formatter.format((end - 1) * 1000)}`
+          )
+        }
+      }
+    })
+  }
   test('history timestamps use Beijing midnight rather than the browser timezone', () => {
     const value = Date.UTC(2026, 8, 15, 16, 5) / 1000
     expect(render(<WorkTime value={value} />)).toContain(
