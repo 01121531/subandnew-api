@@ -205,7 +205,7 @@ func TestMailboxArchiveConcurrentAssignAndAuditRollback(t *testing.T) {
 
 func TestMailboxImportOptionsAvailability(t *testing.T) {
 	s, admin, _ := cvvTestService(t)
-	for _, test := range []struct{ mode, node, reason string }{{"", "master", "not_enabled"}, {"single_node", "slave", "node_unsupported"}, {"single_node", "master", ""}} {
+	for _, test := range []struct{ mode, node, reason string }{{"", "master", ""}, {"disabled", "master", "not_enabled"}, {"single_node", "slave", "node_unsupported"}, {"single_node", "master", ""}, {"invalid", "master", "not_enabled"}} {
 		t.Setenv("MAILBOX_TEMP_CVV_MODE", test.mode)
 		t.Setenv("NODE_TYPE", test.node)
 		options, err := s.ImportOptions(admin)

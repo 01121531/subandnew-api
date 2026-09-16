@@ -146,7 +146,7 @@ func TestTemporaryCVVValidationAndFeatureGate(t *testing.T) {
 	var count int64
 	require.NoError(t, s.DB.Model(&model.MailboxAccount{}).Count(&count).Error)
 	require.Zero(t, count)
-	t.Setenv("MAILBOX_TEMP_CVV_MODE", "")
+	t.Setenv("MAILBOX_TEMP_CVV_MODE", "disabled")
 	_, err := s.Import(context.Background(), admin, "csv", []byte(strings.TrimSpace(string(poolTestCSV("disabled@example.test")))+",007"), AccountTypeOpening)
 	require.Error(t, err)
 	_, err = s.Import(context.Background(), admin, "csv", poolTestCSV("five-columns@example.test"), AccountTypeOpening)

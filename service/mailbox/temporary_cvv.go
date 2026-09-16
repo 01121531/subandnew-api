@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,13 +45,19 @@ func temporaryCVVEnabled() bool {
 }
 
 func temporaryCVVUnavailableReason() string {
-	if os.Getenv("MAILBOX_TEMP_CVV_MODE") != "single_node" {
-		return "not_enabled"
-	}
-	if !common.IsMasterNode || os.Getenv("NODE_TYPE") == "slave" {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("MAILBOX_TEMP_CVV_MODE")))
+	nodeType := strings.ToLower(strings.TrimSpace(os.Getenv("NODE_TYPE")))
+	if !common.IsMasterNode || nodeType == "slave" {
 		return "node_unsupported"
 	}
-	return ""
+	switch mode {
+	case "", "single_node":
+		return ""
+	case "disabled", "off", "none":
+		return "not_enabled"
+	default:
+		return "not_enabled"
+	}
 }
 
 func (s *Service) cvvStore() *cvvStore {
