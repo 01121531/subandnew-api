@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 
-export type RemarkRevision = {
+type RemarkRevision = {
   id: number
   old_remark: string
   new_remark: string
