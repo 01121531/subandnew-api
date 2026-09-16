@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const temporaryCVVTTL = 10 * time.Minute
+const temporaryCVVRevealTTL = 30 * time.Minute
 const temporaryCVVCapacity = 10000
 
 var cvvPattern = regexp.MustCompile(`^[0-9]{3,4}$`)
@@ -73,17 +73,23 @@ func (v *cvvStore) removeLocked(id int64) {
 
 func (v *cvvStore) purgeLocked(now time.Time) {
 	for id, item := range v.items {
-		if !item.expires.After(now) {
+		if !item.expires.IsZero() && !item.expires.After(now) {
 			v.removeLocked(id)
 		}
 	}
 }
 
-func (v *cvvStore) putLocked(id int64, value string, now time.Time, assignment, operator, authVersion int64) {
+func (v *cvvStore) putLocked(id int64, value string, assignment, operator, authVersion int64) {
 	v.removeLocked(id)
-	item := &temporaryCVV{deliveryID: rand.Text(), value: []byte(value), expires: now.Add(temporaryCVVTTL), assignmentID: assignment, operatorID: operator, authVersion: authVersion}
-	v.items[id] = item
-	item.timer = time.AfterFunc(temporaryCVVTTL, func() {
+	v.items[id] = &temporaryCVV{deliveryID: rand.Text(), value: []byte(value), assignmentID: assignment, operatorID: operator, authVersion: authVersion}
+}
+
+func (v *cvvStore) startRevealLocked(id int64, item *temporaryCVV, now time.Time) {
+	if !item.expires.IsZero() {
+		return
+	}
+	item.expires = now.Add(temporaryCVVRevealTTL)
+	item.timer = time.AfterFunc(temporaryCVVRevealTTL, func() {
 		v.mu.Lock()
 		defer v.mu.Unlock()
 		if v.items[id] == item {
@@ -156,7 +162,8 @@ type TemporaryCVVInput struct {
 	CVV     string `json:"cvv"`
 }
 type TemporaryCVVView struct {
-	ExpiresAt int64 `json:"expires_at"`
+	ExpiresAt         int64 `json:"expires_at"`
+	StartsOnFirstView bool  `json:"starts_on_first_view"`
 }
 
 func (s *Service) ProvideTemporaryCVV(ctx context.Context, actor Actor, id int64, input TemporaryCVVInput, accountTypes ...string) (view *TemporaryCVVView, err error) {
@@ -218,9 +225,8 @@ func (s *Service) ProvideTemporaryCVV(ctx context.Context, actor Actor, id int64
 	if err != nil {
 		return nil, err
 	}
-	now := s.Now()
-	v.putLocked(id, input.CVV, now, assignmentID, operatorID, authVersion)
-	return &TemporaryCVVView{ExpiresAt: now.Add(temporaryCVVTTL).Unix()}, nil
+	v.putLocked(id, input.CVV, assignmentID, operatorID, authVersion)
+	return &TemporaryCVVView{StartsOnFirstView: true}, nil
 }
 
 func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) (*CredentialView, error) {
@@ -236,16 +242,16 @@ func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) 
 	}
 	v := s.cvvStore()
 	v.mu.Lock()
-	v.purgeLocked(s.Now())
+	now := s.Now()
+	v.purgeLocked(now)
 	item := v.items[account.ID]
 	if item == nil || item.assignmentID != assignment.ID || item.operatorID != actor.OperatorID || item.authVersion != actor.AuthVersion {
 		v.mu.Unlock()
 		return nil, fail(404, "mailbox_cvv_unavailable")
 	}
+	v.startRevealLocked(account.ID, item, now)
 	value, expires := string(item.value), item.expires.Unix()
-	v.removeLocked(account.ID)
 	v.mu.Unlock()
-	// Take before audit/check: any uncertainty consumes the handoff, never replays it.
 	if err := s.Audit(actor, "credentials_cvv", account.ID, assignment.ID, 200, ""); err != nil {
 		return nil, fail(500, "mailbox_service_unavailable")
 	}
@@ -259,5 +265,5 @@ func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) 
 	if s.Now().Unix() >= expires {
 		return nil, fail(404, "mailbox_cvv_unavailable")
 	}
-	return &CredentialView{CVV: value, ServerTime: s.Now().Unix(), ExpiresAt: expires}, nil
+	return &CredentialView{Available: true, CVV: value, ServerTime: s.Now().Unix(), ExpiresAt: expires}, nil
 }

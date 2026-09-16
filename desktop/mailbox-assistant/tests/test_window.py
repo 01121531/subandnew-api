@@ -82,7 +82,7 @@ def test_value_region_click_revalidates_then_copies(window, qtbot, qapp):
     assert not window.busy
 
 
-def test_copy_cvv_clears_value_and_uses_short_clipboard_lease(window, qapp):
+def test_copy_cvv_keeps_value_during_reveal_window_and_uses_short_clipboard_lease(window, qapp):
     window, api = window
     window.kind = "opening"
     window.current = account(kind="opening")
@@ -92,7 +92,7 @@ def test_copy_cvv_clears_value_and_uses_short_clipboard_lease(window, qapp):
     _, callback, _ = api.take("/accounts/5?")
     callback(account(kind="opening"), None)
     assert qapp.clipboard().text() == "007"
-    assert "cvv" not in window.values
+    assert window.values["cvv"] == "007"
     assert window.clipboard.timer.remainingTime() <= 15000
 
 
@@ -104,6 +104,19 @@ def test_stale_response_after_navigation_never_populates_new_account(window):
     window.current = account(4)
     callback({"password": "old-secret"}, None)
     assert not window.values
+
+
+def test_no_otp_response_is_a_supported_empty_credential(window):
+    window, api = window
+    window.values["password"] = "keep-password"
+    window.fetch_credential("otp")
+    _, callback, _ = api.take("credentials")
+    callback({"available": False, "server_time": 59}, None)
+    assert window.values["password"] == "keep-password"
+    assert "code" not in window.values
+    assert window.fields["code"].text_label.text() == "未提供"
+    assert not window.fields["code"].button.isEnabled()
+    assert window.otp_caption.text() == "此邮箱未配置 2FA。"
 
 
 def test_empty_queue_has_visible_recovery_actions_not_dead_submission_controls(window):
@@ -404,18 +417,18 @@ def test_collapse_erases_secrets_and_old_result(window):
     assert window.hidden_private
 
 
-def test_new_cvv_delivery_can_be_claimed_but_same_delivery_is_not_replayed(window):
+def test_available_cvv_can_be_refetched_during_reveal_window(window):
     window, api = window
     window.kind = "opening"
     item = account(kind="opening")
     item.update(temporary_cvv_id="delivery-one", temporary_cvv_status="available")
     window.items = [item]
-    for delivery, expected in [("delivery-one", 1), ("delivery-one", 0), ("delivery-two", 1)]:
+    for delivery in ("delivery-one", "delivery-one", "delivery-two"):
         item["temporary_cvv_id"] = delivery
         window.open_current()
         _, done, _ = api.take("/accounts/5?")
         done(dict(item), None)
-        assert sum(call[2].get("body", {}).get("kind") == "cvv" for call in api.calls) == expected
+        assert sum(call[2].get("body", {}).get("kind") == "cvv" for call in api.calls) == 1
         api.calls.clear()
 
 

@@ -118,7 +118,7 @@ func normalizeMailboxImportCells(cells []string, kind string, ignoreExtra bool) 
 		}
 	}
 	if kind == AccountTypeRefund && ignoreExtra && len(cells) > 3 && mailboxImportEmail(cells[0]) {
-		if _, err := parseMailboxOTP(cells[2]); err == nil {
+		if _, err := parseMailboxOTP(cells[2]); err == nil || mailboxOTPAbsent(cells[2]) {
 			cells = cells[:3]
 			notices = append(notices, "mailbox_import_extra_fields_ignored")
 		}

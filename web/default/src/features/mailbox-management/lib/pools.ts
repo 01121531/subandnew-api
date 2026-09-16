@@ -160,6 +160,7 @@ export function importMetadata(value: ImportPreview): ImportPreview {
       email: row.email,
       account_type: row.account_type ?? 'refund',
       card_last4: cardLast4(row.card_last4),
+      otp_available: row.otp_available === true,
     })),
     issues: value.issues.map((issue) => ({ row: issue.row, code: issue.code })),
     notices: (value.notices ?? []).map((notice) => ({

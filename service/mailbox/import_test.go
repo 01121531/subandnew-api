@@ -134,6 +134,67 @@ func TestMailboxImportFormatsPreservePasswordsAndRedact(t *testing.T) {
 	}
 }
 
+func TestMailboxImportOpeningAllowsExplicitNoOTPMarker(t *testing.T) {
+	t.Setenv("MAILBOX_TEMP_CVV_MODE", "single_node")
+	s, actor, _ := cvvTestService(t)
+	data := []byte("dwv55euhn2@chenhannb.us----weU4qZKE----XXXX----4565991041326975----09/2031----721")
+
+	preview, err := s.PreviewImport(context.Background(), actor, "text", data, AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, preview.Valid, "%+v", preview.Issues)
+	require.Equal(t, 1, preview.Ready)
+	require.Len(t, preview.Rows, 1)
+	require.False(t, preview.Rows[0].OTPAvailable)
+	require.Contains(t, preview.Notices, ImportIssue{Row: 1, Code: "mailbox_import_otp_absent"})
+	encoded, err := json.Marshal(preview)
+	require.NoError(t, err)
+	for _, secret := range []string{"weU4qZKE", "4565991041326975", "721"} {
+		require.NotContains(t, string(encoded), secret)
+	}
+
+	result, err := s.Import(context.Background(), actor, "text", data, AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Imported)
+	var account model.MailboxAccount
+	require.NoError(t, s.DB.First(&account).Error)
+	require.NotContains(t, account.Ciphertext, mailboxOTPAbsentMarker)
+	password, err := s.Credentials(context.Background(), actor, account.ID, "password", AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, password.Available)
+	require.Equal(t, "weU4qZKE", password.Password)
+	otp, err := s.Credentials(context.Background(), actor, account.ID, "otp", AccountTypeOpening)
+	require.NoError(t, err)
+	require.False(t, otp.Available)
+	require.Empty(t, otp.Code)
+	require.Zero(t, otp.ExpiresAt)
+	card, err := s.Credentials(context.Background(), actor, account.ID, "card", AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, card.Available)
+	require.Equal(t, "4565991041326975", card.CardNumber)
+	require.Equal(t, "09/31", card.CardExpiry)
+}
+
+func TestMailboxImportNoOTPMarkerIsExplicit(t *testing.T) {
+	for _, marker := range []string{"XXXX", "xxxx", "  XxXx  "} {
+		t.Run(marker, func(t *testing.T) {
+			s, actor := newMailboxImportTestService(t)
+			preview, err := s.PreviewImport(context.Background(), actor, "text", []byte("no-otp@example.test----password----"+marker))
+			require.NoError(t, err)
+			require.True(t, preview.Valid)
+			require.False(t, preview.Rows[0].OTPAvailable)
+		})
+	}
+	for _, marker := range []string{"", "XXX", "XXXXX", "NONE"} {
+		t.Run("invalid-"+marker, func(t *testing.T) {
+			s, actor := newMailboxImportTestService(t)
+			preview, err := s.PreviewImport(context.Background(), actor, "text", []byte("invalid@example.test----password----"+marker))
+			require.NoError(t, err)
+			require.False(t, preview.Valid)
+			require.Contains(t, preview.Issues, ImportIssue{Row: 1, Code: "mailbox_import_invalid_otp"})
+		})
+	}
+}
+
 func TestMailboxImportInvalidRowsAndAtomicValidation(t *testing.T) {
 	cases := []struct{ name, input, code string }{
 		{"empty", "", "mailbox_import_empty"},

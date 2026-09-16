@@ -374,6 +374,7 @@ export const mailboxApi = {
         return { password: value.password, server_time: value.server_time }
       }
       return {
+        available: value.available,
         code: value.code,
         expires_at: value.expires_at,
         server_time: value.server_time,

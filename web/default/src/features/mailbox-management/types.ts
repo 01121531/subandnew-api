@@ -279,6 +279,7 @@ export interface ImportPreview {
     email: string
     account_type?: AccountType
     card_last4?: string
+    otp_available?: boolean
   }>
   issues: Array<{ row: number; code: string }>
   notices?: Array<{ row: number; code: string }>
@@ -296,6 +297,7 @@ export interface ImportResult {
   failures: ImportFailure[]
 }
 export interface Credential {
+  available?: boolean
   card_number?: string
   card_expiry?: string
   password?: string

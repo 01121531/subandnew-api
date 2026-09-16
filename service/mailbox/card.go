@@ -55,6 +55,9 @@ func normalizeMailboxExpiry(raw string, now time.Time) (string, error) {
 func parseMailboxExpiry(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	invalid := func() (string, error) { return "", fail(400, "mailbox_import_invalid_card_expiry") }
+	if len(value) == 7 && value[2] == '/' && strings.HasPrefix(value[3:], "20") {
+		value = value[:3] + value[5:]
+	}
 	if len(value) != 5 || value[2] != '/' {
 		return invalid()
 	}

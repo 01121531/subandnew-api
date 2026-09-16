@@ -80,7 +80,7 @@ function Secret(props: {
         const receivedAt = Date.now()
         setNow(receivedAt)
         setValue({ credential, receivedAt, startedAt })
-        if (props.kind === 'otp') {
+        if (props.kind === 'otp' && credential.available !== false) {
           const seconds = otpSeconds(credential, receivedAt, receivedAt)
           if (seconds <= 0) {
             setValue(null)
@@ -248,6 +248,11 @@ function Secret(props: {
       {secret && props.kind === 'otp' && (
         <p className='text-muted-foreground text-xs'>
           {t('mailboxPortal.otpCountdown', { seconds })}
+        </p>
+      )}
+      {props.kind === 'otp' && value?.credential.available === false && (
+        <p role='status' className='text-muted-foreground text-sm'>
+          {t('mailboxPortal.otpNotProvided')}
         </p>
       )}
       {copied && secret && (

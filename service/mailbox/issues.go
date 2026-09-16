@@ -302,9 +302,15 @@ func (s *Service) replaceIssueCredentials(actor Actor, account *model.MailboxAcc
 			secret.Password = *input.Password
 		}
 		if input.OTP != nil {
-			secret.OTP, err = parseMailboxOTP(*input.OTP)
-			if err != nil {
-				return err
+			if mailboxOTPAbsent(*input.OTP) {
+				secret.OTP = mailboxOTPConfig{}
+				secret.OTPAbsent = true
+			} else {
+				secret.OTP, err = parseMailboxOTP(*input.OTP)
+				if err != nil {
+					return err
+				}
+				secret.OTPAbsent = false
 			}
 		}
 		encoded, err := json.Marshal(secret)

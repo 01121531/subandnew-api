@@ -18,6 +18,7 @@ import (
 const mailboxCredentialKind = "mailbox-account:v1"
 
 type CredentialView struct {
+	Available  bool   `json:"available"`
 	CVV        string `json:"cvv,omitempty"`
 	CardNumber string `json:"card_number,omitempty"`
 	CardExpiry string `json:"card_expiry,omitempty"`
@@ -35,8 +36,15 @@ type mailboxOTPConfig struct {
 }
 
 type mailboxCredentialSecret struct {
-	Password string           `json:"password"`
-	OTP      mailboxOTPConfig `json:"otp"`
+	Password  string           `json:"password"`
+	OTP       mailboxOTPConfig `json:"otp"`
+	OTPAbsent bool             `json:"otp_absent,omitempty"`
+}
+
+const mailboxOTPAbsentMarker = "XXXX"
+
+func mailboxOTPAbsent(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), mailboxOTPAbsentMarker)
 }
 
 func validMailboxText(value string) bool {
@@ -183,7 +191,7 @@ func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64,
 		return nil, fail(503, "mailbox_credentials_unavailable")
 	}
 	now := s.Now()
-	view = &CredentialView{ServerTime: now.Unix()}
+	view = &CredentialView{Available: true, ServerTime: now.Unix()}
 	if kind == "card" {
 		var card mailboxCardSecret
 		if json.Unmarshal([]byte(payload.Secret), &card) != nil {
@@ -202,6 +210,8 @@ func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64,
 		}
 		if kind == "password" {
 			view.Password = secret.Password
+		} else if secret.OTPAbsent {
+			view.Available = false
 		} else {
 			view.Code, err = secret.OTP.code(now)
 			if err != nil {

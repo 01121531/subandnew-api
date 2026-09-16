@@ -27,10 +27,11 @@ const mailboxImportMaxBytes = 10 << 20
 const mailboxImportUnzipBytes = 32 << 20
 
 type ImportPreviewRow struct {
-	AccountType string `json:"account_type"`
-	CardLast4   string `json:"card_last4"`
-	Row         int    `json:"row"`
-	Email       string `json:"email"`
+	AccountType  string `json:"account_type"`
+	CardLast4    string `json:"card_last4"`
+	OTPAvailable bool   `json:"otp_available"`
+	Row          int    `json:"row"`
+	Email        string `json:"email"`
 }
 
 type ImportIssue struct {
@@ -247,11 +248,10 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	if err != nil {
 		return nil, err
 	}
-	// Start the handoff lifetime only once the entire import has committed.
+	// Publish CVVs to volatile memory only once the entire import has committed.
 	if cvvs != nil {
-		now := s.Now()
 		for id, value := range pendingCVVs {
-			cvvs.putLocked(id, value, now, 0, 0, 0)
+			cvvs.putLocked(id, value, 0, 0, 0)
 		}
 	}
 	result.Failed = len(result.Failures)
@@ -340,26 +340,35 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			addIssue(row, "mailbox_import_invalid_password")
 			return nil
 		}
-		config, err := parseMailboxOTP(cells[2])
-		if err != nil {
-			addIssue(row, "mailbox_import_invalid_otp")
-			return nil
+		secret := mailboxCredentialSecret{Password: cells[1]}
+		if mailboxOTPAbsent(cells[2]) {
+			secret.OTPAbsent = true
+			preview.Notices = append(preview.Notices, ImportIssue{Row: row, Code: "mailbox_import_otp_absent"})
+		} else {
+			config, err := parseMailboxOTP(cells[2])
+			if err != nil {
+				addIssue(row, "mailbox_import_invalid_otp")
+				return nil
+			}
+			secret.OTP = config
+			preview.Rows[len(preview.Rows)-1].OTPAvailable = true
 		}
 		var card mailboxCardSecret
 		if columns == 5 {
-			card.Number, err = normalizeMailboxPAN(cells[3])
-			if err != nil {
+			var cardErr error
+			card.Number, cardErr = normalizeMailboxPAN(cells[3])
+			if cardErr != nil {
 				addIssue(row, "mailbox_import_invalid_card_number")
 				return nil
 			}
-			card.Expiry, err = normalizeMailboxExpiry(cells[4], s.Now())
-			if err != nil {
+			card.Expiry, cardErr = normalizeMailboxExpiry(cells[4], s.Now())
+			if cardErr != nil {
 				addIssue(row, "mailbox_import_invalid_card_expiry")
 				return nil
 			}
 			preview.Rows[len(preview.Rows)-1].CardLast4 = card.Number[len(card.Number)-4:]
 		}
-		rows = append(rows, mailboxImportRow{row: row, email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card, cvv: cvv})
+		rows = append(rows, mailboxImportRow{row: row, email: email, secret: secret, card: card, cvv: cvv})
 		return nil
 	}
 	if len(data) > mailboxImportMaxBytes {

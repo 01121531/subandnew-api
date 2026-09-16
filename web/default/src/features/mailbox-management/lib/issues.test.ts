@@ -17,6 +17,7 @@ describe('mailbox issue and import contracts', () => {
           expect(fields[0]).toEndWith('@example.test')
           if (kind === 'opening' && cvv) expect(fields[5]).toBe('012')
         }
+        expect(rows[1].split('----')[2]).toBe('XXXX')
       }
     }
   })

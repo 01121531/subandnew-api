@@ -116,6 +116,7 @@ export function CredentialDetail(props: {
         }
         offset.current = result.server_time * 1000 - Date.now()
         setOtp({
+          available: result.available,
           code: result.code,
           expires_at: result.expires_at,
           server_time: result.server_time,
@@ -154,6 +155,18 @@ export function CredentialDetail(props: {
   const remaining = otp?.expires_at
     ? otpRemaining(otp.expires_at, offset.current)
     : 0
+  const otpUnavailable = otp?.available === false
+  let otpValue = '------'
+  let otpStatus = t('mailbox.admin.expiresIn', { seconds: remaining })
+  if (otpUnavailable) {
+    otpValue = t('mailbox.admin.notProvided')
+    otpStatus = t('mailbox.admin.noOtp')
+  } else if (remaining > 0) {
+    otpValue = otp?.code ?? '------'
+  }
+  if (!otpUnavailable && otpPending) {
+    otpStatus = t('mailbox.admin.loading')
+  }
   void tick
   return (
     <Modal
@@ -255,12 +268,10 @@ export function CredentialDetail(props: {
               {otpEnabled ? (
                 <div className='flex flex-wrap items-center gap-3'>
                   <output className='font-mono text-2xl tabular-nums'>
-                    {remaining > 0 ? otp?.code : '------'}
+                    {otpValue}
                   </output>
                   <span className='text-muted-foreground text-sm'>
-                    {otpPending
-                      ? t('mailbox.admin.loading')
-                      : t('mailbox.admin.expiresIn', { seconds: remaining })}
+                    {otpStatus}
                   </span>
                   <CopyButton
                     value={otp?.code ?? ''}

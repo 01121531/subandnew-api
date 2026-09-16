@@ -336,6 +336,11 @@ export function ImportDialog(props: {
                   >
                     <span className='text-muted-foreground'>{row.row}</span>
                     <span className='min-w-0 break-all'>{row.email}</span>
+                    {!row.otp_available && (
+                      <span className='text-muted-foreground'>
+                        {t('mailbox.admin.noOtp')}
+                      </span>
+                    )}
                     {props.accountType === 'opening' && row.card_last4 && (
                       <span className='text-muted-foreground'>
                         {t('mailbox.admin.cardEnding', {

@@ -131,11 +131,11 @@ func TestMailboxCardValidation(t *testing.T) {
 		_, err := normalizeMailboxPAN(pan)
 		require.Error(t, err, pan)
 	}
-	for _, expiry := range []string{"09/26", "12/99", " 10/26 "} {
+	for _, expiry := range []string{"09/26", "12/99", " 10/26 ", "09/2026", "12/2099"} {
 		_, err := normalizeMailboxExpiry(expiry, now)
 		require.NoError(t, err)
 	}
-	for _, expiry := range []string{"08/26", "12/25", "00/99", "13/99", "9/26", "09/2026", "09-26", "aa/bb", ""} {
+	for _, expiry := range []string{"08/26", "12/25", "00/99", "13/99", "9/26", "09/3026", "09/026", "09-26", "aa/bb", ""} {
 		_, err := normalizeMailboxExpiry(expiry, now)
 		require.Error(t, err, expiry)
 	}

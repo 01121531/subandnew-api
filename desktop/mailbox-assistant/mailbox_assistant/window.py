@@ -83,7 +83,6 @@ class Window(QMainWindow):
         self.values: dict[str, str] = {}
         self.deadlines: dict[str, float] = {}
         self.shots: list[Shot] = []
-        self.cvv_attempts: set[tuple[Any, ...]] = set()
         self.otp_pending = False
         self.otp_needs_refresh = False
         self.check_pending = False
@@ -582,7 +581,6 @@ class Window(QMainWindow):
         self.history_list.clear()
         self.history_details.clear()
         self.history_images.clear()
-        self.cvv_attempts.clear()
         self.password.clear()
         self.stack.setCurrentIndex(0)
         self.stack.show()
@@ -802,15 +800,7 @@ class Window(QMainWindow):
             if self.kind == "opening":
                 self.fetch_credential("card")
                 delivery_id = data.get("temporary_cvv_id")
-                claim_key = (
-                    self.api.origin,
-                    self.operator_id,
-                    data["id"],
-                    data["assignment_id"],
-                    delivery_id,
-                )
-                if delivery_id and claim_key not in self.cvv_attempts:
-                    self.cvv_attempts.add(claim_key)
+                if delivery_id:
                     self.fetch_credential("cvv")
                 elif data.get("temporary_cvv_status") == "disabled":
                     self.cvv_caption.setText(ERRORS["mailbox_cvv_disabled"])
@@ -854,6 +844,11 @@ class Window(QMainWindow):
                     return
                 self.error(ApiError("mailbox_request_failed"))
                 return
+            if kind == "otp" and data.get("available") is False:
+                self.values.pop("code", None)
+                self.fields["code"].set_value(None, "未提供")
+                self.otp_caption.setText("此邮箱未配置 2FA。")
+                return
             keys = {
                 "password": ["password"],
                 "otp": ["code"],
@@ -875,8 +870,8 @@ class Window(QMainWindow):
                     remaining = expires - server_time - (time.monotonic() - started)
                     if remaining <= 0:
                         continue
-                    self.deadlines[key] = time.monotonic() + min(
-                        remaining, 60 if key == "cvv" else 120
+                    self.deadlines[key] = time.monotonic() + (
+                        remaining if key == "cvv" else min(remaining, 120)
                     )
                 self.values[key] = value
                 self.fields[key].set_value(value)
@@ -939,7 +934,7 @@ class Window(QMainWindow):
             if key == "code":
                 self.otp_caption.setText(f"验证码 {remaining} 秒后失效" if remaining else "")
             elif remaining:
-                self.cvv_caption.setText(f"临时 CVV {remaining} 秒后清除，复制后立即隐藏")
+                self.cvv_caption.setText(f"临时 CVV {remaining} 秒后失效")
         if self.otp_needs_refresh and not self.busy and not self.otp_pending:
             self.otp_needs_refresh = False
             self.fetch_credential("otp")
@@ -960,11 +955,6 @@ class Window(QMainWindow):
                     self.fetch_credential("otp", lambda: self.copy_field("code"))
                 return
             copied = self.clipboard.copy(self.values[key], 15 if key == "cvv" else 30)
-            if key == "cvv":
-                self.values.pop(key, None)
-                self.deadlines.pop(key, None)
-                self.fields[key].set_value(None, "已复制并清除" if copied else "复制失败，已清除")
-                self.cvv_caption.setText("已领取的 CVV 不能再次获取。")
             self.say("已复制" if copied else "剪贴板正被占用，复制未成功。")
 
         self.verify(copy)

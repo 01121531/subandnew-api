@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,30 +74,19 @@ func cvvTestImport(t *testing.T, s *Service, admin Actor, value string) model.Ma
 	return account
 }
 
-func TestTemporaryCVVImportClaimOnceAndNoPersistence(t *testing.T) {
+func TestTemporaryCVVImportStartsThirtyMinuteWindowOnFirstView(t *testing.T) {
 	s, admin, operator := cvvTestService(t)
 	account := cvvTestImport(t, s, admin, "007")
 	cvvTestAssign(t, s, admin, operator, account.ID)
 	_, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
 	workflowTestStatus(t, err, 403)
-	var successes atomic.Int32
-	var wait sync.WaitGroup
-	for range 8 {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			view, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
-			if err == nil {
-				if view.CVV != "007" {
-					t.Error("CVV changed")
-				}
-				successes.Add(1)
-			}
-		}()
+	for range 3 {
+		view, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+		require.NoError(t, err)
+		require.Equal(t, "007", view.CVV)
 	}
-	wait.Wait()
-	require.Equal(t, int32(1), successes.Load())
-	require.Empty(t, s.cvv.items)
+	require.Len(t, s.cvv.items, 1)
+	require.Equal(t, s.Now().Add(temporaryCVVRevealTTL), s.cvv.items[account.ID].expires)
 	var audits []model.MailboxAudit
 	require.NoError(t, s.DB.Find(&audits).Error)
 	encoded, err := json.Marshal(audits)
@@ -107,15 +94,13 @@ func TestTemporaryCVVImportClaimOnceAndNoPersistence(t *testing.T) {
 	require.NotContains(t, string(encoded), "007")
 }
 
-func TestTemporaryCVVExpiryRefillReassignmentAndDisable(t *testing.T) {
-	for _, operation := range []string{"expiry", "reassign", "recall", "disable", "restart"} {
+func TestTemporaryCVVReassignmentAndDisableInvalidate(t *testing.T) {
+	for _, operation := range []string{"reassign", "recall", "disable", "restart"} {
 		t.Run(operation, func(t *testing.T) {
 			s, admin, operator := cvvTestService(t)
 			account := cvvTestImport(t, s, admin, "0012")
-			view := cvvTestAssign(t, s, admin, operator, account.ID)
+			cvvTestAssign(t, s, admin, operator, account.ID)
 			switch operation {
-			case "expiry":
-				s.Now = func() time.Time { return time.Unix(59, 0).Add(temporaryCVVTTL) }
 			case "reassign":
 				cvvTestAssign(t, s, admin, operator, account.ID)
 			case "recall":
@@ -128,16 +113,27 @@ func TestTemporaryCVVExpiryRefillReassignmentAndDisable(t *testing.T) {
 			}
 			_, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
 			require.Error(t, err)
-			if operation == "expiry" {
-				provided, err := s.ProvideTemporaryCVV(context.Background(), admin, account.ID, TemporaryCVVInput{Version: view.Version, CVV: "000"}, AccountTypeOpening)
-				require.NoError(t, err)
-				require.Equal(t, s.Now().Add(temporaryCVVTTL).Unix(), provided.ExpiresAt)
-				value, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
-				require.NoError(t, err)
-				require.Equal(t, "000", value.CVV)
-			}
 		})
 	}
+}
+
+func TestTemporaryCVVWaitsForFirstViewAndThenExpires(t *testing.T) {
+	s, admin, operator := cvvTestService(t)
+	account := cvvTestImport(t, s, admin, "0012")
+	cvvTestAssign(t, s, admin, operator, account.ID)
+	base := s.Now()
+	s.Now = func() time.Time { return base.Add(12 * time.Hour) }
+	first, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "0012", first.CVV)
+	require.Equal(t, s.Now().Add(temporaryCVVRevealTTL).Unix(), first.ExpiresAt)
+	s.Now = func() time.Time { return base.Add(12*time.Hour + temporaryCVVRevealTTL - time.Second) }
+	second, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, first.ExpiresAt, second.ExpiresAt)
+	s.Now = func() time.Time { return base.Add(12*time.Hour + temporaryCVVRevealTTL) }
+	_, err = s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	workflowTestStatus(t, err, 404)
 }
 
 func TestTemporaryCVVValidationAndFeatureGate(t *testing.T) {
@@ -188,8 +184,8 @@ func TestTemporaryCVVDeliveryMetadataAndRefill(t *testing.T) {
 	require.NoError(t, err)
 	view, err = s.GetAccount(context.Background(), operator, account.ID, AccountTypeOpening)
 	require.NoError(t, err)
-	require.Empty(t, view.TemporaryCVVID)
-	require.Equal(t, "unavailable", view.TemporaryCVVStatus)
+	require.Equal(t, firstID, view.TemporaryCVVID)
+	require.Equal(t, "available", view.TemporaryCVVStatus)
 	_, err = s.ProvideTemporaryCVV(context.Background(), admin, account.ID, TemporaryCVVInput{Version: view.Version, CVV: "000"}, AccountTypeOpening)
 	require.NoError(t, err)
 	view, err = s.GetAccount(context.Background(), operator, account.ID, AccountTypeOpening)
@@ -204,7 +200,7 @@ func TestTemporaryCVVDeliveryMetadataAndRefill(t *testing.T) {
 func TestTemporaryCVVCapacityRejectsWholeImport(t *testing.T) {
 	s, admin, _ := cvvTestService(t)
 	for i := range temporaryCVVCapacity {
-		s.cvv.items[-int64(i+1)] = &temporaryCVV{expires: s.Now().Add(temporaryCVVTTL)}
+		s.cvv.items[-int64(i+1)] = &temporaryCVV{}
 	}
 	_, err := s.Import(context.Background(), admin, "csv", []byte(strings.TrimSpace(string(poolTestCSV("full@example.test")))+",007"), AccountTypeOpening)
 	workflowTestStatus(t, err, 503)

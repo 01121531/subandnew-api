@@ -128,7 +128,7 @@ export const mailboxEn = {
     example: 'Import text example',
     copyExample: 'Copy example',
     exampleHint:
-      'Fictional formatting examples only. Up to 1,000 rows; separate with tabs or ----. Passwords are preserved exactly.',
+      'Fictional formatting examples only. Up to 1,000 rows; separate with tabs or ----. Passwords are preserved exactly. Use XXXX when 2FA is not configured.',
     exampleColumnsRefund: 'Email / Password / 2FA',
     exampleColumnsOpening: 'Email / Password / 2FA / Card number / Expiry',
     exampleCvv: 'Optional sixth column: temporary CVV',
@@ -141,19 +141,21 @@ export const mailboxEn = {
   admin: {
     accountType: 'Account pool',
     ignoreExtraFields:
-      'Ignore extra fields after recognized email, password and 2FA (not saved). Rows with invalid or missing 2FA are skipped.',
+      'Ignore extra fields after recognized email, password and 2FA (not saved). Use XXXX when 2FA is not configured; other missing or invalid values are skipped.',
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
     refundImport:
-      'Refund fields: email, password, 2FA. A recovery email before 2FA is also recognized but not saved.',
+      'Refund fields: email, password, 2FA. Use XXXX when 2FA is not configured. A recovery email before 2FA is also recognized but not saved.',
     openingImport:
-      '5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY). Optional sixth field: temporary CVV (single-node mode only).',
+      '5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY or MM/YYYY). Use XXXX when 2FA is not configured. Optional sixth field: temporary CVV (single-node mode only).',
     excelPanText:
-      'In Excel, PAN and optional CVV must be Text cells to preserve every digit. Keep expiry as MM/YY text.',
+      'In Excel, PAN and optional CVV must be Text cells to preserve every digit. Keep expiry as MM/YY or MM/YYYY text.',
+    noOtp: 'No 2FA',
+    notProvided: 'Not provided',
     provideCvv: 'Provide temporary CVV',
     cvvProvided:
-      'Temporary CVV provided for 10 minutes. One operator claim only.',
+      'Temporary CVV provided. Its 30-minute viewing window starts when the operator first reveals it.',
     temporaryCvvNotice:
-      'Temporary CVV requires explicitly enabled single-node delivery. It expires after 10 minutes and is removed on claim or restart. Use only before authorization of a specific transaction; never retain the source file or include CVV in screenshots. This is not a compliance certification.',
+      'Temporary CVV requires explicitly enabled single-node delivery. It waits in volatile process memory until first reveal, then remains available to the current operator for 30 minutes. Restart, recall, reassignment, approval or disablement removes it immediately. Use only before authorization of a specific transaction; never retain the source file or include CVV in screenshots. This is not a compliance certification.',
     noCvv: 'Do not include CVV, cookies or other extra credentials.',
     card: 'Payment card',
     cardEnding: 'Card **** {{last4}}',
@@ -345,7 +347,8 @@ export const mailboxEn = {
     mailbox_invalid_account_type:
       'Invalid account pool. Choose refund or opening.',
     mailbox_import_invalid_card_number: 'Invalid card number (PAN).',
-    mailbox_import_invalid_card_expiry: 'Invalid card expiry. Use MM/YY.',
+    mailbox_import_invalid_card_expiry:
+      'Invalid card expiry. Use MM/YY or MM/YYYY.',
     mailbox_import_card_number_text_required:
       'The PAN cell must be text. Set the Excel column to Text before entering the number.',
     mailbox_invalid_file: 'Invalid or oversized import file.',
@@ -387,6 +390,8 @@ export const mailboxEn = {
     mailbox_import_empty_fields_ignored: 'Ignored empty trailing fields.',
     mailbox_import_otp_spaces_removed:
       'Removed grouping spaces from the 2FA secret; password unchanged.',
+    mailbox_import_otp_absent:
+      'XXXX was recognized as no 2FA. It is not stored as a secret and no verification code will be generated.',
     mailbox_import_extra_fields_ignored:
       'Extra fields will not be saved, as selected. Only email, password and 2FA are imported.',
     mailbox_import_recovery_email_ignored:
@@ -396,7 +401,7 @@ export const mailboxEn = {
     mailbox_import_invalid_email: 'Invalid email address.',
     mailbox_import_invalid_password: 'Invalid or empty password.',
     mailbox_import_invalid_otp:
-      'Missing or invalid TOTP secret. Website links must contain a valid Base32 secret after #; other links are not fetched.',
+      'Missing or invalid TOTP secret. Use XXXX when 2FA is not configured. Website links must contain a valid Base32 secret after #; other links are not fetched.',
     mailbox_import_formula: 'Spreadsheet formulas are not allowed.',
     mailbox_import_ambiguous_sheet:
       'The workbook must contain one unambiguous data sheet.',
@@ -557,7 +562,7 @@ export const mailboxZh: typeof mailboxEn = {
     example: '导入文本示例',
     copyExample: '复制示例',
     exampleHint:
-      '仅供格式演示，均为虚构测试资料。每批最多 1,000 条，支持制表符或 ---- 分隔；密码保留原文。',
+      '仅供格式演示，均为虚构测试资料。每批最多 1,000 条，支持制表符或 ---- 分隔；密码保留原文。未配置 2FA 时填写 XXXX。',
     exampleColumnsRefund: '邮箱 / 密码 / 2FA',
     exampleColumnsOpening: '邮箱 / 密码 / 2FA / 卡号 / 有效期',
     exampleCvv: '可选第六列：临时 CVV',
@@ -569,18 +574,20 @@ export const mailboxZh: typeof mailboxEn = {
   admin: {
     accountType: '账号池',
     ignoreExtraFields:
-      '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；缺少或无效的 2FA 所在行不会导入。',
+      '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；未配置 2FA 时填写 XXXX，其他缺少或无效值所在行不会导入。',
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
     refundImport:
-      '退款字段为邮箱、密码、2FA；也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
+      '退款字段为邮箱、密码、2FA；未配置 2FA 时填写 XXXX。也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
     openingImport:
-      '每行 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY）。可选第 6 列：临时 CVV（仅限单节点模式）。',
+      '每行 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY 或 MM/YYYY）。未配置 2FA 时填写 XXXX。可选第 6 列：临时 CVV（仅限单节点模式）。',
     excelPanText:
-      'Excel 中卡号和可选 CVV 必须使用文本单元格，避免丢失数字。有效期保留为 MM/YY 文本。',
+      'Excel 中卡号和可选 CVV 必须使用文本单元格，避免丢失数字。有效期保留为 MM/YY 或 MM/YYYY 文本。',
+    noOtp: '无 2FA',
+    notProvided: '未提供',
     provideCvv: '补发临时 CVV',
-    cvvProvided: '已提供临时 CVV，10 分钟内可领取一次。',
+    cvvProvided: '已提供临时 CVV，操作员首次查看后开始 30 分钟有效期。',
     temporaryCvvNotice:
-      '临时 CVV 仅限显式启用的单节点交付，10 分钟到期，领取或重启即删除。仅用于具体交易授权前，不得保留原始文件或将 CVV 放入截图。这不代表已通过合规认证。',
+      '临时 CVV 仅限显式启用的单节点交付；首次查看前保存在进程易失内存中，首次查看后供当前操作员查看 30 分钟。服务重启、回收、改派、审核通过或停用会立即清除。仅用于具体交易授权前，不得保留原始文件或将 CVV 放入截图。这不代表已通过合规认证。',
     noCvv: '禁止包含 CVV、Cookie 或其他额外凭据。',
     card: '支付卡',
     cardEnding: '卡号 **** {{last4}}',
@@ -757,7 +764,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_invalid_work_query:
       '统计查询无效，请输入有效日期，且结束日期不得早于开始日期。',
     mailbox_import_invalid_card_number: '卡号（PAN）无效。',
-    mailbox_import_invalid_card_expiry: '卡片有效期无效，请使用 MM/YY 格式。',
+    mailbox_import_invalid_card_expiry:
+      '卡片有效期无效，请使用 MM/YY 或 MM/YYYY 格式。',
     mailbox_import_card_number_text_required:
       'PAN 单元格必须为文本，请先将 Excel 列设置为文本后重新输入卡号。',
     mailbox_invalid_file: '导入文件无效或过大。',
@@ -797,6 +805,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_import_empty_fields_ignored: '已忽略末尾空字段。',
     mailbox_import_otp_spaces_removed:
       '已去除 2FA 密钥的分组空格，密码保持原样。',
+    mailbox_import_otp_absent:
+      '已将 XXXX 识别为无 2FA；不会将其保存为密钥，也不会生成验证码。',
     mailbox_import_extra_fields_ignored:
       '按已勾选选项忽略额外字段，仅导入邮箱、密码和 2FA，不保存其余内容。',
     mailbox_import_recovery_email_ignored:
@@ -806,7 +816,7 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_import_invalid_email: '邮箱地址无效。',
     mailbox_import_invalid_password: '密码无效或为空。',
     mailbox_import_invalid_otp:
-      '缺少有效的 TOTP 密钥或配置。网站链接仅支持 # 后直接包含有效 Base32 密钥的格式，其他链接不会联网获取。',
+      '缺少有效的 TOTP 密钥或配置；未配置 2FA 时请填写 XXXX。网站链接仅支持 # 后直接包含有效 Base32 密钥的格式，其他链接不会联网获取。',
     mailbox_import_formula: '不允许使用电子表格公式。',
     mailbox_import_ambiguous_sheet: '工作簿必须包含唯一明确的数据工作表。',
     mailbox_import_invalid_csv: 'CSV 文件无效。',
