@@ -346,6 +346,27 @@ describe('credential read reauthorization', () => {
     expect(errorKey(error)).toBe('mailboxPortal.currentPasswordIncorrect')
     expect(isAuthFailure(error)).toBe(false)
   })
+  test('an unavailable CVV does not revoke the other account credentials', async () => {
+    const invalidated: number[] = []
+    const unsubscribe = onAccountFailure((id) => invalidated.push(id))
+    globalThis.fetch = mock(async () =>
+      Response.json(
+        { success: false, message: 'mailbox_cvv_unavailable' },
+        { status: 404 }
+      )
+    ) as unknown as typeof fetch
+    try {
+      await expect(
+        mailboxApi.credentials('csrf', 3, 'cvv', undefined, 'opening')
+      ).rejects.toMatchObject({ code: 'mailbox_cvv_unavailable' })
+      expect(invalidated).toEqual([])
+      expect(
+        errorKey(new MailboxRequestError('mailbox_cvv_unavailable', 404))
+      ).toBe('mailboxPortal.cvvUnavailable')
+    } finally {
+      unsubscribe()
+    }
+  })
   test('approval while a credential is in flight rejects the returned secret', async () => {
     const calls: string[] = []
     globalThis.fetch = mock(async (url: RequestInfo | URL) => {

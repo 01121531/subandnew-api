@@ -18,6 +18,10 @@ export const mailboxPortalEn = {
   card: 'Payment card',
   cardNumber: 'Card number',
   cardExpiry: 'Expiry date',
+  cvv: 'CVV',
+  cvvCountdown: 'Available for {{seconds}}s in this delivery window',
+  cvvDisabled: 'Temporary CVV delivery is disabled on this server.',
+  cvvUnavailable: 'CVV was not provided or is no longer available.',
   cardUnavailable: 'Not provided',
   redactCardWarning:
     'Before uploading, redact the full card number and CVV from every screenshot. Keep only the last four digits visible.',
@@ -131,6 +135,10 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   card: '支付卡',
   cardNumber: '卡号',
   cardExpiry: '有效期',
+  cvv: 'CVV 安全码',
+  cvvCountdown: '本次交付窗口还剩 {{seconds}} 秒',
+  cvvDisabled: '当前服务器未启用临时 CVV 交付。',
+  cvvUnavailable: 'CVV 未提供或已失效，请联系管理员重新提供。',
   cardUnavailable: '未提供',
   redactCardWarning:
     '上传前请遮盖每张截图中的完整卡号和 CVV 安全码，卡号仅保留后四位。',

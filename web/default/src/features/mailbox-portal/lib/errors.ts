@@ -9,6 +9,8 @@ export function errorKey(error: unknown): string {
     mailbox_current_password_incorrect: 'currentPasswordIncorrect',
     mailbox_current_password_invalid: 'currentPasswordIncorrect',
     mailbox_credentials_revoked: 'credentialsBlocked',
+    mailbox_cvv_disabled: 'cvvDisabled',
+    mailbox_cvv_unavailable: 'cvvUnavailable',
     mailbox_assignment_changed: 'assignmentChanged',
     mailbox_attachment_count: 'attachmentCount',
     mailbox_submission_empty: 'submissionEmpty',

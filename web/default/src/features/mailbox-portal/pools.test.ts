@@ -33,6 +33,11 @@ const card = {
   card_expiry: '12/30',
   server_time: 100,
 }
+const cvv = {
+  cvv: '987',
+  expires_at: 190,
+  server_time: 100,
+}
 const hidden = {
   ...card,
   cvv: '987',
@@ -174,6 +179,29 @@ describe('independent account pools', () => {
 })
 
 describe('card reauthorization and clearing', () => {
+  test('opening accounts can request CVV without caching the secret', async () => {
+    const calls: string[] = []
+    globalThis.fetch = mock(async (url: RequestInfo | URL) => {
+      const path = new URL(String(url), 'https://fixture.test')
+      calls.push(path.pathname)
+      return Response.json({
+        success: true,
+        data: path.pathname.endsWith('/credentials') ? cvv : opening,
+      })
+    }) as unknown as typeof fetch
+    expect(
+      await readCredential('csrf', opening, 'cvv', new AbortController().signal)
+    ).toEqual(cvv)
+    expect(calls).toEqual([
+      '/mailbox-api/v1/accounts/3',
+      '/mailbox-api/v1/accounts/3/credentials',
+      '/mailbox-api/v1/accounts/3',
+    ])
+    expect(
+      mailboxClient.getQueryCache().findAll({ queryKey: ['mailbox'] })
+    ).toHaveLength(0)
+  })
+
   test('every reveal checks ownership before and after a fresh, uncached credential request', async () => {
     const calls: string[] = []
     globalThis.fetch = mock(async (url: RequestInfo | URL) => {

@@ -38,7 +38,8 @@ export function onAccountFailure(listener: (id: number) => void): () => void {
 export function invalidateAccountCredentials(id: number, error: unknown): void {
   if (
     error instanceof MailboxRequestError &&
-    [403, 404, 409].includes(error.status)
+    [403, 404, 409].includes(error.status) &&
+    error.code !== 'mailbox_cvv_unavailable'
   ) {
     for (const listener of accountFailureListeners) listener(id)
   }
@@ -372,6 +373,13 @@ export const mailboxApi = {
       }
       if (kind === 'password') {
         return { password: value.password, server_time: value.server_time }
+      }
+      if (kind === 'cvv') {
+        return {
+          cvv: value.cvv,
+          expires_at: value.expires_at,
+          server_time: value.server_time,
+        }
       }
       return {
         available: value.available,

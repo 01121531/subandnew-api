@@ -32,7 +32,7 @@ export async function readCredential(
     const accountType = account.account_type ?? 'refund'
     if (
       !canReadCredentials(account) ||
-      (kind === 'card' && accountType !== 'opening')
+      ((kind === 'card' || kind === 'cvv') && accountType !== 'opening')
     ) {
       throw new MailboxRequestError('mailbox_credentials_revoked', 403)
     }

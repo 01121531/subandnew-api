@@ -50,6 +50,7 @@ test('initial detail render exposes no card fields and refund has no card contro
     expect(html).not.toContain(mailboxPortalEn.cardNumber)
     expect(html).not.toContain(mailboxPortalEn.cardExpiry)
     expect(html.includes(mailboxPortalEn.card)).toBe(accountType === 'opening')
+    expect(html.includes(mailboxPortalEn.cvv)).toBe(accountType === 'opening')
   }
   const approved = renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>

@@ -80,7 +80,10 @@ function Secret(props: {
         const receivedAt = Date.now()
         setNow(receivedAt)
         setValue({ credential, receivedAt, startedAt })
-        if (props.kind === 'otp' && credential.available !== false) {
+        if (
+          (props.kind === 'otp' || props.kind === 'cvv') &&
+          credential.available !== false
+        ) {
           const seconds = otpSeconds(credential, receivedAt, receivedAt)
           if (seconds <= 0) {
             setValue(null)
@@ -110,7 +113,7 @@ function Secret(props: {
         timer = setTimeout(clear, revealRemaining(startedAt, Date.now()))
       }
       void refresh()
-      if (props.kind === 'otp') {
+      if (props.kind === 'otp' || props.kind === 'cvv') {
         clock = setInterval(() => setNow(Date.now()), 250)
       }
     }
@@ -137,7 +140,9 @@ function Secret(props: {
   ) {
     if (props.kind === 'password') secret = value.credential.password ?? ''
     else if (props.kind === 'card') secret = value.credential.card_number ?? ''
-    else if (seconds > 0) secret = value.credential.code ?? ''
+    else if (props.kind === 'cvv' && seconds > 0) {
+      secret = value.credential.cvv ?? ''
+    } else if (seconds > 0) secret = value.credential.code ?? ''
   }
   const expiry =
     secret && props.kind === 'card' ? (value?.credential.card_expiry ?? '') : ''
@@ -160,7 +165,7 @@ function Secret(props: {
         return
       }
       if (
-        props.kind === 'otp' &&
+        (props.kind === 'otp' || props.kind === 'cvv') &&
         value &&
         otpSeconds(value.credential, value.receivedAt, Date.now()) <= 0
       ) {
@@ -250,6 +255,11 @@ function Secret(props: {
           {t('mailboxPortal.otpCountdown', { seconds })}
         </p>
       )}
+      {secret && props.kind === 'cvv' && (
+        <p className='text-muted-foreground text-xs'>
+          {t('mailboxPortal.cvvCountdown', { seconds })}
+        </p>
+      )}
       {props.kind === 'otp' && value?.credential.available === false && (
         <p role='status' className='text-muted-foreground text-sm'>
           {t('mailboxPortal.otpNotProvided')}
@@ -317,7 +327,10 @@ export function Credentials(props: { account: Account; csrf: string }) {
       <Secret {...props} kind='password' />
       <Secret {...props} kind='otp' />
       {props.account.account_type === 'opening' && (
-        <Secret {...props} kind='card' />
+        <>
+          <Secret {...props} kind='card' />
+          <Secret {...props} kind='cvv' />
+        </>
       )}
     </section>
   )

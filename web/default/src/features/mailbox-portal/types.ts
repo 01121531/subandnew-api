@@ -1,5 +1,5 @@
 export type AccountType = 'refund' | 'opening'
-export type CredentialKind = 'password' | 'otp' | 'card'
+export type CredentialKind = 'password' | 'otp' | 'card' | 'cvv'
 
 type AccountStatus =
   | 'unassigned'
@@ -83,6 +83,7 @@ export type Credential = {
   card_expiry?: string
   password?: string
   code?: string
+  cvv?: string
   expires_at?: number
   server_time: number
 }
