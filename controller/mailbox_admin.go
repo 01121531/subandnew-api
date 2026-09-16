@@ -197,6 +197,26 @@ func ProvideMailboxTemporaryCVV(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 
+func ClearMailboxCVV(c *gin.Context) {
+	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
+	if !ok {
+		return
+	}
+	id := mailboxID(c)
+	if id == 0 {
+		return
+	}
+	var input mailbox.TemporaryCVVInput
+	if !mailboxDecode(c, &input) {
+		return
+	}
+	if err := mailboxService().ClearCVV(c.Request.Context(), mailboxActor(c), id, input, accountType); err != nil {
+		mailboxFailure(c, err)
+		return
+	}
+	mailboxSuccess(c, nil)
+}
+
 func AssignMailboxAccounts(c *gin.Context) {
 	var input mailbox.AssignInput
 	if !mailboxDecode(c, &input) {

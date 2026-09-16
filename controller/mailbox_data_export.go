@@ -22,7 +22,12 @@ func ExportMailboxData(issues bool) gin.HandlerFunc {
 			scope, filename, action = input.Scope, "mailbox-issues.xlsx", "mailbox_export_issues"
 			data, counts, err = s.ExportIssues(c.Request.Context(), actor, input)
 		} else {
-			data, counts, err = s.ExportAllData(c.Request.Context(), actor)
+			var input mailbox.AccountExportInput
+			if c.Request.ContentLength != 0 && !mailboxDecode(c, &input) {
+				return
+			}
+			scope = input.Scope
+			data, counts, err = s.ExportAllData(c.Request.Context(), actor, input)
 		}
 		if err == nil {
 			err = s.CheckCompletedExport(actor)

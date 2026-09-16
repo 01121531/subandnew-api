@@ -218,7 +218,8 @@ export class VisibleCredentials {
       const current = this.snapshot[kind]
       if (
         !current?.value ||
-        otpSeconds(current.value, current.receivedAt ?? 0, Date.now()) <= 0
+        (!(kind === 'cvv' && current.value.persistent) &&
+          otpSeconds(current.value, current.receivedAt ?? 0, Date.now()) <= 0)
       ) {
         if (kind === 'otp') await this.load(kind)
         else throw new MailboxRequestError('mailbox_cvv_unavailable', 400)

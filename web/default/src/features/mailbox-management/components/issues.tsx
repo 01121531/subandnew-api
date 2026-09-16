@@ -11,7 +11,8 @@ import { useAuthStore } from '@/stores/auth-store'
 import { mailboxApi } from '../api'
 import { useMailboxMutation, useMailboxQuery } from '../hooks'
 import { canMailbox } from '../lib/permissions'
-import type { AccountType, ResolveIssueInput } from '../types'
+import type { AccountType, ResolveIssueInput, CardFilter } from '../types'
+import { CardFilters } from './card-filters'
 import { Field, Modal, Pager, QueryState, Time } from './common'
 import { DataExportButton } from './data-export-button'
 import { PoolScope } from './pool-scope'
@@ -36,15 +37,26 @@ function PoolIssues(props: { accountType: AccountType }) {
   const [kind, setKind] = useState('')
   const [operator, setOperator] = useState('')
   const [selected, setSelected] = useState<number>()
+  const [cardFilters, setCardFilters] = useState<CardFilter[]>([])
   const operators = useMailboxQuery(['issue-operators'], (signal) =>
     mailboxApi.issueOperators(signal)
   )
   const query = useMailboxQuery(
-    ['issues', props.accountType, page, search, status, kind, operator],
+    [
+      'issues',
+      props.accountType,
+      page,
+      search,
+      status,
+      kind,
+      operator,
+      cardFilters,
+    ],
     (signal) =>
       mailboxApi.issues(
         {
           account_type: props.accountType,
+          card_filters: cardFilters,
           page,
           page_size: 20,
           search,
@@ -57,12 +69,23 @@ function PoolIssues(props: { accountType: AccountType }) {
   )
   return (
     <section className='min-w-0'>
+      {props.accountType === 'opening' &&
+        canMailbox(user, 'view') &&
+        canMailbox(user, 'credentials') && (
+          <CardFilters
+            onApply={(values) => {
+              setCardFilters(values)
+              setPage(1)
+            }}
+          />
+        )}
       <div className='flex flex-wrap gap-2 border-b py-3'>
         {canMailbox(user, 'view') &&
           canMailbox(user, 'review') &&
           canMailbox(user, 'credentials') && (
             <DataExportButton
               filters={{
+                card_filters: cardFilters,
                 account_type: props.accountType,
                 search,
                 status,

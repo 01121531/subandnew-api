@@ -191,8 +191,5 @@ func (s *Service) ChangePassword(ctx context.Context, actor Actor, current, pass
 		}
 		return t.Audit(actor, "operator_password_change", 0, 0, 200, "")
 	})
-	if err == nil {
-		s.invalidateCVVOperator(actor.OperatorID)
-	}
 	return err
 }

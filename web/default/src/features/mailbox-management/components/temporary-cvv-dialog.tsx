@@ -16,9 +16,15 @@ export function TemporaryCvvDialog(props: {
 }) {
   const { t } = useTranslation()
   const [cvv, setCvv] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
   const valid = /^[0-9]{3,4}$/.test(cvv)
   const mutation = useMailboxMutation(async (value: string) => {
     setCvv('')
+    if (value === 'clear') {
+      await mailboxApi.clearCvv(props.account.id, props.account.version)
+      toast.success(t('mailbox.cardFilters.cleared'))
+      return
+    }
     await mailboxApi.provideTemporaryCvv(
       props.account.id,
       props.account.version,
@@ -41,17 +47,38 @@ export function TemporaryCvvDialog(props: {
       pending={mutation.isPending}
       onClose={props.onClose}
       footer={
-        <Button
-          disabled={!valid || mutation.isPending}
-          onClick={() => mutation.submit(cvv)}
-        >
-          {t('mailbox.admin.provideCvv')}
-        </Button>
+        <>
+          <Button
+            variant='destructive'
+            disabled={mutation.isPending}
+            onClick={() => setConfirmClear(true)}
+          >
+            {t('mailbox.cardFilters.clearCvv')}
+          </Button>
+          <Button
+            disabled={!valid || mutation.isPending}
+            onClick={() => mutation.submit(cvv)}
+          >
+            {t('mailbox.admin.provideCvv')}
+          </Button>
+        </>
       }
     >
       <p className='text-muted-foreground mb-4 text-sm'>
         {t('mailbox.admin.temporaryCvvNotice')}
       </p>
+      {confirmClear && (
+        <div role='alert' className='mb-4 space-y-2'>
+          <p>{t('mailbox.cardFilters.clearConfirm')}</p>
+          <Button
+            variant='destructive'
+            disabled={mutation.isPending}
+            onClick={() => mutation.submit('clear')}
+          >
+            {t('mailbox.cardFilters.clearCvv')}
+          </Button>
+        </div>
+      )}
       <Field id='mailbox-temporary-cvv' label='CVV'>
         <Input
           id='mailbox-temporary-cvv'

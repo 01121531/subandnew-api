@@ -25,10 +25,11 @@ import { useAuthStore } from '@/stores/auth-store'
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
 import { canMailbox } from '../lib/permissions'
-import type { Account, AccountType, VersionedID } from '../types'
+import type { Account, AccountType, VersionedID, CardFilter } from '../types'
 import { AccountOperatorFilter } from './account-operator-filter'
 import { ArchiveDialog } from './archive-dialog'
 import { AssignDialog } from './assign-dialog'
+import { CardFilters } from './card-filters'
 import { ChangeStatusDialog } from './change-status-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
@@ -69,12 +70,23 @@ function AccountPool(props: { accountType: AccountType }) {
   const [detail, setDetail] = useState<number>()
   const [accountID, setAccountID] = useState('')
   const [cvvAccount, setCvvAccount] = useState<Account>()
+  const [cardFilters, setCardFilters] = useState<CardFilter[]>([])
   const query = useMailboxQuery(
-    ['accounts', props.accountType, archived, page, search, status, operator],
+    [
+      'accounts',
+      props.accountType,
+      archived,
+      page,
+      search,
+      status,
+      operator,
+      cardFilters,
+    ],
     (signal) =>
       mailboxApi.accounts(
         {
           account_type: props.accountType,
+          card_filters: cardFilters,
           archived,
           page,
           page_size: 20,
@@ -146,8 +158,7 @@ function AccountPool(props: { accountType: AccountType }) {
           !archived &&
           props.accountType === 'opening' &&
           credentials &&
-          canMailbox(user, 'manage') &&
-          ['unassigned', 'pending', 'rejected'].includes(row.status) && (
+          canMailbox(user, 'manage') && (
             <Button
               variant='ghost'
               size='icon'
@@ -163,6 +174,14 @@ function AccountPool(props: { accountType: AccountType }) {
   }
   return (
     <section className='min-w-0 space-y-3'>
+      {props.accountType === 'opening' && view && credentials && (
+        <CardFilters
+          onApply={(values) => {
+            setCardFilters(values)
+            changePage(1)
+          }}
+        />
+      )}
       <div className='flex flex-wrap items-center gap-2 pt-4'>
         {review && !archived && (
           <Button
@@ -215,7 +234,18 @@ function AccountPool(props: { accountType: AccountType }) {
           view &&
           credentials &&
           canMailbox(user, 'review') && <ExportCompletedButton />}
-        {review && credentials && <DataExportButton />}
+        {review && credentials && (
+          <DataExportButton
+            accountFilters={{
+              account_type: props.accountType,
+              archived,
+              search,
+              status,
+              operator_id: operator ? Number(operator) : undefined,
+              card_filters: cardFilters,
+            }}
+          />
+        )}
         {assign && !archived && (
           <Button
             variant='outline'

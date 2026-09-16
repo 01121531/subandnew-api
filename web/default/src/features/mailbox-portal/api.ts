@@ -407,6 +407,7 @@ export const mailboxApi = {
       if (kind === 'cvv') {
         return {
           cvv: value.cvv,
+          ...(value.persistent === true ? { persistent: true } : {}),
           expires_at: value.expires_at,
           server_time: value.server_time,
         }

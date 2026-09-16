@@ -239,6 +239,9 @@ func controlPlaneModels() []interface{} {
 		&SupplierAudit{},
 		// MailboxAccount is migrated explicitly by MigrateMailboxPools.
 		&MailboxOperator{},
+		&MailboxCVV{},
+		&MailboxCardIndex{},
+		&MailboxCardIndexState{},
 		&MailboxSession{},
 		&MailboxLoginAttempt{},
 		&MailboxAssignment{},

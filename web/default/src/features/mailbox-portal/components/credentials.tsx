@@ -75,7 +75,7 @@ function VisibleFields(props: { account: Account; csrf: string }) {
           card: value?.card_number,
           expiry: value?.card_expiry,
           otp: seconds > 0 ? value?.code : undefined,
-          cvv: seconds > 0 ? value?.cvv : undefined,
+          cvv: value?.persistent || seconds > 0 ? value?.cvv : undefined,
         }
         const text = texts[field]
         const labels = {
@@ -127,14 +127,15 @@ function VisibleFields(props: { account: Account; csrf: string }) {
                 {t(placeholder)}
               </span>
             )}
-            {!!text && (field === 'otp' || field === 'cvv') && (
-              <span className='text-muted-foreground text-xs'>
-                {t(
-                  `mailboxPortal.${field === 'otp' ? 'otpCountdown' : 'cvvCountdown'}`,
-                  { seconds }
-                )}
-              </span>
-            )}
+            {!!text &&
+              (field === 'otp' || (field === 'cvv' && !value?.persistent)) && (
+                <span className='text-muted-foreground text-xs'>
+                  {t(
+                    `mailboxPortal.${field === 'otp' ? 'otpCountdown' : 'cvvCountdown'}`,
+                    { seconds }
+                  )}
+                </span>
+              )}
           </CopyField>
         )
       })}

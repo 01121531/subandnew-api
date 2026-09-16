@@ -23,7 +23,7 @@ export const mailboxPortalEn = {
   cardExpiry: 'Expiry date',
   cvv: 'CVV',
   cvvCountdown: 'Available for {{seconds}}s in this delivery window',
-  cvvDisabled: 'Temporary CVV delivery is disabled on this server.',
+  cvvDisabled: 'CVV is disabled on this server.',
   cvvUnavailable: 'CVV was not provided or is no longer available.',
   cardUnavailable: 'Not provided',
   redactCardWarning:
@@ -142,7 +142,7 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   cardExpiry: '有效期',
   cvv: 'CVV 安全码',
   cvvCountdown: '本次交付窗口还剩 {{seconds}} 秒',
-  cvvDisabled: '当前服务器未启用临时 CVV 交付。',
+  cvvDisabled: '当前服务器未启用 CVV。',
   cvvUnavailable: 'CVV 未提供或已失效，请联系管理员重新提供。',
   cardUnavailable: '未提供',
   redactCardWarning:

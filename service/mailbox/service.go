@@ -56,7 +56,6 @@ type Service struct {
 	Cipher                  func() (*managedinstance.CredentialCipher, error)
 	StorageDir              string
 	accountType             string
-	cvv                     *cvvStore
 	importIgnoreExtraFields bool
 	importAllowPartial      bool
 	importUpdateExisting    bool
@@ -217,15 +216,16 @@ type Page[T any] struct {
 	HasMore  bool  `json:"has_more"`
 }
 type ListQuery struct {
-	Archived     bool
-	Kind         string
-	AssignmentID int64
-	AccountType  string `json:"account_type"`
+	CardFilters  []CardFilter `json:"card_filters"`
+	Archived     bool         `json:"archived"`
+	Kind         string       `json:"kind"`
+	AssignmentID int64        `json:"assignment_id"`
+	AccountType  string       `json:"account_type"`
 	Search       string
 	Status       string
-	OperatorID   int64
+	OperatorID   int64 `json:"operator_id"`
 	Page         int
-	PageSize     int
+	PageSize     int `json:"page_size"`
 }
 
 func normalizePage(q ListQuery) ListQuery {

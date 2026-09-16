@@ -12,12 +12,13 @@ import (
 )
 
 type IssueExportInput struct {
-	Scope       string `json:"scope"`
-	AccountType string `json:"account_type"`
-	Search      string `json:"search"`
-	Status      string `json:"status"`
-	Kind        string `json:"kind"`
-	OperatorID  int64  `json:"operator_id"`
+	CardFilters []CardFilter `json:"card_filters"`
+	Scope       string       `json:"scope"`
+	AccountType string       `json:"account_type"`
+	Search      string       `json:"search"`
+	Status      string       `json:"status"`
+	Kind        string       `json:"kind"`
+	OperatorID  int64        `json:"operator_id"`
 }
 
 // Only selected, allowlisted columns enter a report. Payment secrets are never queried.
@@ -277,11 +278,36 @@ func (s *Service) writeDataExport(actor Actor, specs []dataExportSheet) ([]byte,
 	return buffer.Bytes(), counts, nil
 }
 
-func (s *Service) ExportAllData(ctx context.Context, actor Actor) ([]byte, map[string]int, error) {
+type AccountExportInput struct {
+	Scope string `json:"scope"`
+	ListQuery
+}
+
+func (s *Service) ExportAllData(ctx context.Context, actor Actor, inputs ...AccountExportInput) ([]byte, map[string]int, error) {
 	s = s.WithDB(s.DB.WithContext(ctx))
+	if err := s.CheckCompletedExport(actor); err != nil {
+		return nil, nil, err
+	}
 	specs := []dataExportSheet{s.loginExportSheet("邮箱资料", nil)}
 	history := s.historyExportSheets()
 	specs = append(specs, history[0], history[1], s.issueExportSheet(func() *gorm.DB { return s.issueBaseQuery(actor) }), history[2])
+	if len(inputs) > 0 && inputs[0].Scope == "filtered" {
+		var err error
+		s, err = s.withAccountType(inputs[0].AccountType)
+		if err != nil {
+			return nil, nil, err
+		}
+		q, err := s.filteredAccountQuery(actor, inputs[0].ListQuery)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range specs {
+			original := specs[i].query
+			specs[i].query = func() *gorm.DB { return original().Where("a.id IN (?)", q.Session(&gorm.Session{}).Select("a.id")) }
+		}
+	} else if len(inputs) > 0 && inputs[0].Scope != "" && inputs[0].Scope != "all" {
+		return nil, nil, fail(400, "mailbox_invalid_query")
+	}
 	return s.writeDataExport(actor, specs)
 }
 
@@ -293,7 +319,7 @@ func (s *Service) ExportIssues(ctx context.Context, actor Actor, input IssueExpo
 	var query func() *gorm.DB
 	switch input.Scope {
 	case "all":
-		if input.AccountType != "" || input.Search != "" || input.Status != "" || input.Kind != "" || input.OperatorID != 0 {
+		if input.AccountType != "" || input.Search != "" || input.Status != "" || input.Kind != "" || input.OperatorID != 0 || len(input.CardFilters) > 0 {
 			return nil, nil, fail(400, "mailbox_invalid_query")
 		}
 		query = func() *gorm.DB { return s.issueBaseQuery(actor) }
@@ -303,11 +329,12 @@ func (s *Service) ExportIssues(ctx context.Context, actor Actor, input IssueExpo
 		if err != nil {
 			return nil, nil, err
 		}
-		q := ListQuery{Search: input.Search, Status: input.Status, Kind: input.Kind, OperatorID: input.OperatorID}
-		if _, err := s.filteredIssueQuery(actor, q); err != nil {
+		q := ListQuery{Search: input.Search, Status: input.Status, Kind: input.Kind, OperatorID: input.OperatorID, CardFilters: input.CardFilters}
+		filtered, err := s.filteredIssueQuery(actor, q)
+		if err != nil {
 			return nil, nil, err
 		}
-		query = func() *gorm.DB { result, _ := s.filteredIssueQuery(actor, q); return result }
+		query = func() *gorm.DB { return filtered.Session(&gorm.Session{}) }
 	default:
 		return nil, nil, fail(400, "mailbox_invalid_query")
 	}

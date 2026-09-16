@@ -82,11 +82,5 @@ func (s *Service) ArchiveAccounts(ctx context.Context, actor Actor, input Archiv
 	if err != nil {
 		return err
 	}
-	// Never hold the CVV mutex while waiting on a database lock.
-	if !restore {
-		for _, item := range items {
-			s.invalidateCVVAccount(item.ID)
-		}
-	}
 	return nil
 }

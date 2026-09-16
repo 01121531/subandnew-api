@@ -3,6 +3,7 @@ package managedinstance
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -31,6 +32,7 @@ type CredentialPayload struct {
 type CredentialCipher struct {
 	aead       cipher.AEAD
 	keyVersion string
+	indexKey   []byte
 }
 
 func NewCredentialCipher(key []byte, keyVersion string) (*CredentialCipher, error) {
@@ -49,7 +51,15 @@ func NewCredentialCipher(key []byte, keyVersion string) (*CredentialCipher, erro
 	if keyVersion == "" {
 		keyVersion = "v1"
 	}
-	return &CredentialCipher{aead: aead, keyVersion: keyVersion}, nil
+	derive := hmac.New(sha256.New, key)
+	derive.Write([]byte("mailbox-card-index-key:v1"))
+	return &CredentialCipher{aead: aead, keyVersion: keyVersion, indexKey: derive.Sum(nil)}, nil
+}
+
+func (c *CredentialCipher) MailboxCardDigest(kind, value string) string {
+	mac := hmac.New(sha256.New, c.indexKey)
+	mac.Write([]byte(c.keyVersion + "\x00" + kind + "\x00" + value))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func NewCredentialCipherFromEnvironment() (*CredentialCipher, error) {

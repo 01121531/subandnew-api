@@ -181,6 +181,33 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 		return nil, err
 	}
 	query = normalizePage(query)
+	q, err := s.filteredAccountQuery(actor, query)
+	if err != nil {
+		return nil, err
+	}
+	page := &Page[AccountView]{Items: []AccountView{}, Page: query.Page, PageSize: query.PageSize}
+	if err := q.Count(&page.Total).Error; err != nil {
+		return nil, err
+	}
+	if err := q.Select(accountViewSelect).Order("a.id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&page.Items).Error; err != nil {
+		return nil, err
+	}
+	for i := range page.Items {
+		accountCredentials(actor, &page.Items[i])
+	}
+	page.HasMore = int64(query.Page)*int64(query.PageSize) < page.Total
+	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
+		return nil, err
+	}
+	if len(query.CardFilters) > 0 {
+		if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
+			return nil, err
+		}
+	}
+	return page, nil
+}
+
+func (s *Service) filteredAccountQuery(actor Actor, query ListQuery) (*gorm.DB, error) {
 	q := s.accountQuery(actor)
 	if query.Archived {
 		if actor.Admin == nil {
@@ -201,21 +228,7 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 	if query.OperatorID > 0 {
 		q = q.Where("t.operator_id = ?", query.OperatorID)
 	}
-	page := &Page[AccountView]{Items: []AccountView{}, Page: query.Page, PageSize: query.PageSize}
-	if err := q.Count(&page.Total).Error; err != nil {
-		return nil, err
-	}
-	if err := q.Select(accountViewSelect).Order("a.id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&page.Items).Error; err != nil {
-		return nil, err
-	}
-	for i := range page.Items {
-		accountCredentials(actor, &page.Items[i])
-	}
-	page.HasMore = int64(query.Page)*int64(query.PageSize) < page.Total
-	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
-		return nil, err
-	}
-	return page, nil
+	return s.filterCards(actor, q, query.CardFilters)
 }
 
 func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64, accountTypes ...string) (*AccountView, error) {
@@ -279,7 +292,6 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			return fail(400, "mailbox_invalid_assignment")
 		}
 	}
-	changes := []cvvAssignmentChange{}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxAssign); err != nil {
@@ -328,13 +340,9 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			if err := s.Audit(actor, action, account.ID, assignmentID, 200, ""); err != nil {
 				return err
 			}
-			changes = append(changes, cvvAssignmentChange{account.ID, account.ActiveAssignmentID, assignmentID, input.OperatorID, operator.AuthVersion})
 		}
 		return nil
 	})
-	if err == nil {
-		s.updateCVVAssignments(changes)
-	}
 	return err
 }
 
@@ -494,7 +502,6 @@ func (s *Service) SubmitWithRemark(ctx context.Context, actor Actor, assignmentI
 	if err != nil {
 		return nil, err
 	}
-	s.invalidateCVVAccount(view.AccountID)
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
 	}
@@ -517,7 +524,6 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 	if submissionID <= 0 || input.Version <= 0 || (input.Status != StatusApproved && input.Status != StatusRejected) || !utf8.ValidString(input.Reason) || utf8.RuneCountInString(input.Reason) > 2000 || (input.Status == StatusRejected && strings.TrimSpace(input.Reason) == "") {
 		return fail(400, "mailbox_invalid_review")
 	}
-	var accountID int64
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxReview); err != nil {
@@ -531,7 +537,6 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		if err != nil {
 			return err
 		}
-		accountID = account.ID
 		var submission model.MailboxSubmission
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&submission, submissionID).Error; err != nil {
 			return workflowNotFound(err)
@@ -554,8 +559,5 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		}
 		return s.Audit(actor, "review", account.ID, assignment.ID, 200, "")
 	})
-	if err == nil {
-		s.invalidateCVVAccount(accountID)
-	}
 	return err
 }

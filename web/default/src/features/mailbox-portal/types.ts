@@ -79,6 +79,7 @@ export type ListQuery = {
   page_size: number
 }
 export type Credential = {
+  persistent?: boolean
   available?: boolean
   card_number?: string
   card_expiry?: string

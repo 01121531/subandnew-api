@@ -204,6 +204,7 @@ async function exportWorkbook(
 }
 
 export type IssueExportInput = {
+  card_filters?: import('./types').CardFilter[]
   scope: 'all' | 'filtered'
   account_type?: AccountType
   search?: string
@@ -213,8 +214,15 @@ export type IssueExportInput = {
 }
 
 export const mailboxApi = {
-  exportAll: (signal: AbortSignal) =>
-    exportWorkbook('/accounts/export-all', {}, signal),
+  exportAll: (
+    signal: AbortSignal,
+    input: Partial<ListQuery> & { scope?: string } = {}
+  ) =>
+    exportWorkbook(
+      '/accounts/export-all',
+      input.scope === 'all' ? { scope: 'all' } : input,
+      signal
+    ),
   exportIssues: (input: IssueExportInput, signal: AbortSignal) =>
     exportWorkbook(
       '/issues/export',
@@ -281,7 +289,13 @@ export const mailboxApi = {
     }>('/import-options', 'GET', undefined, undefined, signal),
   issues: async (query: ListQuery, signal?: AbortSignal) =>
     pageMetadata(
-      await request<Page<Issue>>('/issues', 'GET', undefined, query, signal),
+      await request<Page<Issue>>(
+        query.card_filters?.length ? '/issues/query' : '/issues',
+        query.card_filters?.length ? 'POST' : 'GET',
+        query.card_filters?.length ? query : undefined,
+        query.card_filters?.length ? undefined : query,
+        signal
+      ),
       (item) => issueMetadata(item, query.account_type ?? 'refund')
     ),
   issue: async (id: number, accountType: AccountType, signal?: AbortSignal) =>
@@ -312,13 +326,24 @@ export const mailboxApi = {
     )
     return { expires_at: result.expires_at }
   },
+  clearCvv: (id: number, version: number) =>
+    request(
+      `/accounts/${id}/clear-cvv`,
+      'POST',
+      { version },
+      { account_type: 'opening' }
+    ),
   accounts: async (query: ListQuery, signal?: AbortSignal) => {
     const accountType = query.account_type ?? 'refund'
     const page = await request<Page<Account>>(
-      '/accounts',
-      'GET',
-      undefined,
-      { ...query, account_type: accountType },
+      query.card_filters?.length ? '/accounts/query' : '/accounts',
+      query.card_filters?.length ? 'POST' : 'GET',
+      query.card_filters?.length
+        ? { ...query, account_type: accountType }
+        : undefined,
+      query.card_filters?.length
+        ? undefined
+        : { ...query, account_type: accountType },
       signal
     )
     return pageMetadata(page, (item) => accountMetadata(item, accountType))

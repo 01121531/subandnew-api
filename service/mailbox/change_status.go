@@ -118,10 +118,5 @@ func (s *Service) ChangeStatus(ctx context.Context, actor Actor, input ChangeSta
 		}
 		return nil
 	})
-	if err == nil {
-		for _, item := range items {
-			s.invalidateCVVAccount(item.ID)
-		}
-	}
 	return err
 }

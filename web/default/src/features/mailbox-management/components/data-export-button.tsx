@@ -13,6 +13,7 @@ import { Modal } from './common'
 
 export function DataExportButton(props: {
   filters?: Omit<IssueExportInput, 'scope'>
+  accountFilters?: Partial<import('../types').ListQuery>
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -22,6 +23,7 @@ export function DataExportButton(props: {
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [])
   const title = t(`mailbox.dataExport.${props.filters ? 'issues' : 'all'}`)
+  const allLabel = props.filters ? 'allIssues' : 'all'
 
   async function download() {
     if (request.current) return
@@ -35,7 +37,10 @@ export function DataExportButton(props: {
             { ...props.filters, scope },
             controller.signal
           )
-        : await mailboxApi.exportAll(controller.signal)
+        : await mailboxApi.exportAll(
+            controller.signal,
+            props.accountFilters ? { ...props.accountFilters, scope } : {}
+          )
       if (controller.signal.aborted) return
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
@@ -94,7 +99,7 @@ export function DataExportButton(props: {
                   : 'mailbox.dataExport.allHint'
               )}
             </p>
-            {props.filters && (
+            {(props.filters || props.accountFilters) && (
               <RadioGroup
                 value={scope}
                 disabled={pending}
@@ -107,7 +112,7 @@ export function DataExportButton(props: {
                   <Label key={value} className='flex items-center gap-2 py-2'>
                     <RadioGroupItem value={value} />
                     {t(
-                      `mailbox.dataExport.${value === 'all' ? 'allIssues' : 'filtered'}`
+                      `mailbox.dataExport.${value === 'all' ? allLabel : 'filtered'}`
                     )}
                   </Label>
                 ))}
