@@ -16,6 +16,7 @@ func registerMailboxRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	operators := controller.MailboxGuard(authz.MailboxOperators)
 	review := controller.MailboxGuard(authz.MailboxReview)
 	admin.GET("/accounts", view, controller.ListMailboxAccounts)
+	admin.POST("/accounts/export-completed", view, review, controller.MailboxGuard(authz.MailboxCredentials), controller.ExportCompletedMailboxAccounts)
 	admin.POST("/accounts/archive", manage, controller.ArchiveMailboxAccounts(false))
 	admin.POST("/accounts/restore", manage, controller.ArchiveMailboxAccounts(true))
 	admin.GET("/accounts/:id", view, controller.GetMailboxAccount)

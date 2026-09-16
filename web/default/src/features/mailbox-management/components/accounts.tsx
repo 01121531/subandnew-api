@@ -30,6 +30,7 @@ import { ArchiveDialog } from './archive-dialog'
 import { AssignDialog } from './assign-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
+import { ExportCompletedButton } from './export-completed-button'
 import { ImportDialog } from './import-dialog'
 import { PoolScope } from './pool-scope'
 import { TemporaryCvvDialog } from './temporary-cvv-dialog'
@@ -176,6 +177,11 @@ function AccountPool(props: { accountType: AccountType }) {
             {t('mailbox.admin.importTitle')}
           </Button>
         )}
+        {props.accountType === 'opening' &&
+          !archived &&
+          view &&
+          credentials &&
+          canMailbox(user, 'review') && <ExportCompletedButton />}
         {assign && !archived && (
           <Button
             variant='outline'

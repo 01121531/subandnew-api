@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { MailboxError, safeCode } from './lib/errors'
 import { importFailuresMetadata } from './lib/import-report'
-import { canMailboxWork } from './lib/permissions'
+import { canMailbox, canMailboxWork } from './lib/permissions'
 import {
   accountMetadata,
   auditMetadata,
@@ -148,6 +148,60 @@ async function workRequest<T>(
   return result
 }
 export const mailboxApi = {
+  exportCompleted: async (signal: AbortSignal): Promise<Blob> => {
+    const allowed = () => {
+      const user = useAuthStore.getState().auth.user
+      return (
+        canMailbox(user, 'view') &&
+        canMailbox(user, 'review') &&
+        canMailbox(user, 'credentials')
+      )
+    }
+    const authorization = adminDataAuthorizationKey(
+      useAuthStore.getState().auth.user
+    )
+    if (!allowed()) throw new MailboxError('mailbox_permission_denied', 403)
+    try {
+      const response = await api.post<Blob>(
+        `${base}/accounts/export-completed`,
+        {},
+        {
+          responseType: 'blob',
+          signal,
+          timeout: 120000,
+          headers: { 'X-Mailbox-Request': '1' },
+          skipBusinessError: true,
+          skipErrorHandler: true,
+        }
+      )
+      if (
+        signal.aborted ||
+        !allowed() ||
+        authorization !==
+          adminDataAuthorizationKey(useAuthStore.getState().auth.user)
+      ) {
+        throw new MailboxError('mailbox_permission_denied', 403)
+      }
+      if (
+        response.data.type !==
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ) {
+        throw new MailboxError('mailbox_request_failed')
+      }
+      return response.data
+    } catch (error) {
+      if (isAxiosError<Blob>(error)) {
+        let code: unknown
+        try {
+          code = JSON.parse((await error.response?.data.text()) ?? '{}').message
+        } catch {
+          /* Never display a raw server response. */
+        }
+        throw new MailboxError(safeCode(code), error.response?.status ?? 0)
+      }
+      throw error
+    }
+  },
   issueOperators: (signal?: AbortSignal) =>
     request<AccountOperator[]>(
       '/issue-operators',

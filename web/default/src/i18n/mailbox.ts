@@ -1,4 +1,10 @@
 export const mailboxEn = {
+  completedExport: {
+    button: 'Export all completed accounts',
+    pending: 'Generating Excel…',
+    success:
+      'Download started. This file contains login credentials; keep it secure.',
+  },
   work: {
     title: 'Operator work history',
     operatorDetails: 'Work details for {{operator}}',
@@ -349,6 +355,12 @@ export const mailboxEn = {
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_export_completed_empty:
+      'No completed opening accounts are available.',
+    mailbox_export_completed_limit:
+      'More than 10,000 completed accounts. Export was not generated or truncated.',
+    mailbox_export_completed_changed:
+      'Account details or assignments changed during export. Please try again.',
     mailbox_invalid_work_query:
       'Invalid statistics query. Enter valid dates with the end date on or after the start date.',
     mailbox_cvv_disabled:
@@ -455,6 +467,11 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  completedExport: {
+    button: '导出已完成账号',
+    pending: '正在生成 Excel…',
+    success: '已开始下载，文件包含登录资料，请妥善保管。',
+  },
   work: {
     title: '操作员工作记录',
     operatorDetails: '查看 {{operator}} 的工作详情',
@@ -786,6 +803,11 @@ export const mailboxZh: typeof mailboxEn = {
     audit: '查看邮箱审计日志',
   },
   errors: {
+    mailbox_export_completed_empty: '暂无已完成开号账号。',
+    mailbox_export_completed_limit:
+      '已完成账号超过 10,000 条，未生成或截断文件。',
+    mailbox_export_completed_changed:
+      '导出期间账号资料或分配发生变化，请重试。',
     mailbox_invalid_account_type: '邮箱类型无效，请选择退款邮箱或开号邮箱。',
     mailbox_invalid_work_query:
       '统计查询无效，请输入有效日期，且结束日期不得早于开始日期。',
