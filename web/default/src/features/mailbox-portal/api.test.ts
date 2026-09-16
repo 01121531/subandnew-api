@@ -38,6 +38,40 @@ function record(
 }
 
 describe('mailbox independent wire contract', () => {
+  test('remark PATCH uses isolated CSRF transport and strips unknown response fields', async () => {
+    const calls = record({
+      id: 1,
+      version: 2,
+      account_type: 'opening',
+      remark: 'updated',
+      can_edit_remark: true,
+      attachments: [],
+      password: 'must-not-return',
+    })
+    await expect(
+      mailboxApi.editRemark('', 1, 'opening', 1, 'updated')
+    ).rejects.toBeInstanceOf(MailboxRequestError)
+    expect(calls).toHaveLength(0)
+    const result = await mailboxApi.editRemark(
+      'csrf',
+      1,
+      'opening',
+      1,
+      'updated'
+    )
+    expect(calls[0].init?.method).toBe('PATCH')
+    expect(new Headers(calls[0].init?.headers).get('X-Mailbox-CSRF')).toBe(
+      'csrf'
+    )
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      account_type: 'opening',
+      version: 1,
+      remark: 'updated',
+    })
+    expect(result.remark).toBe('updated')
+    expect(result.can_edit_remark).toBe(true)
+    expect(result).not.toHaveProperty('password')
+  })
   test('login uses only same-origin cookie transport without console identity or CSRF headers', async () => {
     const calls = record({ authenticated: false })
     await mailboxApi.login({

@@ -346,6 +346,38 @@ func ReviewMailboxSubmission(c *gin.Context) {
 	}
 	mailboxSuccess(c, gin.H{})
 }
+func EditMailboxRemark(c *gin.Context) {
+	id := mailboxID(c)
+	if id == 0 {
+		return
+	}
+	var input mailbox.RemarkInput
+	if !mailboxDecode(c, &input) {
+		return
+	}
+	result, err := mailboxService().EditRemark(c.Request.Context(), mailboxActor(c), id, input)
+	if err != nil {
+		mailboxFailure(c, err)
+		return
+	}
+	mailboxSuccess(c, result)
+}
+func GetMailboxRemarkHistory(c *gin.Context) {
+	id := mailboxID(c)
+	if id == 0 {
+		return
+	}
+	query, ok := mailboxListQuery(c)
+	if !ok {
+		return
+	}
+	result, err := mailboxService().RemarkHistory(c.Request.Context(), mailboxActor(c), id, query)
+	if err != nil {
+		mailboxFailure(c, err)
+		return
+	}
+	mailboxSuccess(c, result)
+}
 func ListMailboxAudits(c *gin.Context) {
 	q, ok := mailboxListQuery(c)
 	if !ok {

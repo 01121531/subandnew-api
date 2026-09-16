@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios'
 
+import type { RemarkHistory } from '@/components/mailbox-remark-editor'
 import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
@@ -148,6 +149,30 @@ async function workRequest<T>(
   return result
 }
 export const mailboxApi = {
+  editRemark: (
+    id: number,
+    accountType: AccountType,
+    version: number,
+    remark: string
+  ) =>
+    request<Submission>(`/submissions/${id}/remark`, 'PATCH', {
+      account_type: accountType,
+      version,
+      remark,
+    }).then((value) => submissionMetadata(value, accountType)),
+  remarkHistory: (
+    id: number,
+    accountType: AccountType,
+    page: number,
+    signal: AbortSignal
+  ) =>
+    request<RemarkHistory>(
+      `/submissions/${id}/remark-history`,
+      'GET',
+      undefined,
+      { account_type: accountType, page, page_size: 20 },
+      signal
+    ),
   changeStatus: (
     accountType: AccountType,
     accounts: Account[],

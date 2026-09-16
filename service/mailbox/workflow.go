@@ -45,22 +45,23 @@ type AssignInput struct {
 }
 
 type SubmissionView struct {
-	Remark       string           `json:"remark"`
-	AccountType  string           `json:"account_type"`
-	CardLast4    string           `json:"card_last4"`
-	ID           int64            `json:"id"`
-	AssignmentID int64            `json:"assignment_id"`
-	AccountID    int64            `json:"account_id"`
-	Email        string           `json:"email"`
-	OperatorID   int64            `json:"operator_id"`
-	OperatorName string           `json:"operator_name"`
-	Status       string           `json:"status"`
-	Version      int64            `json:"version"`
-	ReviewReason string           `json:"review_reason"`
-	ReviewedBy   int              `json:"reviewed_by"`
-	ReviewedAt   int64            `json:"reviewed_at"`
-	CreatedAt    int64            `json:"created_at"`
-	Attachments  []AttachmentView `json:"attachments" gorm:"-"`
+	CanEditRemark bool             `json:"can_edit_remark"`
+	Remark        string           `json:"remark"`
+	AccountType   string           `json:"account_type"`
+	CardLast4     string           `json:"card_last4"`
+	ID            int64            `json:"id"`
+	AssignmentID  int64            `json:"assignment_id"`
+	AccountID     int64            `json:"account_id"`
+	Email         string           `json:"email"`
+	OperatorID    int64            `json:"operator_id"`
+	OperatorName  string           `json:"operator_name"`
+	Status        string           `json:"status"`
+	Version       int64            `json:"version"`
+	ReviewReason  string           `json:"review_reason"`
+	ReviewedBy    int              `json:"reviewed_by"`
+	ReviewedAt    int64            `json:"reviewed_at"`
+	CreatedAt     int64            `json:"created_at"`
+	Attachments   []AttachmentView `json:"attachments" gorm:"-"`
 }
 
 type ReviewInput struct {
@@ -345,7 +346,7 @@ func (s *Service) submissionQuery(actor Actor) *gorm.DB {
 	return q
 }
 
-const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.remark, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
+const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.remark, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at, CASE WHEN a.archived_at = 0 AND a.active_assignment_id = t.id AND t.revoked_at = 0 AND ((t.status = 'submitted' AND u.status = 'pending') OR (t.status = 'rejected' AND u.status = 'rejected')) AND u.id = (SELECT MAX(newest.id) FROM mailbox_submissions AS newest WHERE newest.assignment_id = t.id) THEN 1 ELSE 0 END AS can_edit_remark"
 
 func (s *Service) submissionAttachments(views []SubmissionView) error {
 	if len(views) == 0 {

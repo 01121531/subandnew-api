@@ -45,6 +45,7 @@ export type Attachment = {
 }
 
 export type Submission = {
+  can_edit_remark?: boolean
   account_type?: AccountType
   card_last4?: string
   id: number

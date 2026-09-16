@@ -1,4 +1,12 @@
 export const mailboxEn = {
+  remarkEdit: {
+    title: 'Edit remark',
+    history: 'Remark history',
+    hint: 'Up to 2,000 characters. Do not include passwords, OTP secrets, full card numbers or CVV. A submission without screenshots must keep a remark.',
+    discard: 'Discard unsaved remark changes?',
+    before: 'Before',
+    after: 'After',
+  },
   changeStatus: {
     title: 'Change task status',
     description:
@@ -335,6 +343,7 @@ export const mailboxEn = {
     operatorActor: 'Operator #{{id}}',
     auditActions: {
       change_status: 'Change task status',
+      edit_remark: 'Edit submission remark',
       archive: 'Archive mailbox',
       restore: 'Restore mailbox',
       import: 'Import',
@@ -480,6 +489,14 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  remarkEdit: {
+    title: '编辑备注',
+    history: '备注修订记录',
+    hint: '最多 2,000 字，请勿填写密码、2FA 密钥、完整卡号或 CVV。没有截图的提交必须保留备注。',
+    discard: '放弃尚未保存的备注修改？',
+    before: '修改前',
+    after: '修改后',
+  },
   changeStatus: {
     title: '修改任务状态',
     description:
@@ -798,6 +815,7 @@ export const mailboxZh: typeof mailboxEn = {
       restore: '恢复邮箱',
       import: '导入邮箱',
       change_status: '修改任务状态',
+      edit_remark: '修改提交备注',
       import_preview: '导入预览',
       assign: '分配邮箱',
       recall: '收回邮箱',

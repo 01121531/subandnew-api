@@ -53,6 +53,7 @@ var expectedControlPlaneTables = []string{
 	"mailbox_issues",
 	"mailbox_login_attempts",
 	"mailbox_operators",
+	"mailbox_remark_revisions",
 	"mailbox_sessions",
 	"mailbox_submissions",
 	"managed_account_api_access_logs",
