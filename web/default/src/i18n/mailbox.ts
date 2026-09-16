@@ -1,4 +1,18 @@
 export const mailboxEn = {
+  dataExport: {
+    all: 'Export all mailbox data',
+    issues: 'Export issue reports',
+    confirm: 'Export Excel',
+    scope: 'Export scope',
+    filtered: 'Current filtered results (all pages)',
+    allIssues: 'All issues in both pools',
+    allHint:
+      'Includes both refund and opening pools, archived accounts and inactive assignment history. Five sheets: login data, assignments, submissions and reviews, issues, and remark revisions.',
+    issuesHint:
+      'One row per issue, plus a separate sheet of deduplicated mailbox login data. Screenshots are not included.',
+    sensitive:
+      'Contains passwords and 2FA secrets. Keep the downloaded file secure. No payment details, CVV or live codes. Each sheet supports up to 10,000 rows; larger exports are rejected, not truncated.',
+  },
   remarkEdit: {
     title: 'Edit remark',
     history: 'Remark history',
@@ -377,6 +391,10 @@ export const mailboxEn = {
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_export_empty: 'No matching records to export.',
+    mailbox_export_limit:
+      'A sheet exceeds 10,000 records. Nothing was exported; narrow the issue filters where available.',
+    mailbox_export_changed: 'Data changed during export. Please try again.',
     mailbox_export_completed_empty:
       'No completed opening accounts are available.',
     mailbox_export_completed_limit:
@@ -489,6 +507,20 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  dataExport: {
+    all: '导出全部邮箱资料',
+    issues: '导出异常反馈',
+    confirm: '导出 Excel',
+    scope: '导出范围',
+    filtered: '当前筛选结果（全部分页）',
+    allIssues: '两池全部异常反馈',
+    allHint:
+      '包含退款和开号两池、归档邮箱及失效分配历史。文件分为邮箱资料、分配历史、提交审核、异常反馈、备注修订五个工作表。',
+    issuesHint:
+      '每条反馈一行，另附去重后的关联邮箱登录资料工作表。不包含截图文件。',
+    sensitive:
+      '文件包含密码和 2FA 密钥，请妥善保管。不包含支付资料、CVV 或动态验证码。每个工作表最多 10,000 条，超限整次拒绝，不截断。',
+  },
   remarkEdit: {
     title: '编辑备注',
     history: '备注修订记录',
@@ -846,6 +878,10 @@ export const mailboxZh: typeof mailboxEn = {
     audit: '查看邮箱审计日志',
   },
   errors: {
+    mailbox_export_empty: '暂无符合条件的导出记录。',
+    mailbox_export_limit:
+      '某个工作表超过 10,000 条，未导出任何数据；异常反馈可缩小筛选范围后重试。',
+    mailbox_export_changed: '导出期间资料发生变化，请重试。',
     mailbox_export_completed_empty: '暂无已完成开号账号。',
     mailbox_export_completed_limit:
       '已完成账号超过 10,000 条，未生成或截断文件。',

@@ -18,6 +18,8 @@ func registerMailboxRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	admin.GET("/accounts", view, controller.ListMailboxAccounts)
 	admin.POST("/accounts/change-status", view, review, controller.ChangeMailboxAccountStatus)
 	admin.POST("/accounts/export-completed", view, review, controller.MailboxGuard(authz.MailboxCredentials), controller.ExportCompletedMailboxAccounts)
+	admin.POST("/accounts/export-all", view, review, controller.MailboxGuard(authz.MailboxCredentials), controller.ExportMailboxData(false))
+	admin.POST("/issues/export", view, review, controller.MailboxGuard(authz.MailboxCredentials), controller.ExportMailboxData(true))
 	admin.POST("/accounts/archive", manage, controller.ArchiveMailboxAccounts(false))
 	admin.POST("/accounts/restore", manage, controller.ArchiveMailboxAccounts(true))
 	admin.GET("/accounts/:id", view, controller.GetMailboxAccount)

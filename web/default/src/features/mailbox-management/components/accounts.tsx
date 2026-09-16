@@ -32,6 +32,7 @@ import { AssignDialog } from './assign-dialog'
 import { ChangeStatusDialog } from './change-status-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
+import { DataExportButton } from './data-export-button'
 import { ExportCompletedButton } from './export-completed-button'
 import { ImportDialog } from './import-dialog'
 import { PoolScope } from './pool-scope'
@@ -214,6 +215,7 @@ function AccountPool(props: { accountType: AccountType }) {
           view &&
           credentials &&
           canMailbox(user, 'review') && <ExportCompletedButton />}
+        {review && credentials && <DataExportButton />}
         {assign && !archived && (
           <Button
             variant='outline'

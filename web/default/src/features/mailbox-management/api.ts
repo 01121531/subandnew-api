@@ -148,7 +148,79 @@ async function workRequest<T>(
   }
   return result
 }
+async function exportWorkbook(
+  path: string,
+  body: unknown,
+  signal: AbortSignal
+): Promise<Blob> {
+  const allowed = () => {
+    const user = useAuthStore.getState().auth.user
+    return (
+      canMailbox(user, 'view') &&
+      canMailbox(user, 'review') &&
+      canMailbox(user, 'credentials')
+    )
+  }
+  const authorization = adminDataAuthorizationKey(
+    useAuthStore.getState().auth.user
+  )
+  if (!allowed()) throw new MailboxError('mailbox_permission_denied', 403)
+  try {
+    const response = await api.post<Blob>(`${base}${path}`, body, {
+      responseType: 'blob',
+      signal,
+      timeout: 120000,
+      headers: { 'X-Mailbox-Request': '1' },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+    if (
+      signal.aborted ||
+      !allowed() ||
+      authorization !==
+        adminDataAuthorizationKey(useAuthStore.getState().auth.user)
+    ) {
+      throw new MailboxError('mailbox_permission_denied', 403)
+    }
+    if (
+      response.data.type !==
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ) {
+      throw new MailboxError('mailbox_request_failed')
+    }
+    return response.data
+  } catch (error) {
+    if (isAxiosError<Blob>(error)) {
+      let code: unknown
+      try {
+        code = JSON.parse((await error.response?.data.text()) ?? '{}').message
+      } catch {
+        /* Never display a raw server response. */
+      }
+      throw new MailboxError(safeCode(code), error.response?.status ?? 0)
+    }
+    throw error
+  }
+}
+
+export type IssueExportInput = {
+  scope: 'all' | 'filtered'
+  account_type?: AccountType
+  search?: string
+  status?: string
+  kind?: string
+  operator_id?: number
+}
+
 export const mailboxApi = {
+  exportAll: (signal: AbortSignal) =>
+    exportWorkbook('/accounts/export-all', {}, signal),
+  exportIssues: (input: IssueExportInput, signal: AbortSignal) =>
+    exportWorkbook(
+      '/issues/export',
+      input.scope === 'all' ? { scope: 'all' } : input,
+      signal
+    ),
   editRemark: (
     id: number,
     accountType: AccountType,
@@ -192,60 +264,8 @@ export const mailboxApi = {
         })
       ),
     }),
-  exportCompleted: async (signal: AbortSignal): Promise<Blob> => {
-    const allowed = () => {
-      const user = useAuthStore.getState().auth.user
-      return (
-        canMailbox(user, 'view') &&
-        canMailbox(user, 'review') &&
-        canMailbox(user, 'credentials')
-      )
-    }
-    const authorization = adminDataAuthorizationKey(
-      useAuthStore.getState().auth.user
-    )
-    if (!allowed()) throw new MailboxError('mailbox_permission_denied', 403)
-    try {
-      const response = await api.post<Blob>(
-        `${base}/accounts/export-completed`,
-        {},
-        {
-          responseType: 'blob',
-          signal,
-          timeout: 120000,
-          headers: { 'X-Mailbox-Request': '1' },
-          skipBusinessError: true,
-          skipErrorHandler: true,
-        }
-      )
-      if (
-        signal.aborted ||
-        !allowed() ||
-        authorization !==
-          adminDataAuthorizationKey(useAuthStore.getState().auth.user)
-      ) {
-        throw new MailboxError('mailbox_permission_denied', 403)
-      }
-      if (
-        response.data.type !==
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ) {
-        throw new MailboxError('mailbox_request_failed')
-      }
-      return response.data
-    } catch (error) {
-      if (isAxiosError<Blob>(error)) {
-        let code: unknown
-        try {
-          code = JSON.parse((await error.response?.data.text()) ?? '{}').message
-        } catch {
-          /* Never display a raw server response. */
-        }
-        throw new MailboxError(safeCode(code), error.response?.status ?? 0)
-      }
-      throw error
-    }
-  },
+  exportCompleted: (signal: AbortSignal) =>
+    exportWorkbook('/accounts/export-completed', {}, signal),
   issueOperators: (signal?: AbortSignal) =>
     request<AccountOperator[]>(
       '/issue-operators',
