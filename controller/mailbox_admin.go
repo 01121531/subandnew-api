@@ -12,66 +12,73 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func mailboxImportInput(c *gin.Context) (string, []byte, string, bool) {
+func mailboxImportInput(c *gin.Context) (string, []byte, string, bool, bool) {
 	media, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if media == "multipart/form-data" {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 12<<20)
 		if err := c.Request.ParseMultipartForm(12 << 20); err != nil {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, "", false
+			return "", nil, "", false, false
 		}
 		defer c.Request.MultipartForm.RemoveAll()
 		for key, values := range c.Request.MultipartForm.Value {
-			if (key != "account_type" && key != "format") || len(values) != 1 {
+			if (key != "account_type" && key != "format" && key != "ignore_extra_fields") || len(values) != 1 {
 				mailboxBadRequest(c, "mailbox_invalid_request")
-				return "", nil, "", false
+				return "", nil, "", false, false
 			}
+		}
+		ignoreValue := c.Request.FormValue("ignore_extra_fields")
+		if ignoreValue != "" && ignoreValue != "true" && ignoreValue != "false" {
+			mailboxBadRequest(c, "mailbox_invalid_request")
+			return "", nil, "", false, false
 		}
 		accountType, ok := mailboxAccountType(c, c.Request.FormValue("account_type"))
 		if !ok {
-			return "", nil, "", false
+			return "", nil, "", false, false
 		}
 		files := c.Request.MultipartForm.File["file"]
 		if len(files) != 1 || len(c.Request.MultipartForm.File) != 1 {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, "", false
+			return "", nil, "", false, false
 		}
 		file, err := files[0].Open()
 		if err != nil {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, "", false
+			return "", nil, "", false, false
 		}
 		defer file.Close()
 		data, err := io.ReadAll(io.LimitReader(file, (10<<20)+1))
 		if err != nil || len(data) > 10<<20 {
 			mailboxBadRequest(c, "mailbox_invalid_file")
-			return "", nil, "", false
+			return "", nil, "", false, false
 		}
 		format := strings.TrimPrefix(strings.ToLower(filepath.Ext(files[0].Filename)), ".")
 		if format == "txt" {
 			format = "text"
 		}
-		return format, data, accountType, true
+		return format, data, accountType, ignoreValue == "true", true
 	}
 	var input struct {
-		Format      string `json:"format"`
-		Text        string `json:"text"`
-		AccountType string `json:"account_type"`
+		Format            string `json:"format"`
+		Text              string `json:"text"`
+		AccountType       string `json:"account_type"`
+		IgnoreExtraFields bool   `json:"ignore_extra_fields"`
 	}
 	if !mailboxDecode(c, &input) {
-		return "", nil, "", false
+		return "", nil, "", false, false
 	}
 	accountType, ok := mailboxAccountType(c, input.AccountType)
-	return input.Format, []byte(input.Text), accountType, ok
+	return input.Format, []byte(input.Text), accountType, input.IgnoreExtraFields, ok
 }
 func ImportMailboxAccounts(preview bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		format, data, accountType, ok := mailboxImportInput(c)
+		format, data, accountType, ignoreExtra, ok := mailboxImportInput(c)
 		if !ok {
 			return
 		}
+		service := mailboxService().WithImportExtraFields(ignoreExtra)
 		if preview {
-			result, err := mailboxService().PreviewImport(c.Request.Context(), mailboxActor(c), format, data, accountType)
+			result, err := service.PreviewImport(c.Request.Context(), mailboxActor(c), format, data, accountType)
 			if err != nil {
 				mailboxFailure(c, err)
 				return
@@ -79,7 +86,7 @@ func ImportMailboxAccounts(preview bool) gin.HandlerFunc {
 			mailboxSuccess(c, result)
 			return
 		}
-		result, err := mailboxService().Import(c.Request.Context(), mailboxActor(c), format, data, accountType)
+		result, err := service.Import(c.Request.Context(), mailboxActor(c), format, data, accountType)
 		if err != nil {
 			mailboxFailure(c, err)
 			return

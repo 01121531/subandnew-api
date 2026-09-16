@@ -104,3 +104,73 @@ func TestMailboxImportCompatibilityKeepsDuplicateAndExtraFieldChecks(t *testing.
 	require.Contains(t, preview.Issues, ImportIssue{Row: 2, Code: "mailbox_import_duplicate"})
 	require.Contains(t, preview.Issues, ImportIssue{Row: 3, Code: "mailbox_import_columns"})
 }
+
+func TestMailboxImportLegacySeparatorsAndEmptyFields(t *testing.T) {
+	grouped := "GEZD GNBV GY3T QOJQ GEZD GNBV GY3T QOJQ"
+	for _, line := range []string{
+		"one@example.test|  password  |recovery@example.test|" + grouped,
+		"one@example.test----  password  ----" + grouped + "--------",
+		"one@example.test----  password  --------" + mailboxImportTestSecret,
+	} {
+		for _, format := range []string{"text", "xlsx", "csv"} {
+			s, actor := newMailboxImportTestService(t)
+			data := []byte(line)
+			if format == "xlsx" {
+				data = mailboxImportTestWorkbook(t, [][]string{{line}}, "")
+			}
+			preview, err := s.PreviewImport(context.Background(), actor, format, data)
+			require.NoError(t, err)
+			require.True(t, preview.Valid, "%s: %+v", format, preview.Issues)
+			_, rows, err := s.prepareMailboxImport(format, data)
+			require.NoError(t, err)
+			require.Equal(t, "  password  ", rows[0].secret.Password)
+			require.Equal(t, mailboxImportTestSecret, rows[0].secret.OTP.Secret)
+		}
+	}
+}
+
+func TestMailboxImportExtraFieldsExplicitOptIn(t *testing.T) {
+	for _, line := range []string{
+		"one@example.test----password----" + mailboxImportTestSecret + "----extra-token",
+		"one@example.test----password----" + mailboxImportTestSecret + "----extra|token",
+		"one@example.test|password|recovery@example.test|" + mailboxImportTestSecret + "|extra----token|uuid-value",
+		"one@example.test----password----recovery@example.test----" + mailboxImportTestSecret + "----extra-token",
+	} {
+		s, actor := newMailboxImportTestService(t)
+		preview, err := s.PreviewImport(context.Background(), actor, "text", []byte(line))
+		require.NoError(t, err)
+		require.False(t, preview.Valid)
+		compatible := s.WithImportExtraFields(true)
+		preview, err = compatible.PreviewImport(context.Background(), actor, "text", []byte(line))
+		require.NoError(t, err)
+		require.True(t, preview.Valid, "%+v", preview.Issues)
+		require.Contains(t, preview.Notices, ImportIssue{Row: 1, Code: "mailbox_import_extra_fields_ignored"})
+		encoded, err := json.Marshal(preview)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "extra-token")
+		require.NotContains(t, string(encoded), mailboxImportTestSecret)
+		_, err = compatible.Import(context.Background(), actor, "text", []byte(line))
+		require.NoError(t, err)
+		require.False(t, s.importIgnoreExtraFields)
+	}
+}
+
+func TestMailboxImportExtraFieldsNeverGuessesOTP(t *testing.T) {
+	s, actor := newMailboxImportTestService(t)
+	compatible := s.WithImportExtraFields(true)
+	for _, line := range []string{
+		"one@example.test----password----unknown-field----" + mailboxImportTestSecret,
+		"one@example.test----password----recovery@example.test----BAD-SECRET----metadata",
+		"one@example.test----password----BAD.SECRET",
+		"one@example.test----password----" + mailboxImportTestSecret + " " + mailboxImportTestSecret,
+		"one@example.test\tpass----word\t" + mailboxImportTestSecret,
+	} {
+		preview, err := compatible.PreviewImport(context.Background(), actor, "text", []byte(line))
+		require.NoError(t, err)
+		require.False(t, preview.Valid)
+		_, err = compatible.Import(context.Background(), actor, "text", []byte(line))
+		require.Error(t, err)
+	}
+	_, err := compatible.PreviewImport(context.Background(), actor, "text", []byte("one@example.test----pw----"+mailboxImportTestSecret+"----4111111111111111----12/39"), AccountTypeOpening)
+	require.Error(t, err)
+}

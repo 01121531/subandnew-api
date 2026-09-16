@@ -227,6 +227,9 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 }
 
 func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPreview, []mailboxImportRow, error) {
+	if s.importIgnoreExtraFields && s.pool() != AccountTypeRefund {
+		return nil, nil, fail(400, "mailbox_invalid_request")
+	}
 	preview := &ImportPreview{Rows: []ImportPreviewRow{}, Issues: []ImportIssue{}}
 	rows := []mailboxImportRow{}
 	seen := map[string]int{}
@@ -238,7 +241,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 	headerColumns := 0
 	consume := func(row int, cells []string, header bool) error {
 		var notices []string
-		cells, notices = normalizeMailboxImportCells(cells, s.pool())
+		cells, notices = normalizeMailboxImportCells(cells, s.pool(), s.importIgnoreExtraFields)
 		if header && mailboxImportHeader(cells, s.pool()) {
 			headerColumns = len(cells)
 			if headerColumns == 6 && !temporaryCVVEnabled() {
@@ -254,6 +257,14 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			preview.Notices = append(preview.Notices, ImportIssue{Row: row, Code: code})
 		}
 		withCVV := columns == 5 && len(cells) == 6
+		if columns == 3 && len(cells) == 2 && mailboxImportEmail(cells[0]) {
+			addIssue(row, "mailbox_import_invalid_otp")
+			return nil
+		}
+		if s.importIgnoreExtraFields && len(cells) > 3 && mailboxImportEmail(cells[0]) {
+			addIssue(row, "mailbox_import_invalid_otp")
+			return nil
+		}
 		if (len(cells) != columns && !withCVV) || (headerColumns != 0 && len(cells) != headerColumns) {
 			addIssue(row, "mailbox_import_columns")
 			return nil
@@ -331,19 +342,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 				if strings.TrimSpace(line) == "" {
 					continue
 				}
-				delimiter := "----"
-				if strings.Contains(line, "\t") {
-					delimiter = "\t"
-					if strings.Contains(line, "----") {
-						// Mixed delimiters cannot identify password boundaries reliably.
-						err = consume(row, nil, false)
-						if err != nil {
-							break
-						}
-						continue
-					}
-				}
-				if err = consume(row, strings.Split(line, delimiter), false); err != nil {
+				if err = consume(row, []string{line}, false); err != nil {
 					break
 				}
 			}

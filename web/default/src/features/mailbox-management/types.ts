@@ -262,7 +262,10 @@ export interface Audit {
   created_at: number
 }
 export type ImportFormat = 'text' | 'csv' | 'xlsx'
-export type ImportSource = { account_type?: AccountType } & (
+export type ImportSource = {
+  account_type?: AccountType
+  ignore_extra_fields?: boolean
+} & (
   | { format: ImportFormat; file: File; text?: never }
   | { format: 'text' | 'csv'; text: string; file?: never }
 )

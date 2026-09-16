@@ -262,6 +262,35 @@ describe('mailbox control-plane API', () => {
     ])
     expect(JSON.stringify(preview)).not.toContain('private')
   })
+  test('extra-field compatibility is explicit and preserved for preview and import', async () => {
+    request = spyOn(api, 'request').mockResolvedValue(success)
+    const source: ImportSource = {
+      format: 'text',
+      account_type: 'refund',
+      text: 'synthetic',
+      ignore_extra_fields: true,
+    }
+    await mailboxApi.preview(source)
+    await mailboxApi.import(source)
+    for (const [config] of request.mock.calls) {
+      expect(config.data).toEqual(source)
+    }
+    const file = new File(['synthetic'], 'sample.xlsx')
+    expect(
+      (
+        importBody({
+          format: 'xlsx',
+          file,
+          ignore_extra_fields: true,
+        }) as FormData
+      ).get('ignore_extra_fields')
+    ).toBe('true')
+    expect(
+      (importBody({ format: 'xlsx', file }) as FormData).has(
+        'ignore_extra_fields'
+      )
+    ).toBe(false)
+  })
   test('account operator metadata includes disabled operators without calling management or credential endpoints', async () => {
     const operators = [
       { id: 3, username: 'enabled-user', display_name: 'Enabled' },

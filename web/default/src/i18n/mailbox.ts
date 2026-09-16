@@ -140,6 +140,8 @@ export const mailboxEn = {
   },
   admin: {
     accountType: 'Account pool',
+    ignoreExtraFields:
+      'Ignore extra fields after recognized email, password and 2FA (not saved). Invalid or missing 2FA still blocks import.',
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
     refundImport:
       'Refund fields: email, password, 2FA. A recovery email before 2FA is also recognized but not saved.',
@@ -368,6 +370,11 @@ export const mailboxEn = {
       'Refund: email, password, 2FA (optionally a recovery email before 2FA). Opening: 5 fields, or 6 with temporary CVV enabled. Other extra fields are rejected.',
     mailbox_import_packed_row:
       'Split the single-cell record using its delimiter; password whitespace is preserved.',
+    mailbox_import_empty_fields_ignored: 'Ignored empty trailing fields.',
+    mailbox_import_otp_spaces_removed:
+      'Removed grouping spaces from the 2FA secret; password unchanged.',
+    mailbox_import_extra_fields_ignored:
+      'Extra fields will not be saved, as selected. Only email, password and 2FA are imported.',
     mailbox_import_recovery_email_ignored:
       'Recovery email recognized but will not be saved. Confirm this is acceptable before importing.',
     mailbox_import_otp_link_extracted:
@@ -546,6 +553,8 @@ export const mailboxZh: typeof mailboxEn = {
   },
   admin: {
     accountType: '账号池',
+    ignoreExtraFields:
+      '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；缺少或无效的 2FA 仍阻止导入。',
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
     refundImport:
       '退款字段为邮箱、密码、2FA；也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
@@ -758,6 +767,11 @@ export const mailboxZh: typeof mailboxEn = {
       '退款格式为邮箱、密码、2FA，也兼容在 2FA 前增加辅助邮箱；开号为 5 列，临时 CVV 可用时支持第 6 列。其他额外字段不自动丢弃。',
     mailbox_import_packed_row:
       '已按分隔符拆分单元格中的资料，密码首尾空白保持原样。',
+    mailbox_import_empty_fields_ignored: '已忽略末尾空字段。',
+    mailbox_import_otp_spaces_removed:
+      '已去除 2FA 密钥的分组空格，密码保持原样。',
+    mailbox_import_extra_fields_ignored:
+      '按已勾选选项忽略额外字段，仅导入邮箱、密码和 2FA，不保存其余内容。',
     mailbox_import_recovery_email_ignored:
       '已识别辅助邮箱，但本次不会保存辅助邮箱，请确认后再导入。',
     mailbox_import_otp_link_extracted:

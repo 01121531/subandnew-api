@@ -51,12 +51,13 @@ type Actor struct {
 	TargetOperatorID int64
 }
 type Service struct {
-	DB          *gorm.DB
-	Now         func() time.Time
-	Cipher      func() (*managedinstance.CredentialCipher, error)
-	StorageDir  string
-	accountType string
-	cvv         *cvvStore
+	DB                      *gorm.DB
+	Now                     func() time.Time
+	Cipher                  func() (*managedinstance.CredentialCipher, error)
+	StorageDir              string
+	accountType             string
+	cvv                     *cvvStore
+	importIgnoreExtraFields bool
 }
 
 const AccountTypeRefund = model.MailboxAccountTypeRefund

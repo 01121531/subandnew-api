@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
@@ -29,6 +30,7 @@ export function ImportDialog(props: {
   const [text, setText] = useState('')
   const [file, setFile] = useState<File>()
   const [preview, setPreview] = useState<ImportPreview>()
+  const [ignoreExtraFields, setIgnoreExtraFields] = useState(false)
   const source = useRef<ImportSource | undefined>(undefined)
   const controller = useRef<AbortController | undefined>(undefined)
   useEffect(
@@ -63,10 +65,22 @@ export function ImportDialog(props: {
     setText('')
   }
   function runPreview() {
+    const ignore_extra_fields =
+      props.accountType === 'refund' && ignoreExtraFields
     if (file) {
-      previewMutation.submit({ format, file, account_type: props.accountType })
+      previewMutation.submit({
+        format,
+        file,
+        account_type: props.accountType,
+        ignore_extra_fields,
+      })
     } else if (format !== 'xlsx' && text.trim()) {
-      previewMutation.submit({ format, text, account_type: props.accountType })
+      previewMutation.submit({
+        format,
+        text,
+        account_type: props.accountType,
+        ignore_extra_fields,
+      })
     }
   }
   return (
@@ -122,6 +136,16 @@ export function ImportDialog(props: {
       {!preview ? (
         <div className='grid gap-4'>
           <ImportExamples accountType={props.accountType} pending={pending} />
+          {props.accountType === 'refund' && (
+            <label className='flex items-start gap-3 text-sm'>
+              <Checkbox
+                checked={ignoreExtraFields}
+                disabled={pending}
+                onCheckedChange={setIgnoreExtraFields}
+              />
+              <span>{t('mailbox.admin.ignoreExtraFields')}</span>
+            </label>
+          )}
           <Field id='mailbox-format' label={t('mailbox.admin.format')}>
             <NativeSelect
               id='mailbox-format'

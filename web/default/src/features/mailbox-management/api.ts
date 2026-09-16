@@ -52,19 +52,26 @@ import type {
 } from './types'
 
 const base = '/api/mailbox-management'
-export function importBody(
-  source: ImportSource
-): FormData | { format: string; text: string; account_type: AccountType } {
+export function importBody(source: ImportSource):
+  | FormData
+  | {
+      format: string
+      text: string
+      account_type: AccountType
+      ignore_extra_fields?: boolean
+    } {
   if (source.file) {
     const body = new FormData()
     body.append('account_type', source.account_type ?? 'refund')
     body.append('file', source.file)
+    if (source.ignore_extra_fields) body.append('ignore_extra_fields', 'true')
     return body
   }
   return {
     format: source.format,
     text: source.text,
     account_type: source.account_type ?? 'refund',
+    ...(source.ignore_extra_fields ? { ignore_extra_fields: true } : {}),
   }
 }
 export function unwrap<T>(body: Envelope<T>, status = 0): T {
