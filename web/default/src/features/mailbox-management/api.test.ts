@@ -269,6 +269,7 @@ describe('mailbox control-plane API', () => {
       account_type: 'refund',
       text: 'synthetic',
       ignore_extra_fields: true,
+      allow_partial: true,
     }
     await mailboxApi.preview(source)
     await mailboxApi.import(source)
@@ -282,9 +283,18 @@ describe('mailbox control-plane API', () => {
           format: 'xlsx',
           file,
           ignore_extra_fields: true,
+          allow_partial: true,
         }) as FormData
       ).get('ignore_extra_fields')
     ).toBe('true')
+    expect(
+      (
+        importBody({ format: 'xlsx', file, allow_partial: true }) as FormData
+      ).get('allow_partial')
+    ).toBe('true')
+    expect(
+      (importBody({ format: 'xlsx', file }) as FormData).has('allow_partial')
+    ).toBe(false)
     expect(
       (importBody({ format: 'xlsx', file }) as FormData).has(
         'ignore_extra_fields'

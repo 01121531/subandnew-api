@@ -265,11 +265,14 @@ export type ImportFormat = 'text' | 'csv' | 'xlsx'
 export type ImportSource = {
   account_type?: AccountType
   ignore_extra_fields?: boolean
+  allow_partial?: boolean
 } & (
   | { format: ImportFormat; file: File; text?: never }
   | { format: 'text' | 'csv'; text: string; file?: never }
 )
 export interface ImportPreview {
+  ready?: number
+  failures?: ImportFailure[]
   rows: Array<{
     row: number
     email: string
@@ -280,6 +283,16 @@ export interface ImportPreview {
   notices?: Array<{ row: number; code: string }>
   total: number
   valid: boolean
+}
+export interface ImportFailure {
+  row: number
+  email: string
+  codes: string[]
+}
+export interface ImportResult {
+  imported: number
+  failed: number
+  failures: ImportFailure[]
 }
 export interface Credential {
   card_number?: string

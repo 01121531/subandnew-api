@@ -10,7 +10,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
-	"net/mail"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/01121531/subandnew-api/model"
@@ -38,18 +39,29 @@ type ImportIssue struct {
 }
 
 type ImportPreview struct {
-	Rows    []ImportPreviewRow `json:"rows"`
-	Issues  []ImportIssue      `json:"issues"`
-	Notices []ImportIssue      `json:"notices,omitempty"`
-	Total   int                `json:"total"`
-	Valid   bool               `json:"valid"`
+	Rows     []ImportPreviewRow `json:"rows"`
+	Issues   []ImportIssue      `json:"issues"`
+	Notices  []ImportIssue      `json:"notices,omitempty"`
+	Total    int                `json:"total"`
+	Valid    bool               `json:"valid"`
+	Ready    int                `json:"ready"`
+	Failures []ImportFailure    `json:"failures"`
+}
+
+type ImportFailure struct {
+	Row   int      `json:"row"`
+	Email string   `json:"email"`
+	Codes []string `json:"codes"`
 }
 
 type ImportResult struct {
-	Imported int `json:"imported"`
+	Imported int             `json:"imported"`
+	Failed   int             `json:"failed"`
+	Failures []ImportFailure `json:"failures"`
 }
 
 type mailboxImportRow struct {
+	row    int
 	email  string
 	secret mailboxCredentialSecret
 	card   mailboxCardSecret
@@ -118,13 +130,26 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	if err != nil {
 		return nil, err
 	}
-	if !preview.Valid {
+	if !preview.Valid && !s.importAllowPartial {
 		for _, issue := range preview.Issues {
 			if issue.Code == "mailbox_import_archived" {
 				return nil, fail(409, "mailbox_import_archived")
 			}
 		}
 		return nil, fail(400, "mailbox_import_invalid")
+	}
+	result = &ImportResult{Failures: preview.Failures, Failed: len(preview.Failures)}
+	if len(rows) == 0 {
+		if preview.Total == 0 {
+			return nil, fail(400, "mailbox_import_invalid")
+		}
+		if err := s.checkMailboxImportActor(actor); err != nil {
+			return nil, err
+		}
+		if err := s.Audit(actor, "import", 0, 0, 200, "mailbox_import_invalid"); err != nil {
+			return nil, fail(500, "mailbox_service_unavailable")
+		}
+		return result, nil
 	}
 	cipher, err := s.Cipher()
 	if err != nil {
@@ -164,11 +189,16 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 				return fail(500, "mailbox_service_unavailable")
 			}
 			if insert.RowsAffected != 1 {
+				code := "mailbox_import_conflict"
 				var existing model.MailboxAccount
 				if err := tx.Select("archived_at").Where("account_type = ? AND email = ?", s.pool(), row.email).First(&existing).Error; err == nil && existing.ArchivedAt != 0 {
-					return fail(409, "mailbox_import_archived")
+					code = "mailbox_import_archived"
 				}
-				return fail(409, "mailbox_import_conflict")
+				if !s.importAllowPartial {
+					return fail(409, code)
+				}
+				result.Failures = append(result.Failures, ImportFailure{Row: row.row, Email: row.email, Codes: []string{code}})
+				continue
 			}
 			encoded, err := json.Marshal(row.secret)
 			if err != nil {
@@ -199,6 +229,7 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 			if row.cvv != "" {
 				pendingCVVs[account.ID] = row.cvv
 			}
+			result.Imported++
 		}
 		if err := service.checkMailboxImportActor(actor); err != nil {
 			return err
@@ -223,7 +254,9 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 			cvvs.putLocked(id, value, now, 0, 0, 0)
 		}
 	}
-	return &ImportResult{Imported: len(rows)}, nil
+	result.Failed = len(result.Failures)
+	sort.Slice(result.Failures, func(i, j int) bool { return result.Failures[i].Row < result.Failures[j].Row })
+	return result, nil
 }
 
 func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPreview, []mailboxImportRow, error) {
@@ -256,6 +289,15 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		for _, code := range notices {
 			preview.Notices = append(preview.Notices, ImportIssue{Row: row, Code: code})
 		}
+		// Failure reports identify only a validated email, never arbitrary input.
+		email := ""
+		if len(cells) > 0 {
+			candidate := strings.ToLower(strings.TrimSpace(cells[0]))
+			if len(candidate) <= 320 && validMailboxText(candidate) && mailboxImportEmail(candidate) {
+				email = candidate
+				preview.Rows = append(preview.Rows, ImportPreviewRow{Row: row, Email: email, AccountType: s.pool()})
+			}
+		}
 		withCVV := columns == 5 && len(cells) == 6
 		if columns == 3 && len(cells) == 2 && mailboxImportEmail(cells[0]) {
 			addIssue(row, "mailbox_import_invalid_otp")
@@ -281,14 +323,10 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			}
 			cvv = cells[5]
 		}
-		email := strings.ToLower(strings.TrimSpace(cells[0]))
-		address, err := mail.ParseAddress(email)
-		if err != nil || !validMailboxText(email) || len(email) > 320 || address.Address != email || address.Name != "" || !strings.Contains(email, "@") {
+		if email == "" {
 			addIssue(row, "mailbox_import_invalid_email")
 			return nil
 		}
-		// Only a validated email is ever included in the preview, even on invalid rows.
-		preview.Rows = append(preview.Rows, ImportPreviewRow{Row: row, Email: email, AccountType: s.pool()})
 		if original, exists := seen[email]; exists {
 			addIssue(row, "mailbox_import_duplicate")
 			if original != 0 {
@@ -321,7 +359,7 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 			}
 			preview.Rows[len(preview.Rows)-1].CardLast4 = card.Number[len(card.Number)-4:]
 		}
-		rows = append(rows, mailboxImportRow{email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card, cvv: cvv})
+		rows = append(rows, mailboxImportRow{row: row, email: email, secret: mailboxCredentialSecret{Password: cells[1], OTP: config}, card: card, cvv: cvv})
 		return nil
 	}
 	if len(data) > mailboxImportMaxBytes {
@@ -387,6 +425,12 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 					return fail(400, "mailbox_import_too_many_rows")
 				}
 				addIssue(row, code)
+				if len(cells) > 0 {
+					email := strings.ToLower(strings.TrimSpace(cells[0]))
+					if len(email) <= 320 && validMailboxText(email) && mailboxImportEmail(email) {
+						preview.Rows = append(preview.Rows, ImportPreviewRow{Row: row, Email: email, AccountType: s.pool()})
+					}
+				}
 				return nil
 			}
 			return consume(row, cells, header)
@@ -423,7 +467,34 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		}
 	}
 	preview.Valid = len(preview.Issues) == 0
-	return preview, rows, nil
+	failed := map[int]*ImportFailure{}
+	for _, issue := range preview.Issues {
+		if failed[issue.Row] == nil {
+			failed[issue.Row] = &ImportFailure{Row: issue.Row, Codes: []string{}}
+		}
+		failure := failed[issue.Row]
+		if !slices.Contains(failure.Codes, issue.Code) {
+			failure.Codes = append(failure.Codes, issue.Code)
+		}
+	}
+	for _, row := range preview.Rows {
+		if failure := failed[row.Row]; failure != nil {
+			failure.Email = row.Email
+		}
+	}
+	preview.Failures = []ImportFailure{}
+	for _, failure := range failed {
+		preview.Failures = append(preview.Failures, *failure)
+	}
+	sort.Slice(preview.Failures, func(i, j int) bool { return preview.Failures[i].Row < preview.Failures[j].Row })
+	validRows := make([]mailboxImportRow, 0, len(rows))
+	for _, row := range rows {
+		if failed[row.row] == nil {
+			validRows = append(validRows, row)
+		}
+	}
+	preview.Ready = len(validRows)
+	return preview, validRows, nil
 }
 
 // encoding/csv validates quoting, but normalizes embedded CRLF. Its field
@@ -577,7 +648,6 @@ func readMailboxXLSXRows(data []byte, consume func(int, []string, bool, string) 
 			}
 			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
 				rowCode = "mailbox_import_card_number_text_required"
-				cells = nil
 			}
 		}
 		if kind == AccountTypeOpening && len(cells) == 6 && !(first && mailboxImportHeader(cells, kind)) {
@@ -588,7 +658,6 @@ func readMailboxXLSXRows(data []byte, consume func(int, []string, bool, string) 
 			}
 			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
 				rowCode = "mailbox_import_cvv_text_required"
-				cells = nil
 			}
 		}
 		if err := consume(row, cells, first, rowCode); err != nil {

@@ -8,6 +8,7 @@ import type {
   Submission,
 } from '../types'
 import { MailboxError } from './errors'
+import { importFailuresMetadata } from './import-report'
 
 function cardLast4(value: unknown): string {
   return typeof value === 'string' && /^\d{4}$/.test(value) ? value : ''
@@ -149,6 +150,8 @@ export function auditMetadata(value: Audit): Audit {
 
 export function importMetadata(value: ImportPreview): ImportPreview {
   return {
+    ready: value.ready,
+    failures: importFailuresMetadata(value.failures),
     total: value.total,
     valid: value.valid,
     rows: value.rows.map((row) => ({

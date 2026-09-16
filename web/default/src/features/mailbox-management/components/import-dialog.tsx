@@ -1,4 +1,4 @@
-import { FileUp } from 'lucide-react'
+import { Download, FileUp } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -12,10 +12,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { mailboxApi } from '../api'
 import { useMailboxMutation } from '../hooks'
 import { safeCode } from '../lib/errors'
+import { importFailureCSV } from '../lib/import-report'
 import type {
   AccountType,
   ImportFormat,
   ImportPreview,
+  ImportResult,
   ImportSource,
 } from '../types'
 import { Field, Modal } from './common'
@@ -30,6 +32,7 @@ export function ImportDialog(props: {
   const [text, setText] = useState('')
   const [file, setFile] = useState<File>()
   const [preview, setPreview] = useState<ImportPreview>()
+  const [result, setResult] = useState<ImportResult>()
   const [ignoreExtraFields, setIgnoreExtraFields] = useState(false)
   const source = useRef<ImportSource | undefined>(undefined)
   const controller = useRef<AbortController | undefined>(undefined)
@@ -52,15 +55,60 @@ export function ImportDialog(props: {
     setFile(undefined)
   })
   const commit = useMailboxMutation(async () => {
-    if (!source.current || !preview?.valid) return
-    const result = await mailboxApi.import(source.current)
+    if (
+      !source.current ||
+      !preview ||
+      result ||
+      (preview.ready ?? (preview.valid ? preview.total : 0)) === 0
+    ) {
+      return
+    }
+    const imported = await mailboxApi.import(source.current)
     source.current = undefined
-    toast.success(t('mailbox.admin.imported', { count: result.imported }))
-  }, props.onClose)
+    setResult(imported)
+    const message = t('mailbox.admin.importSummary', {
+      imported: imported.imported,
+      failed: imported.failed,
+    })
+    if (imported.failed > 0) toast.warning(message)
+    else toast.success(message)
+  })
   const pending = previewMutation.isPending || commit.isPending
+  const ready = preview?.ready ?? (preview?.valid ? preview.total : 0)
+  const failures = result?.failures ?? preview?.failures ?? []
+  const describe = (code: string) =>
+    t(`mailbox.errors.${safeCode(code)}`, {
+      defaultValue: t('mailbox.admin.invalidRow'),
+    })
+  function downloadFailures() {
+    try {
+      const csv = importFailureCSV(
+        failures,
+        [
+          t('mailbox.admin.reportRow'),
+          t('mailbox.admin.reportEmail'),
+          t('mailbox.admin.reportReason'),
+        ],
+        describe
+      )
+      const url = URL.createObjectURL(
+        new Blob([csv], { type: 'text/csv;charset=utf-8' })
+      )
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `mailbox-${props.accountType}-import-failures.csv`
+      document.body.append(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error(t('mailbox.admin.reportDownloadFailed'))
+    }
+  }
   function reset() {
     source.current = undefined
     setPreview(undefined)
+    setResult(undefined)
     setFile(undefined)
     setText('')
   }
@@ -73,6 +121,7 @@ export function ImportDialog(props: {
         file,
         account_type: props.accountType,
         ignore_extra_fields,
+        allow_partial: true,
       })
     } else if (format !== 'xlsx' && text.trim()) {
       previewMutation.submit({
@@ -80,6 +129,7 @@ export function ImportDialog(props: {
         text,
         account_type: props.accountType,
         ignore_extra_fields,
+        allow_partial: true,
       })
     }
   }
@@ -87,31 +137,46 @@ export function ImportDialog(props: {
     <Modal
       title={t('mailbox.admin.importTitle')}
       description={t(`mailbox.admin.pools.${props.accountType}`)}
-      dirty={!!text || !!file || !!preview}
+      dirty={!result && (!!text || !!file || !!preview)}
       pending={pending}
       onClose={props.onClose}
       footer={
-        preview ? (
-          <>
-            <Button variant='outline' disabled={pending} onClick={reset}>
-              {t('mailbox.admin.startOver')}
-            </Button>
+        <>
+          {result && (
+            <>
+              <Button variant='outline' onClick={reset}>
+                {t('mailbox.admin.startOver')}
+              </Button>
+              <Button onClick={props.onClose}>
+                {t('mailbox.admin.importDone')}
+              </Button>
+            </>
+          )}
+          {!result && preview && (
+            <>
+              <Button variant='outline' disabled={pending} onClick={reset}>
+                {t('mailbox.admin.startOver')}
+              </Button>
+              <Button
+                disabled={pending || ready === 0}
+                onClick={() => commit.submit(undefined)}
+              >
+                <FileUp />
+                {t('mailbox.admin.importAtomic', { count: ready })}
+              </Button>
+            </>
+          )}
+          {!result && !preview && (
             <Button
-              disabled={pending || !preview.valid || preview.total === 0}
-              onClick={() => commit.submit(undefined)}
+              disabled={
+                pending || (!file && (!text.trim() || format === 'xlsx'))
+              }
+              onClick={runPreview}
             >
-              <FileUp />
-              {t('mailbox.admin.importAtomic', { count: preview.total })}
+              {t('mailbox.admin.preview')}
             </Button>
-          </>
-        ) : (
-          <Button
-            disabled={pending || (!file && (!text.trim() || format === 'xlsx'))}
-            onClick={runPreview}
-          >
-            {t('mailbox.admin.preview')}
-          </Button>
-        )
+          )}
+        </>
       }
     >
       <div className='mb-4 space-y-2 border-l-2 border-amber-500 pl-3 text-sm'>
@@ -197,34 +262,53 @@ export function ImportDialog(props: {
           <p
             role='status'
             className={
-              preview.valid
+              failures.length === 0
                 ? 'text-emerald-700 dark:text-emerald-400'
-                : 'text-destructive'
+                : 'text-amber-700 dark:text-amber-400'
             }
           >
-            {t(
-              preview.valid
-                ? 'mailbox.admin.previewValid'
-                : 'mailbox.admin.previewInvalid',
-              { count: preview.total }
-            )}
+            {result
+              ? t('mailbox.admin.importSummary', {
+                  imported: result.imported,
+                  failed: result.failed,
+                })
+              : t('mailbox.admin.previewPartial', {
+                  ready,
+                  failed: failures.length,
+                })}
           </p>
-          {preview.issues.length > 0 && (
-            <ul className='space-y-2' aria-label={t('mailbox.admin.issues')}>
-              {preview.issues.map((issue) => (
-                <li
-                  key={`${issue.row}-${issue.code}`}
-                  className='text-destructive text-sm break-words'
-                >
-                  {t('mailbox.admin.row', { row: issue.row })}:{' '}
-                  {t(`mailbox.errors.${safeCode(issue.code)}`, {
-                    defaultValue: t('mailbox.admin.invalidRow'),
-                  })}
-                </li>
-              ))}
-            </ul>
+          {failures.length > 0 && (
+            <>
+              <Button
+                variant='outline'
+                disabled={pending}
+                onClick={downloadFailures}
+              >
+                <Download />
+                {t('mailbox.admin.downloadFailures')}
+              </Button>
+              <p className='text-muted-foreground text-sm'>
+                {t('mailbox.admin.failureReportNotice')}
+              </p>
+              <ul
+                className='max-h-64 space-y-2 overflow-y-auto'
+                aria-label={t('mailbox.admin.issues')}
+              >
+                {failures.map((failure) => (
+                  <li
+                    key={failure.row}
+                    className='text-destructive text-sm break-words'
+                  >
+                    {t('mailbox.admin.row', { row: failure.row })}:{' '}
+                    {failure.email || t('mailbox.admin.unrecognizedEmail')}
+                    {' · '}
+                    {failure.codes.map(describe).join('; ')}
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
-          {!!preview.notices?.length && (
+          {!result && !!preview.notices?.length && (
             <ul className='max-h-48 space-y-2 overflow-y-auto border-l-2 border-amber-500 pl-3'>
               {preview.notices.map((notice) => (
                 <li
@@ -239,19 +323,30 @@ export function ImportDialog(props: {
               ))}
             </ul>
           )}
-          <ol className='divide-y'>
-            {preview.rows.map((row) => (
-              <li key={row.row} className='flex flex-wrap gap-3 py-2 text-sm'>
-                <span className='text-muted-foreground'>{row.row}</span>
-                <span className='min-w-0 break-all'>{row.email}</span>
-                {props.accountType === 'opening' && row.card_last4 && (
-                  <span className='text-muted-foreground'>
-                    {t('mailbox.admin.cardEnding', { last4: row.card_last4 })}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
+          {!result && (
+            <ol className='divide-y'>
+              {preview.rows
+                .filter(
+                  (row) => !failures.some((failure) => failure.row === row.row)
+                )
+                .map((row) => (
+                  <li
+                    key={row.row}
+                    className='flex flex-wrap gap-3 py-2 text-sm'
+                  >
+                    <span className='text-muted-foreground'>{row.row}</span>
+                    <span className='min-w-0 break-all'>{row.email}</span>
+                    {props.accountType === 'opening' && row.card_last4 && (
+                      <span className='text-muted-foreground'>
+                        {t('mailbox.admin.cardEnding', {
+                          last4: row.card_last4,
+                        })}
+                      </span>
+                    )}
+                  </li>
+                ))}
+            </ol>
+          )}
         </div>
       )}
     </Modal>

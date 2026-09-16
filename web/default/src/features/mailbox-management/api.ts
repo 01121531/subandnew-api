@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { MailboxError, safeCode } from './lib/errors'
+import { importFailuresMetadata } from './lib/import-report'
 import { canMailboxWork } from './lib/permissions'
 import {
   accountMetadata,
@@ -31,6 +32,7 @@ import type {
   CredentialKind,
   Envelope,
   ImportPreview,
+  ImportResult,
   ImportSource,
   Issue,
   ResolveIssueInput,
@@ -59,12 +61,14 @@ export function importBody(source: ImportSource):
       text: string
       account_type: AccountType
       ignore_extra_fields?: boolean
+      allow_partial?: boolean
     } {
   if (source.file) {
     const body = new FormData()
     body.append('account_type', source.account_type ?? 'refund')
     body.append('file', source.file)
     if (source.ignore_extra_fields) body.append('ignore_extra_fields', 'true')
+    if (source.allow_partial) body.append('allow_partial', 'true')
     return body
   }
   return {
@@ -72,6 +76,7 @@ export function importBody(source: ImportSource):
     text: source.text,
     account_type: source.account_type ?? 'refund',
     ...(source.ignore_extra_fields ? { ignore_extra_fields: true } : {}),
+    ...(source.allow_partial ? { allow_partial: true } : {}),
   }
 }
 export function unwrap<T>(body: Envelope<T>, status = 0): T {
@@ -233,8 +238,18 @@ export const mailboxApi = {
         signal
       )
     ),
-  import: (source: ImportSource) =>
-    request<{ imported: number }>('/imports', 'POST', importBody(source)),
+  import: async (source: ImportSource): Promise<ImportResult> => {
+    const result = await request<ImportResult>(
+      '/imports',
+      'POST',
+      importBody(source)
+    )
+    return {
+      imported: result.imported,
+      failed: result.failed ?? 0,
+      failures: importFailuresMetadata(result.failures),
+    }
+  },
   assign: (input: AssignInput) =>
     request<unknown>('/assignments', 'POST', {
       ...input,

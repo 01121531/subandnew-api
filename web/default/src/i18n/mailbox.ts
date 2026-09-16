@@ -141,7 +141,7 @@ export const mailboxEn = {
   admin: {
     accountType: 'Account pool',
     ignoreExtraFields:
-      'Ignore extra fields after recognized email, password and 2FA (not saved). Invalid or missing 2FA still blocks import.',
+      'Ignore extra fields after recognized email, password and 2FA (not saved). Rows with invalid or missing 2FA are skipped.',
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
     refundImport:
       'Refund fields: email, password, 2FA. A recovery email before 2FA is also recognized but not saved.',
@@ -230,6 +230,19 @@ export const mailboxEn = {
     importTitle: 'Import mailboxes',
     importAtomic: 'Import {{count}} mailboxes',
     imported: '{{count}} mailboxes imported',
+    importSummary: 'Imported {{imported}}; not imported {{failed}}.',
+    previewPartial:
+      '{{ready}} ready to import; {{failed}} failed rows will be skipped.',
+    importDone: 'Done',
+    downloadFailures: 'Export failed rows',
+    failureReportNotice:
+      'CSV includes source row, recognized email and failure reason only. Credentials are not exported. Use the source file to correct failed rows.',
+    reportRow: 'Source row',
+    reportEmail: 'Email',
+    reportReason: 'Failure reason',
+    reportDownloadFailed:
+      'Could not download the failure report. Please try again.',
+    unrecognizedEmail: 'Email could not be recognized',
     format: 'Format',
     text: 'Text',
     file: 'File',
@@ -554,7 +567,7 @@ export const mailboxZh: typeof mailboxEn = {
   admin: {
     accountType: '账号池',
     ignoreExtraFields:
-      '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；缺少或无效的 2FA 仍阻止导入。',
+      '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；缺少或无效的 2FA 所在行不会导入。',
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
     refundImport:
       '退款字段为邮箱、密码、2FA；也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
@@ -640,6 +653,17 @@ export const mailboxZh: typeof mailboxEn = {
     importTitle: '导入邮箱',
     importAtomic: '导入 {{count}} 个邮箱',
     imported: '已导入 {{count}} 个邮箱',
+    importSummary: '成功导入 {{imported}} 个，未导入 {{failed}} 个。',
+    previewPartial: '{{ready}} 条可导入，{{failed}} 条失败记录将跳过。',
+    importDone: '完成',
+    downloadFailures: '导出失败清单',
+    failureReportNotice:
+      'CSV 仅包含原始行号、可识别的邮箱和失败原因，不导出凭据。请对照原文件修正失败行。',
+    reportRow: '原始行号',
+    reportEmail: '邮箱',
+    reportReason: '失败原因',
+    reportDownloadFailed: '失败清单下载失败，请重试。',
+    unrecognizedEmail: '无法识别邮箱',
     format: '格式',
     text: '文本',
     file: '文件',
