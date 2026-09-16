@@ -203,6 +203,14 @@ func AssignMailboxAccounts(c *gin.Context) {
 	mailboxSuccess(c, gin.H{})
 }
 func ListMailboxOperators(c *gin.Context) {
+	if value := c.Query("include_stats"); len(c.QueryArray("include_stats")) > 1 || (value != "" && value != "false" && value != "true") {
+		mailboxBadRequest(c, "mailbox_invalid_work_query")
+		return
+	}
+	if c.Query("include_stats") == "true" {
+		listMailboxOperatorsWithStats(c)
+		return
+	}
 	q, ok := mailboxListQuery(c)
 	if !ok {
 		return

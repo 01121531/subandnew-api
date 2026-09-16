@@ -49,27 +49,27 @@ type MailboxLoginAttempt struct {
 }
 
 type MailboxAssignment struct {
-	ID         int64  `json:"id" gorm:"primaryKey"`
-	AccountID  int64  `json:"account_id" gorm:"not null;index"`
-	OperatorID int64  `json:"operator_id" gorm:"not null;index"`
+	ID         int64  `json:"id" gorm:"primaryKey;index:idx_mailbox_assignments_operator_account_id,priority:3"`
+	AccountID  int64  `json:"account_id" gorm:"not null;index;index:idx_mailbox_assignments_operator_account_id,priority:2;index:idx_mailbox_assignments_operator_created_account,priority:3"`
+	OperatorID int64  `json:"operator_id" gorm:"not null;index;index:idx_mailbox_assignments_operator_account_id,priority:1;index:idx_mailbox_assignments_operator_created_account,priority:1"`
 	Status     string `json:"status" gorm:"size:24;not null;index"`
 	Version    int64  `json:"version" gorm:"not null;default:1"`
 	AssignedBy int    `json:"assigned_by"`
 	RevokedAt  int64  `json:"revoked_at" gorm:"not null;default:0"`
-	CreatedAt  int64  `json:"created_at"`
+	CreatedAt  int64  `json:"created_at" gorm:"index:idx_mailbox_assignments_operator_created_account,priority:2"`
 	UpdatedAt  int64  `json:"updated_at"`
 }
 
 type MailboxSubmission struct {
 	ID           int64  `json:"id" gorm:"primaryKey"`
-	AssignmentID int64  `json:"assignment_id" gorm:"not null;index"`
-	OperatorID   int64  `json:"operator_id" gorm:"not null;index"`
+	AssignmentID int64  `json:"assignment_id" gorm:"not null;index;index:idx_mailbox_submissions_operator_created_assignment,priority:3;index:idx_mailbox_submissions_assignment_operator_created,priority:1"`
+	OperatorID   int64  `json:"operator_id" gorm:"not null;index;index:idx_mailbox_submissions_operator_created_assignment,priority:1;index:idx_mailbox_submissions_assignment_operator_created,priority:2"`
 	Status       string `json:"status" gorm:"size:24;not null;index"`
 	Version      int64  `json:"version" gorm:"not null;default:1"`
 	ReviewReason string `json:"review_reason" gorm:"size:2000"`
 	ReviewedBy   int    `json:"reviewed_by"`
 	ReviewedAt   int64  `json:"reviewed_at"`
-	CreatedAt    int64  `json:"created_at" gorm:"index"`
+	CreatedAt    int64  `json:"created_at" gorm:"index;index:idx_mailbox_submissions_operator_created_assignment,priority:2;index:idx_mailbox_submissions_assignment_operator_created,priority:3"`
 }
 
 type MailboxAttachment struct {
@@ -90,20 +90,20 @@ type MailboxAttachment struct {
 
 type MailboxIssue struct {
 	ID               int64  `gorm:"primaryKey"`
-	AccountID        int64  `gorm:"not null;index"`
-	AssignmentID     int64  `gorm:"not null;index"`
-	OperatorID       int64  `gorm:"not null;index"`
+	AccountID        int64  `gorm:"not null;index;index:idx_mailbox_issues_operator_created_account,priority:3;index:idx_mailbox_issues_operator_account_created,priority:2"`
+	AssignmentID     int64  `gorm:"not null;index;index:idx_mailbox_issues_assignment_operator_status,priority:1"`
+	OperatorID       int64  `gorm:"not null;index;index:idx_mailbox_issues_operator_created_account,priority:1;index:idx_mailbox_issues_operator_account_created,priority:1;index:idx_mailbox_issues_assignment_operator_status,priority:2"`
 	OpenAssignmentID *int64 `gorm:"uniqueIndex"`
 	SubmittedVersion int64  `gorm:"not null;default:0"`
 	Kind             string `gorm:"size:32;not null"`
 	Description      string `gorm:"size:2000;not null"`
-	Status           string `gorm:"size:24;not null;index"`
+	Status           string `gorm:"size:24;not null;index;index:idx_mailbox_issues_assignment_operator_status,priority:3"`
 	Version          int64  `gorm:"not null;default:1"`
 	Resolution       string `gorm:"size:16"`
 	Reply            string `gorm:"size:2000"`
 	ResolvedBy       int    `gorm:"not null;default:0"`
 	ResolvedAt       int64  `gorm:"not null;default:0"`
-	CreatedAt        int64  `gorm:"not null;index"`
+	CreatedAt        int64  `gorm:"not null;index;index:idx_mailbox_issues_operator_created_account,priority:2;index:idx_mailbox_issues_operator_account_created,priority:3"`
 }
 
 type MailboxAudit struct {

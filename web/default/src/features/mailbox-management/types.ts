@@ -50,6 +50,103 @@ export interface Operator {
   created_at: number
   updated_at: number
   generated_password?: string
+  work_summary?: WorkSummary
+}
+export type WorkPeriod =
+  | 'all'
+  | 'today'
+  | 'last_7_days'
+  | 'last_30_days'
+  | 'custom'
+export interface WorkRangeQuery {
+  period?: WorkPeriod
+  start_date?: string
+  end_date?: string
+}
+export interface OperatorsQuery extends ListQuery, WorkRangeQuery {
+  include_stats?: boolean
+}
+export interface WorkRange {
+  period: WorkPeriod
+  start_at: number
+  end_at: number
+  timezone: 'Asia/Shanghai'
+}
+export interface WorkSummary {
+  submitted_accounts: number
+  refund_submitted: number
+  opening_submitted: number
+  submission_count: number
+  issue_accounts: number
+  current: {
+    pending: number
+    submitted: number
+    approved: number
+    rejected: number
+    issue_pending: number
+  }
+}
+export type WorkScope =
+  | 'assigned'
+  | 'submitted'
+  | 'issues'
+  | 'current_pending'
+  | 'current_submitted'
+  | 'current_approved'
+  | 'current_rejected'
+  | 'current_issue_pending'
+export interface WorkAccountsQuery extends WorkRangeQuery {
+  account_type?: AccountType | 'all'
+  scope?: WorkScope
+  search?: string
+  page?: number
+  page_size?: number
+}
+export interface WorkHistoryQuery {
+  account_type: AccountType
+  assignment_page?: number
+  submission_page?: number
+  issue_page?: number
+  page_size?: number
+}
+export interface WorkAccount {
+  id: number
+  email: string
+  account_type: AccountType
+  card_last4: string
+  archived_at: number
+  assignment_id: number
+  assignment_version: number
+  status: MailboxStatus
+  assignment_active: boolean
+  assigned_at: number
+  revoked_at: number
+  submission_count: number
+  last_submitted_at: number
+  last_issue_at: number
+}
+export interface WorkAssignment {
+  id: number
+  account_id: number
+  operator_id: number
+  status: MailboxStatus
+  version: number
+  assigned_by: number
+  created_at: number
+  updated_at: number
+  revoked_at: number
+  assignment_active: boolean
+}
+export interface OperatorWorkSummary {
+  operator: Operator
+  summary: WorkSummary
+  range: WorkRange
+}
+export interface WorkHistory {
+  account: WorkAccount
+  assignments: Page<WorkAssignment>
+  submissions: Page<Submission>
+  issues: Page<Issue>
 }
 export interface OperatorInput {
   username: string

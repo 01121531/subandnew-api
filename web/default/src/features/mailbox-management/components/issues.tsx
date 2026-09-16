@@ -185,7 +185,7 @@ function PoolIssues(props: { accountType: AccountType }) {
   )
 }
 
-function IssueDialog(props: {
+export function IssueDialog(props: {
   id: number
   accountType: AccountType
   onClose: () => void

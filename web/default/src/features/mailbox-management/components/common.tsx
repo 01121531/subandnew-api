@@ -315,6 +315,7 @@ export function SearchBar(props: {
 export function Status(props: {
   value: MailboxStatus | 'pending'
   review?: boolean
+  labelKey?: string
 }) {
   const { t } = useTranslation()
   const colors: Record<string, string> = {
@@ -328,16 +329,17 @@ export function Status(props: {
   }
   return (
     <Badge variant='outline' className={colors[props.value]}>
-      {t(statusLabelKey(props.value, props.review))}
+      {t(props.labelKey ?? statusLabelKey(props.value, props.review))}
     </Badge>
   )
 }
-export function Time(props: { value?: number }) {
+export function Time(props: { value?: number; timeZone?: string }) {
   const { i18n } = useTranslation()
   return props.value ? (
     <time dateTime={new Date(props.value * 1000).toISOString()}>
       {new Date(props.value * 1000).toLocaleString(
-        i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US'
+        i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US',
+        { timeZone: props.timeZone }
       )}
     </time>
   ) : (

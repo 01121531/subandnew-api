@@ -1,8 +1,11 @@
 import { isAxiosError } from 'axios'
 
+import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { MailboxError, safeCode } from './lib/errors'
+import { canMailboxWork } from './lib/permissions'
 import {
   accountMetadata,
   auditMetadata,
@@ -11,6 +14,13 @@ import {
   pageMetadata,
   submissionMetadata,
 } from './lib/pools'
+import {
+  workAccountMetadata,
+  workAssignmentMetadata,
+  workOperatorMetadata,
+  workRangeParams,
+  workSummaryMetadata,
+} from './lib/work'
 import type {
   Account,
   AccountType,
@@ -32,6 +42,13 @@ import type {
   ReviewInput,
   Submission,
   VersionedID,
+  OperatorsQuery,
+  OperatorWorkSummary,
+  WorkAccount,
+  WorkAccountsQuery,
+  WorkHistory,
+  WorkHistoryQuery,
+  WorkRangeQuery,
 } from './types'
 
 const base = '/api/mailbox-management'
@@ -60,7 +77,12 @@ async function request<T>(
   path: string,
   method = 'GET',
   data?: unknown,
-  params?: Partial<ListQuery>,
+  params?:
+    | Partial<ListQuery>
+    | OperatorsQuery
+    | WorkRangeQuery
+    | WorkAccountsQuery
+    | WorkHistoryQuery,
   signal?: AbortSignal
 ): Promise<T> {
   try {
@@ -84,6 +106,31 @@ async function request<T>(
     }
     throw error
   }
+}
+async function workRequest<T>(
+  path: string,
+  params:
+    | OperatorsQuery
+    | WorkRangeQuery
+    | WorkAccountsQuery
+    | WorkHistoryQuery,
+  signal?: AbortSignal
+): Promise<T> {
+  const user = useAuthStore.getState().auth.user
+  if (!canMailboxWork(user)) {
+    throw new MailboxError('mailbox_permission_denied', 403)
+  }
+  const authorization = adminDataAuthorizationKey(user)
+  const result = await request<T>(path, 'GET', undefined, params, signal)
+  const current = useAuthStore.getState().auth.user
+  // An in-flight response must not survive a principal or grant change.
+  if (
+    !canMailboxWork(current) ||
+    authorization !== adminDataAuthorizationKey(current)
+  ) {
+    throw new MailboxError('mailbox_permission_denied', 403)
+  }
+  return result
 }
 export const mailboxApi = {
   issueOperators: (signal?: AbortSignal) =>
@@ -204,8 +251,104 @@ export const mailboxApi = {
       { account_type: accountType },
       signal
     ),
-  operators: (query: ListQuery, signal?: AbortSignal) =>
-    request<Page<Operator>>('/operators', 'GET', undefined, query, signal),
+  operators: async (query: OperatorsQuery, signal?: AbortSignal) => {
+    if (!query.include_stats) {
+      return request<Page<Operator>>(
+        '/operators',
+        'GET',
+        undefined,
+        query,
+        signal
+      )
+    }
+    return pageMetadata(
+      await workRequest<Page<Operator>>('/operators', query, signal),
+      workOperatorMetadata
+    )
+  },
+  workSummary: async (
+    id: number,
+    query: WorkRangeQuery,
+    signal?: AbortSignal
+  ): Promise<OperatorWorkSummary> => {
+    const result = await workRequest<OperatorWorkSummary>(
+      `/operators/${id}/work-summary`,
+      workRangeParams(query),
+      signal
+    )
+    if (result.operator.id !== id) {
+      throw new MailboxError('mailbox_not_found', 404)
+    }
+    return {
+      operator: workOperatorMetadata(result.operator),
+      summary: workSummaryMetadata(result.summary),
+      range: {
+        period: result.range.period,
+        start_at: result.range.start_at,
+        end_at: result.range.end_at,
+        timezone: result.range.timezone,
+      },
+    }
+  },
+  workAccounts: async (
+    id: number,
+    query: WorkAccountsQuery,
+    signal?: AbortSignal
+  ) =>
+    pageMetadata(
+      await workRequest<Page<WorkAccount>>(
+        `/operators/${id}/work-accounts`,
+        {
+          ...workRangeParams(query),
+          account_type: query.account_type ?? 'all',
+          scope: query.scope ?? 'submitted',
+          search: query.search,
+          page: query.page ?? 1,
+          page_size: query.page_size ?? 20,
+        },
+        signal
+      ),
+      workAccountMetadata
+    ),
+  workHistory: async (
+    id: number,
+    accountID: number,
+    query: WorkHistoryQuery,
+    signal?: AbortSignal
+  ): Promise<WorkHistory> => {
+    const result = await workRequest<WorkHistory>(
+      `/operators/${id}/work-accounts/${accountID}/history`,
+      {
+        account_type: query.account_type,
+        assignment_page: query.assignment_page ?? 1,
+        submission_page: query.submission_page ?? 1,
+        issue_page: query.issue_page ?? 1,
+        page_size: query.page_size ?? 20,
+      },
+      signal
+    )
+    if (
+      result.account.id !== accountID ||
+      result.account.account_type !== query.account_type ||
+      [
+        ...result.assignments.items,
+        ...result.submissions.items,
+        ...result.issues.items,
+      ].some((item) => item.operator_id !== id || item.account_id !== accountID)
+    ) {
+      throw new MailboxError('mailbox_not_found', 404)
+    }
+    return {
+      account: workAccountMetadata(result.account),
+      assignments: pageMetadata(result.assignments, workAssignmentMetadata),
+      submissions: pageMetadata(result.submissions, (item) =>
+        submissionMetadata(item, query.account_type)
+      ),
+      issues: pageMetadata(result.issues, (item) =>
+        issueMetadata(item, query.account_type)
+      ),
+    }
+  },
   operatorOptions: (signal?: AbortSignal) =>
     request<OperatorOption[]>(
       '/operator-options',

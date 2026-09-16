@@ -23,14 +23,15 @@ type OperatorInput struct {
 }
 
 type OperatorView struct {
-	ID                int64  `json:"id"`
-	Username          string `json:"username"`
-	DisplayName       string `json:"display_name"`
-	Enabled           bool   `json:"enabled"`
-	Version           int64  `json:"version"`
-	CreatedAt         int64  `json:"created_at"`
-	UpdatedAt         int64  `json:"updated_at"`
-	GeneratedPassword string `json:"generated_password,omitempty"`
+	WorkSummary       *WorkSummary `json:"work_summary,omitempty"`
+	ID                int64        `json:"id"`
+	Username          string       `json:"username"`
+	DisplayName       string       `json:"display_name"`
+	Enabled           bool         `json:"enabled"`
+	Version           int64        `json:"version"`
+	CreatedAt         int64        `json:"created_at"`
+	UpdatedAt         int64        `json:"updated_at"`
+	GeneratedPassword string       `json:"generated_password,omitempty"`
 }
 
 var operatorUsernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9@._+\-]{2,95}$`)

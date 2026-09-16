@@ -1,4 +1,5 @@
 import { hasPermission } from '@/lib/admin-permissions'
+import { ROLE } from '@/lib/roles'
 import type { AuthUser } from '@/stores/auth-store'
 
 export const mailboxActions = [
@@ -19,6 +20,15 @@ export function canMailbox(
 }
 export function canAccessMailbox(user: AuthUser | null | undefined): boolean {
   return mailboxActions.some((action) => canMailbox(user, action))
+}
+export function canMailboxWork(user: AuthUser | null | undefined): boolean {
+  return (
+    !!user &&
+    (user.role === ROLE.ADMIN || user.role === ROLE.SUPER_ADMIN) &&
+    canMailbox(user, 'operators') &&
+    canMailbox(user, 'view') &&
+    canMailbox(user, 'review')
+  )
 }
 export function mailboxTabs(user: AuthUser | null | undefined): string[] {
   const tabs: string[] = []
