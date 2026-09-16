@@ -11,7 +11,7 @@ import { mailboxApi } from '../api'
 import type { AccountType } from '../types'
 import { AccountDetail } from './account-detail'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
-import { MaskedCard } from './masked-card'
+import { Credentials } from './credentials'
 
 export function Accounts(props: {
   accountType: AccountType
@@ -139,9 +139,6 @@ export function Accounts(props: {
                 >
                   {account.email}
                 </button>
-                {props.accountType === 'opening' && (
-                  <MaskedCard last4={account.card_last4} />
-                )}
               </div>
               <div>
                 <Status status={account.status} />
@@ -160,6 +157,9 @@ export function Accounts(props: {
               >
                 <ArrowRight />
               </Button>
+              <div className='col-span-full min-w-0'>
+                <Credentials account={account} csrf={props.csrf} />
+              </div>
             </article>
           ))}
         </div>

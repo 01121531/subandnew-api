@@ -1,4 +1,7 @@
 export const mailboxPortalEn = {
+  email: 'Email',
+  copyFailed:
+    'Copy failed. Check your connection and clipboard permission, then retry.',
   downloadAssistant: 'Download Windows assistant',
   downloadAssistantHint:
     'Windows 10/11 x64 · ZIP containing the EXE and runtime files',
@@ -117,6 +120,8 @@ export const mailboxPortalEn = {
 }
 
 export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
+  email: '邮箱',
+  copyFailed: '复制失败，请检查网络和剪贴板权限后重试。',
   downloadAssistant: '下载 Windows 助手',
   downloadAssistantHint: 'Windows 10/11 x64 · ZIP 内含 EXE 和运行依赖',
   issues: '我的反馈',

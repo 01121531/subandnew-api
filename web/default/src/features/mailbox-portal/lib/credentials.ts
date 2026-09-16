@@ -6,10 +6,6 @@ import {
 import type { Account, Credential, CredentialKind } from '../types'
 import { assertCurrentAssignment, canReadCredentials } from './guards'
 
-export function revealRemaining(startedAt: number, now: number): number {
-  return Math.max(0, 60_000 - Math.max(0, now - startedAt))
-}
-
 export function credentialScope(account: Account): string {
   return [
     account.id,
