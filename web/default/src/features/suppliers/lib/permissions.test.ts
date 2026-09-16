@@ -53,9 +53,9 @@ describe('supplier policy', () => {
     expect(result.view_accounts).toBe(false)
     expect(result.view_usage).toBe(false)
   })
-  test('all 21 keys have unique bilingual labels', () => {
+  test('all 25 keys have unique bilingual labels', () => {
     const keys = policyGroups.flatMap((group) => [...group.keys])
-    expect(new Set(keys).size).toBe(21)
+    expect(new Set(keys).size).toBe(25)
     for (const field of keys) {
       const label =
         `policyField_${field.replaceAll('.', '_')}` as keyof typeof supplierZh

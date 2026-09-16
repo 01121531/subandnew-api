@@ -35,6 +35,10 @@ export const policyGroups = [
       'account.today_cost',
       'account.total_requests',
       'account.total_tokens',
+      'account.rpm',
+      'account.tpm',
+      'account.concurrent',
+      'account.active_sessions',
     ],
   },
   {

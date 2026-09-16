@@ -63,3 +63,16 @@ func TestSupplierOwnerBackfillFreshSetupAndMissingRoot(t *testing.T) {
 	require.NoError(t, f.db.Create(&model.Supplier{Name: "legacy", Username: "legacy", PasswordHash: "hash", Enabled: true}).Error)
 	require.Error(t, BackfillLegacyOwners(f.db))
 }
+
+func TestSupplierRuntimeMetricsRespectResponsibleAdmin(t *testing.T) {
+	for _, field := range []string{"rpm", "tokens", "concurrency"} {
+		a := &authz.DataAccess{Role: common.RoleAdminUser, Policy: model.EmptyAdminDataPolicy()}
+		a.Policy.Fields[field] = true
+		policy := &model.SupplierEffectivePolicy{Values: map[string]bool{"account.rpm": true, "account.tpm": true, "account.concurrent": true, "account.active_sessions": true}, Sources: map[string]string{}}
+		intersectPolicy(policy, a)
+		require.Equal(t, field == "rpm", policy.Values["account.rpm"])
+		require.Equal(t, field == "tokens", policy.Values["account.tpm"])
+		require.Equal(t, field == "concurrency", policy.Values["account.concurrent"])
+		require.Equal(t, field == "concurrency", policy.Values["account.active_sessions"])
+	}
+}

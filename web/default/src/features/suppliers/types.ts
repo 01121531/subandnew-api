@@ -131,6 +131,20 @@ export interface Account {
   name: string
   email: string
   status: string
+  health_status?: string | null
+  failure_kind?: string | null
+  last_error?: string | null
+  cooldown?: boolean | null
+  cooldown_reason?: string | null
+  cooldown_remaining_seconds?: number | null
+  rpm?: number | null
+  tpm?: number | null
+  concurrent?: number | null
+  active_sessions?: number | null
+  max_rpm?: number | null
+  max_tpm?: number | null
+  max_concurrent?: number | null
+  max_sessions?: number | null
   created_at: Timestamp
   group_name: string
   total_cost: number | null

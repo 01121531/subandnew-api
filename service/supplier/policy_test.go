@@ -145,11 +145,19 @@ func TestSupplierPolicyReadRedactsCacheFallbackAndInFlight(t *testing.T) {
 	b := f.binding(t, owner.ID, f.instance(t, 1).Id)
 	remote := &policyRemote{coreRemote: f.r, data: map[string]any{"items": []any{map[string]any{"id": "id", "name": "visible", "email": "hidden@example.test", "total_cost": 123, "today_cost": nil, "status": "active"}}, "total": 40}}
 	f.s.RemoteFactory = func(*model.ManagedInstance, string, string, string, string) (Remote, error) { return remote, nil }
+	for _, field := range accountDiagnosticFields {
+		remote.data["items"].([]any)[0].(map[string]any)[field] = "private diagnostic"
+	}
 	overrides := model.SupplierPolicy{"account.email": boolPtr(false), "account.total_cost": boolPtr(false), "summary.total_accounts": boolPtr(false), "account.status": boolPtr(false)}
+	for field, limit := range map[string]string{"rpm": "max_rpm", "tpm": "max_tpm", "concurrent": "max_concurrent", "active_sessions": "max_sessions"} {
+		overrides["account."+field] = boolPtr(false)
+		row := remote.data["items"].([]any)[0].(map[string]any)
+		row[field], row[limit] = 12, 100
+	}
 	_, err := f.s.SaveBinding(context.Background(), owner.ID, b.ID, BindingInput{PolicyOverrides: &overrides})
 	require.NoError(t, err)
 	p, _ := f.login(t, "vendor")
-	for _, q := range []url.Values{{"search": {"hidden"}}, {"sort": {"total_cost"}}, {"status": {"active"}}, {"recovery_window": {"1h"}}} {
+	for _, q := range []url.Values{{"search": {"hidden"}}, {"sort": {"total_cost"}}, {"sort": {"rpm"}}, {"status": {"active"}}, {"recovery_window": {"1h"}}} {
 		_, err = f.s.Read(context.Background(), p, b.ID, "accounts", q, false)
 		requireCoreError(t, err, 403, "supplier_field_forbidden")
 	}
@@ -168,6 +176,12 @@ func TestSupplierPolicyReadRedactsCacheFallbackAndInFlight(t *testing.T) {
 		require.NotContains(t, row, "email")
 		require.NotContains(t, row, "total_cost")
 		require.NotContains(t, row, "status")
+		for _, field := range []string{"rpm", "max_rpm", "tpm", "max_tpm", "concurrent", "max_concurrent", "active_sessions", "max_sessions"} {
+			require.NotContains(t, row, field)
+		}
+		for _, field := range accountDiagnosticFields {
+			require.NotContains(t, row, field)
+		}
 		require.Contains(t, row, "today_cost")
 		require.Nil(t, row["today_cost"])
 		require.NotContains(t, result, "total")
@@ -230,5 +244,35 @@ func TestSupplierPolicyRedactsEveryDataKey(t *testing.T) {
 				require.NotContains(t, result, field)
 			}
 		})
+	}
+}
+
+func TestSupplierRuntimePermissionsAndOldDefaultClient(t *testing.T) {
+	f := newCoreFixture(t)
+	defaults, err := f.s.DefaultPolicy()
+	require.NoError(t, err)
+	defaults.Policy["account.active_sessions"] = boolPtr(false)
+	defaults, _, err = f.s.SaveDefaultPolicy(defaults.Policy, defaults.Revision)
+	require.NoError(t, err)
+	legacy := model.SupplierPolicy{}
+	for key, value := range defaults.Policy {
+		if _, added := model.SupplierRuntimePolicyParents[key]; !added {
+			legacy[key] = value
+		}
+	}
+	updated, _, err := f.s.SaveDefaultPolicy(legacy, defaults.Revision)
+	require.NoError(t, err)
+	require.False(t, *updated.Policy["account.active_sessions"])
+	require.True(t, *updated.Policy["account.rpm"])
+	_, _, err = f.s.SaveDefaultPolicy(nil, updated.Revision)
+	requireCoreError(t, err, 400, "supplier_invalid_policy")
+	for field, limit := range map[string]string{"rpm": "max_rpm", "tpm": "max_tpm", "concurrent": "max_concurrent", "active_sessions": "max_sessions"} {
+		policy := model.ResolveSupplierPolicy(updated, model.Supplier{PolicyOverrides: model.SupplierPolicy{"account." + field: boolPtr(false)}}, nil)
+		row := map[string]any{field: 12, limit: 100, "name": "visible"}
+		result := map[string]any{"items": []any{row}}
+		redactPolicy(result, "accounts", policy, nil)
+		require.NotContains(t, row, field)
+		require.NotContains(t, row, limit)
+		require.Equal(t, "visible", row["name"])
 	}
 }

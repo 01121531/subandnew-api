@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/01121531/subandnew-api/service/managedaccount"
 )
 
 var remoteIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -255,7 +257,9 @@ func (r *remoteClient) Read(ctx context.Context, resource string, query url.Valu
 			if resource == "proxies" {
 				items = append(items, remoteProxy(item, s.identity.ID))
 			} else {
+				r.redact(s, item)
 				n := remoteFields(item, "id name email status created_at group_name", "total_cost today_cost total_requests total_tokens")
+				remoteAccountDiagnostics(item, n)
 				if n["today_cost"] == nil {
 					if stats, ok := item["stats"].(map[string]any); ok {
 						n["today_cost"] = remoteNumber(stats["daily_cost"])
@@ -338,6 +342,61 @@ func (r *remoteClient) Read(ctx context.Context, resource string, query url.Valu
 	}
 	r.redact(s, result)
 	return result, nil
+}
+
+// Account diagnostics are whitelisted and share the account.status permission.
+var accountDiagnosticFields = []string{"health_status", "failure_kind", "last_error", "cooldown", "cooldown_reason", "cooldown_remaining_seconds"}
+
+func remoteAccountDiagnostics(item, out map[string]any) {
+	for _, key := range []string{"health_status", "failure_kind", "last_error"} {
+		out[key] = remoteDiagnosticText(item[key])
+	}
+	stats, _ := item["stats"].(map[string]any)
+	for _, key := range []string{"rpm", "tpm", "concurrent", "active_sessions"} {
+		out[key] = remoteNonnegativeInteger(stats[key])
+	}
+	for _, key := range []string{"max_rpm", "max_tpm", "max_concurrent", "max_sessions"} {
+		out[key] = remoteNonnegativeInteger(item[key])
+	}
+	out["cooldown"] = nil
+	if cooldown, ok := stats["cooldown"].(bool); ok {
+		out["cooldown"] = cooldown
+	}
+	out["cooldown_reason"] = remoteDiagnosticText(stats["cooldown_reason"])
+	out["cooldown_remaining_seconds"] = nil
+	if seconds, ok := remoteNumber(stats["cooldown_remaining_seconds"]).(float64); ok && seconds >= 0 && math.Trunc(seconds) == seconds {
+		out["cooldown_remaining_seconds"] = seconds
+	}
+}
+
+func remoteNonnegativeInteger(value any) any {
+	if number, ok := remoteNumber(value).(float64); ok && number >= 0 && number <= 9007199254740991 && math.Trunc(number) == number {
+		return number
+	}
+	return nil
+}
+
+func remoteDiagnosticText(value any) any {
+	text, ok := value.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	// Extract only a message from structured errors, never the entire response.
+	var structured any
+	if json.Unmarshal([]byte(text), &structured) == nil {
+		object, ok := structured.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if nested, ok := object["error"].(map[string]any); ok {
+			object = nested
+		}
+		text, ok = object["message"].(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return nil
+		}
+	}
+	return managedaccount.SanitizeSensitiveText(text)
 }
 
 func remoteProxy(m map[string]any, identityID string) map[string]any {

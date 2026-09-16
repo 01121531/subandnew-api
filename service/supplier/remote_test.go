@@ -236,7 +236,7 @@ func TestRemoteAccountResponseWrappersAndNulls(t *testing.T) {
 			require.NoError(t, err)
 			items := result["items"].([]map[string]any)
 			require.Len(t, items, 1)
-			require.Len(t, items[0], 10)
+			require.Len(t, items[0], 24)
 			require.Equal(t, "9007199254740993", items[0]["id"])
 			require.Equal(t, 1.25, items[0]["total_cost"])
 			require.Equal(t, 2.5, items[0]["today_cost"])

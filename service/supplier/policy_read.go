@@ -39,9 +39,6 @@ func validatePolicyQuery(policy *model.SupplierEffectivePolicy, resource string,
 		return nil
 	}
 	key := "account." + sort
-	if sort == "rpm" {
-		key = "summary.rpm"
-	}
 	if !values[key] {
 		return fail(403, "supplier_field_forbidden")
 	}
@@ -67,6 +64,16 @@ func redactPolicy(result map[string]any, resource string, policy *model.Supplier
 		for _, item := range items {
 			if row, ok := item.(map[string]any); ok {
 				remove(row, "account.")
+				for field, limit := range map[string]string{"rpm": "max_rpm", "tpm": "max_tpm", "concurrent": "max_concurrent", "active_sessions": "max_sessions"} {
+					if !policy.Values["account."+field] {
+						delete(row, limit)
+					}
+				}
+				if !policy.Values["account.status"] {
+					for _, key := range accountDiagnosticFields {
+						delete(row, key)
+					}
+				}
 			}
 		}
 		page, _ := strconv.Atoi(q.Get("page"))

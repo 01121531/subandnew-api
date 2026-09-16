@@ -20,6 +20,8 @@ import { useSupplierPolicy } from '../lib/permissions'
 import { portalApi } from '../portal-api'
 import type { AccountQuery } from '../types'
 import { AccountCards } from './account-cards'
+import { AccountRuntime } from './account-runtime'
+import { AccountStatus } from './account-status'
 import {
   Empty,
   Field,
@@ -47,6 +49,9 @@ const accountFields = {
 export function Accounts(props: { bindingId: number }) {
   const { t } = useTranslation()
   const allowed = useSupplierPolicy()
+  const showRuntime = ['rpm', 'tpm', 'concurrent', 'active_sessions'].some(
+    (field) => allowed(`account.${field}`)
+  )
   const defaultSort = allowed('account.created_at') ? 'created_at' : 'name'
   const [searchDraft, setSearchDraft] = useState('')
   const [filters, setFilters] = useState<AccountQuery>({
@@ -350,6 +355,7 @@ export function Accounts(props: { bindingId: number }) {
                       'name',
                       'email',
                       'status',
+                      'accountRuntime',
                       'group',
                       'todayCost',
                       'totalCost',
@@ -357,14 +363,15 @@ export function Accounts(props: { bindingId: number }) {
                       'tokens',
                       'createdAt',
                     ]
-                      .filter(
-                        (key) =>
-                          key === 'name' ||
-                          allowed(
-                            `account.${
-                              accountFields[key as keyof typeof accountFields]
-                            }`
-                          )
+                      .filter((key) =>
+                        key === 'accountRuntime'
+                          ? showRuntime
+                          : key === 'name' ||
+                            allowed(
+                              `account.${
+                                accountFields[key as keyof typeof accountFields]
+                              }`
+                            )
                       )
                       .map((key) => (
                         <TableHead
@@ -407,12 +414,15 @@ export function Accounts(props: { bindingId: number }) {
                         </TableCell>
                       </Visible>
                       <Visible field='account.status'>
-                        <TableCell className='max-w-40 min-w-20 break-all whitespace-normal'>
-                          {t(`supplier.${account.status}`, {
-                            defaultValue: account.status ?? '--',
-                          })}
+                        <TableCell className='max-w-80 min-w-56 whitespace-normal'>
+                          <AccountStatus account={account} />
                         </TableCell>
                       </Visible>
+                      {showRuntime && (
+                        <TableCell className='min-w-48 whitespace-normal'>
+                          <AccountRuntime account={account} />
+                        </TableCell>
+                      )}
                       <Visible field='account.group_name'>
                         <TableCell className='max-w-48 min-w-32 break-all whitespace-normal'>
                           {account.group_name || '--'}

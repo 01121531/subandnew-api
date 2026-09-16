@@ -12,9 +12,28 @@ var SupplierPolicyKeys = []string{
 	"view_accounts", "view_usage", "manage_proxies", "upload_accounts",
 	"account.email", "account.group_name", "account.status", "account.created_at",
 	"account.total_cost", "account.today_cost", "account.total_requests", "account.total_tokens",
+	"account.rpm", "account.tpm", "account.concurrent", "account.active_sessions",
 	"summary.total_accounts", "summary.available_accounts", "summary.rpm",
 	"summary.pool_rpm", "summary.pool_concurrent", "summary.pool_available_accounts",
 	"usage.cost", "usage.requests", "usage.tokens",
+}
+
+// Preserve existing metric-family restrictions when introducing per-account data.
+var SupplierRuntimePolicyParents = map[string]string{
+	"account.rpm": "summary.rpm", "account.tpm": "account.total_tokens",
+	"account.concurrent": "summary.pool_concurrent", "account.active_sessions": "summary.pool_concurrent",
+}
+
+func extendSupplierRuntimePolicy(policy SupplierPolicy) bool {
+	changed := false
+	for key, parent := range SupplierRuntimePolicyParents {
+		if _, exists := policy[key]; !exists && policy[parent] != nil {
+			value := *policy[parent]
+			policy[key] = &value
+			changed = true
+		}
+	}
+	return changed
 }
 
 type SupplierPolicyDefault struct {
@@ -101,6 +120,39 @@ func MigrateSupplierPolicies(db *gorm.DB) error {
 					return err
 				}
 				after = item.ID
+			}
+		}
+		if err := tx.First(&defaults, 1).Error; err != nil {
+			return err
+		}
+		if extendSupplierRuntimePolicy(defaults.Policy) {
+			defaults.Revision++
+			if err := tx.Save(&defaults).Error; err != nil {
+				return err
+			}
+		}
+		var suppliers []Supplier
+		if err := tx.Unscoped().Find(&suppliers).Error; err != nil {
+			return err
+		}
+		for _, item := range suppliers {
+			if extendSupplierRuntimePolicy(item.PolicyOverrides) {
+				item.PolicyVersion++
+				if err := tx.Unscoped().Model(&item).Select("PolicyOverrides", "PolicyVersion").Updates(&item).Error; err != nil {
+					return err
+				}
+			}
+		}
+		var bindings []SupplierBinding
+		if err := tx.Unscoped().Find(&bindings).Error; err != nil {
+			return err
+		}
+		for _, item := range bindings {
+			if extendSupplierRuntimePolicy(item.PolicyOverrides) {
+				item.PolicyVersion++
+				if err := tx.Unscoped().Model(&item).Select("PolicyOverrides", "PolicyVersion").Updates(&item).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return nil

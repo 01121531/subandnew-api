@@ -1,10 +1,10 @@
 import { ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Badge } from '@/components/ui/badge'
-
 import { formatNumber } from '../lib/display'
 import type { Account } from '../types'
+import { AccountRuntime } from './account-runtime'
+import { AccountStatus } from './account-status'
 import { Time } from './common'
 import { CostValue } from './cost-value'
 import { Visible } from './policy-visibility'
@@ -28,15 +28,10 @@ export function AccountCards(props: { accounts: Account[] }) {
                 aria-hidden='true'
               />
               <Visible field='account.status'>
-                <Badge
-                  variant='outline'
-                  className='col-span-2 h-auto min-h-5 max-w-full rounded-sm [overflow-wrap:anywhere] whitespace-normal'
-                >
+                <div className='col-span-2 min-w-0'>
                   <span className='sr-only'>{t('supplier.status')}: </span>
-                  {t(`supplier.${account.status}`, {
-                    defaultValue: account.status ?? '--',
-                  })}
-                </Badge>
+                  <AccountStatus account={account} />
+                </div>
               </Visible>
             </div>
             <p className='text-muted-foreground mt-1 font-mono text-xs break-all'>
@@ -64,6 +59,9 @@ export function AccountCards(props: { accounts: Account[] }) {
                 </div>
               </Visible>
             </dl>
+            <div className='mt-3'>
+              <AccountRuntime account={account} />
+            </div>
           </summary>
           <dl className='grid gap-3 border-t p-3 text-sm'>
             <Visible field='account.email'>

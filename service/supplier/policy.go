@@ -51,9 +51,14 @@ func (s *Service) DefaultPolicy() (model.SupplierPolicyDefault, error) { return 
 func (s *Service) SaveDefaultPolicy(policy model.SupplierPolicy, revision int64) (model.SupplierPolicyDefault, string, error) {
 	var result model.SupplierPolicyDefault
 	var changes string
-	if err := validatePolicy(policy, true); err != nil {
+	if err := validatePolicy(policy, false); err != nil {
 		return result, changes, err
 	}
+	copyPolicy := model.SupplierPolicy{}
+	for key, value := range policy {
+		copyPolicy[key] = value
+	}
+	policy = copyPolicy
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		old, err := lockPolicy(tx)
 		if err != nil {
@@ -61,6 +66,15 @@ func (s *Service) SaveDefaultPolicy(policy model.SupplierPolicy, revision int64)
 		}
 		if old.Revision != revision {
 			return fail(409, "supplier_policy_changed")
+		}
+		// Older admin clients do not know the new account metric switches.
+		for key := range model.SupplierRuntimePolicyParents {
+			if _, exists := policy[key]; !exists {
+				policy[key] = old.Policy[key]
+			}
+		}
+		if err := validatePolicy(policy, true); err != nil {
+			return err
 		}
 		result = old
 		result.Policy, result.Revision = policy, old.Revision+1

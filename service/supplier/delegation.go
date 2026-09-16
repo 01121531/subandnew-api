@@ -51,8 +51,10 @@ func intersectPolicy(policy *model.SupplierEffectivePolicy, a *authz.DataAccess)
 			field = "group"
 		case "pool_rpm":
 			field = "rpm"
-		case "pool_concurrent":
+		case "pool_concurrent", "concurrent":
 			field = "concurrency"
+		case "tpm":
+			field = "tokens"
 		case "pool_available_accounts":
 			field = "available_accounts"
 		}
