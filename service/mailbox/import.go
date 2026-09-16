@@ -57,6 +57,7 @@ type ImportFailure struct {
 
 type ImportResult struct {
 	Imported int             `json:"imported"`
+	Updated  int             `json:"updated"`
 	Failed   int             `json:"failed"`
 	Failures []ImportFailure `json:"failures"`
 }
@@ -171,11 +172,19 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 		cvvs.mu.Lock()
 		defer cvvs.mu.Unlock()
 		cvvs.purgeLocked(s.Now())
-		if len(cvvs.items)+cvvCount > temporaryCVVCapacity {
+		count, err := temporaryCVVCount(cvvs)
+		if err != nil {
+			return nil, fail(503, "mailbox_cvv_disabled")
+		}
+		if !s.importUpdateExisting && count+cvvCount > temporaryCVVCapacity {
 			return nil, fail(503, "mailbox_cvv_capacity")
 		}
 	}
-	pendingCVVs := make(map[int64]string)
+	type pendingCVV struct {
+		value                                 string
+		assignmentID, operatorID, authVersion int64
+	}
+	pendingCVVs := make(map[int64]pendingCVV)
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		service := s.WithDB(tx)
 		if err := service.checkMailboxImportActor(actor); err != nil {
@@ -190,6 +199,57 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 				return fail(500, "mailbox_service_unavailable")
 			}
 			if insert.RowsAffected != 1 {
+				if s.importUpdateExisting {
+					var existing model.MailboxAccount
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("account_type = ? AND email = ?", s.pool(), row.email).First(&existing).Error; err != nil {
+						return fail(409, "mailbox_import_conflict")
+					}
+					if existing.ArchivedAt != 0 {
+						return fail(409, "mailbox_import_archived")
+					}
+					encoded, err := json.Marshal(row.secret)
+					if err != nil {
+						return fail(500, "mailbox_service_unavailable")
+					}
+					ciphertext, version, _, err := cipher.Encrypt(existing.ID, mailboxCredentialKind, managedinstance.CredentialPayload{Secret: string(encoded)})
+					if err != nil {
+						return fail(503, "mailbox_credentials_unavailable")
+					}
+					updates := map[string]interface{}{"ciphertext": ciphertext, "key_version": version, "updated_at": now, "version": gorm.Expr("version + 1")}
+					if s.pool() == AccountTypeOpening {
+						encodedCard, err := json.Marshal(row.card)
+						if err != nil {
+							return fail(500, "mailbox_service_unavailable")
+						}
+						cardCiphertext, cardVersion, _, err := cipher.Encrypt(existing.ID, mailboxCardCredentialKind, managedinstance.CredentialPayload{Secret: string(encodedCard)})
+						if err != nil {
+							return fail(503, "mailbox_credentials_unavailable")
+						}
+						updates["card_ciphertext"], updates["card_key_version"] = cardCiphertext, cardVersion
+						updates["card_last4"] = row.card.Number[len(row.card.Number)-4:]
+					}
+					update := tx.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", existing.ID, existing.Version).Updates(updates)
+					if update.Error != nil || update.RowsAffected != 1 {
+						return fail(409, "mailbox_version_conflict")
+					}
+					if row.cvv != "" {
+						pending := pendingCVV{value: row.cvv, assignmentID: existing.ActiveAssignmentID}
+						if existing.ActiveAssignmentID != 0 {
+							var assignment model.MailboxAssignment
+							if err := tx.Select("operator_id").First(&assignment, existing.ActiveAssignmentID).Error; err == nil {
+								pending.operatorID = assignment.OperatorID
+								var operator model.MailboxOperator
+								if err := tx.Select("auth_version").First(&operator, assignment.OperatorID).Error; err == nil {
+									pending.authVersion = operator.AuthVersion
+								}
+							}
+						}
+						pendingCVVs[existing.ID] = pending
+					}
+					result.Imported++
+					result.Updated++
+					continue
+				}
 				code := "mailbox_import_conflict"
 				var existing model.MailboxAccount
 				if err := tx.Select("archived_at").Where("account_type = ? AND email = ?", s.pool(), row.email).First(&existing).Error; err == nil && existing.ArchivedAt != 0 {
@@ -228,7 +288,7 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 				return fail(500, "mailbox_service_unavailable")
 			}
 			if row.cvv != "" {
-				pendingCVVs[account.ID] = row.cvv
+				pendingCVVs[account.ID] = pendingCVV{value: row.cvv}
 			}
 			result.Imported++
 		}
@@ -250,8 +310,10 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	}
 	// Publish CVVs to volatile memory only once the entire import has committed.
 	if cvvs != nil {
-		for id, value := range pendingCVVs {
-			cvvs.putLocked(id, value, 0, 0, 0)
+		for id, pending := range pendingCVVs {
+			if err := cvvs.putLocked(id, pending.value, pending.assignmentID, pending.operatorID, pending.authVersion); err != nil {
+				return nil, fail(503, "mailbox_cvv_disabled")
+			}
 		}
 	}
 	result.Failed = len(result.Failures)
@@ -466,6 +528,9 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		for _, account := range existing {
 			for _, row := range preview.Rows {
 				if row.Email == strings.ToLower(account.Email) {
+					if s.importUpdateExisting && account.ArchivedAt == 0 {
+						continue
+					}
 					code := "mailbox_import_exists"
 					if account.ArchivedAt != 0 {
 						code = "mailbox_import_archived"

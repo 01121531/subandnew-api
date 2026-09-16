@@ -59,6 +59,7 @@ type Service struct {
 	cvv                     *cvvStore
 	importIgnoreExtraFields bool
 	importAllowPartial      bool
+	importUpdateExisting    bool
 }
 
 const AccountTypeRefund = model.MailboxAccountTypeRefund

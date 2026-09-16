@@ -29,6 +29,8 @@ services:
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/subandnew_api
       - REDIS_CONN_STRING=redis://redis
+      - MAILBOX_TEMP_CVV_MODE=redis
+      - MAILBOX_TEMP_CVV_REDIS_CONN_STRING=redis://mailbox-cvv-redis
       - TZ=Asia/Shanghai
       # Required before adding credentials to managed instances.
       # - MANAGED_INSTANCE_SECRET_KEY=replace-with-32-byte-standard-base64
@@ -39,6 +41,8 @@ services:
     depends_on:
       redis:
         condition: service_started
+      mailbox-cvv-redis:
+        condition: service_started
       postgres:
         condition: service_healthy
     networks:
@@ -48,6 +52,14 @@ services:
     image: redis:7-alpine
     container_name: subandnew-api-dev-redis
     restart: unless-stopped
+    networks:
+      - dev-network
+
+  mailbox-cvv-redis:
+    image: redis:7-alpine
+    container_name: subandnew-api-dev-mailbox-cvv-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
     networks:
       - dev-network
 

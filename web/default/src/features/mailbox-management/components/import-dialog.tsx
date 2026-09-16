@@ -34,6 +34,7 @@ export function ImportDialog(props: {
   const [preview, setPreview] = useState<ImportPreview>()
   const [result, setResult] = useState<ImportResult>()
   const [ignoreExtraFields, setIgnoreExtraFields] = useState(false)
+  const [updateExisting, setUpdateExisting] = useState(false)
   const source = useRef<ImportSource | undefined>(undefined)
   const controller = useRef<AbortController | undefined>(undefined)
   useEffect(
@@ -68,6 +69,7 @@ export function ImportDialog(props: {
     setResult(imported)
     const message = t('mailbox.admin.importSummary', {
       imported: imported.imported,
+      updated: imported.updated ?? 0,
       failed: imported.failed,
     })
     if (imported.failed > 0) toast.warning(message)
@@ -122,6 +124,7 @@ export function ImportDialog(props: {
         account_type: props.accountType,
         ignore_extra_fields,
         allow_partial: true,
+        update_existing: updateExisting,
       })
     } else if (format !== 'xlsx' && text.trim()) {
       previewMutation.submit({
@@ -130,6 +133,7 @@ export function ImportDialog(props: {
         account_type: props.accountType,
         ignore_extra_fields,
         allow_partial: true,
+        update_existing: updateExisting,
       })
     }
   }
@@ -211,6 +215,14 @@ export function ImportDialog(props: {
               <span>{t('mailbox.admin.ignoreExtraFields')}</span>
             </label>
           )}
+          <label className='flex items-start gap-3 text-sm'>
+            <Checkbox
+              checked={updateExisting}
+              disabled={pending}
+              onCheckedChange={setUpdateExisting}
+            />
+            <span>{t('mailbox.admin.updateExisting')}</span>
+          </label>
           <Field id='mailbox-format' label={t('mailbox.admin.format')}>
             <NativeSelect
               id='mailbox-format'
@@ -270,6 +282,7 @@ export function ImportDialog(props: {
             {result
               ? t('mailbox.admin.importSummary', {
                   imported: result.imported,
+                  updated: result.updated ?? 0,
                   failed: result.failed,
                 })
               : t('mailbox.admin.previewPartial', {

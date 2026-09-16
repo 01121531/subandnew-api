@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,8 +79,13 @@ func TestTemporaryCVVImportStartsThirtyMinuteWindowOnFirstView(t *testing.T) {
 	s, admin, operator := cvvTestService(t)
 	account := cvvTestImport(t, s, admin, "007")
 	cvvTestAssign(t, s, admin, operator, account.ID)
-	_, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
-	workflowTestStatus(t, err, 403)
+	for range 3 {
+		view, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
+		require.NoError(t, err)
+		require.Equal(t, "007", view.CVV)
+		require.Zero(t, view.ExpiresAt)
+	}
+	require.True(t, s.cvv.items[account.ID].expires.IsZero())
 	for range 3 {
 		view, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
 		require.NoError(t, err)
@@ -92,6 +98,31 @@ func TestTemporaryCVVImportStartsThirtyMinuteWindowOnFirstView(t *testing.T) {
 	encoded, err := json.Marshal(audits)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "007")
+}
+
+func TestTemporaryCVVReimportUpdatesCredentialsAndKeepsAssignment(t *testing.T) {
+	s, admin, operator := cvvTestService(t)
+	account := cvvTestImport(t, s, admin, "007")
+	assigned := cvvTestAssign(t, s, admin, operator, account.ID)
+	data := bytes.ReplaceAll(poolTestCSV("cvv@example.test"), []byte("synthetic-password"), []byte("new-password"))
+	data = []byte(strings.TrimSpace(string(data)) + ",0007")
+	updater := s.WithImportUpdateExisting(true)
+	preview, err := updater.PreviewImport(context.Background(), admin, "csv", data, AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, preview.Valid, "%+v", preview.Issues)
+	result, err := updater.Import(context.Background(), admin, "csv", data, AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Imported)
+	require.Equal(t, 1, result.Updated)
+	view, err := s.GetAccount(context.Background(), operator, account.ID, AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, assigned.AssignmentID, view.AssignmentID)
+	cvv, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "0007", cvv.CVV)
+	password, err := s.Credentials(context.Background(), operator, account.ID, "password", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "new-password", password.Password)
 }
 
 func TestTemporaryCVVReassignmentAndDisableInvalidate(t *testing.T) {

@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -16,6 +17,7 @@ import (
 )
 
 const temporaryCVVRevealTTL = 30 * time.Minute
+const temporaryCVVUnviewedTTL = 30 * 24 * time.Hour
 const temporaryCVVCapacity = 10000
 
 var cvvPattern = regexp.MustCompile(`^[0-9]{3,4}$`)
@@ -31,8 +33,8 @@ type temporaryCVV struct {
 	timer        *time.Timer
 }
 
-// This store must never be replaced with a persistent/distributed cache.
-// CVVs have no model representation and are never included in audit payloads.
+// Redis mode uses only a dedicated server whose RDB and AOF are disabled.
+// CVVs have no database model and are never included in audit payloads.
 type cvvStore struct {
 	mu    sync.Mutex
 	items map[int64]*temporaryCVV
@@ -52,6 +54,11 @@ func temporaryCVVUnavailableReason() string {
 	}
 	switch mode {
 	case "", "single_node":
+		return ""
+	case "redis":
+		if err := validateTemporaryCVVRedis(); err != nil {
+			return temporaryCVVRedisErrorCode(err)
+		}
 		return ""
 	case "disabled", "off", "none":
 		return "not_enabled"
@@ -76,6 +83,9 @@ func (v *cvvStore) removeLocked(id int64) {
 		}
 		delete(v.items, id)
 	}
+	if temporaryCVVRedisMode() {
+		_ = deleteTemporaryCVVRedis(id)
+	}
 }
 
 func (v *cvvStore) purgeLocked(now time.Time) {
@@ -86,23 +96,99 @@ func (v *cvvStore) purgeLocked(now time.Time) {
 	}
 }
 
-func (v *cvvStore) putLocked(id int64, value string, assignment, operator, authVersion int64) {
-	v.removeLocked(id)
-	v.items[id] = &temporaryCVV{deliveryID: rand.Text(), value: []byte(value), assignmentID: assignment, operatorID: operator, authVersion: authVersion}
+func (v *cvvStore) putLocked(id int64, value string, assignment, operator, authVersion int64) error {
+	existing, err := v.getLocked(id, time.Now())
+	if err != nil {
+		return err
+	}
+	count, err := temporaryCVVCount(v)
+	if err != nil {
+		return err
+	}
+	if existing == nil && count >= temporaryCVVCapacity {
+		return errors.New("temporary cvv capacity reached")
+	}
+	if cached := v.items[id]; cached != nil {
+		clear(cached.value)
+		if cached.timer != nil {
+			cached.timer.Stop()
+		}
+		delete(v.items, id)
+	}
+	item := &temporaryCVV{deliveryID: rand.Text(), value: []byte(value), assignmentID: assignment, operatorID: operator, authVersion: authVersion}
+	if temporaryCVVRedisMode() {
+		if err := saveTemporaryCVVRedis(id, item, temporaryCVVUnviewedTTL); err != nil {
+			clear(item.value)
+			return err
+		}
+	}
+	v.items[id] = item
+	return nil
 }
 
-func (v *cvvStore) startRevealLocked(id int64, item *temporaryCVV, now time.Time) {
-	if !item.expires.IsZero() {
+func (v *cvvStore) getLocked(id int64, now time.Time) (*temporaryCVV, error) {
+	v.purgeLocked(now)
+	if !temporaryCVVRedisMode() {
+		return v.items[id], nil
+	}
+	item, err := loadTemporaryCVVRedis(id)
+	if err != nil || item == nil {
+		if cached := v.items[id]; cached != nil {
+			clear(cached.value)
+			if cached.timer != nil {
+				cached.timer.Stop()
+			}
+			delete(v.items, id)
+		}
+		return item, err
+	}
+	if cached := v.items[id]; cached != nil {
+		clear(cached.value)
+		if cached.timer != nil {
+			cached.timer.Stop()
+		}
+	}
+	if !item.expires.IsZero() && !item.expires.After(now) {
+		_ = deleteTemporaryCVVRedis(id)
+		return nil, nil
+	}
+	v.items[id] = item
+	v.scheduleExpiryLocked(id, item, now)
+	return item, nil
+}
+
+func (v *cvvStore) scheduleExpiryLocked(id int64, item *temporaryCVV, now time.Time) {
+	if item.expires.IsZero() || !item.expires.After(now) {
 		return
 	}
-	item.expires = now.Add(temporaryCVVRevealTTL)
-	item.timer = time.AfterFunc(temporaryCVVRevealTTL, func() {
+	delay := item.expires.Sub(now)
+	item.timer = time.AfterFunc(delay, func() {
 		v.mu.Lock()
 		defer v.mu.Unlock()
 		if v.items[id] == item {
 			v.removeLocked(id)
 		}
 	})
+}
+
+func (v *cvvStore) startRevealLocked(id int64, item *temporaryCVV, now time.Time) error {
+	if !item.expires.IsZero() {
+		return nil
+	}
+	item.expires = now.Add(temporaryCVVRevealTTL)
+	if temporaryCVVRedisMode() {
+		stored, err := claimTemporaryCVVRedis(id, item, now)
+		if err != nil || stored == nil {
+			item.expires = time.Time{}
+			if err != nil {
+				return err
+			}
+			return errors.New("temporary cvv unavailable")
+		}
+		item.expires = stored.expires
+	}
+	v.scheduleExpiryLocked(id, item, now)
+	return nil
 }
 
 func (s *Service) invalidateCVVAccount(id int64) {
@@ -128,7 +214,11 @@ func (s *Service) temporaryCVVMetadata(actor Actor, view *AccountView) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.purgeLocked(s.Now())
-	item := v.items[view.ID]
+	item, err := v.getLocked(view.ID, s.Now())
+	if err != nil {
+		view.TemporaryCVVStatus = "disabled"
+		return
+	}
 	if item != nil && item.assignmentID == view.AssignmentID && item.operatorID == actor.OperatorID && item.authVersion == actor.AuthVersion {
 		view.TemporaryCVVStatus, view.TemporaryCVVID = "available", item.deliveryID
 	}
@@ -143,6 +233,9 @@ func (s *Service) invalidateCVVOperator(id int64) {
 			v.removeLocked(accountID)
 		}
 	}
+	if temporaryCVVRedisMode() {
+		_ = deleteTemporaryCVVRedisOperator(id)
+	}
 }
 
 type cvvAssignmentChange struct{ account, oldAssignment, assignment, operator, authVersion int64 }
@@ -152,7 +245,7 @@ func (s *Service) updateCVVAssignments(changes []cvvAssignmentChange) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	for _, change := range changes {
-		item := v.items[change.account]
+		item, _ := v.getLocked(change.account, s.Now())
 		if item == nil {
 			continue
 		}
@@ -160,6 +253,13 @@ func (s *Service) updateCVVAssignments(changes []cvvAssignmentChange) {
 			v.removeLocked(change.account)
 		} else {
 			item.assignmentID, item.operatorID, item.authVersion = change.assignment, change.operator, change.authVersion
+			ttl := temporaryCVVUnviewedTTL
+			if !item.expires.IsZero() {
+				ttl = item.expires.Sub(s.Now())
+			}
+			if temporaryCVVRedisMode() && saveTemporaryCVVRedis(change.account, item, ttl) != nil {
+				v.removeLocked(change.account)
+			}
 		}
 	}
 }
@@ -196,7 +296,15 @@ func (s *Service) ProvideTemporaryCVV(ctx context.Context, actor Actor, id int64
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.purgeLocked(s.Now())
-	if v.items[id] == nil && len(v.items) >= temporaryCVVCapacity {
+	count, countErr := temporaryCVVCount(v)
+	if countErr != nil {
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
+	item, loadErr := v.getLocked(id, s.Now())
+	if loadErr != nil {
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
+	if item == nil && count >= temporaryCVVCapacity {
 		return nil, fail(503, "mailbox_cvv_capacity")
 	}
 	var assignmentID, operatorID, authVersion int64
@@ -232,16 +340,21 @@ func (s *Service) ProvideTemporaryCVV(ctx context.Context, actor Actor, id int64
 	if err != nil {
 		return nil, err
 	}
-	v.putLocked(id, input.CVV, assignmentID, operatorID, authVersion)
+	if err := v.putLocked(id, input.CVV, assignmentID, operatorID, authVersion); err != nil {
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
 	return &TemporaryCVVView{StartsOnFirstView: true}, nil
 }
 
 func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) (*CredentialView, error) {
-	if actor.Admin != nil || account.AccountType != AccountTypeOpening {
+	if account.AccountType != AccountTypeOpening {
 		return nil, fail(403, "mailbox_permission_denied")
 	}
 	if !temporaryCVVEnabled() {
 		return nil, fail(503, "mailbox_cvv_disabled")
+	}
+	if actor.Admin != nil {
+		return s.claimTemporaryCVVAdmin(actor, account)
 	}
 	var assignment model.MailboxAssignment
 	if err := s.DB.Where("id = ? AND account_id = ? AND operator_id = ? AND revoked_at = 0 AND status IN ?", account.ActiveAssignmentID, account.ID, actor.OperatorID, []string{StatusPending, StatusRejected}).First(&assignment).Error; err != nil {
@@ -251,12 +364,19 @@ func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) 
 	v.mu.Lock()
 	now := s.Now()
 	v.purgeLocked(now)
-	item := v.items[account.ID]
+	item, loadErr := v.getLocked(account.ID, now)
+	if loadErr != nil {
+		v.mu.Unlock()
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
 	if item == nil || item.assignmentID != assignment.ID || item.operatorID != actor.OperatorID || item.authVersion != actor.AuthVersion {
 		v.mu.Unlock()
 		return nil, fail(404, "mailbox_cvv_unavailable")
 	}
-	v.startRevealLocked(account.ID, item, now)
+	if err := v.startRevealLocked(account.ID, item, now); err != nil {
+		v.mu.Unlock()
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
 	value, expires := string(item.value), item.expires.Unix()
 	v.mu.Unlock()
 	if err := s.Audit(actor, "credentials_cvv", account.ID, assignment.ID, 200, ""); err != nil {
@@ -273,4 +393,47 @@ func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) 
 		return nil, fail(404, "mailbox_cvv_unavailable")
 	}
 	return &CredentialView{Available: true, CVV: value, ServerTime: s.Now().Unix(), ExpiresAt: expires}, nil
+}
+
+func (s *Service) claimTemporaryCVVAdmin(actor Actor, account *model.MailboxAccount) (*CredentialView, error) {
+	if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
+		return nil, err
+	}
+	v := s.cvvStore()
+	v.mu.Lock()
+	item, err := v.getLocked(account.ID, s.Now())
+	if err != nil {
+		v.mu.Unlock()
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
+	if item == nil {
+		v.mu.Unlock()
+		return nil, fail(404, "mailbox_cvv_unavailable")
+	}
+	deliveryID := item.deliveryID
+	v.mu.Unlock()
+	if err := s.Audit(actor, "credentials_cvv", account.ID, account.ActiveAssignmentID, 200, ""); err != nil {
+		return nil, fail(500, "mailbox_service_unavailable")
+	}
+	current, err := s.credentialAccount(actor, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Version != account.Version || current.ActiveAssignmentID != account.ActiveAssignmentID {
+		return nil, fail(409, "mailbox_version_conflict")
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	item, err = v.getLocked(account.ID, s.Now())
+	if err != nil {
+		return nil, fail(503, "mailbox_cvv_disabled")
+	}
+	if item == nil || item.deliveryID != deliveryID {
+		return nil, fail(404, "mailbox_cvv_unavailable")
+	}
+	expires := int64(0)
+	if !item.expires.IsZero() {
+		expires = item.expires.Unix()
+	}
+	return &CredentialView{Available: true, CVV: string(item.value), ServerTime: s.Now().Unix(), ExpiresAt: expires}, nil
 }

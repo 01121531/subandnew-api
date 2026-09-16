@@ -73,9 +73,9 @@ demo@example.test----DemoPass!2026----JBSWY3DPEHPK3PXP----4242424242424242----12
 
 Windows 10/11 x64 操作员可使用同版本 `mailbox-assistant-*-windows-amd64.zip`，完整解压后运行 EXE，无需安装 Python。使用独立操作员会话，支持类型切换、点击复制、显式粘贴截图、上下条及提交后下一条。客户端默认显示待处理和已退回任务，使用兼容参数 `status=actionable`；历史提交只读。
 
-Master 单节点默认启用临时 CVV；可设置 `MAILBOX_TEMP_CVV_MODE=disabled` 明确关闭，或设置 `single_node` 明确启用。从节点始终拒绝使用。**多节点只有在导入、凭据读取始终固定进入同一 Master 进程时才可使用，否则必须关闭**。应用无法自动证明请求路由与部署拓扑，仍须由部署者核对。
+生产环境应设置 `MAILBOX_TEMP_CVV_MODE=redis` 和 `MAILBOX_TEMP_CVV_REDIS_CONN_STRING`，连接专用 Redis。该 Redis 必须关闭 RDB 与 AOF，应用会在启用前校验；首次查看前最长保留 30 天，操作员首次查看后保留 30 分钟。`single_node` 仅作为兼容模式使用进程内存，应用重启会丢失。
 
-- 仅使用容量 10,000 条的进程内存，不写数据库、文件、Redis、普通缓存、审计正文或备份，进程重启即丢失。满容量时整批不导入。
+- 容量上限为 10,000 条。Redis 模式不写数据库、文件、普通缓存、审计正文或备份；专用 Redis 必须使用 `save ""` 和 `appendonly no`，避免 CVV 落盘。
 - 导入成功或补发成功后，CVV 只进入当前 Master 进程的易失内存，首次查看前不启动查看倒计时。初次分配会绑定操作员与分配；回收、改派、停用、撤销会话、提交审核均立即清除。
 - 管理员补发入口需要 `manage` 与 `credentials`，使用当前邮箱版本校验；接口为 `POST /api/mailbox-management/accounts/:id/temporary-cvv?account_type=opening`。响应只标记“首次查看开始计时”，不回显 CVV。
 - 仅当前有效分配的开号操作员可以通过凭据接口 `kind=cvv` 查看。首次成功查看启动 30 分钟有效期，期间同一当前操作员可再次查看；到期后服务端清除。服务重启会使尚未查看或仍在有效期内的 CVV 一并丢失，需要管理员重新提供。

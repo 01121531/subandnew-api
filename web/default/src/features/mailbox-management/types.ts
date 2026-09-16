@@ -1,5 +1,5 @@
 export type AccountType = 'refund' | 'opening'
-export type CredentialKind = 'password' | 'otp' | 'card'
+export type CredentialKind = 'password' | 'otp' | 'card' | 'cvv'
 export type MailboxStatus =
   | 'unassigned'
   | 'pending'
@@ -267,6 +267,7 @@ export type ImportSource = {
   account_type?: AccountType
   ignore_extra_fields?: boolean
   allow_partial?: boolean
+  update_existing?: boolean
 } & (
   | { format: ImportFormat; file: File; text?: never }
   | { format: 'text' | 'csv'; text: string; file?: never }
@@ -293,6 +294,7 @@ export interface ImportFailure {
 }
 export interface ImportResult {
   imported: number
+  updated?: number
   failed: number
   failures: ImportFailure[]
 }
@@ -300,6 +302,7 @@ export interface Credential {
   available?: boolean
   card_number?: string
   card_expiry?: string
+  cvv?: string
   password?: string
   code?: string
   expires_at?: number

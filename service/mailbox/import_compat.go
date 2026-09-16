@@ -62,6 +62,12 @@ func (s *Service) WithPartialImport(allow bool) *Service {
 	return &copy
 }
 
+func (s *Service) WithImportUpdateExisting(update bool) *Service {
+	copy := *s
+	copy.importUpdateExisting = update
+	return &copy
+}
+
 func mailboxImportEmail(value string) bool {
 	address := strings.TrimSpace(value)
 	parsed, err := mail.ParseAddress(address)

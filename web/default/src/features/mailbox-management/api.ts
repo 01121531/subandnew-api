@@ -62,6 +62,7 @@ export function importBody(source: ImportSource):
       account_type: AccountType
       ignore_extra_fields?: boolean
       allow_partial?: boolean
+      update_existing?: boolean
     } {
   if (source.file) {
     const body = new FormData()
@@ -69,6 +70,7 @@ export function importBody(source: ImportSource):
     body.append('file', source.file)
     if (source.ignore_extra_fields) body.append('ignore_extra_fields', 'true')
     if (source.allow_partial) body.append('allow_partial', 'true')
+    if (source.update_existing) body.append('update_existing', 'true')
     return body
   }
   return {
@@ -77,6 +79,7 @@ export function importBody(source: ImportSource):
     account_type: source.account_type ?? 'refund',
     ...(source.ignore_extra_fields ? { ignore_extra_fields: true } : {}),
     ...(source.allow_partial ? { allow_partial: true } : {}),
+    ...(source.update_existing ? { update_existing: true } : {}),
   }
 }
 export function unwrap<T>(body: Envelope<T>, status = 0): T {
@@ -246,6 +249,7 @@ export const mailboxApi = {
     )
     return {
       imported: result.imported,
+      updated: result.updated ?? 0,
       failed: result.failed ?? 0,
       failures: importFailuresMetadata(result.failures),
     }

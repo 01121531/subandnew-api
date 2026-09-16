@@ -11,6 +11,7 @@ import { otpRemaining } from '../lib/schemas'
 import type { AccountType, Credential } from '../types'
 import { CardCredential } from './card-credential'
 import { CopyButton, Modal, QueryState, Status, Time } from './common'
+import { TemporaryCvvCredential } from './temporary-cvv-credential'
 
 export function CredentialDetail(props: {
   accountType: AccountType
@@ -222,11 +223,14 @@ export function CredentialDetail(props: {
         {allowed && (
           <>
             {props.accountType === 'opening' && (
-              <CardCredential
-                key={`${snapshot}:${cardGeneration}`}
-                id={props.id}
-                onError={credentialFailure}
-              />
+              <>
+                <CardCredential
+                  key={`${snapshot}:${cardGeneration}`}
+                  id={props.id}
+                  onError={credentialFailure}
+                />
+                <TemporaryCvvCredential key={`cvv:${snapshot}`} id={props.id} />
+              </>
             )}
             <section className='space-y-3 border-t pt-4'>
               <h3 className='flex items-center gap-2 text-sm font-medium'>

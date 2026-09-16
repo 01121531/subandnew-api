@@ -86,6 +86,12 @@ export const mailboxEn = {
         'Temporary CVV is not enabled. Use the five-column format; this page will not change deployment settings.',
       node_unsupported:
         'This node does not support temporary CVV delivery. Use the five-column format.',
+      redis_not_configured:
+        'The dedicated temporary-CVV Redis is not configured. Set its connection before using the sixth column.',
+      redis_persistence_enabled:
+        'Temporary-CVV Redis has RDB or AOF persistence enabled. Disable both before using it.',
+      redis_unavailable:
+        'The dedicated temporary-CVV Redis is unavailable. Check its connection and configuration.',
       permission_denied:
         'Credential access permission is required to import temporary CVV.',
       loading: 'Checking temporary CVV availability...',
@@ -142,6 +148,8 @@ export const mailboxEn = {
     accountType: 'Account pool',
     ignoreExtraFields:
       'Ignore extra fields after recognized email, password and 2FA (not saved). Use XXXX when 2FA is not configured; other missing or invalid values are skipped.',
+    updateExisting:
+      'Update existing mailboxes with the imported credentials and CVV while keeping their current operator assignment and history.',
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
     refundImport:
       'Refund fields: email, password, 2FA. Use XXXX when 2FA is not configured. A recovery email before 2FA is also recognized but not saved.',
@@ -155,13 +163,17 @@ export const mailboxEn = {
     cvvProvided:
       'Temporary CVV provided. Its 30-minute viewing window starts when the operator first reveals it.',
     temporaryCvvNotice:
-      'Temporary CVV requires explicitly enabled single-node delivery. It waits in volatile process memory until first reveal, then remains available to the current operator for 30 minutes. Restart, recall, reassignment, approval or disablement removes it immediately. Use only before authorization of a specific transaction; never retain the source file or include CVV in screenshots. This is not a compliance certification.',
+      'Temporary CVV uses the dedicated non-persistent Redis when configured. It remains available for up to 30 days before first reveal, then for 30 minutes. Recall, reassignment, approval or disablement removes it immediately.',
     noCvv: 'Do not include CVV, cookies or other extra credentials.',
     card: 'Payment card',
     cardEnding: 'Card **** {{last4}}',
     cardNumber: 'Card number (PAN)',
     cardExpiry: 'Expiry (MM/YY)',
     revealCard: 'Reveal card details',
+    cvv: 'CVV security code',
+    revealCvv: 'Reveal CVV',
+    adminCvvHint:
+      'Administrators with credential permission may reveal the current CVV repeatedly while it remains available. Admin viewing does not start or extend the operator window.',
     screenshotRedaction:
       'Screenshots must redact CVV and the full card number. Only the last 4 digits may remain visible.',
     portalEntry: 'Operator sign in',
@@ -232,7 +244,8 @@ export const mailboxEn = {
     importTitle: 'Import mailboxes',
     importAtomic: 'Import {{count}} mailboxes',
     imported: '{{count}} mailboxes imported',
-    importSummary: 'Imported {{imported}}; not imported {{failed}}.',
+    importSummary:
+      'Processed {{imported}} mailboxes, including {{updated}} updates; not imported {{failed}}.',
     previewPartial:
       '{{ready}} ready to import; {{failed}} failed rows will be skipped.',
     importDone: 'Done',
@@ -338,9 +351,10 @@ export const mailboxEn = {
   errors: {
     mailbox_invalid_work_query:
       'Invalid statistics query. Enter valid dates with the end date on or after the start date.',
-    mailbox_cvv_disabled: 'Single-node temporary CVV delivery is not enabled.',
+    mailbox_cvv_disabled:
+      'Temporary CVV delivery is unavailable. Check the dedicated volatile Redis configuration.',
     mailbox_cvv_unavailable:
-      'CVV was not provided, expired, or was already claimed.',
+      'CVV was not provided or has expired. Ask an administrator to provide it again.',
     mailbox_cvv_capacity: 'Temporary delivery capacity is full. Try later.',
     mailbox_invalid_cvv: 'CVV must be a string of 3 or 4 digits.',
     mailbox_import_cvv_text_required: 'The Excel CVV cell must be Text.',
@@ -524,6 +538,11 @@ export const mailboxZh: typeof mailboxEn = {
       enabled: '临时 CVV 已开启，可使用可选的第六列。',
       not_enabled: '临时 CVV 未开启，请使用五列格式。本页面不会修改部署配置。',
       node_unsupported: '当前节点不支持临时 CVV 交付，请使用五列格式。',
+      redis_not_configured:
+        '未配置临时 CVV 专用 Redis，请先配置连接后再使用第六列。',
+      redis_persistence_enabled:
+        '临时 CVV 专用 Redis 开启了 RDB 或 AOF 持久化，必须关闭后才能使用。',
+      redis_unavailable: '临时 CVV 专用 Redis 不可用，请检查连接和配置。',
       permission_denied: '导入临时 CVV 还需要凭据访问权限。',
       loading: '正在读取临时 CVV 功能状态…',
       load_failed: '临时 CVV 状态读取失败，请重试后再复制六列示例。',
@@ -575,6 +594,8 @@ export const mailboxZh: typeof mailboxEn = {
     accountType: '账号池',
     ignoreExtraFields:
       '忽略明确识别的邮箱、密码、2FA 之后的额外字段（不保存）；未配置 2FA 时填写 XXXX，其他缺少或无效值所在行不会导入。',
+    updateExisting:
+      '更新同类型、同邮箱的已有资料及 CVV，同时保留当前操作员绑定、任务状态和历史记录。',
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
     refundImport:
       '退款字段为邮箱、密码、2FA；未配置 2FA 时填写 XXXX。也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
@@ -587,13 +608,17 @@ export const mailboxZh: typeof mailboxEn = {
     provideCvv: '补发临时 CVV',
     cvvProvided: '已提供临时 CVV，操作员首次查看后开始 30 分钟有效期。',
     temporaryCvvNotice:
-      '临时 CVV 仅限显式启用的单节点交付；首次查看前保存在进程易失内存中，首次查看后供当前操作员查看 30 分钟。服务重启、回收、改派、审核通过或停用会立即清除。仅用于具体交易授权前，不得保留原始文件或将 CVV 放入截图。这不代表已通过合规认证。',
+      '配置专用非持久化 Redis 后，临时 CVV 首次查看前最长保留 30 天，操作员首次查看后保留 30 分钟；回收、改派、审核通过或停用会立即清除。',
     noCvv: '禁止包含 CVV、Cookie 或其他额外凭据。',
     card: '支付卡',
     cardEnding: '卡号 **** {{last4}}',
     cardNumber: '卡号（PAN）',
     cardExpiry: '有效期（MM/YY）',
     revealCard: '查看卡片详情',
+    cvv: 'CVV 安全码',
+    revealCvv: '查看 CVV',
+    adminCvvHint:
+      '具备凭据权限的管理员可在 CVV 有效期间重复查看；管理员查看不会启动或延长操作员的 30 分钟窗口。',
     screenshotRedaction: '截图必须遮盖 CVV 和完整卡号，卡号最多只保留后 4 位。',
     portalEntry: '操作员登录入口',
     operatorFilter: '按操作员筛选',
@@ -662,7 +687,8 @@ export const mailboxZh: typeof mailboxEn = {
     importTitle: '导入邮箱',
     importAtomic: '导入 {{count}} 个邮箱',
     imported: '已导入 {{count}} 个邮箱',
-    importSummary: '成功导入 {{imported}} 个，未导入 {{failed}} 个。',
+    importSummary:
+      '成功处理 {{imported}} 个，其中更新 {{updated}} 个；未导入 {{failed}} 个。',
     previewPartial: '{{ready}} 条可导入，{{failed}} 条失败记录将跳过。',
     importDone: '完成',
     downloadFailures: '导出失败清单',
@@ -783,8 +809,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_credentials_changed: '凭据访问权限已变化，请重新打开邮箱。',
     mailbox_credentials_revoked: '凭据访问权限已撤销。',
     mailbox_credentials_unavailable: '凭据暂不可用。',
-    mailbox_cvv_disabled: '未启用单节点临时 CVV 交付。',
-    mailbox_cvv_unavailable: 'CVV 未提供、已过期或已领取。',
+    mailbox_cvv_disabled: '临时 CVV 交付不可用，请检查专用易失 Redis 配置。',
+    mailbox_cvv_unavailable: 'CVV 未提供或已失效，请联系管理员重新提供。',
     mailbox_cvv_capacity: '临时交付容量已满，请稍后再试。',
     mailbox_invalid_cvv: 'CVV 必须是 3 或 4 位数字字符串。',
     mailbox_import_cvv_text_required: 'Excel 的 CVV 单元格必须是文本类型。',

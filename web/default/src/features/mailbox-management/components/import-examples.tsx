@@ -67,7 +67,7 @@ export function ImportExamples(props: {
             <div className='space-y-2' role='status'>
               <p className='text-sm'>
                 {t(
-                  `mailbox.archive.cvv.${['load_failed', 'loading', 'enabled', 'not_enabled', 'node_unsupported', 'permission_denied'].includes(reason) ? reason : 'not_enabled'}`
+                  `mailbox.archive.cvv.${['load_failed', 'loading', 'enabled', 'not_enabled', 'node_unsupported', 'permission_denied', 'redis_not_configured', 'redis_persistence_enabled', 'redis_unavailable'].includes(reason) ? reason : 'not_enabled'}`
                 )}
               </p>
               {options.isError && (

@@ -133,6 +133,8 @@ go build ./...
 | `SQL_DSN` | PostgreSQL/MySQL 连接字符串；未设置时使用 SQLite |
 | `SQLITE_PATH` | SQLite 文件路径 |
 | `REDIS_CONN_STRING` | 可选 Redis 连接 |
+| `MAILBOX_TEMP_CVV_MODE` | 临时 CVV 模式：`redis` 使用专用易失 Redis，`single_node` 使用兼容的进程内存，`disabled` 关闭 |
+| `MAILBOX_TEMP_CVV_REDIS_CONN_STRING` | 临时 CVV 专用 Redis；必须关闭 RDB (`save ""`) 和 AOF (`appendonly no`)，应用会在启用前校验 |
 | `SESSION_SECRET` | 登录会话签名密钥 |
 | `TRUSTED_PROXIES` | 可选反向代理 IP/CIDR 白名单；未设置时默认信任本机代理和 Cloudflare 官方网段，设置后完全覆盖默认值 |
 | `MANAGED_INSTANCE_SECRET_KEY` | 32 字节标准 Base64 主密钥 |

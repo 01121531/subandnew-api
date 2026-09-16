@@ -159,7 +159,7 @@ func (s *Service) Credentials(ctx context.Context, actor Actor, accountID int64,
 	s = s.WithDB(s.DB.WithContext(ctx))
 	// Never put client-supplied kind or decrypted material into an audit entry.
 	action := "credentials"
-	if kind == "password" || kind == "otp" || kind == "card" {
+	if kind == "password" || kind == "otp" || kind == "card" || kind == "cvv" {
 		action += "_" + kind
 	}
 	defer func() { s.auditMailboxFailure(actor, action, accountID, err) }()
