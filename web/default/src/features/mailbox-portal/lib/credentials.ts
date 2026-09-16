@@ -37,6 +37,10 @@ export async function readCredential(
       await mailboxApi.account(account.id, signal, accountType),
       'credentials'
     )
+    // Submitted tasks retain login/card access, but cannot read CVV.
+    if (kind === 'cvv' && account.status === 'submitted') {
+      throw new MailboxRequestError('mailbox_cvv_task_restricted', 403)
+    }
     const value = await mailboxApi.credentials(
       csrf,
       account.id,

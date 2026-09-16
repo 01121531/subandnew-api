@@ -106,6 +106,8 @@ export const mailboxPortalEn = {
   invalidLogin: 'Invalid username or password.',
   currentPasswordIncorrect: 'Current password is incorrect.',
   credentialsBlocked: 'Credentials are unavailable for this assignment.',
+  cvvTaskRestricted:
+    'CVV is unavailable while awaiting review. Other details remain accessible.',
   assignmentChanged:
     'This assignment has changed or is no longer available. Refresh to continue.',
   attachmentCount: 'Select 1-5 images per submission.',
@@ -222,6 +224,7 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   invalidLogin: '用户名或密码不正确。',
   currentPasswordIncorrect: '当前密码不正确。',
   credentialsBlocked: '当前任务的账号凭据不可查看。',
+  cvvTaskRestricted: '待审核任务暂不可查看 CVV，其他资料仍可查看。',
   assignmentChanged: '任务已变更或不再可用，请刷新后继续。',
   attachmentCount: '每次提交请选择 1～5 张图片。',
   invalidImage: '仅支持有效的 PNG、JPEG 和 WebP 图片。',

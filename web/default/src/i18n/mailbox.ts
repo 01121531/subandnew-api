@@ -421,6 +421,8 @@ export const mailboxEn = {
       'Invalid statistics query. Enter valid dates with the end date on or after the start date.',
     mailbox_cvv_disabled:
       'CVV is disabled. Check the deployment configuration.',
+    mailbox_cvv_task_restricted:
+      'CVV is unavailable while awaiting review. Other details remain accessible.',
     mailbox_cvv_unavailable:
       'CVV was not provided or has expired. Ask an administrator to provide it again.',
     mailbox_cvv_capacity: 'Temporary delivery capacity is full. Try later.',
@@ -945,6 +947,7 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_credentials_unavailable: '凭据暂不可用。',
     mailbox_cvv_disabled: 'CVV 功能未开启，请检查部署配置。',
     mailbox_cvv_unavailable: 'CVV 未提供或已失效，请联系管理员重新提供。',
+    mailbox_cvv_task_restricted: '待审核任务暂不可查看 CVV，其他资料仍可查看。',
     mailbox_cvv_capacity: '临时交付容量已满，请稍后再试。',
     mailbox_invalid_cvv: 'CVV 必须是 3 或 4 位数字字符串。',
     mailbox_import_cvv_text_required: 'Excel 的 CVV 单元格必须是文本类型。',

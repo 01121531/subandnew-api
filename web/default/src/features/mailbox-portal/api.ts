@@ -39,7 +39,9 @@ export function invalidateAccountCredentials(id: number, error: unknown): void {
   if (
     error instanceof MailboxRequestError &&
     [403, 404, 409].includes(error.status) &&
-    error.code !== 'mailbox_cvv_unavailable'
+    !['mailbox_cvv_unavailable', 'mailbox_cvv_task_restricted'].includes(
+      error.code
+    )
   ) {
     for (const listener of accountFailureListeners) listener(id)
   }

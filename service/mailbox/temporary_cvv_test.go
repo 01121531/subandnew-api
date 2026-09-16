@@ -93,6 +93,31 @@ func TestPersistentCVVImportEncryptedAndNoExpiry(t *testing.T) {
 	require.NotContains(t, string(encoded), "007")
 }
 
+func TestSubmittedCVVRestrictionDoesNotRevokeOtherCredentials(t *testing.T) {
+	s, admin, operator := cvvTestService(t)
+	account := cvvTestImport(t, s, admin, "007")
+	assigned := cvvTestAssign(t, s, admin, operator, account.ID)
+	require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", assigned.AssignmentID).Update("status", StatusSubmitted).Error)
+	view, err := s.GetAccount(context.Background(), operator, account.ID, AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, view.CredentialsAvailable)
+	_, err = s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	require.EqualError(t, err, "mailbox_cvv_task_restricted")
+	for _, kind := range []string{"password", "otp", "card"} {
+		value, err := s.Credentials(context.Background(), operator, account.ID, kind, AccountTypeOpening)
+		require.NoError(t, err, kind)
+		require.True(t, value.Available, kind)
+	}
+	value, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "007", value.CVV)
+	require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", assigned.AssignmentID).Update("status", StatusApproved).Error)
+	for _, kind := range []string{"password", "otp", "card", "cvv"} {
+		_, err := s.Credentials(context.Background(), operator, account.ID, kind, AccountTypeOpening)
+		require.Error(t, err, kind)
+	}
+}
+
 func TestTemporaryCVVReimportUpdatesCredentialsAndKeepsAssignment(t *testing.T) {
 	s, admin, operator := cvvTestService(t)
 	account := cvvTestImport(t, s, admin, "007")

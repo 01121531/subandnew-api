@@ -149,7 +149,13 @@ func (s *Service) claimTemporaryCVV(actor Actor, account *model.MailboxAccount) 
 	}
 	var assignment model.MailboxAssignment
 	if actor.Admin == nil {
-		if err := s.DB.Where("id = ? AND account_id = ? AND operator_id = ? AND revoked_at = 0 AND status IN ?", account.ActiveAssignmentID, account.ID, actor.OperatorID, []string{StatusPending, StatusRejected}).First(&assignment).Error; err != nil {
+		if err := s.DB.Where("id = ? AND account_id = ? AND operator_id = ? AND revoked_at = 0", account.ActiveAssignmentID, account.ID, actor.OperatorID).First(&assignment).Error; err != nil {
+			return nil, fail(403, "mailbox_credentials_revoked")
+		}
+		if assignment.Status == StatusSubmitted {
+			return nil, fail(403, "mailbox_cvv_task_restricted")
+		}
+		if assignment.Status != StatusPending && assignment.Status != StatusRejected {
 			return nil, fail(403, "mailbox_credentials_revoked")
 		}
 	}

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
 
-import { mailboxApi } from '../api'
+import { mailboxApi, MailboxRequestError } from '../api'
 import { clearMailboxWorkspace } from '../session'
 import type { Account } from '../types'
 import { credentialRequest, visibleCredentials } from './visible-credentials'
@@ -124,4 +124,33 @@ test('late results cannot repopulate an offscreen entry', async () => {
   finish({ password: 'late', server_time: 0 })
   await tick()
   expect(entry.snapshot).toEqual({})
+})
+
+test('submitted CVV restriction does not revoke password, OTP or card', async () => {
+  const submitted: Account = { ...account, status: 'submitted' }
+  detail.mockResolvedValue(submitted)
+  const entry = visibleCredentials(submitted, 'submitted-scope')
+  cleanup.push(entry.subscribe(() => {}))
+  await tick()
+  expect(entry.readable).toBe(true)
+  expect(entry.snapshot.password?.value?.password).toBe('  exact password  ')
+  expect(entry.snapshot.otp?.value?.code).toBe('001234')
+  expect(entry.snapshot.card?.value?.card_number).toBe('4242424242424242')
+  expect(entry.snapshot.cvv?.error).toMatchObject({
+    code: 'mailbox_cvv_task_restricted',
+  })
+  expect(read.mock.calls.some((call) => call[2] === 'cvv')).toBe(false)
+})
+
+test('real revocation still clears all visible credentials', async () => {
+  read.mockImplementation(async () => {
+    throw new MailboxRequestError('mailbox_credentials_revoked', 403)
+  })
+  const entry = visibleCredentials(account, 'revoked-scope')
+  cleanup.push(entry.subscribe(() => {}))
+  await tick()
+  expect(entry.readable).toBe(false)
+  for (const state of Object.values(entry.snapshot)) {
+    expect(state.value).toBeUndefined()
+  }
 })

@@ -11,6 +11,7 @@ export function errorKey(error: unknown): string {
     mailbox_credentials_revoked: 'credentialsBlocked',
     mailbox_cvv_disabled: 'cvvDisabled',
     mailbox_cvv_unavailable: 'cvvUnavailable',
+    mailbox_cvv_task_restricted: 'cvvTaskRestricted',
     mailbox_assignment_changed: 'assignmentChanged',
     mailbox_attachment_count: 'attachmentCount',
     mailbox_submission_empty: 'submissionEmpty',
