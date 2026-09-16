@@ -33,7 +33,6 @@ func newMailboxImportTestService(t *testing.T) (*Service, Actor) {
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
 	require.NoError(t, db.AutoMigrate(&model.MailboxIssue{}))
-	require.NoError(t, db.AutoMigrate(&model.MailboxCVV{}, &model.MailboxCardIndex{}, &model.MailboxCardIndexState{}))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}, &model.MailboxAccount{}, &model.MailboxAssignment{}, &model.MailboxOperator{}, &model.MailboxSession{}, &model.MailboxAudit{}))

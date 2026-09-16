@@ -197,26 +197,6 @@ func ProvideMailboxTemporaryCVV(c *gin.Context) {
 	mailboxSuccess(c, data)
 }
 
-func ClearMailboxCVV(c *gin.Context) {
-	accountType, ok := mailboxAccountType(c, c.Query("account_type"))
-	if !ok {
-		return
-	}
-	id := mailboxID(c)
-	if id == 0 {
-		return
-	}
-	var input mailbox.TemporaryCVVInput
-	if !mailboxDecode(c, &input) {
-		return
-	}
-	if err := mailboxService().ClearCVV(c.Request.Context(), mailboxActor(c), id, input, accountType); err != nil {
-		mailboxFailure(c, err)
-		return
-	}
-	mailboxSuccess(c, nil)
-}
-
 func AssignMailboxAccounts(c *gin.Context) {
 	var input mailbox.AssignInput
 	if !mailboxDecode(c, &input) {
@@ -232,17 +212,6 @@ func AssignMailboxAccounts(c *gin.Context) {
 		return
 	}
 	mailboxSuccess(c, gin.H{})
-}
-func ChangeMailboxAccountStatus(c *gin.Context) {
-	var input mailbox.ChangeStatusInput
-	if !mailboxDecode(c, &input) {
-		return
-	}
-	if err := mailboxService().ChangeStatus(c.Request.Context(), mailboxActor(c), input); err != nil {
-		mailboxFailure(c, err)
-		return
-	}
-	mailboxSuccess(c, gin.H{"updated": len(input.Items)})
 }
 func ListMailboxOperators(c *gin.Context) {
 	if value := c.Query("include_stats"); len(c.QueryArray("include_stats")) > 1 || (value != "" && value != "false" && value != "true") {
@@ -365,38 +334,6 @@ func ReviewMailboxSubmission(c *gin.Context) {
 		return
 	}
 	mailboxSuccess(c, gin.H{})
-}
-func EditMailboxRemark(c *gin.Context) {
-	id := mailboxID(c)
-	if id == 0 {
-		return
-	}
-	var input mailbox.RemarkInput
-	if !mailboxDecode(c, &input) {
-		return
-	}
-	result, err := mailboxService().EditRemark(c.Request.Context(), mailboxActor(c), id, input)
-	if err != nil {
-		mailboxFailure(c, err)
-		return
-	}
-	mailboxSuccess(c, result)
-}
-func GetMailboxRemarkHistory(c *gin.Context) {
-	id := mailboxID(c)
-	if id == 0 {
-		return
-	}
-	query, ok := mailboxListQuery(c)
-	if !ok {
-		return
-	}
-	result, err := mailboxService().RemarkHistory(c.Request.Context(), mailboxActor(c), id, query)
-	if err != nil {
-		mailboxFailure(c, err)
-		return
-	}
-	mailboxSuccess(c, result)
 }
 func ListMailboxAudits(c *gin.Context) {
 	q, ok := mailboxListQuery(c)

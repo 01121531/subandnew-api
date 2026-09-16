@@ -18,7 +18,6 @@ import (
 const mailboxCredentialKind = "mailbox-account:v1"
 
 type CredentialView struct {
-	Persistent bool   `json:"persistent,omitempty"`
 	Available  bool   `json:"available"`
 	CVV        string `json:"cvv,omitempty"`
 	CardNumber string `json:"card_number,omitempty"`

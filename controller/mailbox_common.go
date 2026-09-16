@@ -160,22 +160,6 @@ func mailboxID(c *gin.Context) int64 {
 	return id
 }
 func mailboxListQuery(c *gin.Context) (mailbox.ListQuery, bool) {
-	if c.Request.Method == "POST" {
-		var q mailbox.ListQuery
-		if !mailboxDecode(c, &q) {
-			return q, false
-		}
-		var ok bool
-		q.AccountType, ok = mailboxAccountType(c, q.AccountType)
-		if !ok {
-			return q, false
-		}
-		if q.Page < 0 || q.Page > 100000 || q.PageSize < 0 || q.PageSize > 100 || q.OperatorID < 0 || len(q.Search) > 320 {
-			mailboxBadRequest(c, "mailbox_invalid_query")
-			return q, false
-		}
-		return q, true
-	}
 	page, e := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, e2 := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	operator, e3 := strconv.ParseInt(c.DefaultQuery("operator_id", "0"), 10, 64)

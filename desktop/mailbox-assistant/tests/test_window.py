@@ -106,24 +106,6 @@ def test_stale_response_after_navigation_never_populates_new_account(window):
     assert not window.values
 
 
-def test_persistent_cvv_without_expiry_can_copy_and_clears_on_navigation(window, qapp):
-    window, api = window
-    window.kind = "opening"
-    window.current = account(kind="opening")
-    window.fetch_credential("cvv")
-    _, callback, _ = api.take("credentials")
-    callback({"cvv": "0007", "persistent": True, "server_time": 100}, None)
-    window.tick()
-    assert window.values["cvv"] == "0007"
-    assert "cvv" not in window.deadlines
-    window.copy_field("cvv")
-    _, callback, _ = api.take("/accounts/5?")
-    callback(account(kind="opening"), None)
-    assert qapp.clipboard().text() == "0007"
-    window.clear_task(clear_draft=True)
-    assert "cvv" not in window.values
-
-
 def test_no_otp_response_is_a_supported_empty_credential(window):
     window, api = window
     window.values["password"] = "keep-password"

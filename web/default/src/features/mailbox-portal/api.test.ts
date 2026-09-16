@@ -38,40 +38,6 @@ function record(
 }
 
 describe('mailbox independent wire contract', () => {
-  test('remark PATCH uses isolated CSRF transport and strips unknown response fields', async () => {
-    const calls = record({
-      id: 1,
-      version: 2,
-      account_type: 'opening',
-      remark: 'updated',
-      can_edit_remark: true,
-      attachments: [],
-      password: 'must-not-return',
-    })
-    await expect(
-      mailboxApi.editRemark('', 1, 'opening', 1, 'updated')
-    ).rejects.toBeInstanceOf(MailboxRequestError)
-    expect(calls).toHaveLength(0)
-    const result = await mailboxApi.editRemark(
-      'csrf',
-      1,
-      'opening',
-      1,
-      'updated'
-    )
-    expect(calls[0].init?.method).toBe('PATCH')
-    expect(new Headers(calls[0].init?.headers).get('X-Mailbox-CSRF')).toBe(
-      'csrf'
-    )
-    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
-      account_type: 'opening',
-      version: 1,
-      remark: 'updated',
-    })
-    expect(result.remark).toBe('updated')
-    expect(result.can_edit_remark).toBe(true)
-    expect(result).not.toHaveProperty('password')
-  })
   test('login uses only same-origin cookie transport without console identity or CSRF headers', async () => {
     const calls = record({ authenticated: false })
     await mailboxApi.login({
@@ -380,30 +346,27 @@ describe('credential read reauthorization', () => {
     expect(errorKey(error)).toBe('mailboxPortal.currentPasswordIncorrect')
     expect(isAuthFailure(error)).toBe(false)
   })
-  test.each([
-    ['mailbox_cvv_unavailable', 404, 'cvvUnavailable'],
-    ['mailbox_cvv_task_restricted', 403, 'cvvTaskRestricted'],
-  ] as const)(
-    'CVV error %s does not revoke the other account credentials',
-    async (code, status, key) => {
-      const invalidated: number[] = []
-      const unsubscribe = onAccountFailure((id) => invalidated.push(id))
-      globalThis.fetch = mock(async () =>
-        Response.json({ success: false, message: code }, { status })
-      ) as unknown as typeof fetch
-      try {
-        await expect(
-          mailboxApi.credentials('csrf', 3, 'cvv', undefined, 'opening')
-        ).rejects.toMatchObject({ code })
-        expect(invalidated).toEqual([])
-        expect(errorKey(new MailboxRequestError(code, status))).toBe(
-          `mailboxPortal.${key}`
-        )
-      } finally {
-        unsubscribe()
-      }
+  test('an unavailable CVV does not revoke the other account credentials', async () => {
+    const invalidated: number[] = []
+    const unsubscribe = onAccountFailure((id) => invalidated.push(id))
+    globalThis.fetch = mock(async () =>
+      Response.json(
+        { success: false, message: 'mailbox_cvv_unavailable' },
+        { status: 404 }
+      )
+    ) as unknown as typeof fetch
+    try {
+      await expect(
+        mailboxApi.credentials('csrf', 3, 'cvv', undefined, 'opening')
+      ).rejects.toMatchObject({ code: 'mailbox_cvv_unavailable' })
+      expect(invalidated).toEqual([])
+      expect(
+        errorKey(new MailboxRequestError('mailbox_cvv_unavailable', 404))
+      ).toBe('mailboxPortal.cvvUnavailable')
+    } finally {
+      unsubscribe()
     }
-  )
+  })
   test('approval while a credential is in flight rejects the returned secret', async () => {
     const calls: string[] = []
     globalThis.fetch = mock(async (url: RequestInfo | URL) => {

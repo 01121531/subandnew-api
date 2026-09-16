@@ -83,43 +83,14 @@ func validIssueText(value string) bool {
 }
 
 func (s *Service) issueQuery(actor Actor) *gorm.DB {
-	return s.issueBaseQuery(actor).Where("a.account_type = ?", s.pool())
-}
-
-func (s *Service) issueBaseQuery(actor Actor) *gorm.DB {
 	q := s.DB.Table("mailbox_issues AS i").
 		Joins("JOIN mailbox_accounts AS a ON a.id = i.account_id").
 		Joins("JOIN mailbox_assignments AS t ON t.id = i.assignment_id AND t.account_id = i.account_id AND t.operator_id = i.operator_id").
-		Joins("JOIN mailbox_operators AS o ON o.id = i.operator_id")
+		Joins("JOIN mailbox_operators AS o ON o.id = i.operator_id").Where("a.account_type = ?", s.pool())
 	if actor.Admin == nil {
 		q = q.Where("i.operator_id = ?", actor.OperatorID)
 	}
 	return q
-}
-
-func (s *Service) filteredIssueQuery(actor Actor, query ListQuery) (*gorm.DB, error) {
-	if query.Kind != "" && !validIssueKind(query.Kind, s.pool()) || query.Status != "" && query.Status != "pending" && query.Status != "processed" && query.Status != "resolved" && query.Status != "invalidated" || query.OperatorID < 0 {
-		return nil, fail(400, "mailbox_invalid_query")
-	}
-	q := s.issueQuery(actor)
-	if query.Search != "" {
-		q = q.Where("LOWER(a.email) LIKE ?", "%"+strings.ToLower(query.Search)+"%")
-	}
-	if query.Kind != "" {
-		q = q.Where("i.kind = ?", query.Kind)
-	}
-	if query.Status == "processed" {
-		q = q.Where("i.status <> 'pending'")
-	} else if query.Status != "" {
-		q = q.Where("i.status = ?", query.Status)
-	}
-	if query.OperatorID > 0 {
-		q = q.Where("i.operator_id = ?", query.OperatorID)
-	}
-	if query.AssignmentID > 0 {
-		q = q.Where("i.assignment_id = ?", query.AssignmentID)
-	}
-	return s.filterCards(actor, q, query.CardFilters)
 }
 
 const issueViewSelect = "i.submitted_version, i.id, i.account_id, a.account_type, a.email, a.card_last4, a.version AS account_version, i.assignment_id, t.version AS assignment_version, CASE WHEN a.active_assignment_id = t.id AND t.revoked_at = 0 AND o.enabled = true AND i.status = 'pending' AND t.status = 'issue_pending' THEN true ELSE false END AS assignment_active, i.operator_id, o.display_name AS operator_name, i.kind, i.description, i.status, i.version, i.resolution, i.reply, i.resolved_at, i.created_at"
@@ -158,10 +129,27 @@ func (s *Service) ListIssues(ctx context.Context, actor Actor, query ListQuery) 
 	if err := s.CheckActor(actor, authz.MailboxReview); err != nil {
 		return nil, err
 	}
+	if query.Kind != "" && !validIssueKind(query.Kind, s.pool()) || query.Status != "" && query.Status != "pending" && query.Status != "processed" && query.Status != "resolved" && query.Status != "invalidated" {
+		return nil, fail(400, "mailbox_invalid_query")
+	}
 	query = normalizePage(query)
-	q, err := s.filteredIssueQuery(actor, query)
-	if err != nil {
-		return nil, err
+	q := s.issueQuery(actor)
+	if query.Search != "" {
+		q = q.Where("LOWER(a.email) LIKE ?", "%"+strings.ToLower(query.Search)+"%")
+	}
+	if query.Kind != "" {
+		q = q.Where("i.kind = ?", query.Kind)
+	}
+	if query.Status == "processed" {
+		q = q.Where("i.status <> 'pending'")
+	} else if query.Status != "" {
+		q = q.Where("i.status = ?", query.Status)
+	}
+	if query.OperatorID > 0 {
+		q = q.Where("i.operator_id = ?", query.OperatorID)
+	}
+	if query.AssignmentID > 0 {
+		q = q.Where("i.assignment_id = ?", query.AssignmentID)
 	}
 	page := &Page[IssueView]{Items: []IssueView{}, Page: query.Page, PageSize: query.PageSize}
 	if err := q.Count(&page.Total).Error; err != nil {
@@ -174,14 +162,6 @@ func (s *Service) ListIssues(ctx context.Context, actor Actor, query ListQuery) 
 		return nil, err
 	}
 	page.HasMore = int64(query.Page)*int64(query.PageSize) < page.Total
-	if len(query.CardFilters) > 0 {
-		if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
-			return nil, err
-		}
-		if err := s.CheckActor(actor, authz.MailboxView); err != nil {
-			return nil, err
-		}
-	}
 	if err := s.CheckActor(actor, authz.MailboxReview); err != nil {
 		return nil, err
 	}
@@ -282,6 +262,7 @@ func (s *Service) SubmitIssue(ctx context.Context, actor Actor, assignmentID int
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateCVVAccount(issue.AccountID)
 	return s.GetIssue(ctx, actor, issue.ID, accountType)
 }
 
@@ -363,12 +344,6 @@ func (s *Service) replaceIssueCredentials(actor Actor, account *model.MailboxAcc
 			return fail(503, "mailbox_credentials_unavailable")
 		}
 		updates["card_ciphertext"], updates["card_key_version"], updates["card_last4"] = ciphertext, version, number[len(number)-4:]
-		if err := s.cardChanged(*account, number); err != nil {
-			return err
-		}
-		if err := s.indexCard(account.ID, number, ciphertext); err != nil {
-			return err
-		}
 	}
 	if len(updates) == 0 {
 		return nil
@@ -395,6 +370,7 @@ func (s *Service) ResolveIssue(ctx context.Context, actor Actor, id int64, input
 	if id <= 0 || input.Version <= 0 || input.AccountVersion <= 0 || input.AssignmentVersion <= 0 || !validIssueText(input.Reply) || (input.Resolution != "resume" && input.Resolution != "recall") {
 		return fail(400, "mailbox_invalid_issue")
 	}
+	var accountID int64
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxReview); err != nil {
@@ -421,6 +397,7 @@ func (s *Service) ResolveIssue(ctx context.Context, actor Actor, id int64, input
 		if err != nil {
 			return err
 		}
+		accountID = account.ID
 		var issue model.MailboxIssue
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&issue, id).Error; err != nil {
 			return workflowNotFound(err)
@@ -450,5 +427,8 @@ func (s *Service) ResolveIssue(ctx context.Context, actor Actor, id int64, input
 		}
 		return s.Audit(actor, "issue_"+input.Resolution, account.ID, assignment.ID, 200, "")
 	})
+	if err == nil {
+		s.invalidateCVVAccount(accountID)
+	}
 	return err
 }

@@ -152,16 +152,15 @@ func TestMailboxArchiveWithholdsInFlightCredentialsAndCVV(t *testing.T) {
 	a = cvvTestImport(t, s, admin, "007")
 	input := ArchiveInput{AccountType: AccountTypeOpening, Items: []AssignItem{{a.ID, a.Version}}}
 	require.NoError(t, s.ArchiveAccounts(context.Background(), admin, input, false))
-	var retained model.MailboxCVV
-	require.NoError(t, s.DB.First(&retained, "account_id = ?", a.ID).Error)
+	require.Empty(t, s.cvv.items)
 	_, err = s.ProvideTemporaryCVV(context.Background(), admin, a.ID, TemporaryCVVInput{Version: a.Version + 1, CVV: "008"}, AccountTypeOpening)
 	require.Error(t, err)
 	input.Items[0].Version++
 	require.NoError(t, s.ArchiveAccounts(context.Background(), admin, input, true))
 	cvvTestAssign(t, s, admin, operator, a.ID)
 	value, err = s.Credentials(context.Background(), operator, a.ID, "cvv", AccountTypeOpening)
-	require.NoError(t, err)
-	require.Equal(t, "007", value.CVV)
+	require.Error(t, err)
+	require.Nil(t, value)
 }
 
 func TestMailboxArchiveConcurrentAssignAndAuditRollback(t *testing.T) {
@@ -206,7 +205,7 @@ func TestMailboxArchiveConcurrentAssignAndAuditRollback(t *testing.T) {
 
 func TestMailboxImportOptionsAvailability(t *testing.T) {
 	s, admin, _ := cvvTestService(t)
-	for _, test := range []struct{ mode, node, reason string }{{"", "master", ""}, {"disabled", "master", "not_enabled"}, {"single_node", "slave", ""}, {"single_node", "master", ""}, {"invalid", "master", "not_enabled"}} {
+	for _, test := range []struct{ mode, node, reason string }{{"", "master", ""}, {"disabled", "master", "not_enabled"}, {"single_node", "slave", "node_unsupported"}, {"single_node", "master", ""}, {"invalid", "master", "not_enabled"}} {
 		t.Setenv("MAILBOX_TEMP_CVV_MODE", test.mode)
 		t.Setenv("NODE_TYPE", test.node)
 		options, err := s.ImportOptions(admin)

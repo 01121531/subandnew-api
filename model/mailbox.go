@@ -73,17 +73,6 @@ type MailboxSubmission struct {
 	CreatedAt    int64  `json:"created_at" gorm:"index;index:idx_mailbox_submissions_operator_created_assignment,priority:2;index:idx_mailbox_submissions_assignment_operator_created,priority:3"`
 }
 
-type MailboxRemarkRevision struct {
-	ID           int64  `json:"id" gorm:"primaryKey"`
-	SubmissionID int64  `json:"submission_id" gorm:"not null;index"`
-	AdminID      int    `json:"admin_id"`
-	OperatorID   int64  `json:"operator_id"`
-	OldRemark    string `json:"old_remark" gorm:"type:text"`
-	NewRemark    string `json:"new_remark" gorm:"type:text"`
-	Version      int64  `json:"version"`
-	CreatedAt    int64  `json:"created_at"`
-}
-
 type MailboxAttachment struct {
 	ID           string `json:"id" gorm:"size:64;primaryKey"`
 	AssignmentID int64  `json:"assignment_id" gorm:"not null;index"`
@@ -119,9 +108,6 @@ type MailboxIssue struct {
 }
 
 type MailboxAudit struct {
-	FromStatus       string `json:"from_status,omitempty" gorm:"size:24"`
-	ToStatus         string `json:"to_status,omitempty" gorm:"size:24"`
-	Reason           string `json:"reason,omitempty" gorm:"size:2000"`
 	ID               int64  `json:"id" gorm:"primaryKey"`
 	AccountType      string `json:"account_type" gorm:"size:16;not null;default:refund;index"`
 	AdminID          int    `json:"admin_id" gorm:"index"`

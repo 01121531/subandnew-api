@@ -1,7 +1,16 @@
 import { expect, test } from 'bun:test'
 
 import type { Account } from '../types'
-import { credentialScope } from './credentials'
+import { credentialScope, revealRemaining } from './credentials'
+
+test('password/card reveals expire at 60 seconds without depending on OTP or an upstream clock', () => {
+  const start = 1_000_000
+  expect(revealRemaining(start, start)).toBe(60_000)
+  expect(revealRemaining(start, start + 59_999)).toBe(1)
+  expect(revealRemaining(start, start + 60_000)).toBe(0)
+  expect(revealRemaining(start, start + 90_000)).toBe(0)
+  expect(revealRemaining(start, start - 10_000)).toBe(60_000)
+})
 
 test('credential scopes reset reveals for assignment/status/pool/availability changes, not ordinary row refreshes', () => {
   const account: Account = {

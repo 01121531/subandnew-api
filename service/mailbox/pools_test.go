@@ -142,7 +142,6 @@ func TestMailboxCardValidation(t *testing.T) {
 }
 
 func TestMailboxOpeningImportRejectsColumnsNumericPANAndIsAtomic(t *testing.T) {
-	t.Setenv("MAILBOX_TEMP_CVV_MODE", "disabled")
 	s, admin := newMailboxImportTestService(t)
 	ctx := context.Background()
 	valid := string(poolTestCSV("valid@example.test"))

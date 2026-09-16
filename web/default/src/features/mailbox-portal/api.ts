@@ -39,9 +39,7 @@ export function invalidateAccountCredentials(id: number, error: unknown): void {
   if (
     error instanceof MailboxRequestError &&
     [403, 404, 409].includes(error.status) &&
-    !['mailbox_cvv_unavailable', 'mailbox_cvv_task_restricted'].includes(
-      error.code
-    )
+    error.code !== 'mailbox_cvv_unavailable'
   ) {
     for (const listener of accountFailureListeners) listener(id)
   }
@@ -104,14 +102,9 @@ async function request<T>(
     signal?: AbortSignal
     blob?: boolean
     post?: boolean
-    patch?: boolean
   } = {}
 ): Promise<T> {
-  if (
-    (options.post || options.patch) &&
-    path !== '/auth/login' &&
-    !options.csrf
-  ) {
+  if (options.post && path !== '/auth/login' && !options.csrf) {
     throw new MailboxRequestError('mailbox_csrf_required', 403)
   }
   const currentGeneration = generation
@@ -131,11 +124,9 @@ async function request<T>(
     headers.set('Content-Type', 'application/json')
   }
   if (options.csrf) headers.set('X-Mailbox-CSRF', options.csrf)
-  let method = options.post ? 'POST' : 'GET'
-  if (options.patch) method = 'PATCH'
   try {
     const response = await fetch(`/mailbox-api/v1${path}`, {
-      method,
+      method: options.post ? 'POST' : 'GET',
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
@@ -279,7 +270,6 @@ function publicSubmission(
     version: value.version,
     review_reason: value.review_reason,
     remark: typeof value.remark === 'string' ? value.remark : '',
-    can_edit_remark: value.can_edit_remark === true,
     reviewed_by: value.reviewed_by,
     reviewed_at: value.reviewed_at,
     created_at: value.created_at,
@@ -298,28 +288,6 @@ function publicPage<T>(value: Page<T>, project: (item: T) => T): Page<T> {
 }
 
 export const mailboxApi = {
-  editRemark: (
-    csrf: string,
-    id: number,
-    accountType: AccountType,
-    version: number,
-    remark: string
-  ) =>
-    request<Submission>(`/submissions/${id}/remark`, {
-      patch: true,
-      csrf,
-      body: { account_type: accountType, version, remark },
-    }).then((value) => publicSubmission(value, accountType)),
-  remarkHistory: (
-    id: number,
-    accountType: AccountType,
-    page: number,
-    signal: AbortSignal
-  ) =>
-    request<import('@/components/mailbox-remark-editor').RemarkHistory>(
-      `/submissions/${id}/remark-history?${params({ account_type: accountType, page, page_size: 20 })}`,
-      { signal }
-    ),
   issues: (
     query: ListQuery & { assignment_id?: number; kind?: string },
     signal?: AbortSignal
@@ -409,7 +377,6 @@ export const mailboxApi = {
       if (kind === 'cvv') {
         return {
           cvv: value.cvv,
-          ...(value.persistent === true ? { persistent: true } : {}),
           expires_at: value.expires_at,
           server_time: value.server_time,
         }

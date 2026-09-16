@@ -14,7 +14,6 @@ import {
 
 import { mailboxApi } from '../api'
 import { useMailboxQuery } from '../hooks'
-import { statusLabelKey } from '../lib/display'
 import { safeCode } from '../lib/errors'
 import type { AccountType, Audit } from '../types'
 import { Pager, QueryState, Time } from './common'
@@ -157,17 +156,6 @@ function AuditTargets(props: { item: Audit }) {
   const { t } = useTranslation()
   return (
     <div className='grid gap-1'>
-      {props.item.from_status && props.item.to_status && (
-        <span>
-          {t(statusLabelKey(props.item.from_status))} →{' '}
-          {t(statusLabelKey(props.item.to_status))}
-        </span>
-      )}
-      {props.item.reason && (
-        <span className='max-w-80 break-words whitespace-pre-wrap'>
-          {props.item.reason}
-        </span>
-      )}
       {props.item.account_id > 0 && (
         <span>
           {t('mailbox.admin.accountID')}: #{props.item.account_id}

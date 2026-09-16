@@ -163,11 +163,28 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 			cvvCount++
 		}
 	}
+	var cvvs *cvvStore
 	if cvvCount > 0 {
 		if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
 			return nil, err
 		}
+		cvvs = s.cvvStore()
+		cvvs.mu.Lock()
+		defer cvvs.mu.Unlock()
+		cvvs.purgeLocked(s.Now())
+		count, err := temporaryCVVCount(cvvs)
+		if err != nil {
+			return nil, fail(503, "mailbox_cvv_disabled")
+		}
+		if !s.importUpdateExisting && count+cvvCount > temporaryCVVCapacity {
+			return nil, fail(503, "mailbox_cvv_capacity")
+		}
 	}
+	type pendingCVV struct {
+		value                                 string
+		assignmentID, operatorID, authVersion int64
+	}
+	pendingCVVs := make(map[int64]pendingCVV)
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		service := s.WithDB(tx)
 		if err := service.checkMailboxImportActor(actor); err != nil {
@@ -210,24 +227,24 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 						}
 						updates["card_ciphertext"], updates["card_key_version"] = cardCiphertext, cardVersion
 						updates["card_last4"] = row.card.Number[len(row.card.Number)-4:]
-						if err := service.cardChanged(existing, row.card.Number); err != nil {
-							return err
-						}
-						if err := service.indexCard(existing.ID, row.card.Number, cardCiphertext); err != nil {
-							return err
-						}
 					}
 					update := tx.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", existing.ID, existing.Version).Updates(updates)
 					if update.Error != nil || update.RowsAffected != 1 {
 						return fail(409, "mailbox_version_conflict")
 					}
 					if row.cvv != "" {
-						if err := service.saveCVV(existing.ID, row.cvv); err != nil {
-							return err
+						pending := pendingCVV{value: row.cvv, assignmentID: existing.ActiveAssignmentID}
+						if existing.ActiveAssignmentID != 0 {
+							var assignment model.MailboxAssignment
+							if err := tx.Select("operator_id").First(&assignment, existing.ActiveAssignmentID).Error; err == nil {
+								pending.operatorID = assignment.OperatorID
+								var operator model.MailboxOperator
+								if err := tx.Select("auth_version").First(&operator, assignment.OperatorID).Error; err == nil {
+									pending.authVersion = operator.AuthVersion
+								}
+							}
 						}
-						if err := service.Audit(actor, "cvv_update", existing.ID, existing.ActiveAssignmentID, 200, ""); err != nil {
-							return err
-						}
+						pendingCVVs[existing.ID] = pending
 					}
 					result.Imported++
 					result.Updated++
@@ -265,21 +282,13 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 				updates["card_ciphertext"] = cardCiphertext
 				updates["card_key_version"] = cardVersion
 				updates["card_last4"] = row.card.Number[len(row.card.Number)-4:]
-				if err := service.indexCard(account.ID, row.card.Number, cardCiphertext); err != nil {
-					return err
-				}
 			}
 			update := tx.Model(&model.MailboxAccount{}).Where("id = ? AND version = ?", account.ID, account.Version).Updates(updates)
 			if update.Error != nil || update.RowsAffected != 1 {
 				return fail(500, "mailbox_service_unavailable")
 			}
 			if row.cvv != "" {
-				if err := service.saveCVV(account.ID, row.cvv); err != nil {
-					return err
-				}
-				if err := service.Audit(actor, "cvv_provide", account.ID, 0, 200, ""); err != nil {
-					return err
-				}
+				pendingCVVs[account.ID] = pendingCVV{value: row.cvv}
 			}
 			result.Imported++
 		}
@@ -298,6 +307,14 @@ func (s *Service) Import(ctx context.Context, actor Actor, format string, data [
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Publish CVVs to volatile memory only once the entire import has committed.
+	if cvvs != nil {
+		for id, pending := range pendingCVVs {
+			if err := cvvs.putLocked(id, pending.value, pending.assignmentID, pending.operatorID, pending.authVersion); err != nil {
+				return nil, fail(503, "mailbox_cvv_disabled")
+			}
+		}
 	}
 	result.Failed = len(result.Failures)
 	sort.Slice(result.Failures, func(i, j int) bool { return result.Failures[i].Row < result.Failures[j].Row })

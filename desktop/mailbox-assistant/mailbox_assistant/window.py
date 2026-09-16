@@ -48,8 +48,8 @@ ERRORS = {
     "mailbox_version_conflict": "任务已发生变化，请刷新后核对。",
     "mailbox_credentials_changed": "资料已发生变化，请重新打开任务。",
     "mailbox_permission_denied": "当前账号无权执行此操作。",
-    "mailbox_cvv_disabled": "服务端未启用 CVV。",
-    "mailbox_cvv_unavailable": "CVV 未提供或不可访问，请联系管理员。",
+    "mailbox_cvv_disabled": "服务端未启用单节点临时 CVV 交付。",
+    "mailbox_cvv_unavailable": "临时 CVV 未提供、已过期或已领取，请联系管理员。",
     "mailbox_invalid_credentials": "用户名或密码不正确。",
     "mailbox_login_limited": "登录失败次数过多，请稍后重试。",
 }
@@ -244,7 +244,7 @@ class Window(QMainWindow):
             ("code", "验证码"),
             ("card_number", "信用卡号"),
             ("card_expiry", "有效期"),
-            ("cvv", "CVV"),
+            ("cvv", "临时 CVV"),
         ):
             field = CopyField(key, title)
             field.requested.connect(self.copy_field)
@@ -863,10 +863,7 @@ class Window(QMainWindow):
                     if key == "cvv":
                         self.cvv_caption.setText("领取结果不确定，请联系管理员重新提供。")
                     continue
-                if key == "cvv" and data.get("persistent") is True:
-                    self.deadlines.pop(key, None)
-                    self.cvv_caption.setText("CVV 已加密保存，无自动到期时间")
-                elif key in ("code", "cvv"):
+                if key in ("code", "cvv"):
                     expires, server_time = data.get("expires_at"), data.get("server_time")
                     if not isinstance(expires, int) or not isinstance(server_time, int):
                         continue
@@ -927,8 +924,6 @@ class Window(QMainWindow):
         if self.hidden_private or not self.current:
             return
         for key in ("code", "cvv"):
-            if key == "cvv" and key in self.values and key not in self.deadlines:
-                continue
             remaining = max(0, int(self.deadlines.get(key, 0) - time.monotonic()))
             if key in self.values and remaining <= 0:
                 self.values.pop(key, None)
@@ -953,9 +948,7 @@ class Window(QMainWindow):
             self.set_busy(False)
             if key not in self.values:
                 return
-            if (key == "code" or key == "cvv" and key in self.deadlines) and self.deadlines.get(
-                key, 0
-            ) <= time.monotonic():
+            if key in ("code", "cvv") and self.deadlines.get(key, 0) <= time.monotonic():
                 self.values.pop(key, None)
                 self.fields[key].set_value(None, "已过期")
                 if key == "code":

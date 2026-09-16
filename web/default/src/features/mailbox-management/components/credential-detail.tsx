@@ -10,7 +10,6 @@ import { errorKey } from '../lib/errors'
 import { otpRemaining } from '../lib/schemas'
 import type { AccountType, Credential } from '../types'
 import { CardCredential } from './card-credential'
-import { ChangeStatusDialog } from './change-status-dialog'
 import { CopyButton, Modal, QueryState, Status, Time } from './common'
 import { TemporaryCvvCredential } from './temporary-cvv-credential'
 
@@ -19,11 +18,9 @@ export function CredentialDetail(props: {
   id: number
   canView: boolean
   canCredentials: boolean
-  canReview?: boolean
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const [changingStatus, setChangingStatus] = useState(false)
   const account = useMailboxQuery(
     ['account', props.accountType, props.id],
     (signal) => mailboxApi.account(props.id, signal, props.accountType),
@@ -182,26 +179,6 @@ export function CredentialDetail(props: {
       description={t(`mailbox.admin.pools.${props.accountType}`)}
     >
       <div className='space-y-5'>
-        {props.canReview && account.data && (
-          <Button
-            variant='outline'
-            disabled={account.isFetching || account.isError}
-            onClick={() => setChangingStatus(true)}
-          >
-            {t('mailbox.changeStatus.title')}
-          </Button>
-        )}
-        {changingStatus && account.data && (
-          <ChangeStatusDialog
-            accountType={props.accountType}
-            accounts={[account.data]}
-            onClose={() => setChangingStatus(false)}
-            onSuccess={() => {
-              setChangingStatus(false)
-              void account.refetch()
-            }}
-          />
-        )}
         {props.canCredentials && (
           <p className='text-muted-foreground border-l-2 border-amber-500 pl-3 text-sm'>
             {t('mailbox.admin.revocationWarning')}
