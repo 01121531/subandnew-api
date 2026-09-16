@@ -108,6 +108,9 @@ type MailboxIssue struct {
 }
 
 type MailboxAudit struct {
+	FromStatus       string `json:"from_status,omitempty" gorm:"size:24"`
+	ToStatus         string `json:"to_status,omitempty" gorm:"size:24"`
+	Reason           string `json:"reason,omitempty" gorm:"size:2000"`
 	ID               int64  `json:"id" gorm:"primaryKey"`
 	AccountType      string `json:"account_type" gorm:"size:16;not null;default:refund;index"`
 	AdminID          int    `json:"admin_id" gorm:"index"`

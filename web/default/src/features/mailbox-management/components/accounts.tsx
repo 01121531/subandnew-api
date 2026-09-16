@@ -5,6 +5,7 @@ import {
   UserRoundCheck,
   Trash2,
   ArchiveRestore,
+  ListChecks,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -28,6 +29,7 @@ import type { Account, AccountType, VersionedID } from '../types'
 import { AccountOperatorFilter } from './account-operator-filter'
 import { ArchiveDialog } from './archive-dialog'
 import { AssignDialog } from './assign-dialog'
+import { ChangeStatusDialog } from './change-status-dialog'
 import { Pager, QueryState, SearchBar, Status, Time } from './common'
 import { CredentialDetail } from './credential-detail'
 import { ExportCompletedButton } from './export-completed-button'
@@ -52,6 +54,8 @@ function AccountPool(props: { accountType: AccountType }) {
   const assign = canMailbox(user, 'assign')
   const credentials = canMailbox(user, 'credentials')
   const manage = canMailbox(user, 'manage')
+  const review = view && canMailbox(user, 'review')
+  const [statusAccounts, setStatusAccounts] = useState<Account[]>()
   const [archived, setArchived] = useState(false)
   const [archiveItems, setArchiveItems] = useState<VersionedID[]>()
   const [page, setPage] = useState(1)
@@ -100,6 +104,18 @@ function AccountPool(props: { accountType: AccountType }) {
     const row = rows.find((item) => item.id === id)
     return (
       <div className='flex shrink-0 items-center gap-1'>
+        {review && !archived && row && (
+          <Button
+            variant='ghost'
+            size='icon'
+            title={t('mailbox.changeStatus.title')}
+            aria-label={t('mailbox.changeStatus.title')}
+            disabled={query.isFetching || query.isError}
+            onClick={() => setStatusAccounts([row])}
+          >
+            <ListChecks />
+          </Button>
+        )}
         {!archived && (
           <Button
             variant='ghost'
@@ -147,6 +163,22 @@ function AccountPool(props: { accountType: AccountType }) {
   return (
     <section className='min-w-0 space-y-3'>
       <div className='flex flex-wrap items-center gap-2 pt-4'>
+        {review && !archived && (
+          <Button
+            variant='outline'
+            disabled={!selected.length || query.isFetching || query.isError}
+            onClick={() =>
+              setStatusAccounts(
+                rows.filter((row) =>
+                  selected.some((item) => item.id === row.id)
+                )
+              )
+            }
+          >
+            <ListChecks />
+            {t('mailbox.changeStatus.title')} ({selected.length})
+          </Button>
+        )}
         {view && (
           <div
             className='flex flex-wrap gap-1'
@@ -277,7 +309,7 @@ function AccountPool(props: { accountType: AccountType }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {(assign || manage) && (
+                    {(assign || manage || review) && (
                       <TableHead className='w-10'>
                         <input
                           type='checkbox'
@@ -321,7 +353,7 @@ function AccountPool(props: { accountType: AccountType }) {
                 <TableBody>
                   {rows.map((row) => (
                     <TableRow key={row.id}>
-                      {(assign || manage) && (
+                      {(assign || manage || review) && (
                         <TableCell>
                           <input
                             type='checkbox'
@@ -380,7 +412,7 @@ function AccountPool(props: { accountType: AccountType }) {
                   className='min-w-0 space-y-3 rounded-lg border p-3'
                 >
                   <div className='flex items-start gap-3'>
-                    {(assign || manage) && (
+                    {(assign || manage || review) && (
                       <input
                         className='mt-1'
                         type='checkbox'
@@ -454,6 +486,18 @@ function AccountPool(props: { accountType: AccountType }) {
           onClose={() => setCvvAccount(undefined)}
         />
       )}
+      {statusAccounts && (
+        <ChangeStatusDialog
+          accountType={props.accountType}
+          accounts={statusAccounts}
+          onClose={() => setStatusAccounts(undefined)}
+          onSuccess={() => {
+            setStatusAccounts(undefined)
+            setSelected([])
+            void query.refetch()
+          }}
+        />
+      )}
       {showImport && (
         <ImportDialog
           accountType={props.accountType}
@@ -477,6 +521,7 @@ function AccountPool(props: { accountType: AccountType }) {
           id={detail}
           canView={view}
           canCredentials={credentials}
+          canReview={review}
           onClose={() => setDetail(undefined)}
         />
       )}

@@ -133,6 +133,9 @@ export function submissionMetadata(
 
 export function auditMetadata(value: Audit): Audit {
   return {
+    from_status: value.from_status,
+    to_status: value.to_status,
+    reason: value.reason,
     id: value.id,
     target_operator_id: value.target_operator_id,
     admin_id: value.admin_id,

@@ -1,4 +1,16 @@
 export const mailboxEn = {
+  changeStatus: {
+    title: 'Change task status',
+    description:
+      'Update {{count}} selected mailbox task(s). Changes are atomic and history is preserved.',
+    reason: 'Reason (do not include credentials)',
+    unavailable:
+      'No shared status transition is available. Assign unassigned accounts first; use issue resolution or recall for those workflows.',
+    revoke:
+      'Approval revokes operator credential access. A pending submission is required.',
+    reopen:
+      'The operator can read credentials again and submit a new record. Old approvals are retained; expired CVV is not restored.',
+  },
   completedExport: {
     button: 'Export all completed accounts',
     pending: 'Generating Excel…',
@@ -322,6 +334,7 @@ export const mailboxEn = {
     adminActor: 'Admin #{{id}}',
     operatorActor: 'Operator #{{id}}',
     auditActions: {
+      change_status: 'Change task status',
       archive: 'Archive mailbox',
       restore: 'Restore mailbox',
       import: 'Import',
@@ -467,6 +480,17 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  changeStatus: {
+    title: '修改任务状态',
+    description:
+      '修改选中的 {{count}} 个邮箱任务。批量全部成功或全部取消，历史记录保留。',
+    reason: '修改原因（请勿填写凭据）',
+    unavailable:
+      '所选任务没有共同可用的目标状态。未分配邮箱请先分配；异常和回收请使用对应处理入口。',
+    revoke: '审核通过会收回操作员的凭据访问权，必须已有待审核提交。',
+    reopen:
+      '操作员可以重新读取资料并提交新记录。原审核历史保留，已失效的 CVV 不会恢复。',
+  },
   completedExport: {
     button: '导出已完成账号',
     pending: '正在生成 Excel…',
@@ -773,6 +797,7 @@ export const mailboxZh: typeof mailboxEn = {
       archive: '归档邮箱',
       restore: '恢复邮箱',
       import: '导入邮箱',
+      change_status: '修改任务状态',
       import_preview: '导入预览',
       assign: '分配邮箱',
       recall: '收回邮箱',

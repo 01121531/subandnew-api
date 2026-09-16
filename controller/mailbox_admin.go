@@ -213,6 +213,17 @@ func AssignMailboxAccounts(c *gin.Context) {
 	}
 	mailboxSuccess(c, gin.H{})
 }
+func ChangeMailboxAccountStatus(c *gin.Context) {
+	var input mailbox.ChangeStatusInput
+	if !mailboxDecode(c, &input) {
+		return
+	}
+	if err := mailboxService().ChangeStatus(c.Request.Context(), mailboxActor(c), input); err != nil {
+		mailboxFailure(c, err)
+		return
+	}
+	mailboxSuccess(c, gin.H{"updated": len(input.Items)})
+}
 func ListMailboxOperators(c *gin.Context) {
 	if value := c.Query("include_stats"); len(c.QueryArray("include_stats")) > 1 || (value != "" && value != "false" && value != "true") {
 		mailboxBadRequest(c, "mailbox_invalid_work_query")

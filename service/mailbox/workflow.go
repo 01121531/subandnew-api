@@ -548,11 +548,7 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		if newest.ID != submission.ID {
 			return fail(409, "mailbox_invalid_state")
 		}
-		now := s.Now().Unix()
-		if err := workflowCAS(tx.Model(&model.MailboxSubmission{}).Where("id = ? AND version = ? AND status = ?", submissionID, input.Version, StatusPending).Updates(map[string]any{"status": input.Status, "version": gorm.Expr("version + 1"), "review_reason": input.Reason, "reviewed_by": actor.Admin.UserID, "reviewed_at": now})); err != nil {
-			return err
-		}
-		if err := workflowCAS(tx.Model(&model.MailboxAssignment{}).Where("id = ? AND version = ? AND revoked_at = 0 AND status = ?", assignment.ID, assignment.Version, StatusSubmitted).Updates(map[string]any{"status": input.Status, "version": gorm.Expr("version + 1"), "updated_at": now})); err != nil {
+		if err := s.applyReview(actor, assignment, &submission, input); err != nil {
 			return err
 		}
 		return s.Audit(actor, "review", account.ID, assignment.ID, 200, "")

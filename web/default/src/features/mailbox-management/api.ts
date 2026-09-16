@@ -148,6 +148,25 @@ async function workRequest<T>(
   return result
 }
 export const mailboxApi = {
+  changeStatus: (
+    accountType: AccountType,
+    accounts: Account[],
+    status: string,
+    reason: string
+  ) =>
+    request<unknown>('/accounts/change-status', 'POST', {
+      account_type: accountType,
+      status,
+      reason,
+      items: accounts.map(
+        ({ id, version, assignment_id, assignment_version }) => ({
+          id,
+          version,
+          assignment_id,
+          assignment_version,
+        })
+      ),
+    }),
   exportCompleted: async (signal: AbortSignal): Promise<Blob> => {
     const allowed = () => {
       const user = useAuthStore.getState().auth.user

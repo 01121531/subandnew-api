@@ -248,6 +248,9 @@ export interface ResolveIssueInput {
   }
 }
 export interface Audit {
+  from_status?: string
+  to_status?: string
+  reason?: string
   account_type?: AccountType
   card_last4?: string
   target_operator_id?: number
