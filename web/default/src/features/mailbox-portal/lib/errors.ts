@@ -16,6 +16,8 @@ export function errorKey(error: unknown): string {
     mailbox_attachment_expired: 'imageExpired',
     mailbox_invalid_password: 'passwordInvalid',
     mailbox_draft_limit: 'draftLimit',
+    mailbox_clipboard_empty: 'clipboardEmpty',
+    mailbox_clipboard_unavailable: 'clipboardUnavailable',
   }
   if (known[error.code]) return `mailboxPortal.${known[error.code]}`
   if (error.status === 401) return 'mailboxPortal.sessionExpired'

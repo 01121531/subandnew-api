@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
-import { RefreshCw, Send, Trash2, Upload } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { ClipboardPaste, RefreshCw, Send, Trash2, Upload } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,8 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { IssueKind } from '@/features/mailbox-management/types'
 
-import { mailboxApi } from '../api'
+import { mailboxApi, MailboxRequestError } from '../api'
+import { pastedImages, readClipboardImages } from '../lib/clipboard-images'
 import {
   assertCurrentAssignment,
   canSubmit,
@@ -39,6 +40,8 @@ export function DraftSubmission(props: {
   const [kind, setKind] = useState<IssueKind>('email_login')
   const [description, setDescription] = useState('')
   const [uncertain, setUncertain] = useState(false)
+  const [readingClipboard, setReadingClipboard] = useState(false)
+  const section = useRef<HTMLElement>(null)
   const uncertainRef = useRef(false)
   const input = useRef<HTMLInputElement>(null)
   const urls = useRef(new Set<string>())
@@ -210,7 +213,11 @@ export function DraftSubmission(props: {
     retry: false,
     onError: (failure) => setError(failure),
   })
-  const pending = upload.isPending || submit.isPending || reconcile.isPending
+  const pending =
+    readingClipboard ||
+    upload.isPending ||
+    submit.isPending ||
+    reconcile.isPending
   const submitLabel = props.issue
     ? 'mailbox.issues.submit'
     : 'mailboxPortal.submitReview'
@@ -222,26 +229,75 @@ export function DraftSubmission(props: {
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
   }, [drafts.length, pending])
-  function select(files: File[]) {
-    if (lock.current) return
+  const uploadFiles = upload.mutate
+  const select = useCallback(
+    (files: File[]) => {
+      if (
+        lock.current ||
+        uncertain ||
+        controller.current.signal.aborted ||
+        !canSubmit(props.account)
+      ) {
+        return
+      }
+      try {
+        validateImages(files, drafts.length)
+        const items = files.map((file) => {
+          const url = URL.createObjectURL(file)
+          urls.current.add(url)
+          return { file, url }
+        })
+        setError(null)
+        setDrafts((current) => [...current, ...items])
+        lock.current = true
+        uploadFiles(items)
+      } catch (failure) {
+        setError(failure)
+      }
+    },
+    [drafts.length, props.account, uncertain, uploadFiles]
+  )
+  useEffect(() => {
+    // Listen only inside the current account detail, not elsewhere in the page.
+    const container =
+      section.current?.closest('[role="dialog"]') ?? section.current
+    const paste = (event: Event) => {
+      const data = (event as ClipboardEvent).clipboardData
+      if (!data) return
+      const files = pastedImages(data)
+      if (!files.length) return
+      event.preventDefault()
+      select(files)
+    }
+    container?.addEventListener('paste', paste)
+    return () => container?.removeEventListener('paste', paste)
+  }, [select])
+  async function pasteClipboard() {
+    if (lock.current || uncertain || !canSubmit(props.account)) return
+    lock.current = true
+    setReadingClipboard(true)
     try {
-      validateImages(files, drafts.length)
-      const items = files.map((file) => {
-        const url = URL.createObjectURL(file)
-        urls.current.add(url)
-        return { file, url }
-      })
-      setError(null)
-      setDrafts((current) => [...current, ...items])
-      lock.current = true
-      upload.mutate(items)
-    } catch (failure) {
-      setError(failure)
+      if (!navigator.clipboard?.read) throw new Error('Clipboard unavailable')
+      const files = await readClipboardImages(() => navigator.clipboard.read())
+      if (controller.current.signal.aborted) return
+      lock.current = false
+      if (!files.length) {
+        setError(new MailboxRequestError('mailbox_clipboard_empty', 400))
+      } else {
+        select(files)
+      }
+    } catch {
+      lock.current = false
+      if (!controller.current.signal.aborted) {
+        setError(new MailboxRequestError('mailbox_clipboard_unavailable', 400))
+      }
+    } finally {
+      if (!controller.current.signal.aborted) setReadingClipboard(false)
     }
   }
   if (!canSubmit(props.account)) return null
   return (
-    <section className='grid gap-4 py-5'>
+    <section ref={section} className='grid gap-4 py-5'>
       {props.issue && (
         <div className='grid gap-3'>
           <p className='text-sm text-amber-800 dark:text-amber-300'>
@@ -308,15 +364,27 @@ export function DraftSubmission(props: {
             event.target.value = ''
           }}
         />
-        <Button
-          variant='outline'
-          disabled={pending || uncertain || drafts.length >= 5}
-          aria-describedby='mailbox-redaction-warning'
-          onClick={() => input.current?.click()}
-        >
-          <Upload />
-          {t('mailboxPortal.upload')}
-        </Button>
+        <div className='flex flex-wrap gap-2'>
+          <Button
+            variant='outline'
+            disabled={pending || uncertain || drafts.length >= 5}
+            title={t('mailboxPortal.pasteScreenshotHint')}
+            aria-describedby='mailbox-redaction-warning'
+            onClick={() => void pasteClipboard()}
+          >
+            <ClipboardPaste />
+            {t('mailboxPortal.pasteScreenshot')}
+          </Button>
+          <Button
+            variant='outline'
+            disabled={pending || uncertain || drafts.length >= 5}
+            aria-describedby='mailbox-redaction-warning'
+            onClick={() => input.current?.click()}
+          >
+            <Upload />
+            {t('mailboxPortal.upload')}
+          </Button>
+        </div>
       </div>
       <div className='grid grid-cols-1 gap-3 min-[400px]:grid-cols-2'>
         {drafts.map((draft) => (

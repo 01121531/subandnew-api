@@ -58,6 +58,11 @@ export const mailboxPortalEn = {
   screenshots: 'Screenshots',
   screenshot: 'Submission screenshot',
   upload: 'Upload images',
+  pasteScreenshot: 'Paste screenshot',
+  pasteScreenshotHint: 'Paste screenshot (Ctrl+V / Command+V)',
+  clipboardEmpty: 'No image found in the clipboard. Copy a screenshot first.',
+  clipboardUnavailable:
+    'Clipboard access is unavailable or was denied. Use Ctrl+V / Command+V in this detail panel, or choose an image file.',
   uploaded: 'Uploaded',
   draft: 'Draft',
   remove: 'Remove image',
@@ -150,6 +155,11 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   screenshots: '操作截图',
   screenshot: '提交截图',
   upload: '上传图片',
+  pasteScreenshot: '粘贴截图',
+  pasteScreenshotHint: '粘贴截图（Ctrl+V / Command+V）',
+  clipboardEmpty: '剪贴板中没有图片，请先复制截图。',
+  clipboardUnavailable:
+    '浏览器不支持或未允许读取剪贴板。可在当前详情中按 Ctrl+V / Command+V 粘贴，或选择图片文件。',
   uploaded: '已上传',
   draft: '草稿',
   remove: '移除图片',
