@@ -274,6 +274,7 @@ export interface ImportPreview {
     card_last4?: string
   }>
   issues: Array<{ row: number; code: string }>
+  notices?: Array<{ row: number; code: string }>
   total: number
   valid: boolean
 }

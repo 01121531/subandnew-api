@@ -200,6 +200,21 @@ export function ImportDialog(props: {
               ))}
             </ul>
           )}
+          {!!preview.notices?.length && (
+            <ul className='max-h-48 space-y-2 overflow-y-auto border-l-2 border-amber-500 pl-3'>
+              {preview.notices.map((notice) => (
+                <li
+                  key={`${notice.row}-${notice.code}`}
+                  className='text-sm break-words'
+                >
+                  {t('mailbox.admin.row', { row: notice.row })}:{' '}
+                  {t(`mailbox.errors.${safeCode(notice.code)}`, {
+                    defaultValue: t('mailbox.admin.invalidRow'),
+                  })}
+                </li>
+              ))}
+            </ul>
+          )}
           <ol className='divide-y'>
             {preview.rows.map((row) => (
               <li key={row.row} className='flex flex-wrap gap-3 py-2 text-sm'>

@@ -38,10 +38,11 @@ type ImportIssue struct {
 }
 
 type ImportPreview struct {
-	Rows   []ImportPreviewRow `json:"rows"`
-	Issues []ImportIssue      `json:"issues"`
-	Total  int                `json:"total"`
-	Valid  bool               `json:"valid"`
+	Rows    []ImportPreviewRow `json:"rows"`
+	Issues  []ImportIssue      `json:"issues"`
+	Notices []ImportIssue      `json:"notices,omitempty"`
+	Total   int                `json:"total"`
+	Valid   bool               `json:"valid"`
 }
 
 type ImportResult struct {
@@ -236,6 +237,8 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 	addIssue := func(row int, code string) { preview.Issues = append(preview.Issues, ImportIssue{Row: row, Code: code}) }
 	headerColumns := 0
 	consume := func(row int, cells []string, header bool) error {
+		var notices []string
+		cells, notices = normalizeMailboxImportCells(cells, s.pool())
 		if header && mailboxImportHeader(cells, s.pool()) {
 			headerColumns = len(cells)
 			if headerColumns == 6 && !temporaryCVVEnabled() {
@@ -246,6 +249,9 @@ func (s *Service) prepareMailboxImport(format string, data []byte) (*ImportPrevi
 		preview.Total++
 		if preview.Total > mailboxImportMaxRows {
 			return fail(400, "mailbox_import_too_many_rows")
+		}
+		for _, code := range notices {
+			preview.Notices = append(preview.Notices, ImportIssue{Row: row, Code: code})
 		}
 		withCVV := columns == 5 && len(cells) == 6
 		if (len(cells) != columns && !withCVV) || (headerColumns != 0 && len(cells) != headerColumns) {
@@ -553,6 +559,17 @@ func readMailboxXLSXRows(data []byte, consume func(int, []string, bool, string) 
 			continue
 		}
 		rowCode := ""
+		_, packed := unpackMailboxImportCells(cells)
+		if packed {
+			cell, _ := excelize.CoordinatesToCellName(1, row)
+			cellType, err := book.GetCellType(sheets[0], cell)
+			if err != nil {
+				return invalid()
+			}
+			if cellType != excelize.CellTypeSharedString && cellType != excelize.CellTypeInlineString {
+				return invalid()
+			}
+		}
 		if kind == AccountTypeOpening && len(cells) >= 4 && !(first && mailboxImportHeader(cells, kind)) {
 			cell, _ := excelize.CoordinatesToCellName(4, row)
 			cellType, err := book.GetCellType(sheets[0], cell)

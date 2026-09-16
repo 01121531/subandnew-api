@@ -141,7 +141,8 @@ export const mailboxEn = {
   admin: {
     accountType: 'Account pool',
     pools: { refund: 'Refund pool', opening: 'Opening pool' },
-    refundImport: 'Exactly 3 fields per row: email, password, 2FA.',
+    refundImport:
+      'Refund fields: email, password, 2FA. A recovery email before 2FA is also recognized but not saved.',
     openingImport:
       '5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY). Optional sixth field: temporary CVV (single-node mode only).',
     excelPanText:
@@ -151,7 +152,7 @@ export const mailboxEn = {
       'Temporary CVV provided for 10 minutes. One operator claim only.',
     temporaryCvvNotice:
       'Temporary CVV requires explicitly enabled single-node delivery. It expires after 10 minutes and is removed on claim or restart. Use only before authorization of a specific transaction; never retain the source file or include CVV in screenshots. This is not a compliance certification.',
-    noCvv: 'Do not include CVV. Extra columns are rejected by the server.',
+    noCvv: 'Do not include CVV, cookies or other extra credentials.',
     card: 'Payment card',
     cardEnding: 'Card **** {{last4}}',
     cardNumber: 'Card number (PAN)',
@@ -364,10 +365,17 @@ export const mailboxEn = {
       'Recall assigned mailboxes first. No mailboxes were archived.',
     mailbox_import_empty: 'No mailbox records found.',
     mailbox_import_columns:
-      'Each row needs 3 fields for refund or 5 for opening; a sixth CVV field is supported only when temporary delivery is available. Other extra fields are rejected.',
+      'Refund: email, password, 2FA (optionally a recovery email before 2FA). Opening: 5 fields, or 6 with temporary CVV enabled. Other extra fields are rejected.',
+    mailbox_import_packed_row:
+      'Split the single-cell record using its delimiter; password whitespace is preserved.',
+    mailbox_import_recovery_email_ignored:
+      'Recovery email recognized but will not be saved. Confirm this is acceptable before importing.',
+    mailbox_import_otp_link_extracted:
+      'Extracted the 2FA secret from the link locally. No website was contacted.',
     mailbox_import_invalid_email: 'Invalid email address.',
     mailbox_import_invalid_password: 'Invalid or empty password.',
-    mailbox_import_invalid_otp: 'Invalid TOTP secret or configuration.',
+    mailbox_import_invalid_otp:
+      'Missing or invalid TOTP secret. Website links must contain a valid Base32 secret after #; other links are not fetched.',
     mailbox_import_formula: 'Spreadsheet formulas are not allowed.',
     mailbox_import_ambiguous_sheet:
       'The workbook must contain one unambiguous data sheet.',
@@ -539,7 +547,8 @@ export const mailboxZh: typeof mailboxEn = {
   admin: {
     accountType: '账号池',
     pools: { refund: '退款邮箱', opening: '开号邮箱' },
-    refundImport: '每行恰好 3 列：邮箱、密码、2FA。',
+    refundImport:
+      '退款字段为邮箱、密码、2FA；也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
     openingImport:
       '每行 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY）。可选第 6 列：临时 CVV（仅限单节点模式）。',
     excelPanText:
@@ -548,7 +557,7 @@ export const mailboxZh: typeof mailboxEn = {
     cvvProvided: '已提供临时 CVV，10 分钟内可领取一次。',
     temporaryCvvNotice:
       '临时 CVV 仅限显式启用的单节点交付，10 分钟到期，领取或重启即删除。仅用于具体交易授权前，不得保留原始文件或将 CVV 放入截图。这不代表已通过合规认证。',
-    noCvv: '禁止包含 CVV。服务端会拒绝额外列。',
+    noCvv: '禁止包含 CVV、Cookie 或其他额外凭据。',
     card: '支付卡',
     cardEnding: '卡号 **** {{last4}}',
     cardNumber: '卡号（PAN）',
@@ -746,10 +755,17 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_archive_assigned: '请先回收已分配的邮箱，本次未归档任何邮箱。',
     mailbox_import_empty: '未找到邮箱记录。',
     mailbox_import_columns:
-      '退款邮箱每行必须恰好 3 列，开号邮箱 5 列；临时 CVV 可用时支持第 6 列，不允许其他额外列。',
+      '退款格式为邮箱、密码、2FA，也兼容在 2FA 前增加辅助邮箱；开号为 5 列，临时 CVV 可用时支持第 6 列。其他额外字段不自动丢弃。',
+    mailbox_import_packed_row:
+      '已按分隔符拆分单元格中的资料，密码首尾空白保持原样。',
+    mailbox_import_recovery_email_ignored:
+      '已识别辅助邮箱，但本次不会保存辅助邮箱，请确认后再导入。',
+    mailbox_import_otp_link_extracted:
+      '已在本地从链接中提取 2FA 密钥，未访问任何网站。',
     mailbox_import_invalid_email: '邮箱地址无效。',
     mailbox_import_invalid_password: '密码无效或为空。',
-    mailbox_import_invalid_otp: 'TOTP 密钥或配置无效。',
+    mailbox_import_invalid_otp:
+      '缺少有效的 TOTP 密钥或配置。网站链接仅支持 # 后直接包含有效 Base32 密钥的格式，其他链接不会联网获取。',
     mailbox_import_formula: '不允许使用电子表格公式。',
     mailbox_import_ambiguous_sheet: '工作簿必须包含唯一明确的数据工作表。',
     mailbox_import_invalid_csv: 'CSV 文件无效。',

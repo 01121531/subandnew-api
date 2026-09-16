@@ -235,6 +235,14 @@ describe('mailbox control-plane API', () => {
           issues: [],
           total: 2,
           valid: true,
+          notices: [
+            {
+              row: 1,
+              code: 'mailbox_import_recovery_email_ignored',
+              recovery_email: 'private@example.test',
+              password: 'private-password',
+            },
+          ],
           card_number: '4111111111111111',
         },
       },
@@ -249,6 +257,10 @@ describe('mailbox control-plane API', () => {
     expect(JSON.stringify(preview)).not.toContain('4111111111111111')
     expect(preview.rows[0]).not.toHaveProperty('cvv')
     expect(preview).not.toHaveProperty('card_number')
+    expect(preview.notices).toEqual([
+      { row: 1, code: 'mailbox_import_recovery_email_ignored' },
+    ])
+    expect(JSON.stringify(preview)).not.toContain('private')
   })
   test('account operator metadata includes disabled operators without calling management or credential endpoints', async () => {
     const operators = [

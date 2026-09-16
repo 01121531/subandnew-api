@@ -158,5 +158,9 @@ export function importMetadata(value: ImportPreview): ImportPreview {
       card_last4: cardLast4(row.card_last4),
     })),
     issues: value.issues.map((issue) => ({ row: issue.row, code: issue.code })),
+    notices: (value.notices ?? []).map((notice) => ({
+      row: notice.row,
+      code: notice.code,
+    })),
   }
 }
