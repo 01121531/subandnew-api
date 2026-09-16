@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/01121531/subandnew-api/model"
@@ -44,6 +45,7 @@ type AssignInput struct {
 }
 
 type SubmissionView struct {
+	Remark       string           `json:"remark"`
 	AccountType  string           `json:"account_type"`
 	CardLast4    string           `json:"card_last4"`
 	ID           int64            `json:"id"`
@@ -343,7 +345,7 @@ func (s *Service) submissionQuery(actor Actor) *gorm.DB {
 	return q
 }
 
-const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
+const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.remark, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
 
 func (s *Service) submissionAttachments(views []SubmissionView) error {
 	if len(views) == 0 {
@@ -408,6 +410,12 @@ func (s *Service) ListSubmissions(ctx context.Context, actor Actor, query ListQu
 }
 
 func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version int64, attachmentIDs []string, accountTypes ...string) (*SubmissionView, error) {
+	return s.SubmitWithRemark(ctx, actor, assignmentID, version, attachmentIDs, "", accountTypes...)
+}
+
+// SubmitWithRemark freezes the operator's note alongside the existing review
+// submission. A note or at least one screenshot is required; neither is approval.
+func (s *Service) SubmitWithRemark(ctx context.Context, actor Actor, assignmentID, version int64, attachmentIDs []string, remark string, accountTypes ...string) (*SubmissionView, error) {
 	var err error
 	s, err = s.withAccountType("", accountTypes...)
 	if err != nil {
@@ -420,7 +428,11 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 	if actor.Admin != nil {
 		return nil, fail(403, "mailbox_permission_denied")
 	}
-	if assignmentID <= 0 || version <= 0 || len(attachmentIDs) < 1 || len(attachmentIDs) > 5 {
+	if !utf8.ValidString(remark) || strings.IndexFunc(remark, func(r rune) bool { return unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' }) >= 0 {
+		return nil, fail(400, "mailbox_invalid_submission")
+	}
+	remark = strings.TrimSpace(remark)
+	if assignmentID <= 0 || version <= 0 || (len(attachmentIDs) == 0 && remark == "") || len(attachmentIDs) > 5 || utf8.RuneCountInString(remark) > 2000 {
 		return nil, fail(400, "mailbox_invalid_submission")
 	}
 	seen := make(map[string]bool, len(attachmentIDs))
@@ -454,7 +466,7 @@ func (s *Service) Submit(ctx context.Context, actor Actor, assignmentID, version
 		if len(attachments) != len(attachmentIDs) {
 			return fail(400, "mailbox_invalid_attachments")
 		}
-		submission := model.MailboxSubmission{AssignmentID: assignmentID, OperatorID: actor.OperatorID, Status: StatusPending, Version: 1, CreatedAt: now}
+		submission := model.MailboxSubmission{AssignmentID: assignmentID, OperatorID: actor.OperatorID, Status: StatusPending, Version: 1, CreatedAt: now, Remark: remark}
 		if err := tx.Create(&submission).Error; err != nil {
 			return err
 		}

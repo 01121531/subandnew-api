@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import type { z } from 'zod'
 
+import { MailboxSubmissionRemark } from '@/components/mailbox-submission-remark'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
@@ -62,6 +63,10 @@ export function ReviewDialog(props: {
             <span className='break-all'>{props.submission.operator_name}</span>
             <Time value={props.submission.created_at} />
           </div>
+          <MailboxSubmissionRemark
+            remark={props.submission.remark}
+            labelKey='mailbox.admin.submissionRemark'
+          />
           <p className='border-l-2 border-amber-500 pl-3 text-sm'>
             {t('mailbox.admin.screenshotRedaction')}
           </p>

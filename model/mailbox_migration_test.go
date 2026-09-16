@@ -7,6 +7,24 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func TestMailboxSubmissionRemarkMigrationPreservesLegacyRecords(t *testing.T) {
+	db := useControlPlaneMigrationTestDB(t)
+	require.NoError(t, db.AutoMigrate(&MailboxSubmission{}))
+	require.NoError(t, db.Migrator().DropColumn(&MailboxSubmission{}, "remark"))
+	require.NoError(t, db.Exec(`INSERT INTO mailbox_submissions (id,assignment_id,operator_id,status,version,review_reason,created_at) VALUES (7,11,13,'approved',3,'legacy review',1700000000)`).Error)
+	for i := 0; i < 3; i++ {
+		require.NoError(t, db.AutoMigrate(&MailboxSubmission{}))
+		var row MailboxSubmission
+		require.NoError(t, db.First(&row, 7).Error)
+		require.Empty(t, row.Remark)
+		require.EqualValues(t, 11, row.AssignmentID)
+		require.EqualValues(t, 13, row.OperatorID)
+		require.Equal(t, "approved", row.Status)
+		require.Equal(t, "legacy review", row.ReviewReason)
+		require.EqualValues(t, 3, row.Version)
+	}
+}
+
 func TestMailboxPoolMigrationPreservesLegacyIDsAndHistory(t *testing.T) {
 	db := useControlPlaneMigrationTestDB(t)
 	db.Logger = logger.Default.LogMode(logger.Silent)

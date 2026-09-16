@@ -67,7 +67,22 @@ export const mailboxPortalEn = {
   draft: 'Draft',
   remove: 'Remove image',
   submitReview: 'Submit for review',
-  discardDrafts: 'Discard these unsent screenshots?',
+  remark: 'Submission remark',
+  remarkOptional: 'Submission remark (optional)',
+  remarkWarning:
+    'Do not include passwords, 2FA codes or secrets, card details, or CVV.',
+  remarkCount: '{{count}} / 2000 characters',
+  remarkTooLong:
+    'Remarks must not exceed 2000 characters after trimming surrounding whitespace.',
+  submissionEmpty: 'Add at least one screenshot or a remark.',
+  remarkInvalid:
+    'Remarks cannot contain control characters other than line breaks and tabs.',
+  submissionInvalid:
+    'Invalid submission. Add a remark of up to 2000 characters or 1-5 valid screenshots; remove unsupported control characters.',
+  submissionUncertain:
+    'The submission result is uncertain. Check the latest account status. Do not submit again while the result is unconfirmed.',
+  checkSubmission: 'Check submission status',
+  discardDrafts: 'Discard these unsent screenshots and text?',
   submission: 'Submission #{{id}}',
   reviewed: 'Reviewed',
   noReviewReason: 'No review remarks.',
@@ -164,7 +179,19 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   draft: '草稿',
   remove: '移除图片',
   submitReview: '提交审核',
-  discardDrafts: '放弃本次尚未提交的截图？',
+  remark: '提交备注',
+  remarkOptional: '提交备注（选填）',
+  remarkWarning: '请勿填写密码、2FA 验证码或密钥、支付卡信息及 CVV 安全码。',
+  remarkCount: '{{count}} / 2000 字符',
+  remarkTooLong: '去除首尾空白后，备注不能超过 2000 个字符。',
+  submissionEmpty: '请至少添加一张截图或填写备注。',
+  remarkInvalid: '备注不能包含换行、回车和 Tab 以外的控制字符。',
+  submissionInvalid:
+    '提交内容无效。请填写不超过 2000 字符的备注或添加 1～5 张有效截图，并移除不支持的控制字符。',
+  submissionUncertain:
+    '提交结果尚未确认，请核对最新账号状态。结果未确认前请勿再次提交。',
+  checkSubmission: '核对提交状态',
+  discardDrafts: '放弃本次尚未提交的截图和文字？',
   submission: '提交 #{{id}}',
   reviewed: '审核时间',
   noReviewReason: '暂无审核备注。',

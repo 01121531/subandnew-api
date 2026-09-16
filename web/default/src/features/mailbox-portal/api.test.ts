@@ -108,7 +108,89 @@ describe('mailbox independent wire contract', () => {
     expect(JSON.parse(String(calls[2].init?.body))).toEqual({
       version: 8,
       attachment_ids: ['private-image'],
+      remark: '',
     })
+  })
+  for (const accountType of ['refund', 'opening'] as const) {
+    test(`${accountType} normal submissions send trimmed remarks with or without screenshots`, async () => {
+      for (const ids of [[], ['private-image']]) {
+        const remark = 'First line\n<plain text> \u{1F600}'
+        const calls = record({
+          account_type: accountType,
+          remark,
+          attachments: [],
+        })
+        const result = await mailboxApi.submit(
+          'csrf-fixture',
+          4,
+          8,
+          ids,
+          undefined,
+          accountType,
+          ` \t${remark}\n `
+        )
+        expect(calls).toHaveLength(1)
+        expect(calls[0].url).toBe(
+          `/mailbox-api/v1/assignments/4/submit?account_type=${accountType}`
+        )
+        expect(calls[0].init?.method).toBe('POST')
+        expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+          version: 8,
+          attachment_ids: ids,
+          remark,
+        })
+        expect(result.remark).toBe(remark)
+      }
+    })
+    test(`${accountType} history keeps remarks and accepts responses from before remarks existed`, async () => {
+      const items = [
+        {
+          account_type: accountType,
+          remark: 'Line one\nLine two',
+          attachments: [],
+          password: 'must-not-cache',
+        },
+        { account_type: accountType, attachments: [] },
+      ]
+      record({ items, total: 2, page: 1, page_size: 20, has_more: false })
+      const result = await mailboxApi.submissions({
+        account_type: accountType,
+        page: 1,
+        page_size: 20,
+      })
+      expect(result.items.map((item) => item.remark)).toEqual([
+        'Line one\nLine two',
+        '',
+      ])
+      expect(result.items[0]).not.toHaveProperty('password')
+    })
+  }
+  test('invalid normal submission content is rejected before any network request', async () => {
+    const calls = record()
+    for (const [ids, remark, code] of [
+      [[], ' \n\t\u3000', 'mailbox_submission_empty'],
+      [[], '\u{1F600}'.repeat(2001), 'mailbox_remark_too_long'],
+      [['image'], 'x'.repeat(2001), 'mailbox_remark_too_long'],
+      [['image', 'image'], 'remark', 'mailbox_attachment_count'],
+      [[''], 'remark', 'mailbox_attachment_count'],
+      [[], 'text\u0000', 'mailbox_remark_invalid'],
+    ] as const) {
+      await expect(
+        mailboxApi.submit(
+          'csrf-fixture',
+          4,
+          8,
+          [...ids],
+          undefined,
+          'refund',
+          remark
+        )
+      ).rejects.toMatchObject({ code })
+      expect(errorKey(new MailboxRequestError(code, 400))).not.toBe(
+        'mailboxPortal.requestFailed'
+      )
+    }
+    expect(calls).toHaveLength(0)
   })
   test('list queries encode filters and numeric pagination without invented aggregate requests', async () => {
     const calls = record()

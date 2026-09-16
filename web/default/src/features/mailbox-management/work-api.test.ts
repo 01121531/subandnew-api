@@ -257,6 +257,47 @@ describe('opt-in statistics wire contract', () => {
       ).rejects.toMatchObject({ code: 'mailbox_not_found' })
     }
   })
+  test('both pools retain note-only submission remarks in work history and accept legacy records', async () => {
+    for (const accountType of ['refund', 'opening'] as const) {
+      const submissions = [
+        {
+          id: 1,
+          account_id: 8,
+          operator_id: 7,
+          account_type: accountType,
+          remark: 'First line\nSecond line',
+          attachments: [],
+          password: 'must-not-cache',
+        },
+        {
+          id: 2,
+          account_id: 8,
+          operator_id: 7,
+          account_type: accountType,
+          attachments: [],
+        },
+      ]
+      request.mockResolvedValue(
+        response({
+          account: { ...account, account_type: accountType },
+          assignments: page([]),
+          submissions: page(submissions),
+          issues: page([]),
+        })
+      )
+      const result = await mailboxApi.workHistory(7, 8, {
+        account_type: accountType,
+      })
+      expect(result.submissions.items.map((item) => item.remark)).toEqual([
+        'First line\nSecond line',
+        '',
+      ])
+      expect(
+        result.submissions.items.every((item) => item.attachments.length === 0)
+      ).toBe(true)
+      expect(result.submissions.items[0]).not.toHaveProperty('password')
+    }
+  })
   test('missing permissions prevent all stats requests, including list opt-in', async () => {
     useAuthStore.getState().auth.setUser({ ...admin, role: ROLE.ADMIN })
     for (const run of [

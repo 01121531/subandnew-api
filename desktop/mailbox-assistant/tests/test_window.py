@@ -386,8 +386,8 @@ def test_uncertain_submit_never_replays(window, qapp):
     _, callback, _ = api.take("/submit?")
     callback(None, ApiError("mailbox_network_error", uncertain=True))
     assert window.uncertain_submission
-    _, callback, _ = api.take("/submissions?")
-    callback({"items": []}, None)
+    _, callback, _ = api.take("/accounts/5?")
+    callback(account(), None)
     window.submit()
     assert all("/submit?" not in call[0] for call in api.calls)
 

@@ -15,6 +15,7 @@ import {
   canSubmit,
   validateImages,
 } from '../lib/guards'
+import { normalSubmissionSchema } from '../lib/schemas'
 import { mailboxClient } from '../session'
 import type { Account, Attachment } from '../types'
 import { ErrorMessage } from './common'
@@ -39,6 +40,7 @@ export function DraftSubmission(props: {
   const [error, setError] = useState<unknown>(null)
   const [kind, setKind] = useState<IssueKind>('email_login')
   const [description, setDescription] = useState('')
+  const [remark, setRemark] = useState('')
   const [uncertain, setUncertain] = useState(false)
   const [readingClipboard, setReadingClipboard] = useState(false)
   const section = useRef<HTMLElement>(null)
@@ -125,7 +127,6 @@ export function DraftSubmission(props: {
       )
       const ids = drafts.map((item) => item.attachment?.id ?? '')
       if (
-        (!props.issue && ids.length < 1) ||
         ids.length > 5 ||
         ids.some((id) => !id) ||
         new Set(ids).size !== ids.length
@@ -149,13 +150,23 @@ export function DraftSubmission(props: {
         )
         return
       }
+      const content = normalSubmissionSchema.safeParse({
+        attachment_ids: ids,
+        remark,
+      })
+      if (!content.success) {
+        throw new MailboxRequestError(content.error.issues[0].message, 400)
+      }
+      uncertainRef.current = true
+      setUncertain(true)
       await mailboxApi.submit(
         props.csrf,
         props.account.assignment_id,
         props.account.assignment_version,
         ids,
         controller.current.signal,
-        props.account.account_type ?? 'refund'
+        props.account.account_type ?? 'refund',
+        remark
       )
     },
     onSuccess: () => {
@@ -163,15 +174,29 @@ export function DraftSubmission(props: {
       for (const url of urls.current) URL.revokeObjectURL(url)
       urls.current.clear()
       setDrafts([])
+      setRemark('')
+      uncertainRef.current = false
+      setUncertain(false)
       props.leave.current = { dirty: false, pending: false }
       void mailboxClient.invalidateQueries({ queryKey: ['mailbox'] })
       props.onSubmitted()
     },
-    onError: (failure) => {
+    onError: async (failure) => {
       if (!controller.current.signal.aborted) setError(failure)
-      if (props.issue && uncertainRef.current) return
-      // Reconcile an ambiguous response before allowing another attempt.
-      void mailboxClient.invalidateQueries({
+      if (
+        !props.issue &&
+        failure instanceof MailboxRequestError &&
+        failure.code !== 'mailbox_request_failed' &&
+        failure.status !== 408 &&
+        failure.status >= 400 &&
+        failure.status < 500
+      ) {
+        uncertainRef.current = false
+        setUncertain(false)
+      }
+      if (uncertainRef.current) return
+      // Known rejections and preflight failures refresh without replaying the POST.
+      await mailboxClient.invalidateQueries({
         queryKey: [
           'mailbox',
           'account',
@@ -183,9 +208,36 @@ export function DraftSubmission(props: {
     onSettled: () => {
       lock.current = false
     },
+    retry: false,
   })
   const reconcile = useMutation({
     mutationFn: async () => {
+      if (!props.issue) {
+        const latest = await mailboxApi.account(
+          props.account.id,
+          controller.current.signal,
+          props.account.account_type ?? 'refund'
+        )
+        if (controller.current.signal.aborted) return
+        // Normal submissions have no submitted_version. Matching text or images
+        // could find an older submission, so only refresh authoritative account state.
+        mailboxClient.setQueryData(
+          [
+            'mailbox',
+            'account',
+            props.account.id,
+            props.account.account_type ?? 'refund',
+          ],
+          latest
+        )
+        void mailboxClient.invalidateQueries({
+          queryKey: ['mailbox', 'submissions'],
+        })
+        void mailboxClient.invalidateQueries({
+          queryKey: ['mailbox', 'accounts'],
+        })
+        return
+      }
       const data = await mailboxApi.issues(
         {
           account_type: props.account.account_type ?? 'refund',
@@ -221,14 +273,24 @@ export function DraftSubmission(props: {
   const submitLabel = props.issue
     ? 'mailbox.issues.submit'
     : 'mailboxPortal.submitReview'
-  props.leave.current = { dirty: drafts.length > 0 || !!description, pending }
+  const dirty = drafts.length > 0 || !!description || !!remark
+  const remarkLength = [...remark.trim()].length
+  const remarkValidation = normalSubmissionSchema.shape.remark.safeParse(remark)
+  const remarkError = remarkValidation.success
+    ? null
+    : new MailboxRequestError(remarkValidation.error.issues[0].message, 400)
+  const validNormalSubmission = normalSubmissionSchema.safeParse({
+    attachment_ids: drafts.map((item) => item.attachment?.id ?? ''),
+    remark,
+  }).success
+  props.leave.current = { dirty, pending }
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (drafts.length || pending) event.preventDefault()
+      if (dirty || pending) event.preventDefault()
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [drafts.length, pending])
+  }, [dirty, pending])
   const uploadFiles = upload.mutate
   const select = useCallback(
     (files: File[]) => {
@@ -298,6 +360,42 @@ export function DraftSubmission(props: {
   if (!canSubmit(props.account)) return null
   return (
     <section ref={section} className='grid gap-4 py-5'>
+      {!props.issue && (
+        <div className='grid min-w-0 gap-2'>
+          <label
+            htmlFor='mailbox-submission-remark'
+            className='text-sm font-medium'
+          >
+            {t('mailboxPortal.remarkOptional')}
+          </label>
+          <Textarea
+            id='mailbox-submission-remark'
+            className='min-h-28 [overflow-wrap:anywhere]'
+            autoComplete='off'
+            disabled={pending || uncertain}
+            value={remark}
+            aria-describedby='mailbox-remark-warning mailbox-remark-count mailbox-remark-error'
+            aria-invalid={!!remarkError}
+            onChange={(event) => setRemark(event.target.value)}
+          />
+          <p
+            id='mailbox-remark-warning'
+            className='text-sm text-amber-800 dark:text-amber-300'
+          >
+            {t('mailboxPortal.remarkWarning')}
+          </p>
+          <p
+            id='mailbox-remark-count'
+            className='text-muted-foreground text-xs'
+            aria-live='polite'
+          >
+            {t('mailboxPortal.remarkCount', { count: remarkLength })}
+          </p>
+          <div id='mailbox-remark-error'>
+            <ErrorMessage error={remarkError} />
+          </div>
+        </div>
+      )}
       {props.issue && (
         <div className='grid gap-3'>
           <p className='text-sm text-amber-800 dark:text-amber-300'>
@@ -452,14 +550,27 @@ export function DraftSubmission(props: {
       <ErrorMessage error={error} />
       {uncertain && !pending && (
         <div role='alert' className='grid gap-2 text-sm'>
-          <p>{t('mailbox.issues.uncertain')}</p>
+          <p>
+            {t(
+              props.issue
+                ? 'mailbox.issues.uncertain'
+                : 'mailboxPortal.submissionUncertain'
+            )}
+          </p>
           <Button
             variant='outline'
             disabled={reconcile.isPending}
-            onClick={() => reconcile.mutate()}
+            onClick={() => {
+              setError(null)
+              reconcile.mutate()
+            }}
           >
             <RefreshCw />
-            {t('mailbox.issues.check')}
+            {t(
+              props.issue
+                ? 'mailbox.issues.check'
+                : 'mailboxPortal.checkSubmission'
+            )}
           </Button>
         </div>
       )}
@@ -469,11 +580,11 @@ export function DraftSubmission(props: {
           disabled={
             pending ||
             uncertain ||
-            (props.issue ? !description.trim() : !drafts.length) ||
+            (props.issue ? !description.trim() : !validNormalSubmission) ||
             drafts.some((item) => !item.attachment || item.error)
           }
           onClick={() => {
-            if (!lock.current) {
+            if (!lock.current && !uncertainRef.current) {
               lock.current = true
               setError(null)
               submit.mutate()

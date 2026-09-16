@@ -3,6 +3,7 @@ import { RefreshCw, Search } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MailboxSubmissionRemark } from '@/components/mailbox-submission-remark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -121,6 +122,10 @@ export function History(props: { accountType: AccountType }) {
                 </div>
                 <Status submission status={submission.status} />
               </div>
+              <MailboxSubmissionRemark
+                remark={submission.remark}
+                labelKey='mailboxPortal.remark'
+              />
               {submission.reviewed_at > 0 && (
                 <div className='border-l-2 border-emerald-600 pl-3 text-sm'>
                   <p className='text-muted-foreground mb-1 text-xs'>

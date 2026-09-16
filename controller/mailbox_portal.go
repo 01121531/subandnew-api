@@ -133,11 +133,12 @@ func SubmitMailboxScreenshots(c *gin.Context) {
 	var input struct {
 		Version       int64    `json:"version"`
 		AttachmentIDs []string `json:"attachment_ids"`
+		Remark        string   `json:"remark"`
 	}
 	if !mailboxDecode(c, &input) {
 		return
 	}
-	data, err := mailboxService().Submit(c.Request.Context(), mailboxActor(c), id, input.Version, input.AttachmentIDs, accountType)
+	data, err := mailboxService().SubmitWithRemark(c.Request.Context(), mailboxActor(c), id, input.Version, input.AttachmentIDs, input.Remark, accountType)
 	if err != nil {
 		mailboxFailure(c, err)
 		return

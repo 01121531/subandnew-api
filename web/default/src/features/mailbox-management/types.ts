@@ -197,6 +197,7 @@ export interface Submission {
   status: 'pending' | 'submitted' | 'approved' | 'rejected'
   version: number
   review_reason: string
+  remark?: string
   reviewed_by: number
   reviewed_at: number
   created_at: number

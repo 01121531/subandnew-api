@@ -113,6 +113,7 @@ export function submissionMetadata(
     status: value.status,
     version: value.version,
     review_reason: value.review_reason,
+    remark: typeof value.remark === 'string' ? value.remark : '',
     reviewed_by: value.reviewed_by,
     reviewed_at: value.reviewed_at,
     created_at: value.created_at,

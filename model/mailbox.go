@@ -61,6 +61,7 @@ type MailboxAssignment struct {
 }
 
 type MailboxSubmission struct {
+	Remark       string `json:"remark" gorm:"type:text;not null;default:''"`
 	ID           int64  `json:"id" gorm:"primaryKey"`
 	AssignmentID int64  `json:"assignment_id" gorm:"not null;index;index:idx_mailbox_submissions_operator_created_assignment,priority:3;index:idx_mailbox_submissions_assignment_operator_created,priority:1"`
 	OperatorID   int64  `json:"operator_id" gorm:"not null;index;index:idx_mailbox_submissions_operator_created_assignment,priority:1;index:idx_mailbox_submissions_assignment_operator_created,priority:2"`

@@ -121,12 +121,13 @@ def stylesheet(dark: bool) -> str:
     QMainWindow, QDialog, QWidget#body {{ background: {bg}; }}
     QLabel#muted {{ color: {muted}; }}
     QLabel#heading {{ font-size: 18px; font-weight: 600; }}
-    QLineEdit, QComboBox, QListWidget {{ background: {surface}; border: 1px solid {border};
+    QLineEdit, QTextEdit, QComboBox, QListWidget {{
+        background: {surface}; border: 1px solid {border};
         border-radius: 8px; padding: 8px; selection-background-color: #1674bd; }}
     QPushButton, QToolButton {{ background: {surface}; border: 1px solid {border};
         border-radius: 8px; padding: 7px 9px; min-height: 20px; }}
     QPushButton:hover, QToolButton:hover {{ background: {selected}; }}
-    QPushButton:focus, QToolButton:focus, QLineEdit:focus, QComboBox:focus {{
+    QPushButton:focus, QToolButton:focus, QLineEdit:focus, QTextEdit:focus, QComboBox:focus {{
         border: 2px solid #2688d5; }}
     QPushButton:disabled, QToolButton:disabled {{ color: {muted}; }}
     QPushButton#primary {{ background: #086eb9; color: white; border-color: #086eb9; }}

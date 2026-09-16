@@ -1,6 +1,7 @@
 import { issueMetadata } from '@/features/mailbox-management/lib/pools'
 import type { Issue, IssueKind } from '@/features/mailbox-management/types'
 
+import { normalSubmissionSchema } from './lib/schemas'
 import type {
   Account,
   AccountType,
@@ -267,6 +268,7 @@ function publicSubmission(
     status: value.status,
     version: value.version,
     review_reason: value.review_reason,
+    remark: typeof value.remark === 'string' ? value.remark : '',
     reviewed_by: value.reviewed_by,
     reviewed_at: value.reviewed_at,
     created_at: value.created_at,
@@ -403,23 +405,32 @@ export const mailboxApi = {
       }
     ).then(publicAttachment)
   },
-  submit: (
+  submit: async (
     csrf: string,
     assignment: number,
     version: number,
     ids: string[],
     signal?: AbortSignal,
-    accountType: AccountType = 'refund'
-  ) =>
-    request<Submission>(
+    accountType: AccountType = 'refund',
+    remark = ''
+  ) => {
+    const parsed = normalSubmissionSchema.safeParse({
+      attachment_ids: ids,
+      remark,
+    })
+    if (!parsed.success) {
+      throw new MailboxRequestError(parsed.error.issues[0].message, 400)
+    }
+    return request<Submission>(
       scoped(`/assignments/${assignment}/submit`, accountType),
       {
         post: true,
         csrf,
-        body: { version, attachment_ids: ids },
+        body: { version, ...parsed.data },
         signal,
       }
-    ).then((value) => publicSubmission(value, accountType)),
+    ).then((value) => publicSubmission(value, accountType))
+  },
   attachment: (
     id: string,
     signal?: AbortSignal,

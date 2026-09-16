@@ -285,6 +285,7 @@ export const mailboxEn = {
     screenshot: 'Screenshot {{index}}',
     expandImage: 'Expand screenshot',
     reviewReason: 'Review reason',
+    submissionRemark: 'Submission remark',
     decision: 'Decision',
     approve: 'Approve',
     reject: 'Reject',
@@ -415,7 +416,8 @@ export const mailboxEn = {
     mailbox_login_rate_limited: 'Too many attempts. Try again later.',
     mailbox_invalid_assignment: 'Invalid assignment. Verify IDs and versions.',
     mailbox_invalid_review: 'Invalid review. A rejection reason is required.',
-    mailbox_invalid_submission: 'This submission is no longer valid.',
+    mailbox_invalid_submission:
+      'Invalid submission. Provide a remark of up to 2000 characters or 1-5 valid screenshots, without unsupported control characters.',
     mailbox_invalid_issue:
       'Select a valid issue type and enter 1–2,000 characters.',
     mailbox_issue_inactive:
@@ -703,6 +705,7 @@ export const mailboxZh: typeof mailboxEn = {
     screenshot: '截图 {{index}}',
     expandImage: '放大截图',
     reviewReason: '审核意见',
+    submissionRemark: '提交备注',
     decision: '审核结果',
     approve: '通过',
     reject: '驳回',
@@ -822,7 +825,8 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_login_rate_limited: '尝试次数过多，请稍后重试。',
     mailbox_invalid_assignment: '分配参数无效，请检查 ID 和版本。',
     mailbox_invalid_review: '审核参数无效，驳回必须填写原因。',
-    mailbox_invalid_submission: '此提交已失效。',
+    mailbox_invalid_submission:
+      '提交内容无效，请填写不超过 2000 字符的备注或添加 1～5 张有效截图，且不能包含不支持的控制字符。',
     mailbox_invalid_issue: '请选择有效的问题类型，并填写 1～2,000 字说明。',
     mailbox_issue_inactive: '此分配已失效，不能恢复原任务。',
     mailbox_invalid_issue_credentials:

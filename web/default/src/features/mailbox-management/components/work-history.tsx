@@ -2,6 +2,7 @@ import { ArrowLeft, Eye, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MailboxSubmissionRemark } from '@/components/mailbox-submission-remark'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
@@ -242,6 +243,10 @@ export function WorkHistoryView(props: {
                                   </p>
                                 </div>
                               )}
+                              <MailboxSubmissionRemark
+                                remark={item.remark}
+                                labelKey='mailbox.admin.submissionRemark'
+                              />
                               <HistoryImages
                                 attachments={item.attachments}
                                 accountType={accountType}
