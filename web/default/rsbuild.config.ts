@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -51,6 +52,11 @@ export default defineConfig(({ envMode }) => {
       },
     },
     source: {
+      define: {
+        'import.meta.env.PUBLIC_RELEASE_VERSION': JSON.stringify(
+          readFileSync(path.resolve(__dirname, '../../VERSION'), 'utf8').trim()
+        ),
+      },
       entry: {
         index: './src/main.tsx',
       },

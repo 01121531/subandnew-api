@@ -4,6 +4,7 @@ import { ClipboardList, KeyRound, LogOut, Mail, Menu, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { MailboxAssistantDownload } from '@/components/mailbox-assistant-download'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -112,7 +113,8 @@ function Workspace(props: {
               {t(`mailboxPortal.${tab}`)}
             </h1>
           </div>
-          <div className='flex min-w-0 items-center gap-2'>
+          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+            <MailboxAssistantDownload />
             <span className='text-muted-foreground hidden max-w-48 truncate text-sm sm:inline'>
               {props.session.operator.display_name ||
                 props.session.operator.username}

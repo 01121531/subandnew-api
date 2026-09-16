@@ -6,6 +6,7 @@ import { useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
+import { MailboxAssistantDownload } from '@/components/mailbox-assistant-download'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -143,6 +144,7 @@ export function MailboxSignIn() {
             </fieldset>
           </form>
         </QueryState>
+        <MailboxAssistantDownload className='mt-5 w-full' />
       </div>
     </main>
   )

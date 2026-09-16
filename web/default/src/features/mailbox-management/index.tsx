@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { MailboxAssistantDownload } from '@/components/mailbox-assistant-download'
 import { buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
@@ -51,7 +52,8 @@ function MailboxPage() {
       <SectionPageLayout.Title>
         {t('mailbox.admin.title')}
       </SectionPageLayout.Title>
-      <SectionPageLayout.Actions className='w-full justify-start sm:w-auto sm:justify-end'>
+      <SectionPageLayout.Actions className='w-full flex-wrap justify-start sm:w-auto sm:justify-end'>
+        <MailboxAssistantDownload />
         <a
           href='/mailbox/sign-in'
           target='_blank'

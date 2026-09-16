@@ -1,4 +1,7 @@
 export const mailboxPortalEn = {
+  downloadAssistant: 'Download Windows assistant',
+  downloadAssistantHint:
+    'Windows 10/11 x64 · ZIP containing the EXE and runtime files',
   issues: 'My issue reports',
   status_issue_pending: 'Issue pending',
   title: 'Mailbox workspace',
@@ -89,6 +92,8 @@ export const mailboxPortalEn = {
 }
 
 export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
+  downloadAssistant: '下载 Windows 助手',
+  downloadAssistantHint: 'Windows 10/11 x64 · ZIP 内含 EXE 和运行依赖',
   issues: '我的反馈',
   status_issue_pending: '异常待处理',
   title: '邮箱工作台',
