@@ -45,6 +45,7 @@ export type Attachment = {
 }
 
 export type Submission = {
+  can_edit_remark?: boolean
   account_type?: AccountType
   card_last4?: string
   id: number
@@ -78,6 +79,7 @@ export type ListQuery = {
   page_size: number
 }
 export type Credential = {
+  persistent?: boolean
   available?: boolean
   card_number?: string
   card_expiry?: string

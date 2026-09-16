@@ -23,14 +23,6 @@ func cvvTestService(t *testing.T) (*Service, Actor, Actor) {
 	common.IsMasterNode = true
 	t.Cleanup(func() { common.IsMasterNode = master })
 	s, admin := newMailboxImportTestService(t)
-	s.cvv = newCVVStore()
-	t.Cleanup(func() {
-		s.cvv.mu.Lock()
-		defer s.cvv.mu.Unlock()
-		for id := range s.cvv.items {
-			s.cvv.removeLocked(id)
-		}
-	})
 	op := model.MailboxOperator{Username: "cvv-test", DisplayName: "Test", Enabled: true, AuthVersion: 1, Version: 1}
 	require.NoError(t, s.DB.Create(&op).Error)
 	hash := digest("synthetic-cvv-session")
@@ -75,7 +67,7 @@ func cvvTestImport(t *testing.T, s *Service, admin Actor, value string) model.Ma
 	return account
 }
 
-func TestTemporaryCVVImportStartsThirtyMinuteWindowOnFirstView(t *testing.T) {
+func TestPersistentCVVImportEncryptedAndNoExpiry(t *testing.T) {
 	s, admin, operator := cvvTestService(t)
 	account := cvvTestImport(t, s, admin, "007")
 	cvvTestAssign(t, s, admin, operator, account.ID)
@@ -85,19 +77,45 @@ func TestTemporaryCVVImportStartsThirtyMinuteWindowOnFirstView(t *testing.T) {
 		require.Equal(t, "007", view.CVV)
 		require.Zero(t, view.ExpiresAt)
 	}
-	require.True(t, s.cvv.items[account.ID].expires.IsZero())
 	for range 3 {
 		view, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
 		require.NoError(t, err)
 		require.Equal(t, "007", view.CVV)
 	}
-	require.Len(t, s.cvv.items, 1)
-	require.Equal(t, s.Now().Add(temporaryCVVRevealTTL), s.cvv.items[account.ID].expires)
+	var stored model.MailboxCVV
+	require.NoError(t, s.DB.First(&stored, "account_id = ?", account.ID).Error)
+	require.NotEqual(t, "007", stored.Ciphertext)
+	require.Equal(t, int64(1), stored.Version)
 	var audits []model.MailboxAudit
 	require.NoError(t, s.DB.Find(&audits).Error)
 	encoded, err := json.Marshal(audits)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "007")
+}
+
+func TestSubmittedCVVRestrictionDoesNotRevokeOtherCredentials(t *testing.T) {
+	s, admin, operator := cvvTestService(t)
+	account := cvvTestImport(t, s, admin, "007")
+	assigned := cvvTestAssign(t, s, admin, operator, account.ID)
+	require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", assigned.AssignmentID).Update("status", StatusSubmitted).Error)
+	view, err := s.GetAccount(context.Background(), operator, account.ID, AccountTypeOpening)
+	require.NoError(t, err)
+	require.True(t, view.CredentialsAvailable)
+	_, err = s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
+	require.EqualError(t, err, "mailbox_cvv_task_restricted")
+	for _, kind := range []string{"password", "otp", "card"} {
+		value, err := s.Credentials(context.Background(), operator, account.ID, kind, AccountTypeOpening)
+		require.NoError(t, err, kind)
+		require.True(t, value.Available, kind)
+	}
+	value, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "007", value.CVV)
+	require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", assigned.AssignmentID).Update("status", StatusApproved).Error)
+	for _, kind := range []string{"password", "otp", "card", "cvv"} {
+		_, err := s.Credentials(context.Background(), operator, account.ID, kind, AccountTypeOpening)
+		require.Error(t, err, kind)
+	}
 }
 
 func TestTemporaryCVVReimportUpdatesCredentialsAndKeepsAssignment(t *testing.T) {
@@ -140,15 +158,23 @@ func TestTemporaryCVVReassignmentAndDisableInvalidate(t *testing.T) {
 				_, err := s.SaveOperator(context.Background(), admin, operator.OperatorID, OperatorInput{Username: "cvv-test", DisplayName: "Test", Version: 1, Enabled: false})
 				require.NoError(t, err)
 			case "restart":
-				s.cvv = newCVVStore()
+				restarted := New(s.DB)
+				restarted.Cipher, restarted.Now = s.Cipher, s.Now
+				s = restarted
 			}
 			_, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
-			require.Error(t, err)
+			if operation == "restart" || operation == "reassign" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			var stored model.MailboxCVV
+			require.NoError(t, s.DB.First(&stored, "account_id = ?", account.ID).Error)
 		})
 	}
 }
 
-func TestTemporaryCVVWaitsForFirstViewAndThenExpires(t *testing.T) {
+func TestPersistentCVVDoesNotExpireAfterFirstView(t *testing.T) {
 	s, admin, operator := cvvTestService(t)
 	account := cvvTestImport(t, s, admin, "0012")
 	cvvTestAssign(t, s, admin, operator, account.ID)
@@ -157,14 +183,16 @@ func TestTemporaryCVVWaitsForFirstViewAndThenExpires(t *testing.T) {
 	first, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
 	require.NoError(t, err)
 	require.Equal(t, "0012", first.CVV)
-	require.Equal(t, s.Now().Add(temporaryCVVRevealTTL).Unix(), first.ExpiresAt)
-	s.Now = func() time.Time { return base.Add(12*time.Hour + temporaryCVVRevealTTL - time.Second) }
+	require.Zero(t, first.ExpiresAt)
+	require.True(t, first.Persistent)
+	s.Now = func() time.Time { return base.Add(13 * time.Hour) }
 	second, err := s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
 	require.NoError(t, err)
 	require.Equal(t, first.ExpiresAt, second.ExpiresAt)
-	s.Now = func() time.Time { return base.Add(12*time.Hour + temporaryCVVRevealTTL) }
-	_, err = s.Credentials(context.Background(), operator, account.ID, "cvv", AccountTypeOpening)
-	workflowTestStatus(t, err, 404)
+	s.Now = func() time.Time { return base.Add(400 * 24 * time.Hour) }
+	last, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "0012", last.CVV)
 }
 
 func TestTemporaryCVVValidationAndFeatureGate(t *testing.T) {
@@ -228,15 +256,20 @@ func TestTemporaryCVVDeliveryMetadataAndRefill(t *testing.T) {
 	require.Empty(t, adminView.TemporaryCVVID)
 }
 
-func TestTemporaryCVVCapacityRejectsWholeImport(t *testing.T) {
+func TestPersistentCVVClearVersionAndReimportOmission(t *testing.T) {
 	s, admin, _ := cvvTestService(t)
-	for i := range temporaryCVVCapacity {
-		s.cvv.items[-int64(i+1)] = &temporaryCVV{}
-	}
-	_, err := s.Import(context.Background(), admin, "csv", []byte(strings.TrimSpace(string(poolTestCSV("full@example.test")))+",007"), AccountTypeOpening)
-	workflowTestStatus(t, err, 503)
+	account := cvvTestImport(t, s, admin, "007")
+	_, err := s.WithImportUpdateExisting(true).Import(context.Background(), admin, "csv", poolTestCSV(account.Email), AccountTypeOpening)
+	require.NoError(t, err)
+	value, err := s.Credentials(context.Background(), admin, account.ID, "cvv", AccountTypeOpening)
+	require.NoError(t, err)
+	require.Equal(t, "007", value.CVV)
+	workflowTestStatus(t, s.ClearCVV(context.Background(), admin, account.ID, TemporaryCVVInput{Version: account.Version}, AccountTypeOpening), 409)
+	view, err := s.GetAccount(context.Background(), admin, account.ID, AccountTypeOpening)
+	require.NoError(t, err)
+	require.NoError(t, s.ClearCVV(context.Background(), admin, account.ID, TemporaryCVVInput{Version: view.Version}, AccountTypeOpening))
 	var count int64
-	require.NoError(t, s.DB.Model(&model.MailboxAccount{}).Count(&count).Error)
+	require.NoError(t, s.DB.Model(&model.MailboxCVV{}).Count(&count).Error)
 	require.Zero(t, count)
 }
 

@@ -6,10 +6,6 @@ import {
 import type { Account, Credential, CredentialKind } from '../types'
 import { assertCurrentAssignment, canReadCredentials } from './guards'
 
-export function revealRemaining(startedAt: number, now: number): number {
-  return Math.max(0, 60_000 - Math.max(0, now - startedAt))
-}
-
 export function credentialScope(account: Account): string {
   return [
     account.id,
@@ -41,6 +37,10 @@ export async function readCredential(
       await mailboxApi.account(account.id, signal, accountType),
       'credentials'
     )
+    // Submitted tasks retain login/card access, but cannot read CVV.
+    if (kind === 'cvv' && account.status === 'submitted') {
+      throw new MailboxRequestError('mailbox_cvv_task_restricted', 403)
+    }
     const value = await mailboxApi.credentials(
       csrf,
       account.id,

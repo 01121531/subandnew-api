@@ -15,6 +15,7 @@ export interface Page<T> {
   has_more: boolean
 }
 export interface ListQuery {
+  card_filters?: CardFilter[]
   archived?: boolean
   kind?: string
   assignment_id?: number
@@ -40,6 +41,11 @@ export interface Account {
   status: MailboxStatus
   assigned_at: number
   credentials_available: boolean
+}
+
+export interface CardFilter {
+  operator: 'starts_with' | 'not_starts_with' | 'ends_with' | 'not_ends_with'
+  values: string[]
 }
 export interface Operator {
   id: number
@@ -248,6 +254,9 @@ export interface ResolveIssueInput {
   }
 }
 export interface Audit {
+  from_status?: string
+  to_status?: string
+  reason?: string
   account_type?: AccountType
   card_last4?: string
   target_operator_id?: number
@@ -299,6 +308,7 @@ export interface ImportResult {
   failures: ImportFailure[]
 }
 export interface Credential {
+  persistent?: boolean
   available?: boolean
   card_number?: string
   card_expiry?: string

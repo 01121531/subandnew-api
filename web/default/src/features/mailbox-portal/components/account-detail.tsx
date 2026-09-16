@@ -17,7 +17,6 @@ import type { AccountType } from '../types'
 import { QueryState, Status } from './common'
 import { Credentials } from './credentials'
 import { DraftSubmission, type LeaveState } from './draft-submission'
-import { MaskedCard } from './masked-card'
 
 export function AccountDetail(props: {
   accountType: AccountType
@@ -32,6 +31,8 @@ export function AccountDetail(props: {
   const [issue, setIssue] = useState(false)
   const query = useQuery({
     queryKey: ['mailbox', 'account', props.id, props.accountType],
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: ({ signal }) =>
       mailboxApi.account(props.id, signal, props.accountType),
   })
@@ -90,11 +91,6 @@ export function AccountDetail(props: {
                   </span>
                   <Status status={account.status} />
                 </div>
-                {props.accountType === 'opening' && (
-                  <div className='border-b py-3'>
-                    <MaskedCard last4={account.card_last4} />
-                  </div>
-                )}
                 {!issue && <Credentials account={account} csrf={props.csrf} />}
                 {canSubmit(account) && (
                   <Button

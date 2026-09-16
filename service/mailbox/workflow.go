@@ -45,22 +45,23 @@ type AssignInput struct {
 }
 
 type SubmissionView struct {
-	Remark       string           `json:"remark"`
-	AccountType  string           `json:"account_type"`
-	CardLast4    string           `json:"card_last4"`
-	ID           int64            `json:"id"`
-	AssignmentID int64            `json:"assignment_id"`
-	AccountID    int64            `json:"account_id"`
-	Email        string           `json:"email"`
-	OperatorID   int64            `json:"operator_id"`
-	OperatorName string           `json:"operator_name"`
-	Status       string           `json:"status"`
-	Version      int64            `json:"version"`
-	ReviewReason string           `json:"review_reason"`
-	ReviewedBy   int              `json:"reviewed_by"`
-	ReviewedAt   int64            `json:"reviewed_at"`
-	CreatedAt    int64            `json:"created_at"`
-	Attachments  []AttachmentView `json:"attachments" gorm:"-"`
+	CanEditRemark bool             `json:"can_edit_remark"`
+	Remark        string           `json:"remark"`
+	AccountType   string           `json:"account_type"`
+	CardLast4     string           `json:"card_last4"`
+	ID            int64            `json:"id"`
+	AssignmentID  int64            `json:"assignment_id"`
+	AccountID     int64            `json:"account_id"`
+	Email         string           `json:"email"`
+	OperatorID    int64            `json:"operator_id"`
+	OperatorName  string           `json:"operator_name"`
+	Status        string           `json:"status"`
+	Version       int64            `json:"version"`
+	ReviewReason  string           `json:"review_reason"`
+	ReviewedBy    int              `json:"reviewed_by"`
+	ReviewedAt    int64            `json:"reviewed_at"`
+	CreatedAt     int64            `json:"created_at"`
+	Attachments   []AttachmentView `json:"attachments" gorm:"-"`
 }
 
 type ReviewInput struct {
@@ -180,6 +181,33 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 		return nil, err
 	}
 	query = normalizePage(query)
+	q, err := s.filteredAccountQuery(actor, query)
+	if err != nil {
+		return nil, err
+	}
+	page := &Page[AccountView]{Items: []AccountView{}, Page: query.Page, PageSize: query.PageSize}
+	if err := q.Count(&page.Total).Error; err != nil {
+		return nil, err
+	}
+	if err := q.Select(accountViewSelect).Order("a.id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&page.Items).Error; err != nil {
+		return nil, err
+	}
+	for i := range page.Items {
+		accountCredentials(actor, &page.Items[i])
+	}
+	page.HasMore = int64(query.Page)*int64(query.PageSize) < page.Total
+	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
+		return nil, err
+	}
+	if len(query.CardFilters) > 0 {
+		if err := s.CheckActor(actor, authz.MailboxCredentials); err != nil {
+			return nil, err
+		}
+	}
+	return page, nil
+}
+
+func (s *Service) filteredAccountQuery(actor Actor, query ListQuery) (*gorm.DB, error) {
 	q := s.accountQuery(actor)
 	if query.Archived {
 		if actor.Admin == nil {
@@ -200,21 +228,7 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 	if query.OperatorID > 0 {
 		q = q.Where("t.operator_id = ?", query.OperatorID)
 	}
-	page := &Page[AccountView]{Items: []AccountView{}, Page: query.Page, PageSize: query.PageSize}
-	if err := q.Count(&page.Total).Error; err != nil {
-		return nil, err
-	}
-	if err := q.Select(accountViewSelect).Order("a.id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&page.Items).Error; err != nil {
-		return nil, err
-	}
-	for i := range page.Items {
-		accountCredentials(actor, &page.Items[i])
-	}
-	page.HasMore = int64(query.Page)*int64(query.PageSize) < page.Total
-	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
-		return nil, err
-	}
-	return page, nil
+	return s.filterCards(actor, q, query.CardFilters)
 }
 
 func (s *Service) GetAccount(ctx context.Context, actor Actor, id int64, accountTypes ...string) (*AccountView, error) {
@@ -278,7 +292,6 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			return fail(400, "mailbox_invalid_assignment")
 		}
 	}
-	changes := []cvvAssignmentChange{}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxAssign); err != nil {
@@ -327,13 +340,9 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			if err := s.Audit(actor, action, account.ID, assignmentID, 200, ""); err != nil {
 				return err
 			}
-			changes = append(changes, cvvAssignmentChange{account.ID, account.ActiveAssignmentID, assignmentID, input.OperatorID, operator.AuthVersion})
 		}
 		return nil
 	})
-	if err == nil {
-		s.updateCVVAssignments(changes)
-	}
 	return err
 }
 
@@ -345,7 +354,7 @@ func (s *Service) submissionQuery(actor Actor) *gorm.DB {
 	return q
 }
 
-const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.remark, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at"
+const submissionViewSelect = "u.id, u.assignment_id, t.account_id, a.account_type, a.card_last4, a.email, u.operator_id, o.display_name AS operator_name, u.status, u.version, u.remark, u.review_reason, u.reviewed_by, u.reviewed_at, u.created_at, CASE WHEN a.archived_at = 0 AND a.active_assignment_id = t.id AND t.revoked_at = 0 AND ((t.status = 'submitted' AND u.status = 'pending') OR (t.status = 'rejected' AND u.status = 'rejected')) AND u.id = (SELECT MAX(newest.id) FROM mailbox_submissions AS newest WHERE newest.assignment_id = t.id) THEN 1 ELSE 0 END AS can_edit_remark"
 
 func (s *Service) submissionAttachments(views []SubmissionView) error {
 	if len(views) == 0 {
@@ -493,7 +502,6 @@ func (s *Service) SubmitWithRemark(ctx context.Context, actor Actor, assignmentI
 	if err != nil {
 		return nil, err
 	}
-	s.invalidateCVVAccount(view.AccountID)
 	if err := s.CheckActor(actor, authz.MailboxView); err != nil {
 		return nil, err
 	}
@@ -516,7 +524,6 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 	if submissionID <= 0 || input.Version <= 0 || (input.Status != StatusApproved && input.Status != StatusRejected) || !utf8.ValidString(input.Reason) || utf8.RuneCountInString(input.Reason) > 2000 || (input.Status == StatusRejected && strings.TrimSpace(input.Reason) == "") {
 		return fail(400, "mailbox_invalid_review")
 	}
-	var accountID int64
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		s := s.WithDB(tx)
 		if err := s.workflowActor(actor, authz.MailboxReview); err != nil {
@@ -530,7 +537,6 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		if err != nil {
 			return err
 		}
-		accountID = account.ID
 		var submission model.MailboxSubmission
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&submission, submissionID).Error; err != nil {
 			return workflowNotFound(err)
@@ -548,17 +554,10 @@ func (s *Service) Review(ctx context.Context, actor Actor, submissionID int64, i
 		if newest.ID != submission.ID {
 			return fail(409, "mailbox_invalid_state")
 		}
-		now := s.Now().Unix()
-		if err := workflowCAS(tx.Model(&model.MailboxSubmission{}).Where("id = ? AND version = ? AND status = ?", submissionID, input.Version, StatusPending).Updates(map[string]any{"status": input.Status, "version": gorm.Expr("version + 1"), "review_reason": input.Reason, "reviewed_by": actor.Admin.UserID, "reviewed_at": now})); err != nil {
-			return err
-		}
-		if err := workflowCAS(tx.Model(&model.MailboxAssignment{}).Where("id = ? AND version = ? AND revoked_at = 0 AND status = ?", assignment.ID, assignment.Version, StatusSubmitted).Updates(map[string]any{"status": input.Status, "version": gorm.Expr("version + 1"), "updated_at": now})); err != nil {
+		if err := s.applyReview(actor, assignment, &submission, input); err != nil {
 			return err
 		}
 		return s.Audit(actor, "review", account.ID, assignment.ID, 200, "")
 	})
-	if err == nil {
-		s.invalidateCVVAccount(accountID)
-	}
 	return err
 }

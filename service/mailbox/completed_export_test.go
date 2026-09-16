@@ -172,5 +172,9 @@ func TestCompletedOpeningExportRequiresAllAdminGrants(t *testing.T) {
 		require.NoError(t, authz.SetUserPermissions(u.Id, authz.PermissionsMap{authz.ResourceMailboxManagement: grants}))
 		_, _, err := s.ExportCompletedOpening(t.Context(), Actor{Admin: access})
 		workflowTestStatus(t, err, 403)
+		_, _, err = s.ExportAllData(t.Context(), Actor{Admin: access})
+		workflowTestStatus(t, err, 403)
+		_, _, err = s.ExportIssues(t.Context(), Actor{Admin: access}, IssueExportInput{Scope: "all"})
+		workflowTestStatus(t, err, 403)
 	}
 }

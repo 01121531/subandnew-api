@@ -30,6 +30,7 @@ func workflowTestService(t *testing.T) (*Service, Actor, Actor, Actor) {
 	require.NoError(t, err)
 	conn.SetMaxOpenConns(8)
 	require.NoError(t, db.AutoMigrate(&model.MailboxIssue{}))
+	require.NoError(t, db.AutoMigrate(&model.MailboxCVV{}, &model.MailboxCardIndex{}, &model.MailboxCardIndexState{}))
 	t.Cleanup(func() { require.NoError(t, conn.Close()) })
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}, &model.MailboxAccount{}, &model.MailboxOperator{}, &model.MailboxSession{}, &model.MailboxAssignment{}, &model.MailboxSubmission{}, &model.MailboxAttachment{}, &model.MailboxAudit{}))
 	user := model.User{Username: "workflow-test-root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}

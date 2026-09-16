@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, RefreshCw, Search } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -8,10 +8,16 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { mailboxApi } from '../api'
-import type { AccountType } from '../types'
+import {
+  clearPageCredentials,
+  credentialPageGeneration,
+  failPageCredentials,
+  reconcilePageCredentials,
+} from '../lib/visible-credentials'
+import type { Account, AccountType, Page } from '../types'
 import { AccountDetail } from './account-detail'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
-import { MaskedCard } from './masked-card'
+import { Credentials } from './credentials'
 
 export function Accounts(props: {
   accountType: AccountType
@@ -25,24 +31,42 @@ export function Accounts(props: {
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<number | null>(null)
   const navigation = useRef(new AbortController())
+  useLayoutEffect(
+    () => () => clearPageCredentials(),
+    [props.csrf, props.accountType, filter, status, page]
+  )
   useEffect(() => {
     const active = new AbortController()
     navigation.current = active
     return () => active.abort()
   }, [])
-  const query = useQuery({
+  const query = useQuery<Page<Account>>({
     queryKey: ['mailbox', 'accounts', props.accountType, filter, status, page],
-    queryFn: ({ signal }) =>
-      mailboxApi.accounts(
-        {
-          account_type: props.accountType,
-          search: filter,
-          status,
-          page,
-          page_size: 20,
-        },
-        signal
-      ),
+    refetchInterval: (query) => (query.state.error ? false : 60000),
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async ({ signal }) => {
+      const generation = credentialPageGeneration()
+      try {
+        const result = await mailboxApi.accounts(
+          {
+            account_type: props.accountType,
+            search: filter,
+            status,
+            page,
+            page_size: 20,
+          },
+          signal
+        )
+        if (!signal.aborted) reconcilePageCredentials(result.items, generation)
+        return result
+      } catch (error) {
+        if (!signal.aborted && generation === credentialPageGeneration()) {
+          failPageCredentials(error)
+        }
+        throw error
+      }
+    },
   })
   const counts = new Map<string, number>()
   for (const account of query.data?.items ?? []) {
@@ -139,9 +163,6 @@ export function Accounts(props: {
                 >
                   {account.email}
                 </button>
-                {props.accountType === 'opening' && (
-                  <MaskedCard last4={account.card_last4} />
-                )}
               </div>
               <div>
                 <Status status={account.status} />
@@ -160,6 +181,9 @@ export function Accounts(props: {
               >
                 <ArrowRight />
               </Button>
+              <div className='col-span-full min-w-0'>
+                <Credentials account={account} csrf={props.csrf} />
+              </div>
             </article>
           ))}
         </div>

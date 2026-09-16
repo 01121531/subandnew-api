@@ -37,6 +37,7 @@ func mailboxControllerFixture(t *testing.T) (*gin.Engine, *mailbox.Service, mail
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.AdminDataPolicy{}, &model.MailboxAccount{}, &model.MailboxOperator{}, &model.MailboxSession{}, &model.MailboxLoginAttempt{}, &model.MailboxAssignment{}, &model.MailboxSubmission{}, &model.MailboxAttachment{}, &model.MailboxAudit{}))
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "root", Role: common.RoleRootUser, Status: common.UserStatusEnabled}).Error)
 	require.NoError(t, db.AutoMigrate(&model.MailboxIssue{}))
+	require.NoError(t, db.AutoMigrate(&model.MailboxCVV{}, &model.MailboxCardIndex{}, &model.MailboxCardIndexState{}))
 	old := model.DB
 	model.DB = db
 	t.Cleanup(func() { model.DB = old; sqlDB, _ := db.DB(); _ = sqlDB.Close() })

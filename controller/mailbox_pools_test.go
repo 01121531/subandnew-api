@@ -70,7 +70,7 @@ func TestMailboxHTTPPoolsAndCardCredentials(t *testing.T) {
 	require.Contains(t, w.Header().Get("Cache-Control"), "no-store")
 	require.Equal(t, 404, mailboxRequest(r, "POST", path, `{"kind":"card"}`, otherCookie, otherCSRF).Code)
 	t.Setenv("MAILBOX_TEMP_CVV_MODE", "")
-	require.Equal(t, 503, mailboxRequest(r, "POST", path, `{"kind":"cvv"}`, cookie, csrf).Code)
+	require.Equal(t, 404, mailboxRequest(r, "POST", path, `{"kind":"cvv"}`, cookie, csrf).Code)
 	refundPath := fmt.Sprintf("/mailbox-api/v1/accounts/%d/credentials", accounts[0].ID)
 	require.Equal(t, 400, mailboxRequest(r, "POST", refundPath, `{"kind":"card"}`, cookie, csrf).Code)
 	var active model.MailboxAccount

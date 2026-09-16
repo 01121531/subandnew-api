@@ -1,4 +1,51 @@
 export const mailboxEn = {
+  cardFilters: {
+    title: 'Card number conditions',
+    starts_with: 'Prefix includes',
+    not_starts_with: 'Prefix excludes',
+    ends_with: 'Suffix includes',
+    not_ends_with: 'Suffix excludes',
+    values: 'Digits, one per line or comma separated',
+    apply: 'Apply',
+    reset: 'Reset',
+    clearCvv: 'Clear CVV',
+    clearConfirm: 'Delete the saved CVV? This cannot be undone.',
+    cleared: 'CVV cleared',
+  },
+  dataExport: {
+    all: 'Export all mailbox data',
+    issues: 'Export issue reports',
+    confirm: 'Export Excel',
+    scope: 'Export scope',
+    filtered: 'Current filtered results (all pages)',
+    allIssues: 'All issues in both pools',
+    allHint:
+      'Includes both refund and opening pools, archived accounts and inactive assignment history. Five sheets: login data, assignments, submissions and reviews, issues, and remark revisions.',
+    issuesHint:
+      'One row per issue, plus a separate sheet of deduplicated mailbox login data. Screenshots are not included.',
+    sensitive:
+      'Contains passwords and 2FA secrets. Keep the downloaded file secure. No payment details, CVV or live codes. Each sheet supports up to 10,000 rows; larger exports are rejected, not truncated.',
+  },
+  remarkEdit: {
+    title: 'Edit remark',
+    history: 'Remark history',
+    hint: 'Up to 2,000 characters. Do not include passwords, OTP secrets, full card numbers or CVV. A submission without screenshots must keep a remark.',
+    discard: 'Discard unsaved remark changes?',
+    before: 'Before',
+    after: 'After',
+  },
+  changeStatus: {
+    title: 'Change task status',
+    description:
+      'Update {{count}} selected mailbox task(s). Changes are atomic and history is preserved.',
+    reason: 'Reason (do not include credentials)',
+    unavailable:
+      'No shared status transition is available. Assign unassigned accounts first; use issue resolution or recall for those workflows.',
+    revoke:
+      'Approval revokes operator credential access. A pending submission is required.',
+    reopen:
+      'The operator can read credentials again and submit a new record. Old approvals are retained; expired CVV is not restored.',
+  },
   completedExport: {
     button: 'Export all completed accounts',
     pending: 'Generating Excel…',
@@ -84,10 +131,10 @@ export const mailboxEn = {
     confirm:
       'Move {{count}} mailbox(es) to the archive? This is reversible and retains encrypted data and history. Assigned mailboxes must be recalled first; the whole selection is rejected if any mailbox is assigned or has changed.',
     restoreConfirm:
-      'Restore {{count}} mailbox(es) as unassigned? Previous assignments, tasks and temporary CVV will not be restored.',
+      'Restore {{count}} mailbox(es) as unassigned? Previous tasks will not resume. Encrypted credentials remain retained.',
     cvv: {
       enabled:
-        'Temporary CVV is enabled. The optional sixth column is available.',
+        'Encrypted database CVV storage is enabled. The optional sixth column is available.',
       not_enabled:
         'Temporary CVV is not enabled. Use the five-column format; this page will not change deployment settings.',
       node_unsupported:
@@ -143,7 +190,7 @@ export const mailboxEn = {
       'Fictional formatting examples only. Up to 1,000 rows; separate with tabs or ----. Passwords are preserved exactly. Use XXXX when 2FA is not configured.',
     exampleColumnsRefund: 'Email / Password / 2FA',
     exampleColumnsOpening: 'Email / Password / 2FA / Card number / Expiry',
-    exampleCvv: 'Optional sixth column: temporary CVV',
+    exampleCvv: 'Optional sixth column: CVV',
     back: 'Back to screenshots',
     attachments: 'Optional screenshots',
     noAttachments: 'No screenshots',
@@ -160,16 +207,15 @@ export const mailboxEn = {
     refundImport:
       'Refund fields: email, password, 2FA. Use XXXX when 2FA is not configured. A recovery email before 2FA is also recognized but not saved.',
     openingImport:
-      '5 fields per row: email, password, 2FA, card number (PAN), expiry (MM/YY or MM/YYYY). Use XXXX when 2FA is not configured. Optional sixth field: temporary CVV (single-node mode only).',
+      '5 fields: email, password, 2FA, card number, expiry (MM/YY or MM/YYYY). Use XXXX without 2FA. Optional sixth field: CVV, stored encrypted in the database.',
     excelPanText:
       'In Excel, PAN and optional CVV must be Text cells to preserve every digit. Keep expiry as MM/YY or MM/YYYY text.',
     noOtp: 'No 2FA',
     notProvided: 'Not provided',
-    provideCvv: 'Provide temporary CVV',
-    cvvProvided:
-      'Temporary CVV provided. Its 30-minute viewing window starts when the operator first reveals it.',
+    provideCvv: 'Manage CVV',
+    cvvProvided: 'CVV saved encrypted, without automatic expiry.',
     temporaryCvvNotice:
-      'Temporary CVV uses the dedicated non-persistent Redis when configured. It remains available for up to 30 days before first reveal, then for 30 minutes. Recall, reassignment, approval or disablement removes it immediately.',
+      'CVV is encrypted in the database with no automatic expiry. Task changes revoke access without deleting it. Changing the card clears its old CVV. Back up both database and master key.',
     noCvv: 'Do not include CVV, cookies or other extra credentials.',
     card: 'Payment card',
     cardEnding: 'Card **** {{last4}}',
@@ -179,7 +225,7 @@ export const mailboxEn = {
     cvv: 'CVV security code',
     revealCvv: 'Reveal CVV',
     adminCvvHint:
-      'Administrators with credential permission may reveal the current CVV repeatedly while it remains available. Admin viewing does not start or extend the operator window.',
+      'Credential permission is required. Viewing does not change the stored CVV or start an expiry timer.',
     screenshotRedaction:
       'Screenshots must redact CVV and the full card number. Only the last 4 digits may remain visible.',
     portalEntry: 'Operator sign in',
@@ -322,6 +368,8 @@ export const mailboxEn = {
     adminActor: 'Admin #{{id}}',
     operatorActor: 'Operator #{{id}}',
     auditActions: {
+      change_status: 'Change task status',
+      edit_remark: 'Edit submission remark',
       archive: 'Archive mailbox',
       restore: 'Restore mailbox',
       import: 'Import',
@@ -355,6 +403,14 @@ export const mailboxEn = {
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_invalid_card_filter:
+      'Card conditions require 1–19 digits per value, up to 1,000 values, and the opening pool.',
+    mailbox_card_index_unavailable:
+      'Card index is not ready or could not be built. Retry to continue the batch backfill.',
+    mailbox_export_empty: 'No matching records to export.',
+    mailbox_export_limit:
+      'A sheet exceeds 10,000 records. Nothing was exported; narrow the issue filters where available.',
+    mailbox_export_changed: 'Data changed during export. Please try again.',
     mailbox_export_completed_empty:
       'No completed opening accounts are available.',
     mailbox_export_completed_limit:
@@ -364,7 +420,9 @@ export const mailboxEn = {
     mailbox_invalid_work_query:
       'Invalid statistics query. Enter valid dates with the end date on or after the start date.',
     mailbox_cvv_disabled:
-      'Temporary CVV delivery is unavailable. Check the dedicated volatile Redis configuration.',
+      'CVV is disabled. Check the deployment configuration.',
+    mailbox_cvv_task_restricted:
+      'CVV is unavailable while awaiting review. Other details remain accessible.',
     mailbox_cvv_unavailable:
       'CVV was not provided or has expired. Ask an administrator to provide it again.',
     mailbox_cvv_capacity: 'Temporary delivery capacity is full. Try later.',
@@ -467,6 +525,52 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  cardFilters: {
+    title: '卡号条件',
+    starts_with: '前缀包含',
+    not_starts_with: '前缀排除',
+    ends_with: '后缀包含',
+    not_ends_with: '后缀排除',
+    values: '仅数字，一行一个或逗号分隔',
+    apply: '应用筛选',
+    reset: '重置',
+    clearCvv: '清除 CVV',
+    clearConfirm: '确定删除已保存的 CVV？此操作不可撤销。',
+    cleared: 'CVV 已清除',
+  },
+  dataExport: {
+    all: '导出全部邮箱资料',
+    issues: '导出异常反馈',
+    confirm: '导出 Excel',
+    scope: '导出范围',
+    filtered: '当前筛选结果（全部分页）',
+    allIssues: '两池全部异常反馈',
+    allHint:
+      '包含退款和开号两池、归档邮箱及失效分配历史。文件分为邮箱资料、分配历史、提交审核、异常反馈、备注修订五个工作表。',
+    issuesHint:
+      '每条反馈一行，另附去重后的关联邮箱登录资料工作表。不包含截图文件。',
+    sensitive:
+      '文件包含密码和 2FA 密钥，请妥善保管。不包含支付资料、CVV 或动态验证码。每个工作表最多 10,000 条，超限整次拒绝，不截断。',
+  },
+  remarkEdit: {
+    title: '编辑备注',
+    history: '备注修订记录',
+    hint: '最多 2,000 字，请勿填写密码、2FA 密钥、完整卡号或 CVV。没有截图的提交必须保留备注。',
+    discard: '放弃尚未保存的备注修改？',
+    before: '修改前',
+    after: '修改后',
+  },
+  changeStatus: {
+    title: '修改任务状态',
+    description:
+      '修改选中的 {{count}} 个邮箱任务。批量全部成功或全部取消，历史记录保留。',
+    reason: '修改原因（请勿填写凭据）',
+    unavailable:
+      '所选任务没有共同可用的目标状态。未分配邮箱请先分配；异常和回收请使用对应处理入口。',
+    revoke: '审核通过会收回操作员的凭据访问权，必须已有待审核提交。',
+    reopen:
+      '操作员可以重新读取资料并提交新记录。原审核历史保留，已失效的 CVV 不会恢复。',
+  },
   completedExport: {
     button: '导出已完成账号',
     pending: '正在生成 Excel…',
@@ -550,9 +654,9 @@ export const mailboxZh: typeof mailboxEn = {
     confirm:
       '将 {{count}} 个邮箱移入归档，可恢复。加密资料和历史记录会保留。已分配邮箱须先回收；若任一邮箱仍已分配或版本变化，本次整批不执行。',
     restoreConfirm:
-      '将 {{count}} 个邮箱恢复为未分配？不会恢复原操作员分配、旧任务或临时 CVV。',
+      '将 {{count}} 个邮箱恢复为未分配？不会恢复原操作员分配和旧任务，加密资料继续保留。',
     cvv: {
-      enabled: '临时 CVV 已开启，可使用可选的第六列。',
+      enabled: 'CVV 数据库加密保存已开启，可使用可选的第六列。',
       not_enabled: '临时 CVV 未开启，请使用五列格式。本页面不会修改部署配置。',
       node_unsupported: '当前节点不支持临时 CVV 交付，请使用五列格式。',
       redis_not_configured:
@@ -601,7 +705,7 @@ export const mailboxZh: typeof mailboxEn = {
       '仅供格式演示，均为虚构测试资料。每批最多 1,000 条，支持制表符或 ---- 分隔；密码保留原文。未配置 2FA 时填写 XXXX。',
     exampleColumnsRefund: '邮箱 / 密码 / 2FA',
     exampleColumnsOpening: '邮箱 / 密码 / 2FA / 卡号 / 有效期',
-    exampleCvv: '可选第六列：临时 CVV',
+    exampleCvv: '可选第六列：CVV',
     back: '返回截图提交',
     attachments: '截图（可选）',
     noAttachments: '未附截图',
@@ -617,15 +721,15 @@ export const mailboxZh: typeof mailboxEn = {
     refundImport:
       '退款字段为邮箱、密码、2FA；未配置 2FA 时填写 XXXX。也可在 2FA 前增加辅助邮箱，辅助邮箱仅识别、不保存。',
     openingImport:
-      '每行 5 列：邮箱、密码、2FA、卡号（PAN）、有效期（MM/YY 或 MM/YYYY）。未配置 2FA 时填写 XXXX。可选第 6 列：临时 CVV（仅限单节点模式）。',
+      '每行 5 列：邮箱、密码、2FA、卡号、有效期（MM/YY 或 MM/YYYY）。未配置 2FA 填写 XXXX。可选第 6 列：CVV，使用数据库加密保存。',
     excelPanText:
       'Excel 中卡号和可选 CVV 必须使用文本单元格，避免丢失数字。有效期保留为 MM/YY 或 MM/YYYY 文本。',
     noOtp: '无 2FA',
     notProvided: '未提供',
-    provideCvv: '补发临时 CVV',
-    cvvProvided: '已提供临时 CVV，操作员首次查看后开始 30 分钟有效期。',
+    provideCvv: '管理 CVV',
+    cvvProvided: 'CVV 已加密保存，无自动到期时间。',
     temporaryCvvNotice:
-      '配置专用非持久化 Redis 后，临时 CVV 首次查看前最长保留 30 天，操作员首次查看后保留 30 分钟；回收、改派、审核通过或停用会立即清除。',
+      'CVV 在数据库中加密保存，不自动过期。任务变更只收回访问权；更换卡号会清除旧 CVV。请同时备份数据库与主密钥。',
     noCvv: '禁止包含 CVV、Cookie 或其他额外凭据。',
     card: '支付卡',
     cardEnding: '卡号 **** {{last4}}',
@@ -635,7 +739,7 @@ export const mailboxZh: typeof mailboxEn = {
     cvv: 'CVV 安全码',
     revealCvv: '查看 CVV',
     adminCvvHint:
-      '具备凭据权限的管理员可在 CVV 有效期间重复查看；管理员查看不会启动或延长操作员的 30 分钟窗口。',
+      '需要凭据访问权限，查看不会改变已保存资料，也不会启动到期计时。',
     screenshotRedaction: '截图必须遮盖 CVV 和完整卡号，卡号最多只保留后 4 位。',
     portalEntry: '操作员登录入口',
     operatorFilter: '按操作员筛选',
@@ -773,6 +877,8 @@ export const mailboxZh: typeof mailboxEn = {
       archive: '归档邮箱',
       restore: '恢复邮箱',
       import: '导入邮箱',
+      change_status: '修改任务状态',
+      edit_remark: '修改提交备注',
       import_preview: '导入预览',
       assign: '分配邮箱',
       recall: '收回邮箱',
@@ -803,6 +909,14 @@ export const mailboxZh: typeof mailboxEn = {
     audit: '查看邮箱审计日志',
   },
   errors: {
+    mailbox_invalid_card_filter:
+      '卡号条件仅限开号邮箱，每个值为 1～19 位数字，最多 1,000 个值。',
+    mailbox_card_index_unavailable:
+      '卡号索引尚未完成或建立失败，请重试继续分批建立索引。',
+    mailbox_export_empty: '暂无符合条件的导出记录。',
+    mailbox_export_limit:
+      '某个工作表超过 10,000 条，未导出任何数据；异常反馈可缩小筛选范围后重试。',
+    mailbox_export_changed: '导出期间资料发生变化，请重试。',
     mailbox_export_completed_empty: '暂无已完成开号账号。',
     mailbox_export_completed_limit:
       '已完成账号超过 10,000 条，未生成或截断文件。',
@@ -831,8 +945,9 @@ export const mailboxZh: typeof mailboxEn = {
     mailbox_credentials_changed: '凭据访问权限已变化，请重新打开邮箱。',
     mailbox_credentials_revoked: '凭据访问权限已撤销。',
     mailbox_credentials_unavailable: '凭据暂不可用。',
-    mailbox_cvv_disabled: '临时 CVV 交付不可用，请检查专用易失 Redis 配置。',
+    mailbox_cvv_disabled: 'CVV 功能未开启，请检查部署配置。',
     mailbox_cvv_unavailable: 'CVV 未提供或已失效，请联系管理员重新提供。',
+    mailbox_cvv_task_restricted: '待审核任务暂不可查看 CVV，其他资料仍可查看。',
     mailbox_cvv_capacity: '临时交付容量已满，请稍后再试。',
     mailbox_invalid_cvv: 'CVV 必须是 3 或 4 位数字字符串。',
     mailbox_import_cvv_text_required: 'Excel 的 CVV 单元格必须是文本类型。',

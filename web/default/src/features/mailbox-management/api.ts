@@ -1,5 +1,6 @@
 import { isAxiosError } from 'axios'
 
+import type { RemarkHistory } from '@/components/mailbox-remark-editor'
 import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
@@ -147,61 +148,132 @@ async function workRequest<T>(
   }
   return result
 }
-export const mailboxApi = {
-  exportCompleted: async (signal: AbortSignal): Promise<Blob> => {
-    const allowed = () => {
-      const user = useAuthStore.getState().auth.user
-      return (
-        canMailbox(user, 'view') &&
-        canMailbox(user, 'review') &&
-        canMailbox(user, 'credentials')
-      )
-    }
-    const authorization = adminDataAuthorizationKey(
-      useAuthStore.getState().auth.user
+async function exportWorkbook(
+  path: string,
+  body: unknown,
+  signal: AbortSignal
+): Promise<Blob> {
+  const allowed = () => {
+    const user = useAuthStore.getState().auth.user
+    return (
+      canMailbox(user, 'view') &&
+      canMailbox(user, 'review') &&
+      canMailbox(user, 'credentials')
     )
-    if (!allowed()) throw new MailboxError('mailbox_permission_denied', 403)
-    try {
-      const response = await api.post<Blob>(
-        `${base}/accounts/export-completed`,
-        {},
-        {
-          responseType: 'blob',
-          signal,
-          timeout: 120000,
-          headers: { 'X-Mailbox-Request': '1' },
-          skipBusinessError: true,
-          skipErrorHandler: true,
-        }
-      )
-      if (
-        signal.aborted ||
-        !allowed() ||
-        authorization !==
-          adminDataAuthorizationKey(useAuthStore.getState().auth.user)
-      ) {
-        throw new MailboxError('mailbox_permission_denied', 403)
-      }
-      if (
-        response.data.type !==
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ) {
-        throw new MailboxError('mailbox_request_failed')
-      }
-      return response.data
-    } catch (error) {
-      if (isAxiosError<Blob>(error)) {
-        let code: unknown
-        try {
-          code = JSON.parse((await error.response?.data.text()) ?? '{}').message
-        } catch {
-          /* Never display a raw server response. */
-        }
-        throw new MailboxError(safeCode(code), error.response?.status ?? 0)
-      }
-      throw error
+  }
+  const authorization = adminDataAuthorizationKey(
+    useAuthStore.getState().auth.user
+  )
+  if (!allowed()) throw new MailboxError('mailbox_permission_denied', 403)
+  try {
+    const response = await api.post<Blob>(`${base}${path}`, body, {
+      responseType: 'blob',
+      signal,
+      timeout: 120000,
+      headers: { 'X-Mailbox-Request': '1' },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+    if (
+      signal.aborted ||
+      !allowed() ||
+      authorization !==
+        adminDataAuthorizationKey(useAuthStore.getState().auth.user)
+    ) {
+      throw new MailboxError('mailbox_permission_denied', 403)
     }
-  },
+    if (
+      response.data.type !==
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ) {
+      throw new MailboxError('mailbox_request_failed')
+    }
+    return response.data
+  } catch (error) {
+    if (isAxiosError<Blob>(error)) {
+      let code: unknown
+      try {
+        code = JSON.parse((await error.response?.data.text()) ?? '{}').message
+      } catch {
+        /* Never display a raw server response. */
+      }
+      throw new MailboxError(safeCode(code), error.response?.status ?? 0)
+    }
+    throw error
+  }
+}
+
+export type IssueExportInput = {
+  card_filters?: import('./types').CardFilter[]
+  scope: 'all' | 'filtered'
+  account_type?: AccountType
+  search?: string
+  status?: string
+  kind?: string
+  operator_id?: number
+}
+
+export const mailboxApi = {
+  exportAll: (
+    signal: AbortSignal,
+    input: Partial<ListQuery> & { scope?: string } = {}
+  ) =>
+    exportWorkbook(
+      '/accounts/export-all',
+      input.scope === 'all' ? { scope: 'all' } : input,
+      signal
+    ),
+  exportIssues: (input: IssueExportInput, signal: AbortSignal) =>
+    exportWorkbook(
+      '/issues/export',
+      input.scope === 'all' ? { scope: 'all' } : input,
+      signal
+    ),
+  editRemark: (
+    id: number,
+    accountType: AccountType,
+    version: number,
+    remark: string
+  ) =>
+    request<Submission>(`/submissions/${id}/remark`, 'PATCH', {
+      account_type: accountType,
+      version,
+      remark,
+    }).then((value) => submissionMetadata(value, accountType)),
+  remarkHistory: (
+    id: number,
+    accountType: AccountType,
+    page: number,
+    signal: AbortSignal
+  ) =>
+    request<RemarkHistory>(
+      `/submissions/${id}/remark-history`,
+      'GET',
+      undefined,
+      { account_type: accountType, page, page_size: 20 },
+      signal
+    ),
+  changeStatus: (
+    accountType: AccountType,
+    accounts: Account[],
+    status: string,
+    reason: string
+  ) =>
+    request<unknown>('/accounts/change-status', 'POST', {
+      account_type: accountType,
+      status,
+      reason,
+      items: accounts.map(
+        ({ id, version, assignment_id, assignment_version }) => ({
+          id,
+          version,
+          assignment_id,
+          assignment_version,
+        })
+      ),
+    }),
+  exportCompleted: (signal: AbortSignal) =>
+    exportWorkbook('/accounts/export-completed', {}, signal),
   issueOperators: (signal?: AbortSignal) =>
     request<AccountOperator[]>(
       '/issue-operators',
@@ -217,7 +289,13 @@ export const mailboxApi = {
     }>('/import-options', 'GET', undefined, undefined, signal),
   issues: async (query: ListQuery, signal?: AbortSignal) =>
     pageMetadata(
-      await request<Page<Issue>>('/issues', 'GET', undefined, query, signal),
+      await request<Page<Issue>>(
+        query.card_filters?.length ? '/issues/query' : '/issues',
+        query.card_filters?.length ? 'POST' : 'GET',
+        query.card_filters?.length ? query : undefined,
+        query.card_filters?.length ? undefined : query,
+        signal
+      ),
       (item) => issueMetadata(item, query.account_type ?? 'refund')
     ),
   issue: async (id: number, accountType: AccountType, signal?: AbortSignal) =>
@@ -248,13 +326,24 @@ export const mailboxApi = {
     )
     return { expires_at: result.expires_at }
   },
+  clearCvv: (id: number, version: number) =>
+    request(
+      `/accounts/${id}/clear-cvv`,
+      'POST',
+      { version },
+      { account_type: 'opening' }
+    ),
   accounts: async (query: ListQuery, signal?: AbortSignal) => {
     const accountType = query.account_type ?? 'refund'
     const page = await request<Page<Account>>(
-      '/accounts',
-      'GET',
-      undefined,
-      { ...query, account_type: accountType },
+      query.card_filters?.length ? '/accounts/query' : '/accounts',
+      query.card_filters?.length ? 'POST' : 'GET',
+      query.card_filters?.length
+        ? { ...query, account_type: accountType }
+        : undefined,
+      query.card_filters?.length
+        ? undefined
+        : { ...query, account_type: accountType },
       signal
     )
     return pageMetadata(page, (item) => accountMetadata(item, accountType))
