@@ -23,6 +23,7 @@ func cvvTestService(t *testing.T) (*Service, Actor, Actor) {
 	common.IsMasterNode = true
 	t.Cleanup(func() { common.IsMasterNode = master })
 	s, admin := newMailboxImportTestService(t)
+	require.NoError(t, s.DB.AutoMigrate(&model.MailboxSubmission{}))
 	op := model.MailboxOperator{Username: "cvv-test", DisplayName: "Test", Enabled: true, AuthVersion: 1, Version: 1}
 	require.NoError(t, s.DB.Create(&op).Error)
 	hash := digest("synthetic-cvv-session")

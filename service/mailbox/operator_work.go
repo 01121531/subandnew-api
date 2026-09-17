@@ -51,20 +51,22 @@ type OperatorWorkOverview struct {
 }
 
 type OperatorWorkAccount struct {
-	ID                int64  `json:"id"`
-	Email             string `json:"email"`
-	AccountType       string `json:"account_type"`
-	CardLast4         string `json:"card_last4"`
-	ArchivedAt        int64  `json:"archived_at"`
-	AssignmentID      int64  `json:"assignment_id"`
-	AssignmentVersion int64  `json:"assignment_version"`
-	Status            string `json:"status"`
-	AssignmentActive  bool   `json:"assignment_active"`
-	AssignedAt        int64  `json:"assigned_at"`
-	RevokedAt         int64  `json:"revoked_at"`
-	SubmissionCount   int64  `json:"submission_count"`
-	LastSubmittedAt   int64  `json:"last_submitted_at"`
-	LastIssueAt       int64  `json:"last_issue_at"`
+	ID                     int64  `json:"id"`
+	Email                  string `json:"email"`
+	AccountType            string `json:"account_type"`
+	CardLast4              string `json:"card_last4"`
+	ArchivedAt             int64  `json:"archived_at"`
+	AssignmentID           int64  `json:"assignment_id"`
+	AssignmentVersion      int64  `json:"assignment_version"`
+	Status                 string `json:"status"`
+	AssignmentActive       bool   `json:"assignment_active"`
+	AssignedAt             int64  `json:"assigned_at"`
+	RevokedAt              int64  `json:"revoked_at"`
+	SubmissionCount        int64  `json:"submission_count"`
+	LatestSubmissionID     int64  `json:"latest_submission_id"`
+	LatestSubmissionStatus string `json:"latest_submission_status"`
+	LastSubmittedAt        int64  `json:"last_submitted_at"`
+	LastIssueAt            int64  `json:"last_issue_at"`
 }
 
 type WorkAssignment struct {
@@ -290,13 +292,15 @@ func (s *Service) OperatorWorkSummary(ctx context.Context, actor Actor, id int64
 
 func (s *Service) workAccountQuery(id int64, kind string) *gorm.DB {
 	return workPool(s.DB.Table("mailbox_assignments AS t").Joins("JOIN mailbox_accounts AS a ON a.id = t.account_id").
+		Joins("LEFT JOIN mailbox_submissions latest ON latest.id = (SELECT MAX(ws.id) FROM mailbox_submissions ws JOIN mailbox_assignments wt ON wt.id = ws.assignment_id AND wt.operator_id = ws.operator_id WHERE wt.account_id = a.id AND ws.operator_id = t.operator_id)").
 		Where("t.operator_id = ?", id).
-		Where("NOT EXISTS (SELECT 1 FROM mailbox_assignments newer WHERE newer.operator_id = t.operator_id AND newer.account_id = t.account_id AND newer.id > t.id)"), kind)
+		Where("t.id = COALESCE((SELECT active.id FROM mailbox_assignments active WHERE active.id = a.active_assignment_id AND active.operator_id = t.operator_id AND active.account_id = a.id AND active.revoked_at = 0 AND a.archived_at = 0), (SELECT MAX(history.id) FROM mailbox_assignments history WHERE history.operator_id = t.operator_id AND history.account_id = a.id))"), kind)
 }
 
 // Correlated aggregates are lifetime values for this operator and account only.
 // They run in SQL on the paginated account selection, not one query per item.
 const workAccountSelect = "a.id, a.email, a.account_type, a.card_last4, a.archived_at, t.id AS assignment_id, t.version AS assignment_version, t.status, CASE WHEN " + workActive + " THEN true ELSE false END AS assignment_active, t.created_at AS assigned_at, t.revoked_at, " +
+	"COALESCE(latest.id, 0) AS latest_submission_id, COALESCE(latest.status, '') AS latest_submission_status, " +
 	"(SELECT COUNT(*) FROM mailbox_submissions ws JOIN mailbox_assignments wt ON wt.id = ws.assignment_id AND wt.operator_id = ws.operator_id WHERE wt.account_id = a.id AND ws.operator_id = t.operator_id) AS submission_count, " +
 	"COALESCE((SELECT MAX(ws.created_at) FROM mailbox_submissions ws JOIN mailbox_assignments wt ON wt.id = ws.assignment_id AND wt.operator_id = ws.operator_id WHERE wt.account_id = a.id AND ws.operator_id = t.operator_id), 0) AS last_submitted_at, " +
 	"COALESCE((SELECT MAX(wi.created_at) FROM mailbox_issues wi JOIN mailbox_assignments wt ON wt.id = wi.assignment_id AND wt.account_id = wi.account_id AND wt.operator_id = wi.operator_id WHERE wi.account_id = a.id AND wi.operator_id = t.operator_id), 0) AS last_issue_at"

@@ -116,6 +116,8 @@ export interface WorkHistoryQuery {
   page_size?: number
 }
 export interface WorkAccount {
+  latest_submission_id?: number
+  latest_submission_status?: Submission['status']
   id: number
   email: string
   account_type: AccountType
@@ -180,6 +182,45 @@ export interface AssignInput {
   account_type?: AccountType
   items: VersionedID[]
   operator_id: number
+}
+export interface RepairItem {
+  account_id: number
+  account_version: number
+  original_assignment_id: number
+  original_assignment_version: number
+  current_assignment_id: number
+  current_assignment_version: number
+  submission_id: number
+  submission_version: number
+}
+export interface RepairCandidate extends RepairItem {
+  later_assignments?: Array<{
+    id: number
+    operator_id: number
+    operator_name: string
+    status: MailboxStatus
+    assigned_at: number
+    revoked_at: number
+  }>
+  email: string
+  account_type: AccountType
+  original_operator_id: number
+  original_operator_name: string
+  original_revoked_at: number
+  submission_status: Submission['status']
+  submitted_at: number
+  review_reason: string
+  reviewed_at: number
+  current_operator_name: string
+  current_status: MailboxStatus
+  current_assigned_at: number
+  can_repair: boolean
+  conflict_code: string
+}
+export interface RepairInput {
+  account_type: AccountType
+  reason: string
+  items: RepairItem[]
 }
 export interface Attachment {
   id: string
@@ -319,6 +360,7 @@ export interface Credential {
   server_time: number
 }
 export interface Envelope<T> {
+  conflicts?: unknown
   success: boolean
   message: string
   data: T

@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 
 import { mailboxApi } from '../api'
 import { useMailboxMutation, useMailboxQuery } from '../hooks'
+import { MailboxError } from '../lib/errors'
 import { parseVersionedIDs } from '../lib/schemas'
 import type { AccountType, VersionedID } from '../types'
 import { Confirm, Field, Modal, QueryState } from './common'
@@ -21,15 +22,26 @@ export function AssignDialog(props: {
   const [manual, setManual] = useState('')
   const [error, setError] = useState('')
   const [confirm, setConfirm] = useState(false)
+  const [conflicts, setConflicts] = useState<
+    Array<{ id: number; email: string }>
+  >([])
   const options = useMailboxQuery(['operator-options'], (signal) =>
     mailboxApi.operatorOptions(signal)
   )
   const mutation = useMailboxMutation(async () => {
-    await mailboxApi.assign({
-      account_type: props.accountType,
-      items: props.items.length ? props.items : parseVersionedIDs(manual),
-      operator_id: Number(operator),
-    })
+    try {
+      await mailboxApi.assign({
+        account_type: props.accountType,
+        items: props.items.length ? props.items : parseVersionedIDs(manual),
+        operator_id: Number(operator),
+      })
+      setConflicts([])
+    } catch (error) {
+      setConflicts(error instanceof MailboxError ? error.conflicts : [])
+      throw error
+    } finally {
+      setConfirm(false)
+    }
   }, props.onClose)
   function proceed() {
     try {
@@ -57,6 +69,18 @@ export function AssignDialog(props: {
         }
       >
         <div className='space-y-4'>
+          {conflicts.length > 0 && (
+            <div role='alert' className='space-y-2 text-sm'>
+              <p>{t('mailbox.errors.mailbox_already_submitted')}</p>
+              <ul className='max-h-48 list-inside list-disc overflow-y-auto'>
+                {conflicts.map((item) => (
+                  <li key={item.id} className='break-all'>
+                    #{item.id} {item.email}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className='text-sm font-medium'>
             {t(`mailbox.admin.pools.${props.accountType}`)}
           </p>

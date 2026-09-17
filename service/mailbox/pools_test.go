@@ -349,7 +349,7 @@ func TestMailboxPoolWorkflowIsolationAndRecall(t *testing.T) {
 	require.Equal(t, AccountTypeOpening, history.Items[0].AccountType)
 	view, err = s.GetAccount(ctx, admin, opening.ID, AccountTypeOpening)
 	require.NoError(t, err)
-	require.NoError(t, s.Assign(ctx, admin, AssignInput{AccountType: AccountTypeOpening, Items: []AssignItem{{ID: opening.ID, Version: view.Version}}, OperatorID: other.OperatorID}))
+	legacyTestReassign(t, s, admin, other, opening.ID, AccountTypeOpening)
 	secret, err := s.Credentials(ctx, owner, opening.ID, "card", AccountTypeOpening)
 	require.Nil(t, secret)
 	workflowTestStatus(t, err, 404)

@@ -126,7 +126,7 @@ func TestMailboxWorkflowLifecycleAndHistoryIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, history.Total)
 	require.Equal(t, "Please show the complete panel.", history.Items[1].ReviewReason)
-	workflowTestAssign(t, s, admin, other, account.ID)
+	legacyTestReassign(t, s, admin, other, account.ID)
 	_, err = s.GetAccount(ctx, owner, account.ID)
 	workflowTestStatus(t, err, 404)
 	_, _, err = s.ReadAttachment(ctx, other, first.Attachments[0].ID)
@@ -213,7 +213,7 @@ func TestMailboxWorkflowSubmissionValidationAndRollback(t *testing.T) {
 	for _, input := range []ReviewInput{{Version: 1, Status: StatusRejected}, {Version: 1, Status: StatusRejected, Reason: " \t"}, {Version: 1, Status: StatusApproved, Reason: strings.Repeat("x", 2001)}, {Version: 1, Status: "pending"}} {
 		workflowTestStatus(t, s.Review(ctx, admin, submission.ID, input), 400)
 	}
-	workflowTestAssign(t, s, admin, other, a.ID)
+	legacyTestReassign(t, s, admin, other, a.ID)
 	workflowTestStatus(t, s.Review(ctx, admin, submission.ID, ReviewInput{Version: 1, Status: StatusApproved}), 404)
 	var persisted model.MailboxSubmission
 	require.NoError(t, s.DB.First(&persisted, submission.ID).Error)

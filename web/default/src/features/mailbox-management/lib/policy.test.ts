@@ -201,7 +201,17 @@ describe('safe, localized failures', () => {
     )) {
       const source = readFileSync(resolve(dir, file), 'utf8')
       for (const match of source.matchAll(/"(mailbox_[a-z0-9_]+)"/g)) {
-        if (match[1] !== 'mailbox_assignments') codes.add(match[1])
+        // SQL table names are not user-facing error codes.
+        if (
+          ![
+            'mailbox_assignments',
+            'mailbox_submissions',
+            'mailbox_issues',
+            'mailbox_attachments',
+          ].includes(match[1])
+        ) {
+          codes.add(match[1])
+        }
       }
     }
     expect(codes.size).toBeGreaterThan(30)

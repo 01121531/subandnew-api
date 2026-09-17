@@ -31,6 +31,8 @@ func registerMailboxRoutes(engine *gin.Engine, api *gin.RouterGroup) {
 	admin.POST("/imports/preview", manage, controller.ImportMailboxAccounts(true))
 	admin.POST("/imports", manage, controller.ImportMailboxAccounts(false))
 	admin.POST("/assignments", assign, controller.AssignMailboxAccounts)
+	admin.GET("/assignment-repairs", view, assign, review, controller.ListMailboxAssignmentRepairs)
+	admin.POST("/assignment-repairs", view, assign, review, controller.RepairMailboxAssignments)
 	admin.GET("/operator-options", assign, controller.MailboxOperatorOptions)
 	admin.GET("/operators", operators, controller.ListMailboxOperators)
 	admin.GET("/operators/:id/work-summary", operators, view, review, controller.GetMailboxOperatorWorkSummary)

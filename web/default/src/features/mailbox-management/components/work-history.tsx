@@ -58,16 +58,26 @@ function AssignmentRecord(props: { item: WorkAssignment }) {
         <span>
           #{item.id} · {t('mailbox.work.version', { version: item.version })}
         </span>
-        <WorkStatus value={item.status} />
+        {item.assignment_active && !item.revoked_at && (
+          <WorkStatus value={item.status} />
+        )}
         <span>
           {t(
-            item.assignment_active
+            item.assignment_active && !item.revoked_at
               ? 'mailbox.work.active'
               : 'mailbox.work.inactive'
           )}
         </span>
       </div>
       <dl className='grid gap-2 text-xs sm:grid-cols-2'>
+        <div>
+          <dt className='text-muted-foreground'>
+            {t('mailbox.work.assignmentStatus')}
+          </dt>
+          <dd>
+            <WorkStatus value={item.status} />
+          </dd>
+        </div>
         <div>
           <dt className='text-muted-foreground'>
             {t('mailbox.work.assignedBy')}

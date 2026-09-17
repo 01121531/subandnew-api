@@ -322,6 +322,8 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 				return workflowNotFound(err)
 			}
 		}
+		accounts := make([]*model.MailboxAccount, 0, len(items))
+		ids := make([]int64, 0, len(items))
 		for _, item := range items {
 			account, err := s.workflowAccount(item.ID)
 			if err != nil {
@@ -330,6 +332,15 @@ func (s *Service) Assign(ctx context.Context, actor Actor, input AssignInput, ac
 			if account.Version != item.Version {
 				return fail(409, "mailbox_version_conflict")
 			}
+			accounts = append(accounts, account)
+			ids = append(ids, account.ID)
+		}
+		if input.OperatorID != 0 {
+			if err := s.assignmentConflicts(ids); err != nil {
+				return err
+			}
+		}
+		for _, account := range accounts {
 			now := s.Now().Unix()
 			if account.ActiveAssignmentID != 0 {
 				if err := s.invalidateIssues("assignment_id = ?", account.ActiveAssignmentID); err != nil {

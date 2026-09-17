@@ -104,6 +104,7 @@ export function canReviewWorkSubmission(
 ): boolean {
   return (
     account.assignment_active &&
+    !account.revoked_at &&
     account.assignment_id === submission.assignment_id &&
     (submission.status === 'pending' || submission.status === 'submitted')
   )
@@ -156,6 +157,12 @@ export function workAccountMetadata(value: WorkAccount): WorkAccount {
     revoked_at: value.revoked_at,
     submission_count: value.submission_count,
     last_submitted_at: value.last_submitted_at,
+    ...(value.latest_submission_id !== undefined
+      ? { latest_submission_id: value.latest_submission_id }
+      : {}),
+    ...(value.latest_submission_status
+      ? { latest_submission_status: value.latest_submission_status }
+      : {}),
     last_issue_at: value.last_issue_at,
   }
 }

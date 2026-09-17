@@ -5,9 +5,10 @@ import { adminDataAuthorizationKey } from '@/lib/admin-data-policy'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { MailboxError, safeCode } from './lib/errors'
+import { repairBody, repairMetadata } from './lib/assignment-repairs'
+import { assignmentConflicts, MailboxError, safeCode } from './lib/errors'
 import { importFailuresMetadata } from './lib/import-report'
-import { canMailbox, canMailboxWork } from './lib/permissions'
+import { canMailbox, canMailboxRepair, canMailboxWork } from './lib/permissions'
 import {
   accountMetadata,
   auditMetadata,
@@ -25,6 +26,8 @@ import {
 } from './lib/work'
 import type {
   Account,
+  RepairCandidate,
+  RepairInput,
   AccountType,
   AccountOperator,
   AssignInput,
@@ -85,7 +88,11 @@ export function importBody(source: ImportSource):
 }
 export function unwrap<T>(body: Envelope<T>, status = 0): T {
   if (body?.success !== true) {
-    throw new MailboxError(safeCode(body?.message), status)
+    throw new MailboxError(
+      safeCode(body?.message),
+      status,
+      assignmentConflicts(body?.message, body?.conflicts ? body : body?.data)
+    )
   }
   return body.data
 }
@@ -117,7 +124,13 @@ async function request<T>(
     if (isAxiosError<Envelope<T>>(error)) {
       throw new MailboxError(
         safeCode(error.response?.data?.message),
-        error.response?.status ?? 0
+        error.response?.status ?? 0,
+        assignmentConflicts(
+          error.response?.data?.message,
+          error.response?.data?.conflicts
+            ? error.response.data
+            : error.response?.data?.data
+        )
       )
     }
     throw error
@@ -214,6 +227,39 @@ export type IssueExportInput = {
 }
 
 export const mailboxApi = {
+  assignmentRepairs: async (
+    query: ListQuery & { account_type: AccountType },
+    signal?: AbortSignal
+  ) => {
+    const user = useAuthStore.getState().auth.user
+    const authorization = adminDataAuthorizationKey(user)
+    if (!canMailboxRepair(user)) {
+      throw new MailboxError('mailbox_permission_denied', 403)
+    }
+    const result = await request<Page<RepairCandidate>>(
+      '/assignment-repairs',
+      'GET',
+      undefined,
+      query,
+      signal
+    )
+    const current = useAuthStore.getState().auth.user
+    if (
+      !canMailboxRepair(current) ||
+      authorization !== adminDataAuthorizationKey(current)
+    ) {
+      throw new MailboxError('mailbox_permission_denied', 403)
+    }
+    return pageMetadata(result, (item) =>
+      repairMetadata(item, query.account_type)
+    )
+  },
+  repairAssignments: (input: RepairInput) => {
+    if (!canMailboxRepair(useAuthStore.getState().auth.user)) {
+      throw new MailboxError('mailbox_permission_denied', 403)
+    }
+    return request<unknown>('/assignment-repairs', 'POST', repairBody(input))
+  },
   exportAll: (
     signal: AbortSignal,
     input: Partial<ListQuery> & { scope?: string } = {}

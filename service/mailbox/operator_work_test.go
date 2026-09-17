@@ -106,6 +106,8 @@ func TestMailboxOperatorWorkDistinctRangesPoolsAndLifetime(t *testing.T) {
 	openTask := workTestAssignment(t, s, owner.OperatorID, opening.ID, start-100, StatusSubmitted, true)
 	workTestSubmit(t, s, old, start-1, start)
 	workTestSubmit(t, s, latest, start+1, end-1, end)
+	var latestSubmission model.MailboxSubmission
+	require.NoError(t, s.DB.Where("assignment_id = ?", latest.ID).Order("id DESC").First(&latestSubmission).Error)
 	workTestSubmit(t, s, newOwner, start+2)
 	workTestSubmit(t, s, openTask, start)
 	workTestIssue(t, s, old, start-1, "invalidated")
@@ -131,7 +133,7 @@ func TestMailboxOperatorWorkDistinctRangesPoolsAndLifetime(t *testing.T) {
 	page, err = s.OperatorWorkAccounts(ctx, admin, owner.OperatorID, OperatorWorkQuery{Period: "today", Page: 2, PageSize: 1})
 	require.NoError(t, err)
 	require.False(t, page.HasMore)
-	require.Equal(t, OperatorWorkAccount{ID: refund.ID, Email: refund.Email, AccountType: "refund", AssignmentID: latest.ID, AssignmentVersion: 3, Status: StatusSubmitted, AssignedAt: start + 1, RevokedAt: start + 2, SubmissionCount: 5, LastSubmittedAt: end, LastIssueAt: end - 1}, page.Items[0])
+	require.Equal(t, OperatorWorkAccount{ID: refund.ID, Email: refund.Email, AccountType: "refund", AssignmentID: latest.ID, AssignmentVersion: 3, Status: StatusSubmitted, AssignedAt: start + 1, RevokedAt: start + 2, SubmissionCount: 5, LatestSubmissionID: latestSubmission.ID, LatestSubmissionStatus: StatusPending, LastSubmittedAt: end, LastIssueAt: end - 1}, page.Items[0])
 	for scope, count := range map[string]int64{"assigned": 1, "submitted": 2, "issues": 1, "current_submitted": 0} {
 		page, err := s.OperatorWorkAccounts(ctx, admin, owner.OperatorID, OperatorWorkQuery{Period: "today", Scope: scope})
 		require.NoError(t, err)
@@ -208,9 +210,95 @@ func TestMailboxOperatorWorkCurrentConsistency(t *testing.T) {
 			for _, a := range page.Items {
 				require.True(t, a.AssignmentActive)
 				require.Zero(t, a.SubmissionCount)
+				require.Zero(t, a.LatestSubmissionID)
+				require.Empty(t, a.LatestSubmissionStatus)
 				require.Zero(t, a.LastSubmittedAt)
 			}
 		}
+	}
+}
+
+func TestMailboxOperatorWorkRestoredAssignmentAndLatestSubmission(t *testing.T) {
+	for _, mode := range []string{"restored", "inactive", "other_operator", "revoked", "archived"} {
+		t.Run(mode, func(t *testing.T) {
+			s, admin, owner, other := workflowTestService(t)
+			ctx := context.Background()
+			at := s.Now().Unix()
+			a := workflowTestAccount(t, s, "restored@example.test")
+			old := workTestAssignment(t, s, owner.OperatorID, a.ID, at-100, StatusApproved, false)
+			newest := workTestAssignment(t, s, owner.OperatorID, a.ID, at-50, StatusPending, false)
+			workTestSubmit(t, s, newest, at-40)
+			// A newer submission can belong to an older assignment, with a result
+			// distinct from both the active and newest historical assignment.
+			latest := model.MailboxSubmission{AssignmentID: old.ID, OperatorID: owner.OperatorID, Status: StatusRejected, CreatedAt: at - 40}
+			require.NoError(t, s.DB.Create(&latest).Error)
+			foreign := workTestAssignment(t, s, other.OperatorID, a.ID, at-20, StatusSubmitted, false)
+			workTestSubmit(t, s, foreign, at-10)
+			otherAccount := workflowTestAccount(t, s, "unrelated@example.test")
+			unrelated := workTestAssignment(t, s, owner.OperatorID, otherAccount.ID, at-20, StatusSubmitted, false)
+			workTestSubmit(t, s, unrelated, at-10)
+			workTestIssue(t, s, old, at-30, "resolved")
+			workTestIssue(t, s, newest, at-20, "invalidated")
+			require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", old.ID).Update("revoked_at", 0).Error)
+			activeID := old.ID
+			if mode == "inactive" {
+				activeID = 0
+			} else if mode == "other_operator" {
+				activeID = foreign.ID
+				require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", foreign.ID).Update("revoked_at", 0).Error)
+			} else if mode == "revoked" {
+				require.NoError(t, s.DB.Model(&model.MailboxAssignment{}).Where("id = ?", old.ID).Update("revoked_at", at).Error)
+			} else if mode == "archived" {
+				require.NoError(t, s.DB.Model(&model.MailboxAccount{}).Where("id = ?", a.ID).Update("archived_at", at).Error)
+			}
+			require.NoError(t, s.DB.Model(&model.MailboxAccount{}).Where("id = ?", a.ID).Update("active_assignment_id", activeID).Error)
+			expected := newest
+			if mode == "restored" {
+				expected = old
+				expected.RevokedAt = 0
+			}
+			history, err := s.OperatorAccountHistory(ctx, admin, owner.OperatorID, a.ID, OperatorHistoryQuery{AccountType: "refund", PageSize: 1})
+			require.NoError(t, err)
+			require.Equal(t, expected.ID, history.Account.AssignmentID)
+			require.Equal(t, expected.Status, history.Account.Status)
+			require.Equal(t, expected.Version, history.Account.AssignmentVersion)
+			require.Equal(t, expected.CreatedAt, history.Account.AssignedAt)
+			require.Equal(t, expected.RevokedAt, history.Account.RevokedAt)
+			require.Equal(t, mode == "restored", history.Account.AssignmentActive)
+			require.Equal(t, latest.ID, history.Account.LatestSubmissionID)
+			require.Equal(t, StatusRejected, history.Account.LatestSubmissionStatus)
+			require.EqualValues(t, 2, history.Account.SubmissionCount)
+			require.Equal(t, at-40, history.Account.LastSubmittedAt)
+			require.Equal(t, at-20, history.Account.LastIssueAt)
+			require.EqualValues(t, 2, history.Assignments.Total)
+			require.EqualValues(t, 2, history.Submissions.Total)
+			require.EqualValues(t, 2, history.Issues.Total)
+			require.Equal(t, newest.ID, history.Assignments.Items[0].ID)
+			require.Equal(t, latest.ID, history.Submissions.Items[0].ID)
+			data, err := json.Marshal(history.Account)
+			require.NoError(t, err)
+			require.Contains(t, string(data), fmt.Sprintf(`"latest_submission_id":%d`, latest.ID))
+			require.Contains(t, string(data), `"latest_submission_status":"rejected"`)
+			for _, scope := range []string{"assigned", "submitted", "issues", "current_approved", "current_pending"} {
+				page, err := s.OperatorWorkAccounts(ctx, admin, owner.OperatorID, OperatorWorkQuery{Scope: scope, Search: a.Email, PageSize: 1})
+				require.NoError(t, err)
+				if scope == "current_pending" || (scope == "current_approved" && mode != "restored") {
+					require.Zero(t, page.Total, scope)
+					require.Empty(t, page.Items)
+					continue
+				}
+				require.EqualValues(t, 1, page.Total, scope)
+				require.False(t, page.HasMore)
+				require.Equal(t, []OperatorWorkAccount{history.Account}, page.Items)
+			}
+			overview, err := s.OperatorWorkSummary(ctx, admin, owner.OperatorID, OperatorWorkQuery{})
+			require.NoError(t, err)
+			expectedSummary := WorkSummary{SubmittedAccounts: 2, RefundSubmitted: 2, SubmissionCount: 3, IssueAccounts: 1}
+			if mode == "restored" {
+				expectedSummary.Current.Approved = 1
+			}
+			require.Equal(t, expectedSummary, overview.Summary)
+		})
 	}
 }
 
@@ -228,9 +316,9 @@ func TestMailboxOperatorWorkTrueHistoryPaginationAndIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, s.ResolveIssue(ctx, admin, issue.ID, issueResolution(issue), "refund"))
 	second := workflowTestSubmission(t, s, owner, a.ID)
-	workflowTestAssign(t, s, admin, other, a.ID)
+	legacyTestReassign(t, s, admin, other, a.ID)
 	otherSubmission := workflowTestSubmission(t, s, other, a.ID)
-	latest := workflowTestAssign(t, s, admin, owner, a.ID)
+	latest := legacyTestReassign(t, s, admin, owner, a.ID)
 	issue2, err := s.SubmitIssue(ctx, owner, latest.AssignmentID, IssueInput{Version: latest.AssignmentVersion, Kind: "other", Description: "Second issue"}, "refund")
 	require.NoError(t, err)
 	current, err = s.GetAccount(ctx, admin, a.ID)
@@ -249,6 +337,8 @@ func TestMailboxOperatorWorkTrueHistoryPaginationAndIsolation(t *testing.T) {
 	require.False(t, history.Account.AssignmentActive)
 	require.NotZero(t, history.Account.ArchivedAt)
 	require.EqualValues(t, 2, history.Account.SubmissionCount)
+	require.Equal(t, second.ID, history.Account.LatestSubmissionID)
+	require.Equal(t, StatusPending, history.Account.LatestSubmissionStatus)
 	require.EqualValues(t, 2, history.Assignments.Total)
 	require.EqualValues(t, 2, history.Submissions.Total)
 	require.EqualValues(t, 2, history.Issues.Total)

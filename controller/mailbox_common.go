@@ -3,6 +3,7 @@ package controller
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -29,7 +30,12 @@ func mailboxFailure(c *gin.Context, err error) {
 	if status == 401 && strings.HasPrefix(c.Request.URL.Path, "/mailbox-api/") {
 		mailboxCookie(c, "", -1)
 	}
-	c.AbortWithStatusJSON(status, gin.H{"success": false, "message": code})
+	body := gin.H{"success": false, "message": code}
+	var conflicts *mailbox.AssignmentConflictError
+	if errors.As(err, &conflicts) {
+		body["conflicts"] = conflicts.Conflicts
+	}
+	c.AbortWithStatusJSON(status, body)
 }
 func mailboxBadRequest(c *gin.Context, code string) {
 	mailboxFailure(c, &mailbox.Error{Status: 400, Code: code})

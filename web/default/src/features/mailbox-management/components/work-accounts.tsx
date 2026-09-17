@@ -22,10 +22,12 @@ export function WorkAccountFacts(props: { account: WorkAccount }) {
         <Badge variant='outline'>
           {t(`mailbox.admin.pools.${item.account_type}`)}
         </Badge>
-        <WorkStatus value={item.status} />
+        {item.assignment_active && !item.revoked_at && (
+          <WorkStatus value={item.status} />
+        )}
         <span>
           {t(
-            item.assignment_active
+            item.assignment_active && !item.revoked_at
               ? 'mailbox.work.active'
               : 'mailbox.work.inactive'
           )}
@@ -47,6 +49,22 @@ export function WorkAccountFacts(props: { account: WorkAccount }) {
           <dd>
             #{item.assignment_id} ·{' '}
             {t('mailbox.work.version', { version: item.assignment_version })}
+            <span className='ml-2'>
+              <WorkStatus value={item.status} />
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt className='text-muted-foreground'>
+            {t('mailbox.work.latestSubmission')}
+          </dt>
+          <dd>
+            {item.latest_submission_id ? `#${item.latest_submission_id} ` : ''}
+            {item.latest_submission_status ? (
+              <WorkStatus value={item.latest_submission_status} review />
+            ) : (
+              '--'
+            )}
           </dd>
         </div>
         <div>

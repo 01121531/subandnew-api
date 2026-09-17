@@ -37,6 +37,12 @@ export function mailboxTabs(user: AuthUser | null | undefined): string[] {
   }
   if (canMailbox(user, 'operators')) tabs.push('operators')
   if (canMailbox(user, 'review')) tabs.push('review', 'issues')
+  if (canMailboxRepair(user)) tabs.push('repairs')
   if (canMailbox(user, 'audit')) tabs.push('audit')
   return tabs
+}
+export function canMailboxRepair(user: AuthUser | null | undefined): boolean {
+  return (['view', 'assign', 'review'] as const).every((action) =>
+    canMailbox(user, action)
+  )
 }

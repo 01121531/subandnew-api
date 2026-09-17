@@ -1,4 +1,23 @@
 export const mailboxEn = {
+  repairs: {
+    title: 'Repair mistaken assignments',
+    laterAssignments: 'Later assignment history ({{count}})',
+    apply: 'Repair assignments',
+    original: 'Original assignment',
+    submission: 'Original submission and review',
+    current: 'Current assignment',
+    reviewedAt: 'Reviewed at',
+    operator: 'Operator ID (original or later)',
+    selectPage: 'Select eligible items on this page',
+    clear: 'Clear selection',
+    confirm:
+      'Repair {{count}} mailbox assignment(s) using the original submission and review? The entire batch succeeds or fails together (maximum 1,000). Current assignment access may be revoked. History is preserved.',
+    success: 'Assignments repaired',
+    conflict:
+      'This assignment cannot be repaired. Review the conflict and refresh the preview.',
+    reload:
+      'Close this dialog and refresh the preview before retrying. Do not resubmit an uncertain request without checking the result.',
+  },
   cardFilters: {
     title: 'Card number conditions',
     starts_with: 'Prefix includes',
@@ -100,6 +119,8 @@ export const mailboxEn = {
     active: 'Active assignment',
     inactive: 'Inactive assignment',
     latestAssignment: 'Latest assignment for this operator',
+    latestSubmission: 'Latest submission status',
+    assignmentStatus: 'Recorded assignment status',
     version: 'Version {{version}}',
     lifetimeSubmissions: 'Submissions by this operator (all time)',
     lastSubmitted: 'Last submission by this operator (all time)',
@@ -239,6 +260,7 @@ export const mailboxEn = {
     title: 'Mailbox management',
     tabs: {
       pool: 'Email pool',
+      repairs: 'Assignment repairs',
       operators: 'Operators',
       review: 'Review',
       issues: 'Issue reports',
@@ -368,6 +390,8 @@ export const mailboxEn = {
     adminActor: 'Admin #{{id}}',
     operatorActor: 'Operator #{{id}}',
     auditActions: {
+      repair_assignment: 'Repair mistaken assignment',
+      repair_assignment_links: 'Repaired assignment history links',
       change_status: 'Change task status',
       edit_remark: 'Edit submission remark',
       archive: 'Archive mailbox',
@@ -403,6 +427,18 @@ export const mailboxEn = {
     audit: 'View mailbox audit log',
   },
   errors: {
+    mailbox_already_submitted:
+      'These mailboxes already have submissions and cannot be reassigned. No items were assigned. Review their history or use assignment repair.',
+    mailbox_repair_invalid:
+      'Enter a reason and select 1 to 1,000 distinct eligible mailboxes with valid versions.',
+    mailbox_repair_conflict:
+      'The assignment no longer matches the repair preview. Refresh and review it again.',
+    mailbox_repair_operator_disabled:
+      'The original operator is disabled or no longer exists.',
+    mailbox_repair_ambiguous:
+      'The assignment or submission history is ambiguous and cannot be repaired automatically.',
+    mailbox_repair_later_activity:
+      'A later assignment has activity that prevents automatic repair.',
     mailbox_invalid_card_filter:
       'Card conditions require 1–19 digits per value, up to 1,000 values, and the opening pool.',
     mailbox_card_index_unavailable:
@@ -525,6 +561,24 @@ export const mailboxEn = {
 }
 
 export const mailboxZh: typeof mailboxEn = {
+  repairs: {
+    title: '修复误分配',
+    laterAssignments: '后续分配历史（{{count}}）',
+    apply: '修复分配',
+    original: '原分配',
+    submission: '原提交及审核',
+    current: '当前分配',
+    reviewedAt: '审核时间',
+    operator: '操作员 ID（原操作员或后续分配）',
+    selectPage: '选择本页可修复项',
+    clear: '清空选择',
+    confirm:
+      '确认使用原提交及审核结果修复 {{count}} 个邮箱的分配？整批同时成功或失败，最多 1,000 项。当前分配的访问权限可能被撤销，历史记录保留。',
+    success: '分配已修复',
+    conflict: '该分配无法修复，请核对冲突原因并刷新预览。',
+    reload:
+      '请关闭对话框并刷新预览后重试。请求结果不确定时，请先核对结果，不要直接重复提交。',
+  },
   cardFilters: {
     title: '卡号条件',
     starts_with: '前缀包含',
@@ -623,6 +677,8 @@ export const mailboxZh: typeof mailboxEn = {
     active: '分配有效',
     inactive: '分配已失效',
     latestAssignment: '该操作员最近一次分配',
+    latestSubmission: '最近提交状态',
+    assignmentStatus: '分配记录状态',
     version: '版本 {{version}}',
     lifetimeSubmissions: '该操作员累计提交次数',
     lastSubmitted: '该操作员最后提交时间（全部历史）',
@@ -752,6 +808,7 @@ export const mailboxZh: typeof mailboxEn = {
     title: '邮箱管理',
     tabs: {
       pool: '邮箱池',
+      repairs: '误分配检查',
       operators: '操作员',
       review: '审核',
       issues: '异常反馈',
@@ -875,6 +932,8 @@ export const mailboxZh: typeof mailboxEn = {
     operatorActor: '操作员 #{{id}}',
     auditActions: {
       archive: '归档邮箱',
+      repair_assignment: '修复误分配',
+      repair_assignment_links: '误分配修复历史关联',
       restore: '恢复邮箱',
       import: '导入邮箱',
       change_status: '修改任务状态',
@@ -911,6 +970,14 @@ export const mailboxZh: typeof mailboxEn = {
   errors: {
     mailbox_invalid_card_filter:
       '卡号条件仅限开号邮箱，每个值为 1～19 位数字，最多 1,000 个值。',
+    mailbox_already_submitted:
+      '以下邮箱已有提交记录，无法重新分配。本次未分配任何项目，请核对历史记录或使用误分配修复。',
+    mailbox_repair_invalid:
+      '请填写原因，并选择 1 至 1,000 个版本有效、不重复且可修复的邮箱。',
+    mailbox_repair_conflict: '分配记录与修复预览不一致，请刷新后重新核对。',
+    mailbox_repair_operator_disabled: '原操作员已停用或不存在。',
+    mailbox_repair_ambiguous: '分配或提交历史存在歧义，无法自动修复。',
+    mailbox_repair_later_activity: '后续分配存在操作记录，无法自动修复。',
     mailbox_card_index_unavailable:
       '卡号索引尚未完成或建立失败，请重试继续分批建立索引。',
     mailbox_export_empty: '暂无符合条件的导出记录。',
