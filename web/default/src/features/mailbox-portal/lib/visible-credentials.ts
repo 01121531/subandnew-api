@@ -91,9 +91,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('offline', () =>
     failPageCredentials(new MailboxRequestError('mailbox_request_failed', 0))
   )
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') clearPageCredentials()
-  })
 }
 export class VisibleCredentials {
   private generation = pageGeneration
@@ -102,6 +99,7 @@ export class VisibleCredentials {
   private controller = new AbortController()
   private timers = new Set<ReturnType<typeof setTimeout>>()
   private started = false
+  private viewers = 0
   private kinds: CredentialKind[]
   get readable() {
     return !this.controller.signal.aborted
@@ -118,8 +116,16 @@ export class VisibleCredentials {
   private emit() {
     for (const listener of this.listeners) listener()
   }
-  subscribe(listener: () => void) {
+  subscribe(listener: () => void, active = true) {
     this.listeners.add(listener)
+    const deactivate = active ? this.activate() : undefined
+    return () => {
+      this.listeners.delete(listener)
+      deactivate?.()
+    }
+  }
+  activate() {
+    this.viewers++
     if (!this.started) {
       this.started = true
       for (const kind of this.kinds) void this.load(kind)
@@ -134,8 +140,10 @@ export class VisibleCredentials {
         void this.load('otp')
       }
     }
+    let active = true
     return () => {
-      this.listeners.delete(listener)
+      if (active) this.viewers--
+      active = false
     }
   }
   private later(run: () => void, delay: number) {
@@ -181,7 +189,7 @@ export class VisibleCredentials {
               },
             }
             this.emit()
-            if (kind === 'otp' && this.listeners.size) void this.load(kind)
+            if (kind === 'otp' && this.viewers) void this.load(kind)
           }, remaining * 1000)
         }
       }

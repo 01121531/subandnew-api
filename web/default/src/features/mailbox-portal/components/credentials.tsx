@@ -38,20 +38,23 @@ function VisibleFields(props: { account: Account; csrf: string }) {
   const [, render] = useState(0)
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    if (!visible) {
-      setEntry(null)
-      return
-    }
+    if (!visible) return
     const value = visibleCredentials(props.account, props.csrf)
-    const unsubscribe = value.subscribe(() => render((n) => n + 1))
     setEntry(value)
+    const deactivate = value.activate()
+    setNow(Date.now())
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => {
-      unsubscribe()
+      deactivate()
       clearInterval(timer)
-      setEntry(null)
     }
   }, [visible, props.account, props.csrf])
+  useEffect(() => {
+    if (!entry) return
+    const unsubscribe = entry.subscribe(() => render((n) => n + 1), false)
+    render((n) => n + 1)
+    return unsubscribe
+  }, [entry])
   const fields: ('email' | 'expiry' | CredentialKind)[] =
     props.account.account_type === 'opening'
       ? ['email', 'password', 'otp', 'card', 'expiry', 'cvv']
@@ -65,7 +68,7 @@ function VisibleFields(props: { account: Account; csrf: string }) {
       {fields.map((field) => {
         const kind = field === 'expiry' ? 'card' : field
         const state = kind === 'email' ? undefined : entry?.snapshot[kind]
-        const value = visible ? state?.value : undefined
+        const value = state?.value
         const seconds = value
           ? otpSeconds(value, state?.receivedAt ?? now, now)
           : 0

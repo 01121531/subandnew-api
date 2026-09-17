@@ -258,6 +258,28 @@ test('page recheck revokes changed accounts and ignores old-page responses', asy
   expect(next.snapshot.cvv?.value).toBeUndefined()
 })
 
+test('passive observers retain loaded data without starting requests', async () => {
+  const entry = visibleCredentials(account, 'passive')
+  cleanup.push(entry.subscribe(() => {}, false))
+  await tick()
+  expect(read).not.toHaveBeenCalled()
+  const deactivate = entry.activate()
+  await tick()
+  const password = entry.snapshot.password?.value
+  expect(password).toBeDefined()
+  deactivate()
+  deactivate()
+  read.mockClear()
+  detail.mockClear()
+  cleanup.push(entry.activate())
+  await tick()
+  expect(entry.snapshot.password?.value).toBe(password)
+  expect(read).not.toHaveBeenCalled()
+  expect(detail).not.toHaveBeenCalled()
+  entry.stop()
+  expect(entry.snapshot.password?.value).toBeUndefined()
+})
+
 test('returning to expired OTP refreshes only OTP; absent OTP is not reloaded', async () => {
   const entry = visibleCredentials(account, 'otp-return')
   const release = entry.subscribe(() => {})
