@@ -173,7 +173,6 @@ function Workspace(props: {
             <Accounts
               accountType={accountType}
               csrf={props.session.csrf_token}
-              onSubmitted={() => setTab('submissions')}
             />
           )}
           {!signingOut && tab === 'submissions' && (

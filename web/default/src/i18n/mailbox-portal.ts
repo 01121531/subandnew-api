@@ -75,6 +75,7 @@ export const mailboxPortalEn = {
   draft: 'Draft',
   remove: 'Remove image',
   submitReview: 'Submit for review',
+  submissionSucceeded: 'Submitted successfully',
   remark: 'Submission remark',
   remarkOptional: 'Submission remark (optional)',
   remarkWarning:
@@ -196,6 +197,7 @@ export const mailboxPortalZh: Record<keyof typeof mailboxPortalEn, string> = {
   draft: '草稿',
   remove: '移除图片',
   submitReview: '提交审核',
+  submissionSucceeded: '提交成功',
   remark: '提交备注',
   remarkOptional: '提交备注（选填）',
   remarkWarning: '请勿填写密码、2FA 验证码或密钥、支付卡信息及 CVV 安全码。',

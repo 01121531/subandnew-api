@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, RefreshCw, Search } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,11 +20,7 @@ import { AccountDetail } from './account-detail'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
 import { Credentials } from './credentials'
 
-export function Accounts(props: {
-  accountType: AccountType
-  csrf: string
-  onSubmitted: () => void
-}) {
+export function Accounts(props: { accountType: AccountType; csrf: string }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('')
@@ -235,7 +232,7 @@ export function Accounts(props: {
           onClose={() => setSelected(null)}
           onSubmitted={() => {
             setSelected(null)
-            props.onSubmitted()
+            toast.success(t('mailboxPortal.submissionSucceeded'))
           }}
         />
       )}
