@@ -307,6 +307,12 @@ func (s *Service) RepairAssignments(ctx context.Context, actor Actor, input Repa
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id IN (?)", tx.Model(&model.MailboxAssignment{}).Select("operator_id").Where("id IN ?", originalIDs)).Order("id").Find(&operators).Error; err != nil {
 			return err
 		}
+		// Use the locking read, not an older REPEATABLE READ snapshot, for
+		// operator eligibility. Disabling an operator does not bump accounts.
+		eligibleOperators := make(map[int64]bool, len(operators))
+		for _, operator := range operators {
+			eligibleOperators[operator.ID] = operator.Enabled
+		}
 		for _, x := range items {
 			a, err := s.workflowAccount(x.AccountID)
 			if err != nil {
@@ -322,6 +328,9 @@ func (s *Service) RepairAssignments(ctx context.Context, actor Actor, input Repa
 			r, err := s.repairCandidate(a, x.SubmissionID)
 			if err != nil {
 				return err
+			}
+			if !eligibleOperators[r.OriginalOperatorID] {
+				return fail(409, "mailbox_repair_operator_disabled")
 			}
 			if r.RepairItem != x {
 				return fail(409, "mailbox_version_conflict")

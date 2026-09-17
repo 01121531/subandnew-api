@@ -285,6 +285,25 @@ func TestMailboxAssignmentGuardProtectedHistory(t *testing.T) {
 	}
 }
 
+func TestMailboxAssignmentRepairUsesLockedOperatorEligibility(t *testing.T) {
+	s, admin, owner, other := workflowTestService(t)
+	candidate := repairTestFixture(t, s, owner, other, "refund", StatusPending, "operator-snapshot@example.test", false)
+	require.NoError(t, s.DB.Model(&model.MailboxOperator{}).Where("id = ?", owner.OperatorID).Update("enabled", false).Error)
+	before := repairTestSnapshot(t, s)
+	// Simulate a stale consistent-read operator snapshot while the locking
+	// []MailboxOperator read correctly observes the committed disable.
+	const callback = "test:stale_operator_snapshot"
+	require.NoError(t, s.DB.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if operator, ok := tx.Statement.Dest.(*model.MailboxOperator); ok && operator.ID == owner.OperatorID {
+			operator.Enabled = true
+		}
+	}))
+	t.Cleanup(func() { _ = s.DB.Callback().Query().Remove(callback) })
+	err := s.RepairAssignments(context.Background(), admin, RepairInput{AccountType: "refund", Reason: "operator was disabled", Items: []RepairItem{candidate.RepairItem}})
+	operatorTestError(t, err, 409, "mailbox_repair_operator_disabled")
+	require.Equal(t, before, repairTestSnapshot(t, s))
+}
+
 func TestMailboxAssignmentRepairConcurrentCAS(t *testing.T) {
 	s, admin, owner, other := workflowTestService(t)
 	candidate := repairTestFixture(t, s, owner, other, "refund", StatusPending, "race@example.test", false)
