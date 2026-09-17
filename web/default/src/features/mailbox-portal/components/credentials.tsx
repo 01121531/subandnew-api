@@ -1,4 +1,4 @@
-import { Copy, RefreshCw } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -12,7 +12,7 @@ import {
   type VisibleCredentials,
 } from '../lib/visible-credentials'
 import type { Account, CredentialKind } from '../types'
-import { ErrorMessage } from './common'
+import { CredentialRetry, ErrorMessage } from './common'
 
 export function Credentials(props: { account: Account; csrf: string }) {
   const { t } = useTranslation()
@@ -113,16 +113,12 @@ function VisibleFields(props: { account: Account; csrf: string }) {
             {!!state?.error && (
               <>
                 <ErrorMessage error={state.error} />
-                <Button
-                  size='sm'
-                  variant='ghost'
-                  onClick={() => {
+                <CredentialRetry
+                  error={state.error}
+                  retry={() => {
                     if (kind !== 'email') entry?.retry(kind)
                   }}
-                >
-                  <RefreshCw />
-                  {t('mailboxPortal.retry')}
-                </Button>
+                />
               </>
             )}
             {!state?.error && field !== 'email' && !text && (

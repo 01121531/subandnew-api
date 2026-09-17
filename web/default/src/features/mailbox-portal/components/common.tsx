@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { toIntlLocale } from '@/i18n/languages'
 
+import { useRetryCooldown } from '../hooks/use-retry-cooldown'
 import { errorKey } from '../lib/errors'
 import type { Page } from '../types'
 
@@ -51,17 +52,31 @@ export function QueryState(props: {
   error: unknown
   retry: () => void
   children?: ReactNode
+  preserveData?: boolean
 }) {
   const { t } = useTranslation()
+  const cooldown = useRetryCooldown(props.error)
   if (props.error) {
     return (
-      <div className='grid justify-items-start gap-3 py-6'>
-        <ErrorMessage error={props.error} />
-        <Button variant='outline' onClick={props.retry}>
-          <RefreshCw />
-          {t('mailboxPortal.retry')}
-        </Button>
-      </div>
+      <>
+        <div className='grid justify-items-start gap-3 py-6'>
+          <ErrorMessage error={props.error} />
+          {props.preserveData && (
+            <p role='status'>{t('mailboxPortal.refreshFailed')}</p>
+          )}
+          <Button
+            variant='outline'
+            disabled={cooldown > 0}
+            onClick={props.retry}
+          >
+            <RefreshCw />
+            {cooldown > 0
+              ? t('mailboxPortal.retryCooldown', { count: cooldown })
+              : t('mailboxPortal.retry')}
+          </Button>
+        </div>
+        {props.preserveData && props.children}
+      </>
     )
   }
   if (props.pending) {
@@ -84,6 +99,24 @@ export function Empty() {
       <Inbox aria-hidden='true' className='size-7' />
       {t('mailboxPortal.empty')}
     </div>
+  )
+}
+
+export function CredentialRetry(props: { error: unknown; retry: () => void }) {
+  const { t } = useTranslation()
+  const cooldown = useRetryCooldown(props.error)
+  return (
+    <Button
+      size='sm'
+      variant='ghost'
+      disabled={cooldown > 0}
+      onClick={props.retry}
+    >
+      <RefreshCw />
+      {cooldown > 0
+        ? t('mailboxPortal.retryCooldown', { count: cooldown })
+        : t('mailboxPortal.retry')}
+    </Button>
   )
 }
 

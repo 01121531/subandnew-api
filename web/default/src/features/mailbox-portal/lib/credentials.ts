@@ -6,6 +6,30 @@ import {
 import type { Account, Credential, CredentialKind } from '../types'
 import { assertCurrentAssignment, canReadCredentials } from './guards'
 
+// Only concurrent checks share a result; post-read checks cannot reuse pre-read results.
+const checks = new WeakMap<AbortSignal, Map<string, Promise<Account>>>()
+function checkAccount(
+  account: Account,
+  signal: AbortSignal,
+  phase: 'before' | 'after'
+) {
+  let pending = checks.get(signal)
+  if (!pending) {
+    pending = new Map()
+    checks.set(signal, pending)
+  }
+  const key = `${credentialScope(account)}:${account.version}:${phase}`
+  const existing = pending.get(key)
+  if (existing) return existing
+  const result = mailboxApi
+    .account(account.id, signal, account.account_type ?? 'refund')
+    .finally(() => {
+      pending.delete(key)
+    })
+  pending.set(key, result)
+  return result
+}
+
 export function credentialScope(account: Account): string {
   return [
     account.id,
@@ -34,7 +58,7 @@ export async function readCredential(
     }
     assertCurrentAssignment(
       account,
-      await mailboxApi.account(account.id, signal, accountType),
+      await checkAccount(account, signal, 'before'),
       'credentials'
     )
     // Submitted tasks retain login/card access, but cannot read CVV.
@@ -51,7 +75,7 @@ export async function readCredential(
     // Reject a late secret if ownership/review changed while it was being fetched.
     assertCurrentAssignment(
       account,
-      await mailboxApi.account(account.id, signal, accountType),
+      await checkAccount(account, signal, 'after'),
       'credentials'
     )
     return value

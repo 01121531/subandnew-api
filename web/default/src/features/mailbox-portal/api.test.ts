@@ -8,6 +8,7 @@ import {
   onAuthFailure,
   onAccountFailure,
   safeError,
+  retryDeadline,
 } from './api'
 import { readCredential } from './lib/credentials'
 import { errorKey } from './lib/errors'
@@ -38,6 +39,51 @@ function record(
 }
 
 describe('mailbox independent wire contract', () => {
+  test('rate limits preserve cooldown and block repeated network requests', async () => {
+    let count = 0
+    globalThis.fetch = mock(async () => {
+      count++
+      return new Response('', { status: 429, headers: { 'Retry-After': '60' } })
+    }) as unknown as typeof fetch
+    const error = await mailboxApi
+      .accounts({ page: 1, page_size: 20 })
+      .catch((e) => e)
+    expect(error.status).toBe(429)
+    expect(error.retryAt).toBeGreaterThan(Date.now() + 58000)
+    await expect(
+      mailboxApi.accounts({ page: 1, page_size: 20 })
+    ).rejects.toBeInstanceOf(MailboxRequestError)
+    expect(count).toBe(1)
+    expect(retryDeadline(null, 1000)).toBe(31000)
+    expect(retryDeadline('invalid', 1000)).toBe(31000)
+    expect(retryDeadline('5', 1000)).toBe(6000)
+    expect(retryDeadline('Thu, 01 Jan 1970 00:01:00 GMT', 1000)).toBe(60000)
+  })
+  test('account summary and priority are opt-in and only public counts survive', async () => {
+    const calls = record({
+      items: [],
+      total: 25,
+      page: 1,
+      page_size: 20,
+      has_more: true,
+      status_counts: { pending: 5, submitted: 20, password: 'private' },
+    })
+    const page = await mailboxApi.accounts({
+      page: 1,
+      page_size: 20,
+      include_summary: true,
+      sort: 'pending_first',
+    })
+    expect(calls[0].url).toContain('include_summary=true')
+    expect(calls[0].url).toContain('sort=pending_first')
+    expect(page.status_counts).toEqual({
+      pending: 5,
+      submitted: 20,
+      rejected: 0,
+      approved: 0,
+      issue_pending: 0,
+    })
+  })
   test('remark PATCH uses isolated CSRF transport and strips unknown response fields', async () => {
     const calls = record({
       id: 1,

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 
 import { mailboxApi } from '../api'
+import { useRetryCooldown } from '../hooks/use-retry-cooldown'
 import {
   clearPageCredentials,
   credentialPageGeneration,
@@ -18,7 +19,6 @@ import {
 import type { Account, AccountType, Page } from '../types'
 import { AccountDetail } from './account-detail'
 import { Empty, Pagination, QueryState, Status, Time } from './common'
-import { Credentials } from './credentials'
 
 export function Accounts(props: { accountType: AccountType; csrf: string }) {
   const { t } = useTranslation()
@@ -52,6 +52,8 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
             status,
             page,
             page_size: 20,
+            include_summary: true,
+            sort: 'pending_first',
           },
           signal
         )
@@ -65,10 +67,8 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
       }
     },
   })
-  const counts = new Map<string, number>()
-  for (const account of query.data?.items ?? []) {
-    counts.set(account.status, (counts.get(account.status) ?? 0) + 1)
-  }
+  const counts = Object.entries(query.data?.status_counts ?? {})
+  const cooldown = useRetryCooldown(query.error)
   return (
     <section className='min-w-0'>
       <div className='flex flex-wrap items-center gap-3 border-b py-4'>
@@ -121,7 +121,7 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
         <Button
           variant='outline'
           size='icon'
-          disabled={query.isFetching}
+          disabled={query.isFetching || cooldown > 0}
           title={t('mailboxPortal.refresh')}
           aria-label={t('mailboxPortal.refresh')}
           onClick={() => void query.refetch()}
@@ -129,10 +129,14 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
           <RefreshCw />
         </Button>
       </div>
-      {!!counts.size && !query.error && (
+      {!!counts.length && !query.error && (
         <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-2 border-b py-3 text-xs'>
-          <span>{t('mailboxPortal.currentPage')}</span>
-          {Array.from(counts, ([value, count]) => (
+          <span>
+            {t('mailboxPortal.filteredTotal', {
+              count: query.data?.total ?? 0,
+            })}
+          </span>
+          {counts.map(([value, count]) => (
             <span key={value}>
               {t(`mailboxPortal.status_${value}`)}{' '}
               <strong className='text-foreground tabular-nums'>{count}</strong>
@@ -143,6 +147,7 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
       <QueryState
         pending={query.isPending}
         error={query.error}
+        preserveData={!!query.data}
         retry={() => void query.refetch()}
       >
         {!query.data?.items.length && <Empty />}
@@ -178,19 +183,18 @@ export function Accounts(props: { accountType: AccountType; csrf: string }) {
               >
                 <ArrowRight />
               </Button>
-              <div className='col-span-full min-w-0'>
-                <Credentials account={account} csrf={props.csrf} />
-              </div>
             </article>
           ))}
         </div>
       </QueryState>
-      <Pagination
-        data={query.data}
-        page={page}
-        pending={query.isFetching}
-        onPage={setPage}
-      />
+      {query.data && (
+        <Pagination
+          data={query.data}
+          page={page}
+          pending={query.isFetching}
+          onPage={setPage}
+        />
+      )}
       {selected !== null && (
         <AccountDetail
           accountType={props.accountType}

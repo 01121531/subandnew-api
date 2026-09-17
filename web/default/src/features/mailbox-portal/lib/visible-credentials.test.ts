@@ -60,6 +60,7 @@ test('scrolling and detail close retain page-owned credentials without rereading
   cleanup.push(second)
   await tick()
   expect(read).toHaveBeenCalledTimes(4)
+  expect(detail).toHaveBeenCalledTimes(2)
   expect(entry.snapshot.password?.value?.password).toBe('  exact password  ')
   first()
   await tick()

@@ -65,6 +65,7 @@ export type Submission = {
 }
 
 export type Page<T> = {
+  status_counts?: Record<string, number>
   items: T[]
   total: number
   page: number
@@ -72,6 +73,8 @@ export type Page<T> = {
   has_more: boolean
 }
 export type ListQuery = {
+  include_summary?: boolean
+  sort?: 'pending_first'
   account_type?: AccountType
   search?: string
   status?: string

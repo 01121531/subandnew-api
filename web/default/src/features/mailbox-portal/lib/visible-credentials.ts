@@ -82,9 +82,9 @@ export function reconcilePageCredentials(
 }
 onAuthFailure(clearPageCredentials)
 onMailboxWorkspaceClear(clearPageCredentials)
-onAccountFailure((id) => {
+onAccountFailure((id, error) => {
   for (const entry of entries.values()) {
-    if (entry.account.id === id) entry.stop()
+    if (entry.account.id === id) entry.stop(error)
   }
 })
 if (typeof window !== 'undefined') {

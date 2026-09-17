@@ -186,8 +186,27 @@ func (s *Service) ListAccounts(ctx context.Context, actor Actor, query ListQuery
 		return nil, err
 	}
 	page := &Page[AccountView]{Items: []AccountView{}, Page: query.Page, PageSize: query.PageSize}
+	if query.Sort != "" && query.Sort != "pending_first" {
+		return nil, fail(400, "mailbox_invalid_query")
+	}
+	if query.IncludeSummary {
+		var counts []struct {
+			Status string
+			Count  int64
+		}
+		if err := q.Session(&gorm.Session{}).Select("COALESCE(t.status, 'unassigned') AS status, COUNT(*) AS count").Group("COALESCE(t.status, 'unassigned')").Scan(&counts).Error; err != nil {
+			return nil, err
+		}
+		page.StatusCounts = map[string]int64{StatusPending: 0, StatusRejected: 0, StatusSubmitted: 0, StatusApproved: 0, StatusIssuePending: 0}
+		for _, count := range counts {
+			page.StatusCounts[count.Status] = count.Count
+		}
+	}
 	if err := q.Count(&page.Total).Error; err != nil {
 		return nil, err
+	}
+	if query.Sort == "pending_first" {
+		q = q.Order("CASE WHEN t.status = 'pending' THEN 0 ELSE 1 END ASC")
 	}
 	if err := q.Select(accountViewSelect).Order("a.id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Scan(&page.Items).Error; err != nil {
 		return nil, err

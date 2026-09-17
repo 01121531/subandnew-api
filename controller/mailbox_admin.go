@@ -103,6 +103,17 @@ func ListMailboxAccounts(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if strings.HasPrefix(c.Request.URL.Path, "/mailbox-api/") {
+		q.Sort = c.Query("sort")
+		switch c.Query("include_summary") {
+		case "1", "true":
+			q.IncludeSummary = true
+		case "", "0", "false":
+		default:
+			mailboxBadRequest(c, "mailbox_invalid_query")
+			return
+		}
+	}
 	data, err := mailboxService().ListAccounts(c.Request.Context(), mailboxActor(c), q)
 	if err != nil {
 		mailboxFailure(c, err)

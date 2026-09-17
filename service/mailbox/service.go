@@ -209,23 +209,26 @@ func (s *Service) Audit(actor Actor, action string, accountID, assignmentID int6
 }
 
 type Page[T any] struct {
-	Items    []T   `json:"items"`
-	Total    int64 `json:"total"`
-	Page     int   `json:"page"`
-	PageSize int   `json:"page_size"`
-	HasMore  bool  `json:"has_more"`
+	StatusCounts map[string]int64 `json:"status_counts,omitempty"`
+	Items        []T              `json:"items"`
+	Total        int64            `json:"total"`
+	Page         int              `json:"page"`
+	PageSize     int              `json:"page_size"`
+	HasMore      bool             `json:"has_more"`
 }
 type ListQuery struct {
-	CardFilters  []CardFilter `json:"card_filters"`
-	Archived     bool         `json:"archived"`
-	Kind         string       `json:"kind"`
-	AssignmentID int64        `json:"assignment_id"`
-	AccountType  string       `json:"account_type"`
-	Search       string
-	Status       string
-	OperatorID   int64 `json:"operator_id"`
-	Page         int
-	PageSize     int `json:"page_size"`
+	IncludeSummary bool         `json:"include_summary"`
+	Sort           string       `json:"sort"`
+	CardFilters    []CardFilter `json:"card_filters"`
+	Archived       bool         `json:"archived"`
+	Kind           string       `json:"kind"`
+	AssignmentID   int64        `json:"assignment_id"`
+	AccountType    string       `json:"account_type"`
+	Search         string
+	Status         string
+	OperatorID     int64 `json:"operator_id"`
+	Page           int
+	PageSize       int `json:"page_size"`
 }
 
 func normalizePage(q ListQuery) ListQuery {

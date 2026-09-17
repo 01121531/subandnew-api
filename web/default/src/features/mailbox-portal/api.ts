@@ -17,18 +17,30 @@ import type {
 export class MailboxRequestError extends Error {
   constructor(
     readonly code: string,
-    readonly status: number
+    readonly status: number,
+    readonly retryAt = 0
   ) {
     super(code)
   }
 }
 
 const failureListeners = new Set<() => void>()
-const accountFailureListeners = new Set<(id: number) => void>()
+const accountFailureListeners = new Set<(id: number, error: unknown) => void>()
 let generation = 0
 const requests = new Set<AbortController>()
+let rateLimitedUntil = 0
 
-export function onAccountFailure(listener: (id: number) => void): () => void {
+export function retryDeadline(value: string | null, now = Date.now()): number {
+  const text = value?.trim() ?? ''
+  const seconds = /^\d+$/.test(text) ? Number(text) : Number.NaN
+  const date = text && !Number.isFinite(seconds) ? Date.parse(text) : Number.NaN
+  const deadline = Number.isFinite(seconds) ? now + seconds * 1000 : date
+  return Number.isFinite(deadline) && deadline > now ? deadline : now + 30000
+}
+
+export function onAccountFailure(
+  listener: (id: number, error: unknown) => void
+): () => void {
   accountFailureListeners.add(listener)
   return () => {
     accountFailureListeners.delete(listener)
@@ -43,7 +55,7 @@ export function invalidateAccountCredentials(id: number, error: unknown): void {
       error.code
     )
   ) {
-    for (const listener of accountFailureListeners) listener(id)
+    for (const listener of accountFailureListeners) listener(id, error)
   }
 }
 
@@ -58,6 +70,7 @@ export function cancelMailboxRequests(): void {
   generation += 1
   for (const controller of requests) controller.abort()
   requests.clear()
+  rateLimitedUntil = 0
 }
 
 export function isAuthFailure(error: unknown): boolean {
@@ -107,6 +120,13 @@ async function request<T>(
     patch?: boolean
   } = {}
 ): Promise<T> {
+  if (Date.now() < rateLimitedUntil) {
+    throw new MailboxRequestError(
+      'mailbox_request_failed',
+      429,
+      rateLimitedUntil
+    )
+  }
   if (
     (options.post || options.patch) &&
     path !== '/auth/login' &&
@@ -145,6 +165,17 @@ async function request<T>(
         ? (options.body as FormData)
         : JSON.stringify(options.body),
     })
+    if (response.status === 429) {
+      rateLimitedUntil = Math.max(
+        rateLimitedUntil,
+        retryDeadline(response.headers.get('Retry-After'))
+      )
+      throw new MailboxRequestError(
+        'mailbox_request_failed',
+        429,
+        rateLimitedUntil
+      )
+    }
     let result: T
     if (response.ok && options.blob) {
       if (
@@ -183,7 +214,7 @@ async function request<T>(
     if (accountPath) {
       const id = Number(accountPath[1])
       if (!path.includes('/credentials')) {
-        for (const listener of accountFailureListeners) listener(id)
+        for (const listener of accountFailureListeners) listener(id, error)
       } else invalidateAccountCredentials(id, error)
     }
     if (
@@ -289,6 +320,19 @@ function publicSubmission(
 
 function publicPage<T>(value: Page<T>, project: (item: T) => T): Page<T> {
   return {
+    status_counts: value.status_counts
+      ? Object.fromEntries(
+          ['pending', 'rejected', 'submitted', 'approved', 'issue_pending'].map(
+            (status) => {
+              const count = value.status_counts?.[status] ?? 0
+              return [
+                status,
+                Number.isSafeInteger(count) && count >= 0 ? count : 0,
+              ]
+            }
+          )
+        )
+      : undefined,
     items: value.items.map(project),
     total: value.total,
     page: value.page,
