@@ -45,12 +45,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ExportSchedules } from '@/features/export-schedules'
+import { useScheduleText } from '@/features/export-schedules/messages'
 import { getManagedInstances } from '@/features/managed-instances/api'
 import {
   cancelUsageRecordsExport,
@@ -213,6 +216,37 @@ function ExportWarningBadge({ item }: { item: UsageRecordExportTask }) {
 }
 
 export function ExportRecords() {
+  const [view, setView] = useState('files')
+  const text = useScheduleText()
+  const navigation = (
+    <Tabs value={view} onValueChange={setView}>
+      <TabsList>
+        <TabsTrigger value='files'>
+          {text('导出文件', 'Export files')}
+        </TabsTrigger>
+        <TabsTrigger value='schedules'>
+          {text('定时任务', 'Scheduled tasks')}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+  )
+  if (view === 'files') return <ExportFileRecords navigation={navigation} />
+  return (
+    <SectionPageLayout>
+      <SectionPageLayout.Title>
+        {text('导出记录', 'Export records')}
+      </SectionPageLayout.Title>
+      <SectionPageLayout.Content>
+        <div className='grid gap-4'>
+          {navigation}
+          <ExportSchedules />
+        </div>
+      </SectionPageLayout.Content>
+    </SectionPageLayout>
+  )
+}
+
+function ExportFileRecords({ navigation }: { navigation: ReactNode }) {
   const user = useAuthStore((state) => state.auth.user)
   const isRoot = user?.role === ROLE.SUPER_ADMIN
   const [page, setPage] = useState(1)
@@ -315,6 +349,7 @@ export function ExportRecords() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='grid gap-3'>
+          {navigation}
           <div className='border-border bg-card grid min-w-0 gap-3 rounded-lg border p-3 shadow-xs sm:flex sm:flex-wrap sm:items-end'>
             <label className='grid min-w-0 gap-1 text-xs font-medium sm:min-w-36'>
               状态

@@ -28,6 +28,8 @@ type AccountExportSelection struct {
 }
 
 type AccountExportInput struct {
+	SnapshotTimes map[int64]int64          `json:"snapshot_times,omitempty"`
+	Notes         []string                 `json:"notes,omitempty"`
 	Source        string                   `json:"source"`
 	Window        TimeWindow               `json:"window"`
 	Locale        string                   `json:"locale"`
@@ -93,6 +95,24 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 			results, failures, collectionErr = collectPagedAccountExportMetrics(ctx, instanceID, input.ActorID, indexes, input.Selected, input.Window)
 		case model.ManagedInstanceKindClaudeGateway:
 			results = collectClaudeGatewayAccountExportMetrics(indexes, input.Selected, input.Source, input.Window)
+			if input.SnapshotTimes != nil {
+				observed := input.SnapshotTimes[instanceID]
+				for _, index := range indexes {
+					account := input.Selected[index].Account
+					valid := observed >= input.Window.Start && observed <= input.Window.End
+					if input.Source == "account_output" {
+						valid = valid && account.CreatedAt >= input.Window.Start && account.CreatedAt <= input.Window.End
+					} else {
+						zone, _ := time.LoadLocation("Asia/Shanghai")
+						date := time.Unix(observed, 0).In(zone)
+						start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, zone).AddDate(0, 0, 1-account.UsageWindowDays)
+						valid = valid && account.UsageWindowDays > 0 && start.Unix() == input.Window.Start
+					}
+					if !valid {
+						delete(results, account.ID)
+					}
+				}
+			}
 		default:
 			collectionErr = ErrUnsupportedCapability
 		}
@@ -451,6 +471,15 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 		_ = workbook.AutoFilter(sheet, "A1:"+endColumn+"1", nil)
 	} else {
 		_ = workbook.AutoFilter(sheet, "A1:U1", nil)
+	}
+	if len(input.Notes) > 0 {
+		if _, err := workbook.NewSheet("Report info"); err != nil {
+			return nil, err
+		}
+		_ = workbook.SetColWidth("Report info", "A", "A", 100)
+		for index, note := range input.Notes {
+			_ = workbook.SetCellStr("Report info", fmt.Sprintf("A%d", index+1), note)
+		}
 	}
 	temporaryFile, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {

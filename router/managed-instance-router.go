@@ -17,6 +17,16 @@ type permissionRoute struct {
 }
 
 func registerManagedInstanceRoutes(apiRouter *gin.RouterGroup) {
+	schedules := apiRouter.Group("/managed-account-export-schedules")
+	schedules.Use(middleware.AdminAuth(), middleware.RequirePermission(authz.ManagedInstanceUsageView))
+	schedules.GET("", controller.ListAccountExportSchedules)
+	schedules.POST("", controller.SaveAccountExportSchedule)
+	schedules.GET("/:id", controller.GetAccountExportSchedule)
+	schedules.PUT("/:id", controller.SaveAccountExportSchedule)
+	schedules.DELETE("/:id", controller.AccountExportScheduleAction)
+	schedules.POST("/:id/:action", controller.AccountExportScheduleAction)
+	schedules.GET("/:id/runs", controller.ListAccountExportScheduleRuns)
+	schedules.POST("/:id/deliveries/:delivery_id/retry", controller.RetryAccountExportDelivery)
 	accountFilterTemplateGroup := apiRouter.Group("/managed-account-filter-templates")
 	accountFilterTemplateGroup.Use(middleware.AdminAuth(), middleware.RequirePermission(authz.ManagedInstanceUsageView))
 	accountFilterTemplateGroup.GET("", controller.ListManagedAccountFilterTemplates)

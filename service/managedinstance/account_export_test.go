@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
@@ -39,6 +40,7 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	}}
 	artifact, err := writeAccountExportWorkbook("systask_xlsx_structure", AccountExportInput{
 		Window: TimeWindow{Start: 1786032000, End: 1786723199, Timezone: "Asia/Shanghai"}, Locale: "zh-CN",
+		Notes: []string{"Snapshot: 2026-08-14; stale: true", "=not-a-formula"},
 	}, rows, 0)
 	require.NoError(t, err)
 	require.Equal(t, 2, artifact.RecordCount)
@@ -70,6 +72,34 @@ func TestWriteAccountExportWorkbookPreservesRowsAndFormatting(t *testing.T) {
 	require.Equal(t, 1, panes.YSplit)
 	require.NotZero(t, mustStyle(t, workbook, "A1"))
 	requireWorksheetAutoFilter(t, path)
+	note, err := workbook.GetCellValue("Report info", "A2")
+	require.NoError(t, err)
+	require.Equal(t, "=not-a-formula", note)
+	formula, err := workbook.GetCellFormula("Report info", "A2")
+	require.NoError(t, err)
+	require.Empty(t, formula)
+}
+
+func TestScheduledAccountOutputDoesNotSubstituteLifetimeForDifferentPeriod(t *testing.T) {
+	zone, _ := time.LoadLocation("Asia/Shanghai")
+	start := time.Date(2026, 9, 17, 0, 0, 0, 0, zone).Unix()
+	amount := 55.0
+	input := AccountExportInput{Source: "account_output", Window: TimeWindow{Start: start, End: start + 86399, Timezone: "Asia/Shanghai"}, SnapshotTimes: map[int64]int64{1: start + 3600}, Selected: []AccountExportSelection{{InstanceID: 1, InstanceKind: model.ManagedInstanceKindClaudeGateway, Account: InventoryItem{ID: 1, CreatedAt: start - 86400, Cost: &amount, CostUnit: "usd"}}}}
+	rows, warnings, err := collectAccountExportRows(t.Context(), input, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, warnings)
+	require.Nil(t, rows[0].Amount)
+	input.Selected[0].Account.CreatedAt = start + 100
+	rows, warnings, err = collectAccountExportRows(t.Context(), input, nil)
+	require.NoError(t, err)
+	require.Zero(t, warnings)
+	require.Equal(t, amount, *rows[0].Amount)
+	input.Window.Start -= 86400
+	input.Window.End -= 86400
+	rows, warnings, err = collectAccountExportRows(t.Context(), input, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, warnings)
+	require.Nil(t, rows[0].Amount)
 }
 
 func TestCollectAccountExportRowsUsesClaudeGatewayOutputCounters(t *testing.T) {

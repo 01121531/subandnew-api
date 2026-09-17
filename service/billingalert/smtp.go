@@ -71,10 +71,11 @@ type SMTPTestInput struct {
 }
 
 type SMTPMessage struct {
-	Recipients []string
-	Subject    string
-	TextBody   string
-	HTMLBody   string
+	Recipients  []string
+	Subject     string
+	TextBody    string
+	HTMLBody    string
+	Attachments []SMTPAttachment
 }
 
 type smtpCipher struct {
@@ -174,6 +175,9 @@ func SendSMTPMessage(ctx context.Context, message SMTPMessage) error {
 		if !validEmail(recipient) {
 			return ErrInvalidBillingInput
 		}
+	}
+	if err := validateSMTPAttachments(message.Attachments); err != nil {
+		return err
 	}
 	raw := buildSMTPMessage(setting, message)
 	return deliverSMTP(ctx, setting, password, message.Recipients, raw)
@@ -284,16 +288,21 @@ func deliverSMTP(ctx context.Context, setting *model.SMTPSetting, password strin
 		return fmt.Errorf("smtp_data_failed: %w", err)
 	}
 	if _, err := writer.Write(message); err != nil {
-		_ = writer.Close()
-		return fmt.Errorf("smtp_write_failed: %w", err)
+		// Do not send the DATA terminator after a partial write.
+		return &SMTPDeliveryError{Uncertain: true, Cause: err}
 	}
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("smtp_delivery_failed: %w", err)
+		return classifySMTPFinalResponse(err)
 	}
-	return client.Quit()
+	// DATA was acknowledged: a lost QUIT response cannot undo acceptance.
+	_ = client.Quit()
+	return nil
 }
 
 func buildSMTPMessage(setting *model.SMTPSetting, message SMTPMessage) []byte {
+	if len(message.Attachments) > 0 {
+		return buildSMTPAttachmentMessage(setting, message)
+	}
 	var builder strings.Builder
 	from := mail.Address{Name: setting.FromName, Address: setting.FromAddress}
 	builder.WriteString("From: " + from.String() + "\r\n")

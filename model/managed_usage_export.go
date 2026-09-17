@@ -26,6 +26,7 @@ var ErrManagedUsageExportConflict = errors.New("managed usage export status conf
 type ManagedUsageExport struct {
 	ID           int64            `json:"id" gorm:"primaryKey"`
 	TaskID       string           `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
+	ScheduleID   int64            `json:"schedule_id,omitempty" gorm:"not null;default:0;index"`
 	InstanceID   int64            `json:"instance_id" gorm:"not null;index"`
 	InstanceName string           `json:"instance_name" gorm:"type:varchar(128);not null"`
 	InstanceKind string           `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
@@ -113,6 +114,18 @@ func CreateManagedUsageExport(record *ManagedUsageExport, payload any, state any
 }
 
 func CreateManagedUsageExportWithItems(record *ManagedUsageExport, payload any, state any, items []*ManagedExportItem) (*SystemTask, error) {
+	var task *SystemTask
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		task, err = CreateManagedUsageExportWithItemsTx(tx, record, payload, state, items)
+		return err
+	})
+	return task, err
+}
+
+// CreateManagedUsageExportWithItemsTx lets scheduled runs and their frozen
+// export data commit together. The caller owns the transaction.
+func CreateManagedUsageExportWithItemsTx(tx *gorm.DB, record *ManagedUsageExport, payload any, state any, items []*ManagedExportItem) (*SystemTask, error) {
 	if record == nil || record.ActorID <= 0 || (record.ExportKind != ManagedExportKindAccounts && record.InstanceID <= 0) {
 		return nil, errors.New("invalid managed usage export")
 	}
@@ -140,19 +153,18 @@ func CreateManagedUsageExportWithItems(record *ManagedUsageExport, payload any, 
 		}
 		item.TaskID = taskID
 	}
-	err = DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(task).Error; err != nil {
-			return err
+	if err := tx.Create(task).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Create(record).Error; err != nil {
+		return nil, err
+	}
+	if len(items) > 0 {
+		if err := tx.CreateInBatches(items, 500).Error; err != nil {
+			return nil, err
 		}
-		if err := tx.Create(record).Error; err != nil {
-			return err
-		}
-		if len(items) > 0 {
-			return tx.CreateInBatches(items, 500).Error
-		}
-		return nil
-	})
-	return task, err
+	}
+	return task, nil
 }
 
 func ListManagedUsageExports(filter ManagedUsageExportListFilter) (*ManagedUsageExportList, error) {

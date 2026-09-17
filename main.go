@@ -27,6 +27,7 @@ import (
 	"github.com/01121531/subandnew-api/router"
 	"github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/accountdataapi"
+	"github.com/01121531/subandnew-api/service/accountexport"
 	assistantsecrets "github.com/01121531/subandnew-api/service/assistant/secrets"
 	assistantworker "github.com/01121531/subandnew-api/service/assistant/worker"
 	"github.com/01121531/subandnew-api/service/authz"
@@ -101,6 +102,7 @@ func main() {
 			return
 		}
 		service.StartSystemTaskRunner()
+		accountexport.Start()
 		service.StartManagedDashboardCollector()
 		service.StartManagedConductorRealtimeCollector()
 		service.StartManagedPollingRealtimeCollector()
@@ -233,6 +235,9 @@ func main() {
 	}
 	if err := service.StopManagedPollingRealtimeCollector(ctx); err != nil {
 		common.SysError("managed polling realtime collector did not stop before shutdown deadline: " + err.Error())
+	}
+	if err := accountexport.Stop(ctx); err != nil {
+		common.SysError("account export scheduler shutdown timed out")
 	}
 	if err := service.StopSystemTaskRunner(ctx); err != nil {
 		common.SysError("system task runner did not stop before shutdown deadline: " + err.Error())

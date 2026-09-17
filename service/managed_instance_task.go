@@ -38,13 +38,15 @@ type ManagedInstanceSyncPayload struct {
 type managedInstanceSyncHandler struct{}
 
 type ManagedUsageExportPayload struct {
-	ExportKind string                     `json:"export_kind,omitempty"`
-	InstanceID int64                      `json:"instance_id,omitempty"`
-	ActorID    int                        `json:"actor_id"`
-	Query      url.Values                 `json:"query,omitempty"`
-	Source     string                     `json:"source,omitempty"`
-	Window     managedinstance.TimeWindow `json:"window,omitempty"`
-	Locale     string                     `json:"locale,omitempty"`
+	Notes         []string                   `json:"notes,omitempty"`
+	SnapshotTimes map[int64]int64            `json:"snapshot_times,omitempty"`
+	ExportKind    string                     `json:"export_kind,omitempty"`
+	InstanceID    int64                      `json:"instance_id,omitempty"`
+	ActorID       int                        `json:"actor_id"`
+	Query         url.Values                 `json:"query,omitempty"`
+	Source        string                     `json:"source,omitempty"`
+	Window        managedinstance.TimeWindow `json:"window,omitempty"`
+	Locale        string                     `json:"locale,omitempty"`
 }
 
 type ManagedAccountExportItemInput struct {
@@ -200,6 +202,27 @@ func managedExportActorName(actorID int) string {
 }
 
 func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*model.SystemTask, error) {
+	prepared, err := PrepareManagedAccountExport(actorID, request)
+	if err != nil {
+		return nil, err
+	}
+	task, err := model.CreateManagedUsageExportWithItems(prepared.Record, prepared.Payload, prepared.State, prepared.Items)
+	if err == nil {
+		notifySystemTaskRunner()
+	}
+	return task, err
+}
+
+type PreparedManagedAccountExport struct {
+	Record  *model.ManagedUsageExport
+	Payload ManagedUsageExportPayload
+	State   managedinstance.UsageRecordExportProgress
+	Items   []*model.ManagedExportItem
+}
+
+// PrepareManagedAccountExport freezes the same data and permissions as manual
+// exports without enqueueing, so a scheduled run can commit atomically.
+func PrepareManagedAccountExport(actorID int, request ManagedAccountExportRequest) (*PreparedManagedAccountExport, error) {
 	access, accessErr := managedExportAccess(actorID)
 	if accessErr != nil {
 		return nil, accessErr
@@ -398,15 +421,12 @@ func EnqueueManagedAccountExport(actorID int, request ManagedAccountExportReques
 	}
 	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: request.Source, Window: request.Window, Locale: request.Locale}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(selections)), Stage: "queued"}
-	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
+	record := &model.ManagedUsageExport{
 		InstanceID: soleInstanceID, InstanceName: instanceName, InstanceKind: instanceKind,
 		ActorID: actorID, ActorName: managedExportActorName(actorID), ExportKind: model.ManagedExportKindAccounts,
 		FileFormat: model.ManagedExportFormatXLSX, Source: request.Source, Query: string(queryJSON), DataPolicy: &access.Policy,
-	}, payload, state, exportItems)
-	if err == nil {
-		notifySystemTaskRunner()
 	}
-	return task, err
+	return &PreparedManagedAccountExport{Record: record, Payload: payload, State: state, Items: exportItems}, nil
 }
 
 func cloneManagedUsageExportQuery(query url.Values) url.Values {
@@ -525,6 +545,9 @@ func RetryManagedUsageExport(taskID string, actorID int, root bool) (*model.Syst
 	record, err := GetManagedUsageExport(taskID, actorID, root)
 	if err != nil || record == nil {
 		return nil, err
+	}
+	if record.ScheduleID > 0 {
+		return nil, model.ErrManagedUsageExportConflict
 	}
 	if record.Status != model.ManagedUsageExportStatusFailed && record.Status != model.ManagedUsageExportStatusExpired {
 		return nil, model.ErrManagedUsageExportConflict
@@ -661,7 +684,7 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 				selections = append(selections, selection)
 			}
 			if err == nil {
-				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections, VisibleFields: access.Policy.Fields}, progressCallback)
+				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections, VisibleFields: access.Policy.Fields, Notes: payload.Notes, SnapshotTimes: payload.SnapshotTimes}, progressCallback)
 			}
 		}
 	} else {

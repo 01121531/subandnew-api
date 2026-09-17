@@ -46,6 +46,8 @@ import {
   XCircle,
 } from 'lucide-react'
 import {
+  createContext,
+  useContext,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -91,6 +93,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableHeader, TableRow } from '@/components/ui/table'
+import { ScheduleEntry } from '@/features/export-schedules'
 import {
   createFleetPresetRange,
   resolveFleetTimeRange,
@@ -145,6 +148,13 @@ import {
   hasAccountOutputMetrics,
 } from './account-output-metrics'
 import { useBatchedAccountSnapshots } from './use-batched-account-snapshots'
+
+const ScheduleScope = createContext({
+  instance_ids: [] as number[],
+  preset_days: 30,
+  include_terms: [] as string[],
+  exclude_terms: [] as string[],
+})
 
 type AccountFamily =
   | 'new_api'
@@ -597,6 +607,7 @@ function AccountExportBar(props: {
 }) {
   const { t, i18n } = useTranslation()
   const access = useAdminDataAccess()
+  const scheduleScope = useContext(ScheduleScope)
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const selectedItems = [...props.selection.selected.values()]
@@ -665,6 +676,19 @@ function AccountExportBar(props: {
           </span>
         </label>
         <div className='flex flex-1 flex-wrap items-center justify-end gap-2'>
+          <ScheduleEntry
+            query={{
+              ...scheduleScope,
+              dataset: props.source,
+              ...props.filterSnapshot,
+              sort_by: props.sortBy,
+              sort_order: props.sortOrder,
+            }}
+            accounts={selectedItems.map((item) => ({
+              instance_id: item.instanceId,
+              account_id: item.accountId,
+            }))}
+          />
           {selectedItems.length > 0 && (
             <Button variant='ghost' size='sm' onClick={props.selection.clear}>
               {t('Clear selection')}
@@ -1436,153 +1460,164 @@ function FullManagedAccounts() {
   }
 
   return (
-    <SectionPageLayout>
-      <SectionPageLayout.Title>
-        {t('Account management')}
-      </SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        {canManageAccountDataAPIs && (
-          <Button variant='outline' onClick={createAccountDataAuthorization}>
-            <Braces />
-            <span className='hidden sm:inline'>{t('创建接口授权')}</span>
+    <ScheduleScope.Provider
+      value={{
+        instance_ids: instances.map((i) => i.id),
+        preset_days: timeRange.presetDays ?? 30,
+        include_terms: searchValues,
+        exclude_terms: excludeSearchValues,
+      }}
+    >
+      <SectionPageLayout>
+        <SectionPageLayout.Title>
+          {t('Account management')}
+        </SectionPageLayout.Title>
+        <SectionPageLayout.Actions>
+          {canManageAccountDataAPIs && (
+            <Button variant='outline' onClick={createAccountDataAuthorization}>
+              <Braces />
+              <span className='hidden sm:inline'>{t('创建接口授权')}</span>
+            </Button>
+          )}
+          <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          <Button
+            variant='outline'
+            size='icon-sm'
+            aria-label={t('Refresh')}
+            onClick={refresh}
+          >
+            <RefreshCw className={isRefreshing ? 'animate-spin' : ''} />
           </Button>
-        )}
-        <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
-        <Button
-          variant='outline'
-          size='icon-sm'
-          aria-label={t('Refresh')}
-          onClick={refresh}
-        >
-          <RefreshCw className={isRefreshing ? 'animate-spin' : ''} />
-        </Button>
-      </SectionPageLayout.Actions>
-      <SectionPageLayout.Content>
-        <div className='grid gap-4'>
-          <div className='bg-card border-border/80 grid min-w-0 gap-2 rounded-lg border p-2.5 shadow-xs sm:flex sm:flex-wrap sm:items-center sm:p-3'>
-            <SegmentedControl
-              value={family}
-              options={ACCOUNT_FAMILIES}
-              getLabel={(option) =>
-                access.canView('accounts')
-                  ? `${t(familyLabel(option))} · ${familyCounts[option]}`
-                  : t(familyLabel(option))
-              }
-              onChange={(value) => {
-                setFamily(value)
-                if (
-                  (value === 'new_api' || value === 'mercer_router') &&
-                  sortKey === 'survival'
-                ) {
-                  setSortKey(access.canView('status') ? 'available' : 'name')
+        </SectionPageLayout.Actions>
+        <SectionPageLayout.Content>
+          <div className='grid gap-4'>
+            <div className='bg-card border-border/80 grid min-w-0 gap-2 rounded-lg border p-2.5 shadow-xs sm:flex sm:flex-wrap sm:items-center sm:p-3'>
+              <SegmentedControl
+                value={family}
+                options={ACCOUNT_FAMILIES}
+                getLabel={(option) =>
+                  access.canView('accounts')
+                    ? `${t(familyLabel(option))} · ${familyCounts[option]}`
+                    : t(familyLabel(option))
                 }
-              }}
-            />
-            <Select
-              items={[
-                {
-                  value: ALL_SITES_VALUE,
-                  label: access.canView('accounts')
-                    ? `${t('All sites')} · ${familyInstances.length}`
-                    : t('All sites'),
-                },
-                ...familyInstances.map((instance) => ({
-                  value: String(instance.id),
-                  label: instance.name,
-                })),
-              ]}
-              value={effectiveInstanceID}
-              onValueChange={(value) => {
-                if (!value) return
-                setSelectedInstances((current) => ({
-                  ...current,
-                  [family]: value,
-                }))
-              }}
-            >
-              <SelectTrigger
-                className='h-10 w-full min-w-0 sm:h-8 sm:w-64'
-                aria-label={t('Select site')}
+                onChange={(value) => {
+                  setFamily(value)
+                  if (
+                    (value === 'new_api' || value === 'mercer_router') &&
+                    sortKey === 'survival'
+                  ) {
+                    setSortKey(access.canView('status') ? 'available' : 'name')
+                  }
+                }}
+              />
+              <Select
+                items={[
+                  {
+                    value: ALL_SITES_VALUE,
+                    label: access.canView('accounts')
+                      ? `${t('All sites')} · ${familyInstances.length}`
+                      : t('All sites'),
+                  },
+                  ...familyInstances.map((instance) => ({
+                    value: String(instance.id),
+                    label: instance.name,
+                  })),
+                ]}
+                value={effectiveInstanceID}
+                onValueChange={(value) => {
+                  if (!value) return
+                  setSelectedInstances((current) => ({
+                    ...current,
+                    [family]: value,
+                  }))
+                }}
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value={ALL_SITES_VALUE}>
-                    {t('All sites')}
-                    {access.canView('accounts') &&
-                      ` · ${familyInstances.length}`}
-                  </SelectItem>
-                  {familyInstances.map((instance) => (
-                    <SelectItem key={instance.id} value={String(instance.id)}>
-                      <span className='flex min-w-0 items-center gap-2'>
-                        <AdminDataField fields={['status']}>
-                          <span
-                            className={cn(
-                              'size-1.5 shrink-0 rounded-full',
-                              instance.status === 'healthy' && 'bg-success',
-                              instance.status === 'degraded' && 'bg-warning',
-                              ['offline', 'auth_failed'].includes(
-                                instance.status
-                              ) && 'bg-destructive',
-                              instance.status === 'unknown' &&
-                                'bg-muted-foreground/50'
-                            )}
-                          />
-                        </AdminDataField>
-                        <span className='truncate'>{instance.name}</span>
-                      </span>
+                <SelectTrigger
+                  className='h-10 w-full min-w-0 sm:h-8 sm:w-64'
+                  aria-label={t('Select site')}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value={ALL_SITES_VALUE}>
+                      {t('All sites')}
+                      {access.canView('accounts') &&
+                        ` · ${familyInstances.length}`}
                     </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <div className='flex min-w-0 flex-1 items-center gap-2 sm:ms-auto sm:max-w-xs'>
-              <Search
-                className='text-muted-foreground size-4 shrink-0'
-                aria-hidden='true'
-              />
-              <MultiSelect
-                options={[]}
-                selected={searchValues}
-                onChange={setSearchValues}
-                allowCreate
-                maxVisibleChips={2}
-                placeholder={t('Search accounts or channels')}
-                className='min-h-10 min-w-0 flex-1 sm:min-h-8'
-              />
+                    {familyInstances.map((instance) => (
+                      <SelectItem key={instance.id} value={String(instance.id)}>
+                        <span className='flex min-w-0 items-center gap-2'>
+                          <AdminDataField fields={['status']}>
+                            <span
+                              className={cn(
+                                'size-1.5 shrink-0 rounded-full',
+                                instance.status === 'healthy' && 'bg-success',
+                                instance.status === 'degraded' && 'bg-warning',
+                                ['offline', 'auth_failed'].includes(
+                                  instance.status
+                                ) && 'bg-destructive',
+                                instance.status === 'unknown' &&
+                                  'bg-muted-foreground/50'
+                              )}
+                            />
+                          </AdminDataField>
+                          <span className='truncate'>{instance.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <div className='flex min-w-0 flex-1 items-center gap-2 sm:ms-auto sm:max-w-xs'>
+                <Search
+                  className='text-muted-foreground size-4 shrink-0'
+                  aria-hidden='true'
+                />
+                <MultiSelect
+                  options={[]}
+                  selected={searchValues}
+                  onChange={setSearchValues}
+                  allowCreate
+                  maxVisibleChips={2}
+                  placeholder={t('Search accounts or channels')}
+                  className='min-h-10 min-w-0 flex-1 sm:min-h-8'
+                />
+              </div>
+              <div className='flex min-w-0 flex-1 items-center gap-2 sm:max-w-xs'>
+                <SearchX
+                  className='text-muted-foreground size-4 shrink-0'
+                  aria-hidden='true'
+                />
+                <MultiSelect
+                  options={[]}
+                  selected={excludeSearchValues}
+                  onChange={setExcludeSearchValues}
+                  allowCreate
+                  maxVisibleChips={2}
+                  placeholder={t('Exclude accounts or channels')}
+                  className='min-h-10 min-w-0 flex-1 sm:min-h-8'
+                />
+              </div>
             </div>
-            <div className='flex min-w-0 flex-1 items-center gap-2 sm:max-w-xs'>
-              <SearchX
-                className='text-muted-foreground size-4 shrink-0'
-                aria-hidden='true'
-              />
-              <MultiSelect
-                options={[]}
-                selected={excludeSearchValues}
-                onChange={setExcludeSearchValues}
-                allowCreate
-                maxVisibleChips={2}
-                placeholder={t('Exclude accounts or channels')}
-                className='min-h-10 min-w-0 flex-1 sm:min-h-8'
-              />
-            </div>
+            <AccountFilterPanel
+              value={advancedFilter}
+              onChange={(value) =>
+                setAdvancedFilter({
+                  ...value,
+                  rules: value.rules.filter((rule) =>
+                    access.allows(rule.field)
+                  ),
+                })
+              }
+              options={filterOptions}
+              allowedFields={ACCOUNT_FILTER_FIELDS.filter(access.allows)}
+            />
+            {content}
           </div>
-          <AccountFilterPanel
-            value={advancedFilter}
-            onChange={(value) =>
-              setAdvancedFilter({
-                ...value,
-                rules: value.rules.filter((rule) => access.allows(rule.field)),
-              })
-            }
-            options={filterOptions}
-            allowedFields={ACCOUNT_FILTER_FIELDS.filter(access.allows)}
-          />
-          {content}
-        </div>
-      </SectionPageLayout.Content>
-    </SectionPageLayout>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+    </ScheduleScope.Provider>
   )
 }
 
