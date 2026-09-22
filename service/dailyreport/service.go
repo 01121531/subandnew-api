@@ -92,6 +92,23 @@ func ListRules(instanceID int64) ([]map[string]any, error) {
 	return items, nil
 }
 
+func ListRulesForInstances(instanceIDs []int64) ([]map[string]any, error) {
+	if len(instanceIDs) == 0 {
+		return []map[string]any{}, nil
+	}
+	var rules []model.DailyReportRule
+	if err := model.DB.Where("instance_id IN ?", instanceIDs).Order("id desc").Find(&rules).Error; err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		var filter any
+		_ = json.Unmarshal([]byte(rule.FilterJSON), &filter)
+		items = append(items, map[string]any{"id": rule.ID, "instance_id": rule.InstanceID, "supplier_code": rule.SupplierCode, "supplier_name": rule.SupplierName, "filter": filter, "enabled": rule.Enabled, "version": rule.Version, "created_at": rule.CreatedAt, "updated_at": rule.UpdatedAt})
+	}
+	return items, nil
+}
+
 func SaveRule(input model.DailyReportRule) (*model.DailyReportRule, error) {
 	if input.InstanceID <= 0 || strings.TrimSpace(input.SupplierCode) == "" {
 		return nil, ErrInvalidRange

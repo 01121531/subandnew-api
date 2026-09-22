@@ -12,6 +12,7 @@ import (
 	"github.com/01121531/subandnew-api/service/dailyreport"
 	"github.com/gin-gonic/gin"
 	"github.com/xuri/excelize/v2"
+	"gorm.io/gorm"
 )
 
 type dailyReportRuleRequest struct {
@@ -82,7 +83,11 @@ func ListDailyReports(c *gin.Context) {
 func GetDailyReportDetail(c *gin.Context) { ListDailyReports(c) }
 
 func ListDailyReportRules(c *gin.Context) {
-	items, err := dailyreport.ListRules(0)
+	ids, ok := reportIDs(c)
+	if !ok {
+		return
+	}
+	items, err := dailyreport.ListRulesForInstances(ids)
 	if err != nil {
 		adminDataError(c, err)
 		return
@@ -124,6 +129,14 @@ func DeleteDailyReportRule(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid id"})
+		return
+	}
+	var rule model.DailyReportRule
+	if err := model.DB.First(&rule, id).Error; err != nil {
+		adminDataError(c, err)
+		return
+	}
+	if !adminInstancesAllowed(c, []int64{rule.InstanceID}) {
 		return
 	}
 	if err := dailyreport.DeleteRule(id); err != nil {
@@ -179,10 +192,7 @@ type dailyReportScheduleRequest struct {
 
 func ListDailyReportSchedules(c *gin.Context) {
 	var rows []model.DailyReportSchedule
-	query := model.DB.Where("owner_id = ? AND deleted_at = 0", c.GetInt("id")).Order("id desc")
-	if c.GetInt("role") >= common.RoleRootUser {
-		query = model.DB.Where("deleted_at = 0").Order("id desc")
-	}
+	query := dailyScheduleScope(c).Where("deleted_at = 0").Order("id desc")
 	if err := query.Find(&rows).Error; err != nil {
 		adminDataError(c, err)
 		return
@@ -201,7 +211,7 @@ func SaveDailyReportSchedule(c *gin.Context) {
 	row := model.DailyReportSchedule{ID: request.ID, OwnerID: c.GetInt("id"), Name: strings.TrimSpace(request.Name), ConfigJSON: string(config), Enabled: request.Enabled, Version: request.Version, NextAt: request.NextAt, CreatedAt: now, UpdatedAt: now}
 	var err error
 	if row.ID > 0 {
-		err = model.DB.Model(&model.DailyReportSchedule{}).Where("id = ? AND version = ? AND deleted_at = 0", row.ID, request.Version).Updates(map[string]any{"name": row.Name, "config_json": row.ConfigJSON, "enabled": row.Enabled, "next_at": row.NextAt, "version": request.Version + 1, "updated_at": now}).Error
+		err = dailyScheduleScope(c).Where("id = ? AND version = ? AND deleted_at = 0", row.ID, request.Version).Updates(map[string]any{"name": row.Name, "config_json": row.ConfigJSON, "enabled": row.Enabled, "next_at": row.NextAt, "version": request.Version + 1, "updated_at": now}).Error
 	} else {
 		err = model.DB.Create(&row).Error
 	}
@@ -214,7 +224,7 @@ func SaveDailyReportSchedule(c *gin.Context) {
 
 func DeleteDailyReportSchedule(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err := model.DB.Model(&model.DailyReportSchedule{}).Where("id = ?", id).Updates(map[string]any{"deleted_at": common.GetTimestamp(), "enabled": false}).Error; err != nil {
+	if err := dailyScheduleScope(c).Where("id = ?", id).Updates(map[string]any{"deleted_at": common.GetTimestamp(), "enabled": false}).Error; err != nil {
 		adminDataError(c, err)
 		return
 	}
@@ -225,6 +235,11 @@ func ListDailyReportScheduleRuns(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid id"})
+		return
+	}
+	var schedule model.DailyReportSchedule
+	if err := dailyScheduleScope(c).Where("id = ? AND deleted_at = 0", id).First(&schedule).Error; err != nil {
+		adminDataError(c, err)
 		return
 	}
 	var runs []model.DailyReportRun
@@ -246,7 +261,7 @@ func DailyReportScheduleAction(c *gin.Context) {
 		updates["enabled"] = true
 	case "execute":
 		var schedule model.DailyReportSchedule
-		if err := model.DB.Where("id = ? AND deleted_at = 0", id).First(&schedule).Error; err != nil {
+		if err := dailyScheduleScope(c).Where("id = ? AND deleted_at = 0", id).First(&schedule).Error; err != nil {
 			adminDataError(c, err)
 			return
 		}
@@ -280,9 +295,17 @@ func DailyReportScheduleAction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "unknown action"})
 		return
 	}
-	if err := model.DB.Model(&model.DailyReportSchedule{}).Where("id = ? AND deleted_at = 0", id).Updates(updates).Error; err != nil {
+	if err := dailyScheduleScope(c).Where("id = ? AND deleted_at = 0", id).Updates(updates).Error; err != nil {
 		adminDataError(c, err)
 		return
 	}
 	adminDataJSON(c, http.StatusOK, gin.H{"updated": true})
+}
+
+func dailyScheduleScope(c *gin.Context) *gorm.DB {
+	query := model.DB.Model(&model.DailyReportSchedule{})
+	if c.GetInt("role") < common.RoleRootUser {
+		return query.Where("owner_id = ?", c.GetInt("id"))
+	}
+	return query
 }
