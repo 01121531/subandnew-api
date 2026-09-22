@@ -48,6 +48,7 @@ export type DailyReportRule = {
   source_template_name?: string
 }
 
+/** @public Kept for legacy Router bill clients. */
 export type SupplierBill = {
   instance_id: number
   supplier_code: string
@@ -68,6 +69,7 @@ export type SupplierBill = {
   error_code?: string
 }
 
+/** @public Kept for legacy Router bill clients. */
 export type SupplierBillsOverview = {
   start_date: string
   end_date: string
@@ -139,6 +141,7 @@ export async function getDailyReports(params: {
   return response.data
 }
 
+/** @public Kept for legacy Router bill clients. */
 export async function getDailyReportSupplierBills(params: {
   start_date: string
   end_date: string
@@ -260,6 +263,7 @@ export function exportDailyReportAccounts(params: {
   )
 }
 
+/** @public Kept for legacy Router bill clients. */
 export function exportDailyReportSuppliers(params: {
   start_date: string
   end_date: string
