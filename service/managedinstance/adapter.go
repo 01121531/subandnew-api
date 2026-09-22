@@ -663,7 +663,21 @@ func (genericAdapter) Probe(ctx context.Context, connector *Connector, credentia
 	if !canTryNextGenericAdapter(conductorErr) {
 		return nil, conductorErr
 	}
-	return (claudeGatewayAdapter{}).Probe(ctx, connector, credential)
+	result, claudeGatewayErr := (claudeGatewayAdapter{}).Probe(ctx, connector, credential)
+	if claudeGatewayErr == nil {
+		return result, nil
+	}
+	if !canTryNextGenericAdapter(claudeGatewayErr) {
+		return nil, claudeGatewayErr
+	}
+	result, nevermoreErr := (nevermoreAdapter{}).Probe(ctx, connector, credential)
+	if nevermoreErr == nil {
+		return result, nil
+	}
+	if !canTryNextGenericAdapter(nevermoreErr) {
+		return nil, nevermoreErr
+	}
+	return (routerAdapter{}).Probe(ctx, connector, credential)
 }
 
 func canTryNextGenericAdapter(err error) bool {

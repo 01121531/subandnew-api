@@ -151,7 +151,7 @@ func CollectSupplierBills(ctx context.Context, instanceID int64, startDate, endD
 	if err != nil {
 		return SupplierBillsOverview{}, err
 	}
-	login, err := connector.DoJSON(ctx, http.MethodPost, "/api/user/login", nil, map[string]string{"username": credential.UserID, "password": credential.Secret})
+	login, err := connector.DoJSON(ctx, http.MethodPost, "/api/user/login?turnstile=", nil, map[string]string{"username": credential.UserID, "password": credential.Secret})
 	if err != nil || login.StatusCode >= 300 {
 		return SupplierBillsOverview{}, errors.New("router login failed")
 	}

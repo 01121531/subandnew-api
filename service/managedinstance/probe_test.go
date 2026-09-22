@@ -575,6 +575,63 @@ func TestManagedInstanceAlertFailureThresholdUsesGlobalAndInstanceOverride(t *te
 	require.Equal(t, defaultManagedInstanceAlertFailureThreshold, managedInstanceAlertFailureThreshold(db, instance))
 }
 
+func TestProbeGenericDetectsNevermoreSupplier(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/admin/v1/auth/login" {
+			http.NotFound(response, request)
+			return
+		}
+		require.Equal(t, http.MethodPost, request.Method)
+		var input map[string]string
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+		require.Equal(t, "supplier", input["username"])
+		require.Equal(t, "password", input["password"])
+		http.SetCookie(response, &http.Cookie{Name: "session", Value: "nevermore-session", Path: "/"})
+		writeProbeJSON(response, `{"csrf_token":"csrf","user":{"id":37,"roles":["SUPPLIER"],"status":"ACTIVE"}}`)
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "supplier",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindNevermore, result.Kind)
+	require.Equal(t, model.ManagedInstanceAccessUser, result.AccessScope)
+	require.Contains(t, result.Capabilities, "uploads.read")
+}
+
+func TestProbeGenericDetectsRouterChannelAdmin(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/user/login" {
+			http.NotFound(response, request)
+			return
+		}
+		require.Equal(t, http.MethodPost, request.Method)
+		require.Equal(t, "", request.URL.Query().Get("turnstile"))
+		var input map[string]string
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&input))
+		require.Equal(t, "channel-admin", input["username"])
+		require.Equal(t, "password", input["password"])
+		http.SetCookie(response, &http.Cookie{Name: "session", Value: "router-session", Path: "/"})
+		writeProbeJSON(response, `{"success":true,"data":{"id":1075,"role":5,"status":1}}`)
+	}))
+	defer server.Close()
+
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindGeneric, CredentialInput{
+		AuthType: "account_password", Secret: "password", UserID: "channel-admin",
+	})
+	result, err := Probe(context.Background(), instance.Id, 7)
+	require.NoError(t, err)
+	require.Equal(t, model.ManagedInstanceKindRouter, result.Kind)
+	require.Equal(t, model.ManagedInstanceAccessChannelAdmin, result.AccessScope)
+	require.Contains(t, result.Capabilities, "usage.read")
+}
+
 func TestResolveProbeAlertQueuesRecoveryOnlyAfterFailureEmailSent(t *testing.T) {
 	db := newManagedInstanceTestDB(t)
 	instance := &model.ManagedInstance{Name: "recover", Kind: model.ManagedInstanceKindConductor, BaseURL: "https://recover.example.com"}
