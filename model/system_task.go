@@ -33,6 +33,7 @@ const (
 	SystemTaskTypeBillingAlertExport        = "billing_alert_export"
 	SystemTaskTypeMetricAlertScan           = "metric_alert_scan"
 	SystemTaskTypeMetricAlertEvaluate       = "metric_alert_evaluate"
+	SystemTaskTypeDailyReportScheduler      = "daily_report_scheduler"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

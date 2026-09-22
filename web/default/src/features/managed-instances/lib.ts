@@ -25,6 +25,8 @@ export const MANAGED_INSTANCE_KINDS = [
   { value: 'sub2api', label: 'Sub2API' },
   { value: 'conductor', label: 'Conductor' },
   { value: 'claude_gateway', label: 'Claude Gateway' },
+  { value: 'nevermore', label: 'Nevermore' },
+  { value: 'router', label: 'Router' },
   { value: 'generic', label: 'Generic' },
 ] as const
 

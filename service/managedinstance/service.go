@@ -540,11 +540,30 @@ func NormalizeBaseURL(raw string) (string, error) {
 
 func validKind(kind string) bool {
 	switch kind {
-	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway, model.ManagedInstanceKindGeneric:
+	case model.ManagedInstanceKindNewAPI, model.ManagedInstanceKindMercerRouter, model.ManagedInstanceKindHuichuan, model.ManagedInstanceKindSub2API, model.ManagedInstanceKindConductor, model.ManagedInstanceKindClaudeGateway, model.ManagedInstanceKindNevermore, model.ManagedInstanceKindRouter, model.ManagedInstanceKindGeneric:
 		return true
 	default:
 		return false
 	}
+}
+
+// LoadCredentialForInstance is intentionally limited to server-side collectors.
+// It never serializes credential material into an API response.
+func LoadCredentialForInstance(instanceID int64) (*CredentialMaterial, error) {
+	return loadCredential(instanceID)
+}
+
+func NewConnectorForInstance(instanceID int64) (*model.ManagedInstance, *Connector, error) {
+	var instance model.ManagedInstance
+	if err := model.DB.First(&instance, instanceID).Error; err != nil {
+		return nil, nil, err
+	}
+	policy, err := ConnectorPolicyFromEnvironment()
+	if err != nil {
+		return nil, nil, err
+	}
+	connector, err := NewConnector(&instance, policy)
+	return &instance, connector, err
 }
 
 func validManagementMode(mode string) bool {

@@ -23,6 +23,8 @@ type ManagedInstanceKind =
   | 'sub2api'
   | 'conductor'
   | 'claude_gateway'
+  | 'nevermore'
+  | 'router'
   | 'generic'
 export type ManagedInstanceStatus =
   | 'unknown'

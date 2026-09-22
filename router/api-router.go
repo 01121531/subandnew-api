@@ -36,6 +36,7 @@ func SetApiRouter(router *gin.Engine) {
 	registerAuthzRoutes(api)
 	registerAssistantRoutes(api)
 	registerManagedInstanceRoutes(api)
+	registerDailyReportRoutes(api)
 	registerBillingAlertRoutes(api)
 	registerAccountDataAPIRoutes(router, api)
 	registerSupplierRoutes(router, api)

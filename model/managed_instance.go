@@ -12,6 +12,8 @@ const (
 	ManagedInstanceKindSub2API       = "sub2api"
 	ManagedInstanceKindConductor     = "conductor"
 	ManagedInstanceKindClaudeGateway = "claude_gateway"
+	ManagedInstanceKindNevermore     = "nevermore"
+	ManagedInstanceKindRouter        = "router"
 	ManagedInstanceKindGeneric       = "generic"
 
 	ManagedInstanceModeObserve = "observe"

@@ -34,6 +34,8 @@ export const managedInstanceFormSchema = z.object({
     'sub2api',
     'conductor',
     'claude_gateway',
+    'nevermore',
+    'router',
     'generic',
   ]),
   base_url: z.string().trim().min(1).refine(isManagedInstanceURL),

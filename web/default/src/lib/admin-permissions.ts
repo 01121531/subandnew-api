@@ -30,6 +30,7 @@ export const ADMIN_PERMISSION_RESOURCES = {
   ASSISTANT: 'assistant',
   MANAGED_ACCOUNT_API: 'managed_account_api',
   SUPPLIER: 'supplier',
+  DAILY_REPORT: 'daily_report',
 } as const
 
 export const ADMIN_PERMISSION_ACTIONS = {

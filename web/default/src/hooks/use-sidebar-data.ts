@@ -49,6 +49,11 @@ export function useSidebarData(): SidebarData {
     ADMIN_PERMISSION_RESOURCES.BILLING_ALERT,
     ADMIN_PERMISSION_ACTIONS.VIEW
   )
+  const canViewDailyReports = hasPermission(
+    user,
+    ADMIN_PERMISSION_RESOURCES.DAILY_REPORT,
+    ADMIN_PERMISSION_ACTIONS.VIEW
+  )
   const canViewAccountDataAPIs = hasPermission(
     user,
     ADMIN_PERMISSION_RESOURCES.MANAGED_ACCOUNT_API,
@@ -113,6 +118,9 @@ export function useSidebarData(): SidebarData {
                   icon: FileClock,
                 },
               ]
+            : []),
+          ...(canViewDailyReports
+            ? [{ title: '日报', url: '/daily-reports', icon: FileClock }]
             : []),
           ...(canViewBillingAlerts
             ? [

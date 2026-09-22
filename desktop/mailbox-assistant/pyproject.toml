@@ -1,6 +1,6 @@
 [project]
 name = "mailbox-assistant"
-version = "1.2.113"
+version = "1.2.114"
 description = "Floating operator client for the mailbox workspace"
 requires-python = ">=3.12,<3.13"
 dependencies = ["PySide6==6.11.2"]

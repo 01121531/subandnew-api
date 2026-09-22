@@ -77,6 +77,8 @@ func adapterForKind(kind string) (InstanceAdapter, error) {
 		return claudeGatewayAdapter{}, nil
 	case model.ManagedInstanceKindGeneric:
 		return genericAdapter{}, nil
+	case model.ManagedInstanceKindNevermore, model.ManagedInstanceKindRouter:
+		return genericAdapter{}, nil
 	default:
 		return nil, fmt.Errorf("%w: unknown adapter kind", ErrInvalidInstance)
 	}

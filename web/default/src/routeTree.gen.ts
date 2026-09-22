@@ -41,6 +41,7 @@ import { Route as AuthenticatedInterfaceManagementIndexRouteImport } from './rou
 import { Route as AuthenticatedInstancesIndexRouteImport } from './routes/_authenticated/instances/index'
 import { Route as AuthenticatedExportRecordsIndexRouteImport } from './routes/_authenticated/export-records/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
+import { Route as AuthenticatedDailyReportsIndexRouteImport } from './routes/_authenticated/daily-reports/index'
 import { Route as AuthenticatedBillingAlertsIndexRouteImport } from './routes/_authenticated/billing-alerts/index'
 import { Route as AuthenticatedBillingAlertRecordsIndexRouteImport } from './routes/_authenticated/billing-alert-records/index'
 import { Route as AuthenticatedAssistantIndexRouteImport } from './routes/_authenticated/assistant/index'
@@ -222,6 +223,12 @@ const AuthenticatedDashboardIndexRoute =
     path: '/dashboard/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedDailyReportsIndexRoute =
+  AuthenticatedDailyReportsIndexRouteImport.update({
+    id: '/daily-reports/',
+    path: '/daily-reports/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedBillingAlertsIndexRoute =
   AuthenticatedBillingAlertsIndexRouteImport.update({
     id: '/billing-alerts/',
@@ -316,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/assistant/': typeof AuthenticatedAssistantIndexRoute
   '/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
+  '/daily-reports/': typeof AuthenticatedDailyReportsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/instances/': typeof AuthenticatedInstancesIndexRoute
@@ -356,6 +364,7 @@ export interface FileRoutesByTo {
   '/assistant': typeof AuthenticatedAssistantIndexRoute
   '/billing-alert-records': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/billing-alerts': typeof AuthenticatedBillingAlertsIndexRoute
+  '/daily-reports': typeof AuthenticatedDailyReportsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/export-records': typeof AuthenticatedExportRecordsIndexRoute
   '/instances': typeof AuthenticatedInstancesIndexRoute
@@ -402,6 +411,7 @@ export interface FileRoutesById {
   '/_authenticated/assistant/': typeof AuthenticatedAssistantIndexRoute
   '/_authenticated/billing-alert-records/': typeof AuthenticatedBillingAlertRecordsIndexRoute
   '/_authenticated/billing-alerts/': typeof AuthenticatedBillingAlertsIndexRoute
+  '/_authenticated/daily-reports/': typeof AuthenticatedDailyReportsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/export-records/': typeof AuthenticatedExportRecordsIndexRoute
   '/_authenticated/instances/': typeof AuthenticatedInstancesIndexRoute
@@ -447,6 +457,7 @@ export interface FileRouteTypes {
     | '/assistant/'
     | '/billing-alert-records/'
     | '/billing-alerts/'
+    | '/daily-reports/'
     | '/dashboard/'
     | '/export-records/'
     | '/instances/'
@@ -487,6 +498,7 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/billing-alert-records'
     | '/billing-alerts'
+    | '/daily-reports'
     | '/dashboard'
     | '/export-records'
     | '/instances'
@@ -532,6 +544,7 @@ export interface FileRouteTypes {
     | '/_authenticated/assistant/'
     | '/_authenticated/billing-alert-records/'
     | '/_authenticated/billing-alerts/'
+    | '/_authenticated/daily-reports/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/export-records/'
     | '/_authenticated/instances/'
@@ -791,6 +804,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/daily-reports/': {
+      id: '/_authenticated/daily-reports/'
+      path: '/daily-reports'
+      fullPath: '/daily-reports/'
+      preLoaderRoute: typeof AuthenticatedDailyReportsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/billing-alerts/': {
       id: '/_authenticated/billing-alerts/'
       path: '/billing-alerts'
@@ -925,6 +945,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAssistantIndexRoute: typeof AuthenticatedAssistantIndexRoute
   AuthenticatedBillingAlertRecordsIndexRoute: typeof AuthenticatedBillingAlertRecordsIndexRoute
   AuthenticatedBillingAlertsIndexRoute: typeof AuthenticatedBillingAlertsIndexRoute
+  AuthenticatedDailyReportsIndexRoute: typeof AuthenticatedDailyReportsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedExportRecordsIndexRoute: typeof AuthenticatedExportRecordsIndexRoute
   AuthenticatedInstancesIndexRoute: typeof AuthenticatedInstancesIndexRoute
@@ -948,6 +969,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedBillingAlertRecordsIndexRoute:
     AuthenticatedBillingAlertRecordsIndexRoute,
   AuthenticatedBillingAlertsIndexRoute: AuthenticatedBillingAlertsIndexRoute,
+  AuthenticatedDailyReportsIndexRoute: AuthenticatedDailyReportsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedExportRecordsIndexRoute: AuthenticatedExportRecordsIndexRoute,
   AuthenticatedInstancesIndexRoute: AuthenticatedInstancesIndexRoute,
