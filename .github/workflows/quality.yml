@@ -38,6 +38,13 @@ jobs:
           go test ./... -count=1
           go vet ./...
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
-          # GO-2026-6452 has no fixed excelize release yet; keep all other
-          # vulnerability findings blocking the quality gate.
-          govulncheck -ignore=GO-2026-6452 ./...
+          # GO-2026-6452 has no fixed excelize release yet. Filter only that
+          # advisory from the machine-readable findings; all other findings
+          # and scanner errors remain quality-blocking.
+          set -o pipefail
+          govulncheck -format=json ./... > govulncheck.json
+          unexpected=$(jq -r 'select(.finding? != null and .finding.osv != "GO-2026-6452") | .finding.osv' govulncheck.json | sort -u)
+          if [ -n "$unexpected" ]; then
+            echo "$unexpected"
+            exit 1
+          fi
