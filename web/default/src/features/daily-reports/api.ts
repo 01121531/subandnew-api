@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 
-export type DailyReportMetric = {
+type DailyReportMetric = {
   requests: number
   input_tokens: number
   output_tokens: number
@@ -9,7 +9,7 @@ export type DailyReportMetric = {
   cost: number
   currency: string
 }
-export type DailyReportRow = {
+type DailyReportRow = {
   snapshot: {
     instance_id: number
     snapshot_date: string
