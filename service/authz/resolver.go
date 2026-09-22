@@ -52,7 +52,29 @@ func Capabilities(userID int, systemRole int) PermissionsMap {
 
 func roleBaselineAllows(e *casbin.SyncedEnforcer, roleKey string, permission Permission) bool {
 	effect, ok := explicitSubjectEffect(e, RoleSubject(roleKey), permission)
-	return ok && effect == EffectAllow
+	if ok {
+		return effect == EffectAllow
+	}
+
+	// Built-in role policies are seeded at startup. Older databases may not
+	// contain policies for resources registered by a newer binary, so use the
+	// catalog baseline when that policy row is absent. Explicit role policies
+	// above still win, including explicit denies.
+	return roleKey == BuiltInRoleAdmin && actionHasRoleForPermission(permission, roleKey)
+}
+
+func actionHasRoleForPermission(permission Permission, roleKey string) bool {
+	for _, resource := range registry {
+		if resource.Resource != permission.Resource {
+			continue
+		}
+		for _, action := range resource.Actions {
+			if action.Action == permission.Action {
+				return actionHasRole(action, roleKey)
+			}
+		}
+	}
+	return false
 }
 
 func explicitSubjectEffect(e *casbin.SyncedEnforcer, subject string, permission Permission) (string, bool) {

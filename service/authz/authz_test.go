@@ -44,6 +44,15 @@ func TestInitSeedsControlPlanePoliciesOnce(t *testing.T) {
 	assert.False(t, Can(3, common.RoleCommonUser, ManagedInstanceView))
 }
 
+func TestBuiltInAdminUsesCatalogBaselineWhenLegacyPolicyIsMissing(t *testing.T) {
+	db := newAuthzTestDB(t)
+	require.NoError(t, Init(db))
+	require.NoError(t, db.Where("v0 = ? AND v1 = ? AND v2 = ?", RoleSubject(BuiltInRoleAdmin), ResourceDailyReport, DailyReportView.Action).Delete(&model.CasbinRule{}).Error)
+	require.NoError(t, ReloadPolicy())
+
+	assert.True(t, Can(2, common.RoleAdminUser, DailyReportView))
+}
+
 func TestSetUserPermissionsStoresOnlyControlPlaneOverrides(t *testing.T) {
 	db := newAuthzTestDB(t)
 	require.NoError(t, Init(db))
