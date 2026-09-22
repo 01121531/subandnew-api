@@ -57,28 +57,75 @@ func reportIDs(c *gin.Context) ([]int64, bool) {
 	return ids, true
 }
 
+// reportIDsForKind keeps the legacy report endpoints permissive unless the
+// caller opts into an instance-kind contract. New report views use this to
+// prevent a platform from being rendered with another platform's schema.
+func reportIDsForKind(c *gin.Context) ([]int64, bool) {
+	ids, ok := reportIDs(c)
+	if !ok {
+		return nil, false
+	}
+	kind := strings.TrimSpace(c.Query("instance_kind"))
+	if kind == "" {
+		return ids, true
+	}
+	var instances []model.ManagedInstance
+	if err := model.DB.Where("id IN ?", ids).Find(&instances).Error; err != nil {
+		adminDataError(c, err)
+		return nil, false
+	}
+	byID := make(map[int64]string, len(instances))
+	for _, instance := range instances {
+		byID[instance.Id] = instance.Kind
+	}
+	for _, id := range ids {
+		if byID[id] != kind {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "instance kind mismatch"})
+			return nil, false
+		}
+	}
+	return ids, true
+}
+
 func ListDailyReports(c *gin.Context) {
 	listDailyReportsForSource(c, c.Query("source"))
 }
 
 func listDailyReportsForSource(c *gin.Context, source string) {
-	ids, ok := reportIDs(c)
+	ids, ok := reportIDsForKind(c)
 	if !ok {
 		return
 	}
 	date := c.DefaultQuery("date", time.Now().In(dailyreport.BeijingLocation()).Format("2006-01-02"))
+	instanceKind := strings.TrimSpace(c.Query("instance_kind"))
+	if instanceKind == model.ManagedInstanceKindMercerRouter && (strings.TrimSpace(c.Query("supplier_code")) != "" || strings.TrimSpace(c.Query("rule_id")) != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "MercerRouter daily account data does not support Claude Gateway rules"})
+		return
+	}
 	items := make([]dailyreport.Row, 0, len(ids))
 	for _, id := range ids {
+		if instanceKind == model.ManagedInstanceKindMercerRouter {
+			row, err := dailyreport.Collect(c.Request.Context(), id, date, source)
+			if err == nil {
+				items = append(items, row)
+			}
+			continue
+		}
 		var rules []model.DailyReportRule
 		query := model.DB.Where("instance_id = ? AND enabled = ?", id, true)
-		if supplierCode := strings.TrimSpace(c.Query("supplier_code")); supplierCode != "" {
+		supplierCode := strings.TrimSpace(c.Query("supplier_code"))
+		ruleID := strings.TrimSpace(c.Query("rule_id"))
+		if supplierCode != "" {
 			query = query.Where("supplier_code = ?", supplierCode)
 		}
-		if ruleID := strings.TrimSpace(c.Query("rule_id")); ruleID != "" {
+		if ruleID != "" {
 			query = query.Where("id = ?", ruleID)
 		}
 		_ = query.Find(&rules).Error
 		if len(rules) == 0 {
+			if supplierCode != "" || ruleID != "" {
+				continue
+			}
 			row, err := dailyreport.Collect(c.Request.Context(), id, date, source)
 			if err == nil {
 				items = append(items, row)
@@ -121,6 +168,11 @@ func ListDailyReportSupplierOptions(c *gin.Context) {
 		if err != nil || id <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid instance id"})
 		}
+		return
+	}
+	var instance model.ManagedInstance
+	if err := model.DB.First(&instance, id).Error; err != nil || instance.Kind != model.ManagedInstanceKindClaudeGateway {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "supplier options require Claude Gateway"})
 		return
 	}
 	items, err := dailyreport.ListClaudeGatewaySuppliers(c.Request.Context(), id)
@@ -237,6 +289,11 @@ func SaveDailyReportRule(c *gin.Context) {
 	if !adminInstancesAllowed(c, []int64{request.InstanceID}) {
 		return
 	}
+	var instance model.ManagedInstance
+	if err := model.DB.First(&instance, request.InstanceID).Error; err != nil || instance.Kind != model.ManagedInstanceKindClaudeGateway {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "daily report rules require Claude Gateway"})
+		return
+	}
 	filterJSON := `{}`
 	if request.Filter != nil {
 		data, err := json.Marshal(request.Filter)
@@ -270,6 +327,11 @@ func DeleteDailyReportRule(c *gin.Context) {
 		return
 	}
 	if !adminInstancesAllowed(c, []int64{rule.InstanceID}) {
+		return
+	}
+	var instance model.ManagedInstance
+	if err := model.DB.First(&instance, rule.InstanceID).Error; err != nil || instance.Kind != model.ManagedInstanceKindClaudeGateway {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "daily report rules require Claude Gateway"})
 		return
 	}
 	if err := dailyreport.DeleteRule(id); err != nil {
@@ -361,32 +423,62 @@ func PushDailyReportFilterTemplate(c *gin.Context) {
 }
 
 func ExportDailyReport(c *gin.Context) {
-	ids, ok := reportIDs(c)
+	ids, ok := reportIDsForKind(c)
 	if !ok {
 		return
 	}
 	date := c.DefaultQuery("date", time.Now().In(dailyreport.BeijingLocation()).Format("2006-01-02"))
 	source := c.Query("source")
+	supplierCode := strings.TrimSpace(c.Query("supplier_code"))
+	ruleID := strings.TrimSpace(c.Query("rule_id"))
+	mode := strings.TrimSpace(c.Query("mode"))
+	useFiltered := source == model.DailyReportSourceManagedAccounts && (mode == "filtered" || (mode == "" && (supplierCode != "" || ruleID != "")))
 	book := excelize.NewFile()
 	sheet := book.GetSheetName(0)
-	headers := []string{"实例 ID", "日期", "来源", "请求数", "总 Token", "费用", "币种", "账号数", "渠道数", "上传数", "状态", "旧快照", "采集时间", "错误"}
+	headers := []string{"实例 ID", "日期", "来源", "统计范围", "请求数", "总 Token", "费用", "币种", "账号数", "渠道数", "上传数", "状态", "旧快照", "采集时间", "错误"}
 	for i, header := range headers {
 		_ = book.SetCellValue(sheet, string(rune('A'+i))+"1", header)
 	}
 	rowIndex := 2
 	for _, id := range ids {
-		row, err := dailyreport.Collect(c.Request.Context(), id, date, source)
-		if err != nil {
-			continue
+		rows := make([]dailyreport.Row, 0, 1)
+		if useFiltered {
+			query := model.DB.Where("instance_id = ? AND enabled = ?", id, true)
+			if supplierCode != "" {
+				query = query.Where("supplier_code = ?", supplierCode)
+			}
+			if ruleID != "" {
+				query = query.Where("id = ?", ruleID)
+			}
+			var rules []model.DailyReportRule
+			if err := query.Find(&rules).Error; err != nil {
+				continue
+			}
+			for index := range rules {
+				row, err := dailyreport.CollectWithRule(c.Request.Context(), id, date, source, &rules[index])
+				if err == nil {
+					rows = append(rows, row)
+				}
+			}
+		} else if row, err := dailyreport.Collect(c.Request.Context(), id, date, source); err == nil {
+			rows = append(rows, row)
 		}
-		values := []any{id, date, row.Snapshot.Source, row.Full.Requests, row.Full.TotalTokens, row.Full.Cost, row.Full.Currency, row.Snapshot.AccountCount, row.Snapshot.ChannelCount, row.Snapshot.UploadCount, row.Snapshot.Status, row.Snapshot.Stale, time.Unix(row.Snapshot.ObservedAt, 0).In(dailyreport.BeijingLocation()).Format("2006-01-02 15:04:05"), row.Snapshot.ErrorCode}
-		for i, value := range values {
-			_ = book.SetCellValue(sheet, string(rune('A'+i))+strconv.Itoa(rowIndex), value)
+		for _, row := range rows {
+			metric := row.Full
+			rangeName := "全部消耗"
+			if useFiltered {
+				metric = row.Filtered
+				rangeName = "筛选消耗"
+			}
+			values := []any{id, date, row.Snapshot.Source, rangeName, metric.Requests, metric.TotalTokens, metric.Cost, metric.Currency, row.Snapshot.AccountCount, row.Snapshot.ChannelCount, row.Snapshot.UploadCount, row.Snapshot.Status, row.Snapshot.Stale, time.Unix(row.Snapshot.ObservedAt, 0).In(dailyreport.BeijingLocation()).Format("2006-01-02 15:04:05"), row.Snapshot.ErrorCode}
+			for i, value := range values {
+				_ = book.SetCellValue(sheet, string(rune('A'+i))+strconv.Itoa(rowIndex), value)
+			}
+			rowIndex++
 		}
-		rowIndex++
 	}
-	_ = book.AutoFilter(sheet, "A1:N"+strconv.Itoa(rowIndex-1), nil)
-	_ = book.SetColWidth(sheet, "A", "N", 16)
+	_ = book.AutoFilter(sheet, "A1:O"+strconv.Itoa(rowIndex-1), nil)
+	_ = book.SetColWidth(sheet, "A", "O", 16)
 	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Header("Content-Disposition", `attachment; filename="daily-report.xlsx"`)

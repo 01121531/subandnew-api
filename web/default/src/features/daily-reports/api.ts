@@ -117,6 +117,7 @@ export type SupplierOption = { code: string; name: string }
 export async function getDailyReports(params: {
   date: string
   instance_ids?: number[]
+  instance_kind?: string
   source?: string
   supplier_code?: string
   rule_id?: number
@@ -125,6 +126,7 @@ export async function getDailyReports(params: {
   if (params.instance_ids?.length) {
     query.set('instance_ids', params.instance_ids.join(','))
   }
+  if (params.instance_kind) query.set('instance_kind', params.instance_kind)
   if (params.source) query.set('source', params.source)
   if (params.supplier_code) query.set('supplier_code', params.supplier_code)
   if (params.rule_id) query.set('rule_id', String(params.rule_id))
@@ -237,11 +239,19 @@ async function downloadDailyReportExport(
 export function exportDailyReportAccounts(params: {
   date: string
   instance_ids?: number[]
+  instance_kind?: string
+  supplier_code?: string
+  rule_id?: number
+  mode?: 'full' | 'filtered'
 }) {
   return downloadDailyReportExport(
     '/api/daily-reports/accounts/export',
     {
       date: params.date,
+      ...(params.instance_kind ? { instance_kind: params.instance_kind } : {}),
+      ...(params.supplier_code ? { supplier_code: params.supplier_code } : {}),
+      ...(params.rule_id ? { rule_id: String(params.rule_id) } : {}),
+      ...(params.mode ? { mode: params.mode } : {}),
       ...(params.instance_ids?.length
         ? { instance_ids: params.instance_ids.join(',') }
         : {}),

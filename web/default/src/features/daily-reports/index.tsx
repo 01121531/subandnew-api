@@ -30,16 +30,13 @@ import type { ManagedInstance } from '@/features/managed-instances/types'
 
 import {
   exportDailyReportAccounts,
-  exportDailyReportSuppliers,
   exportDailyReportUploads,
-  getDailyReportSupplierBills,
   getDailyReportUploads,
   getDailyReports,
+  listDailyReportSupplierOptions,
   listDailyReportRules,
   type DailyReportOverview,
   type DailyReportRule,
-  type SupplierBill,
-  type SupplierBillsOverview,
   type UploadDay,
   type UploadRecord,
   type UploadsOverview,
@@ -54,6 +51,8 @@ type ReportQuery<T> = {
 
 const formatNumber = (value: number) =>
   value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+const formatCost = (value: number, currency: string) =>
+  currency ? `${formatNumber(value)} ${currency}` : '未提供'
 const today = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai',
 }).format(new Date())
@@ -90,20 +89,16 @@ export function DailyReports() {
     const value = new URLSearchParams(window.location.search).get('tab')
     return value === 'accounts' || value === 'uploads' ? value : 'suppliers'
   })
-  const [supplierStart, setSupplierStart] = useState(shiftDate(today, -6))
-  const [supplierEnd, setSupplierEnd] = useState(today)
+  const [supplierDate, setSupplierDate] = useState(today)
   const [supplierInstance, setSupplierInstance] = useState('')
+  const [supplier, setSupplier] = useState('')
+  const [supplierRule, setSupplierRule] = useState('')
+  const [supplierMode, setSupplierMode] = useState<'full' | 'filtered'>('full')
   const [accountDate, setAccountDate] = useState(today)
   const [accountInstance, setAccountInstance] = useState('')
-  const [accountSupplier, setAccountSupplier] = useState('')
-  const [accountRule, setAccountRule] = useState('')
-  const [accountMode, setAccountMode] = useState<'full' | 'filtered'>('full')
   const [uploadStart, setUploadStart] = useState(shiftDate(today, -6))
   const [uploadEnd, setUploadEnd] = useState(today)
   const [uploadInstance, setUploadInstance] = useState('')
-  const [supplierDetail, setSupplierDetail] = useState<SupplierBill | null>(
-    null
-  )
   const [uploadDetail, setUploadDetail] = useState<UploadRecord | null>(null)
 
   const instancesQuery = useQuery({
@@ -121,12 +116,12 @@ export function DailyReports() {
     () => (instanceItems ?? []) as ManagedInstance[],
     [instanceItems]
   )
-  const routerInstances = useMemo(
-    () => instances.filter((item) => item.kind === 'router'),
-    [instances]
-  )
   const claudeInstances = useMemo(
     () => instances.filter((item) => item.kind === 'claude_gateway'),
+    [instances]
+  )
+  const mercerInstances = useMemo(
+    () => instances.filter((item) => item.kind === 'mercer_router'),
     [instances]
   )
   const nevermoreInstances = useMemo(
@@ -135,58 +130,71 @@ export function DailyReports() {
   )
   const ruleItems = rulesQuery.data?.data?.items
   const rules = useMemo(() => ruleItems ?? [], [ruleItems])
-  const accountRules = useMemo(
+  const supplierRules = useMemo(
     () =>
       rules.filter(
         (rule) =>
           rule.enabled &&
-          (!accountInstance || rule.instance_id === Number(accountInstance)) &&
-          (!accountSupplier || rule.supplier_code === accountSupplier)
+          claudeInstances.some((item) => item.id === rule.instance_id) &&
+          (!supplierInstance ||
+            rule.instance_id === Number(supplierInstance)) &&
+          (!supplier || rule.supplier_code === supplier)
       ),
-    [accountInstance, accountSupplier, rules]
+    [claudeInstances, supplier, supplierInstance, rules]
   )
   const supplierNames = useMemo(
     () => [
       ...new Map(
-        accountRules.map((rule) => [rule.supplier_code, rule.supplier_name])
+        supplierRules.map((rule) => [rule.supplier_code, rule.supplier_name])
       ),
     ],
-    [accountRules]
+    [supplierRules]
   )
+
+  const supplierOptionsQuery = useQuery({
+    queryKey: ['daily-report-supplier-options', supplierInstance],
+    queryFn: () => listDailyReportSupplierOptions(Number(supplierInstance)),
+    enabled: tab === 'suppliers' && Boolean(supplierInstance),
+    staleTime: 60_000,
+  })
+  const supplierOptions = useMemo(() => {
+    const options = new Map(supplierNames)
+    for (const item of supplierOptionsQuery.data?.data?.items ?? []) {
+      options.set(item.code, item.name)
+    }
+    return [...options]
+  }, [supplierNames, supplierOptionsQuery.data])
 
   const supplierQuery = useQuery({
     queryKey: [
       'daily-report-suppliers',
-      supplierStart,
-      supplierEnd,
+      supplierDate,
       supplierInstance,
+      supplier,
+      supplierRule,
     ],
     queryFn: () =>
-      getDailyReportSupplierBills({
-        start_date: supplierStart,
-        end_date: supplierEnd,
-        instance_ids: instanceIDs(routerInstances, supplierInstance),
+      getDailyReports({
+        date: supplierDate,
+        source: 'managed_accounts',
+        instance_ids: instanceIDs(claudeInstances, supplierInstance),
+        instance_kind: 'claude_gateway',
+        supplier_code: supplier || undefined,
+        rule_id: supplierRule ? Number(supplierRule) : undefined,
       }),
-    enabled: tab === 'suppliers' && routerInstances.length > 0,
+    enabled: tab === 'suppliers' && claudeInstances.length > 0,
     staleTime: 30_000,
   })
   const accountQuery = useQuery({
-    queryKey: [
-      'daily-report-accounts',
-      accountDate,
-      accountInstance,
-      accountSupplier,
-      accountRule,
-    ],
+    queryKey: ['daily-report-accounts', accountDate, accountInstance],
     queryFn: () =>
       getDailyReports({
         date: accountDate,
         source: 'managed_accounts',
-        instance_ids: instanceIDs(claudeInstances, accountInstance),
-        supplier_code: accountSupplier || undefined,
-        rule_id: accountRule ? Number(accountRule) : undefined,
+        instance_ids: instanceIDs(mercerInstances, accountInstance),
+        instance_kind: 'mercer_router',
       }),
-    enabled: tab === 'accounts' && claudeInstances.length > 0,
+    enabled: tab === 'accounts' && mercerInstances.length > 0,
     staleTime: 30_000,
   })
   const uploadQuery = useQuery({
@@ -204,22 +212,19 @@ export function DailyReports() {
   const exportCurrent = async () => {
     try {
       if (tab === 'suppliers') {
-        if (
-          supplierStart > supplierEnd ||
-          shiftDate(supplierStart, 31) < supplierEnd
-        ) {
-          toast.error('供货商数据最多查询 31 天')
-          return
-        }
-        await exportDailyReportSuppliers({
-          start_date: supplierStart,
-          end_date: supplierEnd,
-          instance_ids: instanceIDs(routerInstances, supplierInstance),
+        await exportDailyReportAccounts({
+          date: supplierDate,
+          instance_ids: instanceIDs(claudeInstances, supplierInstance),
+          instance_kind: 'claude_gateway',
+          supplier_code: supplier || undefined,
+          rule_id: supplierRule ? Number(supplierRule) : undefined,
+          mode: supplierMode,
         })
       } else if (tab === 'accounts') {
         await exportDailyReportAccounts({
           date: accountDate,
-          instance_ids: instanceIDs(claudeInstances, accountInstance),
+          instance_ids: instanceIDs(mercerInstances, accountInstance),
+          instance_kind: 'mercer_router',
         })
       } else {
         await exportDailyReportUploads({
@@ -273,33 +278,37 @@ export function DailyReports() {
         </Tabs>
         {tab === 'suppliers' && (
           <SupplierReport
-            startDate={supplierStart}
-            endDate={supplierEnd}
-            setStartDate={setSupplierStart}
-            setEndDate={setSupplierEnd}
+            date={supplierDate}
+            setDate={setSupplierDate}
             instance={supplierInstance}
-            setInstance={setSupplierInstance}
-            instances={routerInstances}
+            setInstance={(value) => {
+              setSupplierInstance(value)
+              setSupplier('')
+              setSupplierRule('')
+            }}
+            supplier={supplier}
+            setSupplier={(value) => {
+              setSupplier(value)
+              setSupplierRule('')
+            }}
+            rule={supplierRule}
+            setRule={setSupplierRule}
+            mode={supplierMode}
+            setMode={setSupplierMode}
+            instances={claudeInstances}
+            rules={supplierRules}
+            supplierNames={supplierOptions}
             query={supplierQuery}
-            detail={supplierDetail}
-            setDetail={setSupplierDetail}
           />
         )}
         {tab === 'accounts' && (
           <AccountReport
+            title='MercerRouter 每日账户数据'
             date={accountDate}
             setDate={setAccountDate}
             instance={accountInstance}
             setInstance={setAccountInstance}
-            supplier={accountSupplier}
-            setSupplier={setAccountSupplier}
-            rule={accountRule}
-            setRule={setAccountRule}
-            mode={accountMode}
-            setMode={setAccountMode}
-            instances={claudeInstances}
-            rules={accountRules}
-            supplierNames={supplierNames}
+            instances={mercerInstances}
             query={accountQuery}
           />
         )}
@@ -347,161 +356,6 @@ function DateRangeFields(props: {
 }
 
 function SupplierReport(props: {
-  startDate: string
-  endDate: string
-  setStartDate: (value: string) => void
-  setEndDate: (value: string) => void
-  instance: string
-  setInstance: (value: string) => void
-  instances: ManagedInstance[]
-  query: ReportQuery<SupplierBillsOverview>
-  detail: SupplierBill | null
-  setDetail: (value: SupplierBill | null) => void
-}) {
-  const data = props.query.data?.data as
-    | Awaited<ReturnType<typeof getDailyReportSupplierBills>>['data']
-    | undefined
-  const items = data?.items ?? []
-  return (
-    <>
-      <Card>
-        <CardContent className='grid gap-3 p-4 md:grid-cols-[1fr_1fr_220px_auto]'>
-          <DateRangeFields {...props} />
-          <NativeSelect
-            value={props.instance}
-            onChange={(event) => props.setInstance(event.target.value)}
-          >
-            <NativeSelectOption value=''>全部 Router 实例</NativeSelectOption>
-            {props.instances.map((item) => (
-              <NativeSelectOption key={item.id} value={String(item.id)}>
-                {item.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <div className='text-muted-foreground self-center text-sm'>
-            北京时间 · 最多 31 天
-          </div>
-        </CardContent>
-      </Card>
-      {props.query.isError && (
-        <ErrorNotice message={queryErrorMessage(props.query.error)} />
-      )}
-      <div className='grid gap-3 sm:grid-cols-3'>
-        <MetricCard label='账单数' value={data?.bill_count ?? 0} />
-        <MetricCard
-          label='应付金额'
-          value={formatNumber(data?.total_payable ?? 0)}
-        />
-        <MetricCard
-          label='总请求次数'
-          value={formatNumber(data?.total_requests ?? 0)}
-        />
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>供应商账单</CardTitle>
-        </CardHeader>
-        <CardContent className='p-0'>
-          <div className='overflow-x-auto'>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>供应商</TableHead>
-                  <TableHead>账单日期</TableHead>
-                  <TableHead>请求数</TableHead>
-                  <TableHead>输入 Token</TableHead>
-                  <TableHead>输出 Token</TableHead>
-                  <TableHead>缓存 Token</TableHead>
-                  <TableHead>原价</TableHead>
-                  <TableHead>应付</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.length === 0 ? (
-                  <EmptyRow colSpan={10} />
-                ) : (
-                  items.map((item) => (
-                    <TableRow
-                      key={`${item.instance_id}-${item.supplier_code}-${item.bill_date}`}
-                    >
-                      <TableCell>
-                        {item.supplier_name || item.supplier_code}
-                      </TableCell>
-                      <TableCell>{item.bill_date}</TableCell>
-                      <TableCell>{formatNumber(item.requests)}</TableCell>
-                      <TableCell>{formatNumber(item.input_tokens)}</TableCell>
-                      <TableCell>{formatNumber(item.output_tokens)}</TableCell>
-                      <TableCell>{formatNumber(item.cache_tokens)}</TableCell>
-                      <TableCell>
-                        {formatNumber(item.original_amount)} {item.currency}
-                      </TableCell>
-                      <TableCell>
-                        {formatNumber(item.payable_amount)} {item.currency}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            item.status === 'succeeded'
-                              ? 'secondary'
-                              : 'destructive'
-                          }
-                        >
-                          {item.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          onClick={() => props.setDetail(item)}
-                        >
-                          详情
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-      <Dialog
-        open={props.detail != null}
-        onOpenChange={(open) => !open && props.setDetail(null)}
-      >
-        <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-xl'>
-          <DialogHeader>
-            <DialogTitle>供应商账单详情</DialogTitle>
-            <DialogDescription>账单原始周期数据与采集快照</DialogDescription>
-          </DialogHeader>
-          {props.detail && (
-            <DetailGrid
-              values={{
-                供应商: props.detail.supplier_name,
-                账单日期: props.detail.bill_date,
-                时区: props.detail.timezone,
-                请求数: formatNumber(props.detail.requests),
-                输入Token: formatNumber(props.detail.input_tokens),
-                输出Token: formatNumber(props.detail.output_tokens),
-                缓存Token: formatNumber(props.detail.cache_tokens),
-                原价金额: formatNumber(props.detail.original_amount),
-                应付金额: formatNumber(props.detail.payable_amount),
-                Token明细: JSON.stringify(props.detail.token_details ?? {}),
-                快照时间: formatTimestamp(props.detail.observed_at),
-                状态: props.detail.status,
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function AccountReport(props: {
   date: string
   setDate: (value: string) => void
   instance: string
@@ -517,15 +371,37 @@ function AccountReport(props: {
   supplierNames: [string, string][]
   query: ReportQuery<DailyReportOverview>
 }) {
+  return (
+    <AccountReport title='Claude Gateway 供货商数据' {...props} showFilters />
+  )
+}
+
+function AccountReport(props: {
+  title: string
+  date: string
+  setDate: (value: string) => void
+  instance: string
+  setInstance: (value: string) => void
+  supplier?: string
+  setSupplier?: (value: string) => void
+  rule?: string
+  setRule?: (value: string) => void
+  mode?: 'full' | 'filtered'
+  setMode?: (value: 'full' | 'filtered') => void
+  instances: ManagedInstance[]
+  rules?: DailyReportRule[]
+  supplierNames?: [string, string][]
+  showFilters?: boolean
+  query: ReportQuery<DailyReportOverview>
+}) {
+  const showFilters = props.showFilters === true
+  const mode = props.mode ?? 'full'
   const data = props.query.data?.data as DailyReportOverview | undefined
   const rows = data?.items ?? []
   const totals = rows.reduce(
     (result, row) => {
-      const metric = props.mode === 'filtered' ? row.filtered : row.full
-      if (
-        props.mode === 'full' &&
-        result.instances.has(row.snapshot.instance_id)
-      ) {
+      const metric = mode === 'filtered' ? row.filtered : row.full
+      if (mode === 'full' && result.instances.has(row.snapshot.instance_id)) {
         result.accounts = Math.max(result.accounts, row.snapshot.account_count)
         return result
       }
@@ -533,6 +409,7 @@ function AccountReport(props: {
       result.requests += metric.requests
       result.tokens += metric.total_tokens
       result.cost += metric.cost
+      result.costAvailable = result.costAvailable && Boolean(metric.currency)
       result.accounts += row.snapshot.account_count
       return result
     },
@@ -540,6 +417,7 @@ function AccountReport(props: {
       requests: 0,
       tokens: 0,
       cost: 0,
+      costAvailable: true,
       accounts: 0,
       instances: new Set<number>(),
     }
@@ -547,7 +425,13 @@ function AccountReport(props: {
   return (
     <>
       <Card>
-        <CardContent className='grid gap-3 p-4 md:grid-cols-[180px_220px_220px_220px_1fr]'>
+        <CardContent
+          className={
+            showFilters
+              ? 'grid gap-3 p-4 md:grid-cols-[180px_220px_220px_220px_1fr]'
+              : 'grid gap-3 p-4 md:grid-cols-[180px_280px_1fr]'
+          }
+        >
           <Input
             type='date'
             value={props.date}
@@ -558,12 +442,12 @@ function AccountReport(props: {
             value={props.instance}
             onChange={(event) => {
               props.setInstance(event.target.value)
-              props.setSupplier('')
-              props.setRule('')
+              props.setSupplier?.('')
+              props.setRule?.('')
             }}
           >
             <NativeSelectOption value=''>
-              全部 Claude Gateway
+              {showFilters ? '全部 Claude Gateway' : '全部 MercerRouter'}
             </NativeSelectOption>
             {props.instances.map((item) => (
               <NativeSelectOption key={item.id} value={String(item.id)}>
@@ -571,47 +455,57 @@ function AccountReport(props: {
               </NativeSelectOption>
             ))}
           </NativeSelect>
-          <NativeSelect
-            value={props.supplier}
-            onChange={(event) => {
-              props.setSupplier(event.target.value)
-              props.setRule('')
-            }}
-          >
-            <NativeSelectOption value=''>全部供应商</NativeSelectOption>
-            {props.supplierNames.map(([code, name]) => (
-              <NativeSelectOption key={code} value={code}>
-                {name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
-            value={props.rule}
-            onChange={(event) => props.setRule(event.target.value)}
-          >
-            <NativeSelectOption value=''>全部已启用规则</NativeSelectOption>
-            {props.rules.map((rule) => (
-              <NativeSelectOption key={rule.id} value={String(rule.id)}>
-                {rule.supplier_name} · {rule.source_template_name || '手动规则'}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <div className='bg-muted flex items-center gap-1 rounded-md p-1'>
-            <Button
-              size='sm'
-              variant={props.mode === 'full' ? 'secondary' : 'ghost'}
-              onClick={() => props.setMode('full')}
-            >
-              全部消耗
-            </Button>
-            <Button
-              size='sm'
-              variant={props.mode === 'filtered' ? 'secondary' : 'ghost'}
-              onClick={() => props.setMode('filtered')}
-            >
-              筛选消耗
-            </Button>
-          </div>
+          {showFilters && (
+            <>
+              <NativeSelect
+                value={props.supplier ?? ''}
+                onChange={(event) => {
+                  props.setSupplier?.(event.target.value)
+                  props.setRule?.('')
+                }}
+              >
+                <NativeSelectOption value=''>全部供应商</NativeSelectOption>
+                {(props.supplierNames ?? []).map(([code, name]) => (
+                  <NativeSelectOption key={code} value={code}>
+                    {name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <NativeSelect
+                value={props.rule ?? ''}
+                onChange={(event) => props.setRule?.(event.target.value)}
+              >
+                <NativeSelectOption value=''>全部已启用规则</NativeSelectOption>
+                {(props.rules ?? []).map((rule) => (
+                  <NativeSelectOption key={rule.id} value={String(rule.id)}>
+                    {rule.supplier_name} ·{' '}
+                    {rule.source_template_name || '手动规则'}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <div className='bg-muted flex items-center gap-1 rounded-md p-1'>
+                <Button
+                  size='sm'
+                  variant={mode === 'full' ? 'secondary' : 'ghost'}
+                  onClick={() => props.setMode?.('full')}
+                >
+                  全部消耗
+                </Button>
+                <Button
+                  size='sm'
+                  variant={mode === 'filtered' ? 'secondary' : 'ghost'}
+                  onClick={() => props.setMode?.('filtered')}
+                >
+                  筛选消耗
+                </Button>
+              </div>
+            </>
+          )}
+          {!showFilters && (
+            <div className='text-muted-foreground self-center text-sm'>
+              北京时间自然日 · MercerRouter 聚合用量
+            </div>
+          )}
         </CardContent>
       </Card>
       {props.query.isError && (
@@ -620,12 +514,15 @@ function AccountReport(props: {
       <div className='grid gap-3 sm:grid-cols-4'>
         <MetricCard label='请求数' value={formatNumber(totals.requests)} />
         <MetricCard label='总 Token' value={formatNumber(totals.tokens)} />
-        <MetricCard label='费用' value={formatNumber(totals.cost)} />
+        <MetricCard
+          label='费用'
+          value={totals.costAvailable ? formatNumber(totals.cost) : '未提供'}
+        />
         <MetricCard label='账号数' value={formatNumber(totals.accounts)} />
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>每日账户消耗</CardTitle>
+          <CardTitle>{props.title}</CardTitle>
         </CardHeader>
         <CardContent className='p-0'>
           <div className='overflow-x-auto'>
@@ -647,8 +544,7 @@ function AccountReport(props: {
                   <EmptyRow colSpan={8} />
                 ) : (
                   rows.map((row) => {
-                    const metric =
-                      props.mode === 'filtered' ? row.filtered : row.full
+                    const metric = mode === 'filtered' ? row.filtered : row.full
                     return (
                       <TableRow
                         key={`${row.snapshot.instance_id}-${row.snapshot.supplier_code}`}
@@ -668,7 +564,7 @@ function AccountReport(props: {
                           {formatNumber(metric.total_tokens)}
                         </TableCell>
                         <TableCell>
-                          {formatNumber(metric.cost)} {metric.currency}
+                          {formatCost(metric.cost, metric.currency)}
                         </TableCell>
                         <TableCell>{row.snapshot.account_count}</TableCell>
                         <TableCell>{row.snapshot.active_count}</TableCell>
@@ -904,13 +800,4 @@ function EmptyRow({ colSpan }: { colSpan: number }) {
       </TableCell>
     </TableRow>
   )
-}
-
-function formatTimestamp(value: number) {
-  if (!value) return '-'
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(new Date(value * 1000))
 }

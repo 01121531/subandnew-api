@@ -154,13 +154,16 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 	if err != nil {
 		return Metrics{}, Metrics{}, 0, 0, true, "usage_summary_failed", err
 	}
-	full := Metrics{Currency: "USD"}
+	full := Metrics{}
 	if summary.Requests.Value != nil {
 		full.Requests = *summary.Requests.Value
 	}
 	if summary.Cost.Value != nil {
 		full.Cost = *summary.Cost.Value
 		full.Currency = summary.Cost.Unit
+		if full.Currency == "" {
+			full.Currency = "USD"
+		}
 	}
 	if summary.Tokens.Value != nil {
 		full.TotalTokens = *summary.Tokens.Value
