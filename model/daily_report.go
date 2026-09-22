@@ -14,17 +14,19 @@ const (
 )
 
 type DailyReportRule struct {
-	ID           int64  `json:"id" gorm:"primaryKey"`
-	InstanceID   int64  `json:"instance_id" gorm:"not null;uniqueIndex:uidx_daily_report_rule_instance_supplier"`
-	SupplierCode string `json:"supplier_code" gorm:"type:varchar(128);not null;uniqueIndex:uidx_daily_report_rule_instance_supplier"`
-	SupplierName string `json:"supplier_name" gorm:"type:varchar(256);not null"`
-	FilterJSON   string `json:"-" gorm:"type:text;not null"`
-	Enabled      bool   `json:"enabled" gorm:"not null;default:true;index"`
-	CreatedBy    int    `json:"created_by" gorm:"not null;index"`
-	UpdatedBy    int    `json:"updated_by" gorm:"not null"`
-	Version      int64  `json:"version" gorm:"not null;default:1"`
-	CreatedAt    int64  `json:"created_at" gorm:"not null;index"`
-	UpdatedAt    int64  `json:"updated_at" gorm:"not null;index"`
+	ID                 int64  `json:"id" gorm:"primaryKey"`
+	InstanceID         int64  `json:"instance_id" gorm:"not null;uniqueIndex:uidx_daily_report_rule_instance_supplier"`
+	SupplierCode       string `json:"supplier_code" gorm:"type:varchar(128);not null;uniqueIndex:uidx_daily_report_rule_instance_supplier"`
+	SupplierName       string `json:"supplier_name" gorm:"type:varchar(256);not null"`
+	FilterJSON         string `json:"-" gorm:"type:text;not null"`
+	SourceTemplateID   int64  `json:"source_template_id" gorm:"not null;default:0;index"`
+	SourceTemplateName string `json:"source_template_name" gorm:"type:varchar(64);not null;default:''"`
+	Enabled            bool   `json:"enabled" gorm:"not null;default:true;index"`
+	CreatedBy          int    `json:"created_by" gorm:"not null;index"`
+	UpdatedBy          int    `json:"updated_by" gorm:"not null"`
+	Version            int64  `json:"version" gorm:"not null;default:1"`
+	CreatedAt          int64  `json:"created_at" gorm:"not null;index"`
+	UpdatedAt          int64  `json:"updated_at" gorm:"not null;index"`
 }
 
 func (DailyReportRule) TableName() string { return "daily_report_rules" }

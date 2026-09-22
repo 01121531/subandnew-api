@@ -1612,6 +1612,13 @@ function FullManagedAccounts() {
               }
               options={filterOptions}
               allowedFields={ACCOUNT_FILTER_FIELDS.filter(access.allows)}
+              instanceId={selectedInstance?.id}
+              isClaudeGateway={family === 'claude_gateway'}
+              canPushDailyReport={hasPermission(
+                user,
+                ADMIN_PERMISSION_RESOURCES.DAILY_REPORT,
+                ADMIN_PERMISSION_ACTIONS.MANAGE
+              )}
             />
             {content}
           </div>

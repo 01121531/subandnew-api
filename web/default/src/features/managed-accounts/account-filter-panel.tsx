@@ -17,8 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Filter, ListPlus, Plus, Save, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { isAxiosError } from 'axios'
+import {
+  ChevronDown,
+  Filter,
+  ListPlus,
+  Plus,
+  Save,
+  Send,
+  Trash2,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -58,6 +67,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  listDailyReportSupplierOptions,
+  pushDailyReportFilterTemplate,
+} from '@/features/daily-reports/api'
 import { cn } from '@/lib/utils'
 
 import {
@@ -182,6 +195,9 @@ export function AccountFilterPanel(props: {
   options: Partial<Record<AccountFilterField, MultiSelectOption[]>>
   templatesEnabled?: boolean
   allowedFields?: AccountFilterField[]
+  instanceId?: number
+  isClaudeGateway?: boolean
+  canPushDailyReport?: boolean
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -194,10 +210,22 @@ export function AccountFilterPanel(props: {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [bulkRuleID, setBulkRuleID] = useState<string | null>(null)
   const [bulkValues, setBulkValues] = useState('')
+  const [pushOpen, setPushOpen] = useState(false)
+  const [replaceOpen, setReplaceOpen] = useState(false)
+  const [pushSupplierCode, setPushSupplierCode] = useState('')
   const templatesQuery = useQuery({
     queryKey: TEMPLATE_QUERY_KEY,
     queryFn: listAccountFilterTemplates,
     enabled: props.templatesEnabled !== false,
+  })
+  const supplierOptionsQuery = useQuery({
+    queryKey: ['daily-report-supplier-options', props.instanceId],
+    queryFn: () => listDailyReportSupplierOptions(props.instanceId ?? 0),
+    enabled:
+      Boolean(props.canPushDailyReport) &&
+      Boolean(props.isClaudeGateway) &&
+      Boolean(props.instanceId),
+    staleTime: 60_000,
   })
   const templates = (templatesQuery.data?.data ?? []).filter(
     (template) =>
@@ -252,6 +280,41 @@ export function AccountFilterPanel(props: {
     },
     onError: () => toast.error(t('Could not delete filter template')),
   })
+  const pushMutation = useMutation({
+    mutationFn: (replaceExisting: boolean) =>
+      pushDailyReportFilterTemplate({
+        instance_id: props.instanceId ?? 0,
+        supplier_code: pushSupplierCode,
+        template_id: selectedTemplate?.id ?? 0,
+        enabled: true,
+        replace_existing: replaceExisting,
+      }),
+    onSuccess: async () => {
+      setPushOpen(false)
+      setReplaceOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ['daily-report-rules'] })
+      toast.success('筛选模板已推入日报')
+    },
+    onError: (error) => {
+      if (isAxiosError(error) && error.response?.status === 409) {
+        setReplaceOpen(true)
+        return
+      }
+      toast.error('推入日报失败')
+    },
+  })
+
+  useEffect(() => {
+    const first = supplierOptionsQuery.data?.data?.items?.[0]
+    if (
+      first &&
+      !supplierOptionsQuery.data?.data?.items.some(
+        (item) => item.code === pushSupplierCode
+      )
+    ) {
+      setPushSupplierCode(first.code)
+    }
+  }, [pushSupplierCode, supplierOptionsQuery.data])
 
   const updateRule = (id: string, patch: Partial<AccountFilterRule>) => {
     props.onChange({
@@ -362,6 +425,19 @@ export function AccountFilterPanel(props: {
                 </Button>
                 {selectedTemplate && (
                   <>
+                    {props.isClaudeGateway &&
+                      props.canPushDailyReport &&
+                      props.instanceId && (
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          className='min-h-11 @xl/account-filter:min-h-9'
+                          onClick={() => setPushOpen(true)}
+                        >
+                          <Send />
+                          推入日报
+                        </Button>
+                      )}
                     <Button
                       variant='outline'
                       size='sm'
@@ -754,6 +830,66 @@ export function AccountFilterPanel(props: {
               onClick={() => deleteMutation.mutate()}
             >
               {t('Delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={pushOpen} onOpenChange={setPushOpen}>
+        <DialogContent className='sm:max-w-md'>
+          <DialogHeader>
+            <DialogTitle>推入日报</DialogTitle>
+            <DialogDescription>
+              当前模板会保存为规则快照，后续修改或删除模板不会改变已推入规则。
+            </DialogDescription>
+          </DialogHeader>
+          <div className='space-y-2'>
+            <Label>供应商</Label>
+            <Select
+              value={pushSupplierCode}
+              onValueChange={(value) => setPushSupplierCode(value ?? '')}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder='选择供应商' />
+              </SelectTrigger>
+              <SelectContent>
+                {(supplierOptionsQuery.data?.data?.items ?? []).map((item) => (
+                  <SelectItem key={item.code} value={item.code}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setPushOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button
+              disabled={!pushSupplierCode || pushMutation.isPending}
+              onClick={() => pushMutation.mutate(false)}
+            >
+              {pushMutation.isPending ? '保存中...' : '确认推入'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={replaceOpen} onOpenChange={setReplaceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>覆盖已有日报规则？</AlertDialogTitle>
+            <AlertDialogDescription>
+              同一实例和供应商已有规则。确认后只影响后续统计，历史日报快照不会修改。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pushMutation.isPending}
+              onClick={() => pushMutation.mutate(true)}
+            >
+              确认覆盖
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

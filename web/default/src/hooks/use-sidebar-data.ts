@@ -120,7 +120,26 @@ export function useSidebarData(): SidebarData {
               ]
             : []),
           ...(canViewDailyReports
-            ? [{ title: '日报', url: '/daily-reports', icon: FileClock }]
+            ? [
+                {
+                  title: '日报',
+                  icon: FileClock,
+                  items: [
+                    {
+                      title: '供货商数据',
+                      url: '/daily-reports?tab=suppliers',
+                    },
+                    {
+                      title: '每日账户数据',
+                      url: '/daily-reports?tab=accounts',
+                    },
+                    {
+                      title: '上传账户数量',
+                      url: '/daily-reports?tab=uploads',
+                    },
+                  ],
+                },
+              ]
             : []),
           ...(canViewBillingAlerts
             ? [

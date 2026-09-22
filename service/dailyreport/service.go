@@ -87,7 +87,7 @@ func ListRules(instanceID int64) ([]map[string]any, error) {
 	for _, rule := range rules {
 		var filter any
 		_ = json.Unmarshal([]byte(rule.FilterJSON), &filter)
-		items = append(items, map[string]any{"id": rule.ID, "instance_id": rule.InstanceID, "supplier_code": rule.SupplierCode, "supplier_name": rule.SupplierName, "filter": filter, "enabled": rule.Enabled, "version": rule.Version, "created_at": rule.CreatedAt, "updated_at": rule.UpdatedAt})
+		items = append(items, map[string]any{"id": rule.ID, "instance_id": rule.InstanceID, "supplier_code": rule.SupplierCode, "supplier_name": rule.SupplierName, "filter": filter, "source_template_id": rule.SourceTemplateID, "source_template_name": rule.SourceTemplateName, "enabled": rule.Enabled, "version": rule.Version, "created_at": rule.CreatedAt, "updated_at": rule.UpdatedAt})
 	}
 	return items, nil
 }
@@ -104,7 +104,7 @@ func ListRulesForInstances(instanceIDs []int64) ([]map[string]any, error) {
 	for _, rule := range rules {
 		var filter any
 		_ = json.Unmarshal([]byte(rule.FilterJSON), &filter)
-		items = append(items, map[string]any{"id": rule.ID, "instance_id": rule.InstanceID, "supplier_code": rule.SupplierCode, "supplier_name": rule.SupplierName, "filter": filter, "enabled": rule.Enabled, "version": rule.Version, "created_at": rule.CreatedAt, "updated_at": rule.UpdatedAt})
+		items = append(items, map[string]any{"id": rule.ID, "instance_id": rule.InstanceID, "supplier_code": rule.SupplierCode, "supplier_name": rule.SupplierName, "filter": filter, "source_template_id": rule.SourceTemplateID, "source_template_name": rule.SourceTemplateName, "enabled": rule.Enabled, "version": rule.Version, "created_at": rule.CreatedAt, "updated_at": rule.UpdatedAt})
 	}
 	return items, nil
 }
@@ -138,7 +138,7 @@ func SaveRule(input model.DailyReportRule) (*model.DailyReportRule, error) {
 		if input.ID > 0 && input.Version > 0 && existing.Version != input.Version {
 			return gorm.ErrInvalidData
 		}
-		updates := map[string]any{"supplier_name": input.SupplierName, "filter_json": input.FilterJSON, "enabled": input.Enabled, "updated_by": input.UpdatedBy, "updated_at": now, "version": gorm.Expr("version + 1")}
+		updates := map[string]any{"supplier_name": input.SupplierName, "filter_json": input.FilterJSON, "source_template_id": input.SourceTemplateID, "source_template_name": input.SourceTemplateName, "enabled": input.Enabled, "updated_by": input.UpdatedBy, "updated_at": now, "version": gorm.Expr("version + 1")}
 		if err := tx.Model(&existing).Updates(updates).Error; err != nil {
 			return err
 		}
@@ -167,6 +167,7 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 	}
 	filtered := full
 	var accountCount int64
+	query := managedaccount.Query{InstanceIDs: []int64{instanceID}, Dataset: managedaccount.DatasetOutput, PresetDays: 1, Page: 1, PageSize: 10000, AllowLargePage: true}
 	if rule != nil && strings.TrimSpace(rule.FilterJSON) != "" && rule.FilterJSON != "{}" {
 		var raw struct {
 			MatchMode    string                              `json:"match_mode"`
@@ -175,20 +176,23 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 			ExcludeTerms []string                            `json:"exclude_terms"`
 		}
 		if err := json.Unmarshal([]byte(rule.FilterJSON), &raw); err == nil {
-			result, qerr := managedaccount.Execute(ctx, managedaccount.Query{InstanceIDs: []int64{instanceID}, Dataset: managedaccount.DatasetOutput, PresetDays: 1, MatchMode: raw.MatchMode, Rules: raw.Rules, IncludeTerms: raw.IncludeTerms, ExcludeTerms: raw.ExcludeTerms, Page: 1, PageSize: 10000, AllowLargePage: true})
-			if qerr == nil {
-				accountCount = int64(result.Total)
-				filtered = Metrics{Currency: full.Currency}
-				for _, item := range result.Items {
-					if item.Requests != nil {
-						filtered.Requests += *item.Requests
-					}
-					if item.Tokens != nil {
-						filtered.TotalTokens += *item.Tokens
-					}
-					if item.Amount != nil {
-						filtered.Cost += *item.Amount
-					}
+			query.MatchMode, query.Rules = raw.MatchMode, raw.Rules
+			query.IncludeTerms, query.ExcludeTerms = raw.IncludeTerms, raw.ExcludeTerms
+		}
+	}
+	if result, qerr := managedaccount.Execute(ctx, query); qerr == nil {
+		accountCount = int64(result.Total)
+		if rule != nil && strings.TrimSpace(rule.FilterJSON) != "" && rule.FilterJSON != "{}" {
+			filtered = Metrics{Currency: full.Currency}
+			for _, item := range result.Items {
+				if item.Requests != nil {
+					filtered.Requests += *item.Requests
+				}
+				if item.Tokens != nil {
+					filtered.TotalTokens += *item.Tokens
+				}
+				if item.Amount != nil {
+					filtered.Cost += *item.Amount
 				}
 			}
 		}
