@@ -79,6 +79,8 @@ const defaultValues: ManagedInstanceFormValues = {
   tls_verify: true,
   request_timeout_seconds: 10,
   check_interval_seconds: 60,
+  collection_interval_seconds: 900,
+  collection_stall_timeout_seconds: 600,
   alert_failure_threshold: 0,
   labels: '',
   auth_type: 'account_password',
@@ -169,6 +171,12 @@ function toInput(
     tls_verify: autoDetect ? true : values.tls_verify,
     request_timeout_seconds: autoDetect ? 10 : values.request_timeout_seconds,
     check_interval_seconds: autoDetect ? 60 : values.check_interval_seconds,
+    collection_interval_seconds: autoDetect
+      ? 900
+      : values.collection_interval_seconds,
+    collection_stall_timeout_seconds: autoDetect
+      ? 600
+      : values.collection_stall_timeout_seconds,
     alert_failure_threshold: autoDetect ? 0 : values.alert_failure_threshold,
   }
   if (values.secret.trim()) {
@@ -216,6 +224,10 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
       tls_verify: props.instance.tls_verify,
       request_timeout_seconds: props.instance.request_timeout_seconds,
       check_interval_seconds: props.instance.check_interval_seconds,
+      collection_interval_seconds:
+        props.instance.collection_interval_seconds || 900,
+      collection_stall_timeout_seconds:
+        props.instance.collection_stall_timeout_seconds || 600,
       alert_failure_threshold: props.instance.alert_failure_threshold,
       labels: labelsToText(props.instance.labels),
       auth_type: props.instance.credential?.auth_type || 'bearer_pat',
@@ -443,6 +455,65 @@ export function InstanceFormSheet(props: InstanceFormSheetProps) {
                             max={86400}
                             onChange={(event) =>
                               field.onChange(event.target.valueAsNumber)
+                            }
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='collection_interval_seconds'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Collection interval')}</FormLabel>
+                        <NativeSelect
+                          className='w-full'
+                          value={String(field.value)}
+                          onChange={(event) =>
+                            field.onChange(Number(event.target.value))
+                          }
+                        >
+                          <NativeSelectOption value='300'>
+                            {t('5 minutes')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='900'>
+                            {t('15 minutes')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='1800'>
+                            {t('30 minutes')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='3600'>
+                            {t('1 hour')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='21600'>
+                            {t('6 hours')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='86400'>
+                            {t('24 hours')}
+                          </NativeSelectOption>
+                        </NativeSelect>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='collection_stall_timeout_seconds'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('No-progress timeout (minutes)')}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={1}
+                            max={1440}
+                            value={Math.round(field.value / 60)}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value) * 60)
                             }
                           />
                         </FormControl>

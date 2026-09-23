@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,36 @@ import (
 	"github.com/01121531/subandnew-api/model"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInventoryProgressNeverMovesBackwards(t *testing.T) {
+	var progress [][2]int
+	ctx := withInventoryProgress(context.Background(), func(completed int, total int) {
+		progress = append(progress, [2]int{completed, total})
+	})
+
+	reportInventoryProgress(ctx, 1, 100)
+	reportInventoryProgress(ctx, 2, 50)
+	reportInventoryProgress(ctx, 1, 120)
+	reportInventoryProgress(ctx, 3, 120)
+
+	require.Equal(t, [][2]int{{1, 100}, {2, 100}, {2, 120}, {3, 120}}, progress)
+}
+
+func TestPersistObservationFailureKeepsLastSuccessfulPayload(t *testing.T) {
+	db := newManagedInstanceTestDB(t)
+	instance := createProbeInstance(t, "https://summary.example.com", model.ManagedInstanceKindNewAPI, CredentialInput{AuthType: "bearer_pat", Secret: "summary-secret"})
+	_, err := persistObservation(instance.Id, model.ManagedInstanceSnapshotTypeSummary, "", 100, map[string]any{"requests": 7}, nil)
+	require.NoError(t, err)
+	_, err = persistObservation(instance.Id, model.ManagedInstanceSnapshotTypeSummary, "", 200, nil, errors.New("upstream unavailable"))
+	require.NoError(t, err)
+
+	var snapshot model.ManagedInstanceSnapshot
+	require.NoError(t, db.Where("instance_id = ? AND snapshot_type = ?", instance.Id, model.ManagedInstanceSnapshotTypeSummary).First(&snapshot).Error)
+	require.Equal(t, model.ManagedInstanceCollectionFailed, snapshot.CollectionStatus)
+	require.Equal(t, int64(100), snapshot.ObservedAt)
+	require.JSONEq(t, `{"requests":7}`, snapshot.Payload)
+	require.NotZero(t, snapshot.UpdatedAt)
+}
 
 func TestCollectInventoryNormalizesAndRedactsRemoteRows(t *testing.T) {
 	db := newManagedInstanceTestDB(t)

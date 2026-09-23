@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -24,9 +25,7 @@ import (
 
 const (
 	managedAccountSyncInterval      = 15 * time.Minute
-	managedAccountRefreshCooldown   = managedAccountSyncInterval
 	managedAccountFailureCooldown   = time.Minute
-	managedAccountSyncTimeout       = 10 * time.Minute
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
@@ -34,6 +33,105 @@ const (
 	managedAccountStandardTaskMode  = "standard"
 	managedAccountCustomTaskMode    = "custom"
 )
+
+type managedAccountCollectionWatchdog struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	activity chan struct{}
+	stalled  atomic.Bool
+	stop     chan struct{}
+	stopOnce sync.Once
+}
+
+type managedAccountCollectionWatchdogKey struct{}
+
+func newManagedAccountCollectionWatchdog(parent context.Context, timeout time.Duration) *managedAccountCollectionWatchdog {
+	if timeout <= 0 {
+		timeout = time.Duration(model.ManagedInstanceDefaultCollectionStallTimeoutSeconds) * time.Second
+	}
+	ctx, cancel := context.WithCancel(parent)
+	watchdog := &managedAccountCollectionWatchdog{
+		ctx: ctx, cancel: cancel, activity: make(chan struct{}, 1), stop: make(chan struct{}),
+	}
+	watchdog.ctx = context.WithValue(ctx, managedAccountCollectionWatchdogKey{}, watchdog)
+	go watchdog.run(timeout)
+	watchdog.Signal()
+	return watchdog
+}
+
+func (watchdog *managedAccountCollectionWatchdog) run(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	reset := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(timeout)
+	}
+	for {
+		select {
+		case <-watchdog.activity:
+			reset()
+		case <-timer.C:
+			watchdog.stalled.Store(true)
+			watchdog.cancel()
+			return
+		case <-watchdog.stop:
+			return
+		case <-watchdog.ctx.Done():
+			return
+		}
+	}
+}
+
+func (watchdog *managedAccountCollectionWatchdog) Signal() {
+	if watchdog == nil {
+		return
+	}
+	select {
+	case watchdog.activity <- struct{}{}:
+	default:
+	}
+}
+
+func (watchdog *managedAccountCollectionWatchdog) Stop() {
+	if watchdog == nil {
+		return
+	}
+	watchdog.stopOnce.Do(func() {
+		close(watchdog.stop)
+		watchdog.cancel()
+	})
+}
+
+func (watchdog *managedAccountCollectionWatchdog) TimedOut() bool {
+	return watchdog != nil && watchdog.stalled.Load()
+}
+
+func managedInstanceCollectionInterval(instance *model.ManagedInstance) time.Duration {
+	if instance == nil || instance.CollectionIntervalSeconds <= 0 {
+		return time.Duration(model.ManagedInstanceDefaultCollectionIntervalSeconds) * time.Second
+	}
+	return time.Duration(instance.CollectionIntervalSeconds) * time.Second
+}
+
+func managedInstanceCollectionFailureCooldown(instance *model.ManagedInstance) time.Duration {
+	interval := managedInstanceCollectionInterval(instance) / 5
+	if interval < managedAccountFailureCooldown {
+		return managedAccountFailureCooldown
+	}
+	return interval
+}
+
+func managedInstanceCollectionStallTimeout(instance *model.ManagedInstance) time.Duration {
+	if instance == nil || instance.CollectionStallTimeoutSeconds <= 0 {
+		return time.Duration(model.ManagedInstanceDefaultCollectionStallTimeoutSeconds) * time.Second
+	}
+	return time.Duration(instance.CollectionStallTimeoutSeconds) * time.Second
+}
 
 var managedAccountPresetDays = [...]int{1, 7, 14, 30}
 
@@ -183,11 +281,11 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	if accountRange.PresetDays == 0 {
 		view.RefreshRecommended = output == nil || output.ObservedAt <= 0
 	} else {
-		view.RefreshRecommended = managedAccountSectionNeedsRefresh(inventory, now)
+		view.RefreshRecommended = managedAccountSectionNeedsRefreshForInstance(inventory, now, instance.ManagedInstance)
 		if instance.Kind == model.ManagedInstanceKindClaudeGateway && managedAccountVendorRefreshDue(inventory, now) {
 			view.RefreshRecommended = true
 		}
-		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefresh(output, now)
+		view.RefreshRecommended = view.RefreshRecommended || managedAccountSectionNeedsRefreshForInstance(output, now, instance.ManagedInstance)
 	}
 	return view, nil
 }
@@ -344,23 +442,48 @@ func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange Ma
 
 func managedAccountRefreshDue(instanceID int64, accountRange ManagedAccountRange) bool {
 	now := common.GetTimestamp()
+	instance, err := managedinstance.Get(instanceID)
+	if err != nil {
+		return true
+	}
 	inventory, _ := findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)
-	if managedAccountSectionNeedsRefresh(inventory, now) {
+	if managedAccountSectionNeedsRefreshForInstance(inventory, now, instance.ManagedInstance) {
 		return true
 	}
 	output, _ := findManagedAccountSnapshot(instanceID, model.ManagedAccountSnapshotKindOutput, accountRange.RangeKey)
-	return managedAccountSectionNeedsRefresh(output, now)
+	return managedAccountSectionNeedsRefreshForInstance(output, now, instance.ManagedInstance)
 }
 
 func managedAccountSectionNeedsRefresh(snapshot *model.ManagedAccountSnapshot, now int64) bool {
 	if snapshot == nil || snapshot.LastAttemptAt == 0 {
 		return true
 	}
-	cooldown := managedAccountRefreshCooldown
+	cooldown := managedAccountSyncInterval
 	if snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed {
 		cooldown = managedAccountFailureCooldown
 	}
 	return now-snapshot.LastAttemptAt >= int64(cooldown/time.Second)
+}
+
+func managedAccountSectionNeedsRefreshForInstance(snapshot *model.ManagedAccountSnapshot, now int64, instance *model.ManagedInstance) bool {
+	return managedAccountSectionNeedsRefreshWithCooldown(snapshot, now, managedInstanceCollectionInterval(instance))
+}
+
+func managedAccountSectionNeedsRefreshWithCooldown(snapshot *model.ManagedAccountSnapshot, now int64, cooldown time.Duration) bool {
+	if snapshot == nil || snapshot.LastAttemptAt == 0 {
+		return true
+	}
+	if snapshot.LastAttemptStatus == model.ManagedInstanceCollectionFailed {
+		cooldown = maxManagedAccountDuration(cooldown/5, managedAccountFailureCooldown)
+	}
+	return now-snapshot.LastAttemptAt >= int64(cooldown/time.Second)
+}
+
+func maxManagedAccountDuration(left, right time.Duration) time.Duration {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func managedAccountVendorRefreshDue(snapshot *model.ManagedAccountSnapshot, now int64) bool {
@@ -660,22 +783,24 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_account_sync_payload")
 		return
 	}
-	workCtx, cancel := context.WithTimeout(ctx, managedAccountSyncTimeout)
-	defer cancel()
-	release, err := acquireManagedAccountSlots(workCtx, payload.InstanceID)
+	instance, err := managedinstance.Get(payload.InstanceID)
+	if err != nil {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, managedAccountErrorCode(err))
+		return
+	}
+	release, err := acquireManagedAccountSlots(ctx, payload.InstanceID)
 	if err != nil {
 		if ctx.Err() != nil && model.RequeueSystemTask(task.TaskID, runnerID) == nil {
 			notifySystemTaskRunner()
 			return
 		}
-		errorCode := "account_sync_cancelled"
-		if workCtx.Err() != nil {
-			errorCode = "account_collection_timeout"
-		}
-		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode)
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "account_sync_cancelled")
 		return
 	}
 	defer release()
+	watchdog := newManagedAccountCollectionWatchdog(ctx, managedInstanceCollectionStallTimeout(instance.ManagedInstance))
+	defer watchdog.Stop()
+	workCtx := watchdog.ctx
 	defer publishManagedAccountSnapshotEvent(payload.InstanceID)
 
 	results := map[string]any{}
@@ -684,6 +809,7 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = updateManagedAccountSyncProgress(task, runnerID, "inventory", 0, 5)
 		inventory, collectErr := collectManagedAccountObservation(workCtx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
 			return managedinstance.CollectInventoryWithProgress(workCtx, payload.InstanceID, "auto", "", func(completed int, total int) {
+				watchdog.Signal()
 				_ = updateManagedAccountInventoryProgress(task, runnerID, completed, total)
 			})
 		})
@@ -691,6 +817,10 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 			if model.RequeueSystemTask(task.TaskID, runnerID) == nil {
 				notifySystemTaskRunner()
 			}
+			return
+		}
+		if watchdog.TimedOut() {
+			_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "account_collection_stalled")
 			return
 		}
 		if err := saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindInventory, payload.Range, inventory, collectErr); err != nil {
@@ -708,10 +838,12 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 			}
 		} else {
 			_ = updateManagedAccountSyncProgress(task, runnerID, "output_1d", 1, 5)
+			watchdog.Signal()
 			failed = collectManagedAccountPresetOutputs(workCtx, task, runnerID, payload, results)
 		}
 	} else {
 		_ = updateManagedAccountSyncProgress(task, runnerID, "output_custom", 0, 1)
+		watchdog.Signal()
 		failed = collectManagedAccountCustomOutput(workCtx, task, runnerID, payload, results)
 	}
 	if ctx.Err() != nil {
@@ -720,14 +852,15 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		}
 		return
 	}
+	if watchdog.TimedOut() {
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, results, "account_collection_stalled")
+		return
+	}
 	status := model.SystemTaskStatusSucceeded
 	errorCode := ""
 	if failed {
 		status = model.SystemTaskStatusFailed
 		errorCode = "account_collection_failed"
-		if workCtx.Err() != nil {
-			errorCode = "account_collection_timeout"
-		}
 		_ = updateManagedAccountSyncProgress(task, runnerID, "failed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode))
 	} else if err := updateManagedAccountSyncProgress(task, runnerID, "completed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode)); err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("managed account progress update failed for %s: %v", task.TaskID, err))
@@ -783,6 +916,7 @@ func updateManagedAccountInventoryProgress(task *model.SystemTask, runnerID stri
 func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
 	failed := false
 	for index, days := range managedAccountPresetDays {
+		watchdogSignalFromContext(ctx)
 		step := index + 1
 		_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", step, 5)
 		accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
@@ -805,11 +939,13 @@ func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemT
 		if collectErr != nil || observation == nil || observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 			failed = true
 		}
+		watchdogSignalFromContext(ctx)
 	}
 	return failed
 }
 
 func collectManagedAccountCustomOutput(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
+	watchdogSignalFromContext(ctx)
 	accountRange := payload.Range
 	observation, collectErr := collectManagedAccountObservation(ctx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
 		return managedinstance.CollectAccountOutput(ctx, payload.InstanceID, managedinstance.TimeWindow{Start: accountRange.Start, End: accountRange.End})
@@ -822,7 +958,14 @@ func collectManagedAccountCustomOutput(ctx context.Context, task *model.SystemTa
 	}
 	results[accountRange.RangeKey] = managedAccountTaskResult(observation, collectErr)
 	_ = updateManagedAccountSyncProgress(task, runnerID, "output_custom", 1, 1)
+	watchdogSignalFromContext(ctx)
 	return collectErr != nil || observation == nil || observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded
+}
+
+func watchdogSignalFromContext(ctx context.Context) {
+	if watchdog, ok := ctx.Value(managedAccountCollectionWatchdogKey{}).(*managedAccountCollectionWatchdog); ok {
+		watchdog.Signal()
+	}
 }
 
 func managedAccountTaskResult(observation *managedinstance.ObservationView, collectionErr error) map[string]any {
@@ -960,9 +1103,9 @@ func managedAccountDailyArchiveSyncDue(instance *model.ManagedInstance, latest m
 		if state.AttemptedAt == 0 || state.AttemptedAt < boundaryAt {
 			return true
 		}
-		cooldown := managedAccountSyncInterval
+		cooldown := managedInstanceCollectionInterval(instance)
 		if state.Status == model.ManagedInstanceCollectionFailed {
-			cooldown = managedAccountFailureCooldown
+			cooldown = managedInstanceCollectionFailureCooldown(instance)
 		}
 		if now >= state.AttemptedAt+int64(cooldown/time.Second) {
 			return true
@@ -1000,9 +1143,9 @@ func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[s
 		if state.AttemptedAt == 0 {
 			return true
 		}
-		cooldown := managedAccountSyncInterval
+		cooldown := managedInstanceCollectionInterval(instance)
 		if state.Status == model.ManagedInstanceCollectionFailed {
-			cooldown = managedAccountFailureCooldown
+			cooldown = managedInstanceCollectionFailureCooldown(instance)
 		}
 		if now >= state.AttemptedAt+int64(cooldown/time.Second) {
 			return true

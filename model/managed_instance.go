@@ -29,32 +29,37 @@ const (
 	ManagedInstanceAccessAdmin        = "admin"
 	ManagedInstanceAccessUser         = "user"
 	ManagedInstanceAccessChannelAdmin = "channel_admin"
+
+	ManagedInstanceDefaultCollectionIntervalSeconds     = 15 * 60
+	ManagedInstanceDefaultCollectionStallTimeoutSeconds = 10 * 60
 )
 
 type ManagedInstance struct {
-	Id                    int64  `json:"id" gorm:"primaryKey"`
-	SortOrder             int64  `json:"sort_order" gorm:"bigint;not null;default:0;index"`
-	Name                  string `json:"name" gorm:"type:varchar(128);not null;uniqueIndex"`
-	Kind                  string `json:"kind" gorm:"type:varchar(32);not null;index"`
-	BaseURL               string `json:"base_url" gorm:"type:varchar(512);not null;uniqueIndex"`
-	Environment           string `json:"environment" gorm:"type:varchar(32);not null;default:'production';index"`
-	Labels                string `json:"-" gorm:"type:text"`
-	ManagementMode        string `json:"management_mode" gorm:"type:varchar(32);not null;default:'observe';index"`
-	Status                string `json:"status" gorm:"type:varchar(32);not null;default:'unknown';index"`
-	Version               string `json:"version" gorm:"type:varchar(64)"`
-	Capabilities          string `json:"-" gorm:"type:text"`
-	TLSVerify             bool   `json:"tls_verify" gorm:"not null;default:true"`
-	RequestTimeoutSeconds int    `json:"request_timeout_seconds" gorm:"not null;default:10"`
-	CheckIntervalSeconds  int    `json:"check_interval_seconds" gorm:"not null;default:60"`
-	AlertFailureThreshold int    `json:"alert_failure_threshold" gorm:"not null;default:0"`
-	AlertRuleMigratedAt   int64  `json:"-" gorm:"bigint;not null;default:0;index"`
-	LastSeenAt            int64  `json:"last_seen_at" gorm:"bigint;not null;default:0;index"`
-	LastCheckedAt         int64  `json:"last_checked_at" gorm:"bigint;not null;default:0;index"`
-	ConsecutiveFailures   int    `json:"consecutive_failures" gorm:"not null;default:0"`
-	CreatedBy             int    `json:"created_by" gorm:"not null;default:0;index"`
-	UpdatedBy             int    `json:"updated_by" gorm:"not null;default:0"`
-	CreatedAt             int64  `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt             int64  `json:"updated_at" gorm:"bigint;not null;index"`
+	Id                            int64  `json:"id" gorm:"primaryKey"`
+	SortOrder                     int64  `json:"sort_order" gorm:"bigint;not null;default:0;index"`
+	Name                          string `json:"name" gorm:"type:varchar(128);not null;uniqueIndex"`
+	Kind                          string `json:"kind" gorm:"type:varchar(32);not null;index"`
+	BaseURL                       string `json:"base_url" gorm:"type:varchar(512);not null;uniqueIndex"`
+	Environment                   string `json:"environment" gorm:"type:varchar(32);not null;default:'production';index"`
+	Labels                        string `json:"-" gorm:"type:text"`
+	ManagementMode                string `json:"management_mode" gorm:"type:varchar(32);not null;default:'observe';index"`
+	Status                        string `json:"status" gorm:"type:varchar(32);not null;default:'unknown';index"`
+	Version                       string `json:"version" gorm:"type:varchar(64)"`
+	Capabilities                  string `json:"-" gorm:"type:text"`
+	TLSVerify                     bool   `json:"tls_verify" gorm:"not null;default:true"`
+	RequestTimeoutSeconds         int    `json:"request_timeout_seconds" gorm:"not null;default:10"`
+	CheckIntervalSeconds          int    `json:"check_interval_seconds" gorm:"not null;default:60"`
+	CollectionIntervalSeconds     int    `json:"collection_interval_seconds" gorm:"not null;default:900"`
+	CollectionStallTimeoutSeconds int    `json:"collection_stall_timeout_seconds" gorm:"not null;default:600"`
+	AlertFailureThreshold         int    `json:"alert_failure_threshold" gorm:"not null;default:0"`
+	AlertRuleMigratedAt           int64  `json:"-" gorm:"bigint;not null;default:0;index"`
+	LastSeenAt                    int64  `json:"last_seen_at" gorm:"bigint;not null;default:0;index"`
+	LastCheckedAt                 int64  `json:"last_checked_at" gorm:"bigint;not null;default:0;index"`
+	ConsecutiveFailures           int    `json:"consecutive_failures" gorm:"not null;default:0"`
+	CreatedBy                     int    `json:"created_by" gorm:"not null;default:0;index"`
+	UpdatedBy                     int    `json:"updated_by" gorm:"not null;default:0"`
+	CreatedAt                     int64  `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt                     int64  `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 func (ManagedInstance) TableName() string { return "managed_instances" }
@@ -76,6 +81,12 @@ func (instance *ManagedInstance) BeforeCreate(_ *gorm.DB) error {
 	if instance.CheckIntervalSeconds == 0 {
 		instance.CheckIntervalSeconds = 60
 	}
+	if instance.CollectionIntervalSeconds == 0 {
+		instance.CollectionIntervalSeconds = ManagedInstanceDefaultCollectionIntervalSeconds
+	}
+	if instance.CollectionStallTimeoutSeconds == 0 {
+		instance.CollectionStallTimeoutSeconds = ManagedInstanceDefaultCollectionStallTimeoutSeconds
+	}
 	if instance.CreatedAt == 0 {
 		instance.CreatedAt = now
 	}
@@ -88,6 +99,16 @@ func (instance *ManagedInstance) BeforeCreate(_ *gorm.DB) error {
 
 func (instance *ManagedInstance) BeforeUpdate(_ *gorm.DB) error {
 	instance.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+func (instance *ManagedInstance) AfterFind(_ *gorm.DB) error {
+	if instance.CollectionIntervalSeconds == 0 {
+		instance.CollectionIntervalSeconds = ManagedInstanceDefaultCollectionIntervalSeconds
+	}
+	if instance.CollectionStallTimeoutSeconds == 0 {
+		instance.CollectionStallTimeoutSeconds = ManagedInstanceDefaultCollectionStallTimeoutSeconds
+	}
 	return nil
 }
 

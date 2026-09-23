@@ -1753,8 +1753,11 @@ function AccountCollectionProgress(props: {
               <div className='text-muted-foreground mt-2 flex flex-wrap items-center justify-between gap-2 text-xs'>
                 <span>
                   {t(
-                    ACCOUNT_SYNC_STAGE_LABELS[progress.stage ?? 'queued'] ??
-                      'Collecting account data'
+                    task.error === 'account_collection_stalled'
+                      ? 'Collection stopped due to no progress'
+                      : (ACCOUNT_SYNC_STAGE_LABELS[
+                          progress.stage ?? 'queued'
+                        ] ?? 'Collecting account data')
                   )}
                 </span>
                 {progress.item_total ? (

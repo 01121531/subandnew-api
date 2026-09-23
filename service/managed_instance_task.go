@@ -21,8 +21,6 @@ import (
 
 const failedManagedInstanceProbeInterval = time.Hour
 
-const managedInstanceSyncInterval = 5 * time.Minute
-
 type ManagedInstanceProbePayload struct {
 	InstanceID int64 `json:"instance_id"`
 	ActorID    int   `json:"actor_id,omitempty"`
@@ -1019,19 +1017,26 @@ func scheduleDueManagedInstanceSyncs(now int64) {
 			ids = append(ids, instance.Id)
 		}
 		var snapshots []model.ManagedInstanceSnapshot
-		if err := model.DB.Select("instance_id", "MAX(observed_at) AS observed_at").
+		if err := model.DB.Select("instance_id", "updated_at", "collection_status").
 			Where("instance_id IN ? AND snapshot_type = ?", ids, model.ManagedInstanceSnapshotTypeSummary).
-			Group("instance_id").Find(&snapshots).Error; err != nil {
+			Find(&snapshots).Error; err != nil {
 			logger.LogWarn(context.Background(), fmt.Sprintf("managed instance sync snapshot query failed: %v", err))
 			return false
 		}
+		statuses := make(map[int64]string, len(snapshots))
 		for _, snapshot := range snapshots {
-			latest[snapshot.InstanceId] = snapshot.ObservedAt
+			if snapshot.UpdatedAt >= latest[snapshot.InstanceId] {
+				latest[snapshot.InstanceId] = snapshot.UpdatedAt
+				statuses[snapshot.InstanceId] = snapshot.CollectionStatus
+			}
 		}
-		intervalSeconds := int64(managedInstanceSyncInterval / time.Second)
 		for _, instance := range instances {
-			jitter := instance.Id % (intervalSeconds/5 + 1)
-			if observedAt := latest[instance.Id]; observedAt > 0 && now < observedAt+intervalSeconds+jitter {
+			interval := managedInstanceCollectionInterval(instance)
+			intervalSeconds := int64(interval / time.Second)
+			if statuses[instance.Id] == model.ManagedInstanceCollectionFailed {
+				intervalSeconds = int64(managedInstanceCollectionFailureCooldown(instance) / time.Second)
+			}
+			if observedAt := latest[instance.Id]; observedAt > 0 && now < observedAt+intervalSeconds {
 				continue
 			}
 			if _, _, err := EnqueueScopedSystemTask(

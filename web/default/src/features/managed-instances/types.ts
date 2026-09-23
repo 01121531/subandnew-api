@@ -56,6 +56,8 @@ export interface ManagedInstance {
   tls_verify: boolean
   request_timeout_seconds: number
   check_interval_seconds: number
+  collection_interval_seconds: number
+  collection_stall_timeout_seconds: number
   alert_failure_threshold: number
   last_seen_at: number
   last_checked_at: number
@@ -75,6 +77,8 @@ export interface ManagedInstanceInput {
   tls_verify: boolean
   request_timeout_seconds: number
   check_interval_seconds: number
+  collection_interval_seconds: number
+  collection_stall_timeout_seconds: number
   alert_failure_threshold: number
   credential?: ManagedInstanceCredentialInput
 }

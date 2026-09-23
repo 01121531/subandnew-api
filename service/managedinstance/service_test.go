@@ -92,6 +92,8 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 	require.Equal(t, "https://api.example.com/root", updated.BaseURL)
 	require.Equal(t, model.ManagedInstanceModeOperate, updated.ManagementMode)
 	require.Equal(t, 15, updated.RequestTimeoutSeconds)
+	require.Equal(t, model.ManagedInstanceDefaultCollectionIntervalSeconds, updated.CollectionIntervalSeconds)
+	require.Equal(t, model.ManagedInstanceDefaultCollectionStallTimeoutSeconds, updated.CollectionStallTimeoutSeconds)
 
 	rotated, err := RotateCredential(created.Id, CredentialInput{AuthType: "legacy_access_token", Secret: "new-token", UserID: "9"}, 2)
 	require.NoError(t, err)
@@ -118,6 +120,25 @@ func TestManagedInstanceCRUDKeepsCredentialEncrypted(t *testing.T) {
 	require.Equal(t, int64(4), auditPage.Total)
 	require.Len(t, auditPage.Items, 2)
 	require.Equal(t, "delete", auditPage.Items[0].Action)
+}
+
+func TestManagedInstanceUpdatePreservesCollectionPolicyForLegacyClients(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	created, err := Create(CreateInput{
+		Name: "legacy-policy", Kind: model.ManagedInstanceKindNewAPI, BaseURL: "https://legacy-policy.example.com",
+		Environment: "production", ManagementMode: model.ManagedInstanceModeObserve, TLSVerify: true,
+		CollectionIntervalSeconds: 21600, CollectionStallTimeoutSeconds: 1800, ActorID: 1,
+	})
+	require.NoError(t, err)
+
+	updated, err := Update(created.Id, UpdateInput{
+		Name: created.Name, Kind: created.Kind, BaseURL: created.BaseURL, Environment: created.Environment,
+		ManagementMode: created.ManagementMode, TLSVerify: true, RequestTimeoutSeconds: 10,
+		CheckIntervalSeconds: 60, ActorID: 1,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 21600, updated.CollectionIntervalSeconds)
+	require.Equal(t, 1800, updated.CollectionStallTimeoutSeconds)
 }
 
 func TestManagedInstanceWriteModeRequiresExplicitRootAuthorization(t *testing.T) {

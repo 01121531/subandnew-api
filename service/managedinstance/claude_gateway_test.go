@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -369,6 +370,45 @@ func TestClaudeGatewayInventoryEnrichesMissingCostsConcurrently(t *testing.T) {
 	require.GreaterOrEqual(t, maxInFlight.Load(), int32(2))
 	require.Equal(t, []int{1, 2, 3, 4}, progressCompleted)
 	require.Equal(t, []int{4, 4, 4, 4}, progressTotals)
+}
+
+func TestClaudeGatewayInventoryProgressAccumulatesAcrossPages(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	pages := map[int]string{
+		1: `[{"id":"account-1","status":"active","today_cost":3},{"id":"account-2","status":"active","today_cost":2}]`,
+		2: `[{"id":"account-3","status":"active","today_cost":1},{"id":"account-4","status":"active","today_cost":0}]`,
+	}
+	var progress [][2]int
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			page, err := strconv.Atoi(request.URL.Query().Get("page"))
+			require.NoError(t, err)
+			require.Equal(t, "1", request.URL.Query().Get("page_mode"))
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
+			require.Equal(t, "all", request.URL.Query().Get("status"))
+			require.Equal(t, "all", request.URL.Query().Get("recovery_window"))
+			require.Equal(t, "all", request.URL.Query().Get("fable_recovery_window"))
+			require.Equal(t, "today_cost", request.URL.Query().Get("sort"))
+			require.Equal(t, "desc", request.URL.Query().Get("direction"))
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(response, `{"accounts":%s,"total":4,"page":%d,"page_size":100,"total_pages":2}`, pages[page], page)
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectInventoryWithProgress(context.Background(), instance.Id, "auto", "", func(completed int, total int) {
+		progress = append(progress, [2]int{completed, total})
+	})
+	require.NoError(t, err)
+	require.Len(t, view.Data.(*InventoryPage).Items, 4)
+	require.Equal(t, [][2]int{{1, 4}, {2, 4}, {3, 4}, {4, 4}}, progress)
 }
 
 func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {

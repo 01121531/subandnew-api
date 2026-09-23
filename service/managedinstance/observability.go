@@ -195,10 +195,16 @@ func reportInventoryProgress(ctx context.Context, completed int, total int) {
 	if completed < 0 {
 		completed = 0
 	}
+	reporter.mu.Lock()
+	if completed < reporter.lastCompleted {
+		completed = reporter.lastCompleted
+	}
+	if total < reporter.lastTotal {
+		total = reporter.lastTotal
+	}
 	if total < completed {
 		total = completed
 	}
-	reporter.mu.Lock()
 	if completed == reporter.lastCompleted && total == reporter.lastTotal {
 		reporter.mu.Unlock()
 		return
@@ -1245,6 +1251,22 @@ func persistObservationWithGuard(instanceID int64, snapshotType string, resource
 		if guard != nil {
 			if err := guard(tx); err != nil {
 				return err
+			}
+		}
+		if collectionErr != nil {
+			var previous model.ManagedInstanceSnapshot
+			lookupErr := tx.Where(
+				"instance_id = ? AND snapshot_type = ? AND resource_kind = ?",
+				instanceID, snapshotType, resourceKind,
+			).First(&previous).Error
+			if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+				return lookupErr
+			}
+			if lookupErr == nil && previous.CollectionStatus == model.ManagedInstanceCollectionSucceeded && previous.Payload != "" {
+				snapshot.ObservedAt = previous.ObservedAt
+				snapshot.ETag = previous.ETag
+				snapshot.Payload = previous.Payload
+				snapshot.SchemaVersion = previous.SchemaVersion
 			}
 		}
 		return tx.Clauses(clause.OnConflict{

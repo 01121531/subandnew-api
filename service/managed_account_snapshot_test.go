@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -150,6 +151,46 @@ func TestManagedAccountFailedRefreshRetriesAfterOneMinute(t *testing.T) {
 		LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
 	}
 	require.False(t, managedAccountSectionNeedsRefresh(succeeded, now))
+}
+
+func TestManagedAccountCollectionWatchdogUsesLastProgress(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	watchdog := newManagedAccountCollectionWatchdog(ctx, 30*time.Millisecond)
+	defer watchdog.Stop()
+
+	deadline := time.NewTimer(150 * time.Millisecond)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			watchdog.Signal()
+		case <-deadline.C:
+			require.False(t, watchdog.TimedOut())
+			require.NoError(t, watchdog.ctx.Err())
+			goto stalled
+		}
+	}
+
+stalled:
+	stalledWatchdog := newManagedAccountCollectionWatchdog(context.Background(), 20*time.Millisecond)
+	defer stalledWatchdog.Stop()
+	select {
+	case <-stalledWatchdog.ctx.Done():
+		require.True(t, stalledWatchdog.TimedOut())
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("watchdog did not stop after the stall timeout")
+	}
+}
+
+func TestManagedAccountCollectionPolicyUsesInstanceSettings(t *testing.T) {
+	require.Equal(t, 15*time.Minute, managedInstanceCollectionInterval(nil))
+	require.Equal(t, 30*time.Minute, managedInstanceCollectionInterval(&model.ManagedInstance{CollectionIntervalSeconds: 1800}))
+	require.Equal(t, time.Minute, managedInstanceCollectionFailureCooldown(&model.ManagedInstance{CollectionIntervalSeconds: 300}))
+	require.Equal(t, 6*time.Minute, managedInstanceCollectionFailureCooldown(&model.ManagedInstance{CollectionIntervalSeconds: 1800}))
+	require.Equal(t, 12*time.Minute, managedInstanceCollectionFailureCooldown(&model.ManagedInstance{CollectionIntervalSeconds: 3600}))
 }
 
 func TestManagedAccountRefreshCooldownAndDeduplication(t *testing.T) {
@@ -369,7 +410,7 @@ func seedAccountExportActor(t *testing.T) {
 }
 
 func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
-	instance := &model.ManagedInstance{Id: 9, Kind: model.ManagedInstanceKindSub2API}
+	instance := &model.ManagedInstance{Id: 9, Kind: model.ManagedInstanceKindSub2API, CollectionIntervalSeconds: 1800}
 	now := int64(10_000)
 	latest := map[string]managedAccountScheduleState{
 		managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey): {
@@ -383,8 +424,8 @@ func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 		}
 	}
 	require.False(t, managedAccountStandardSyncDue(instance, latest, now))
-	require.False(t, managedAccountStandardSyncDue(instance, latest, now+int64(managedAccountSyncInterval/time.Second)-1))
-	require.True(t, managedAccountStandardSyncDue(instance, latest, now+int64(managedAccountSyncInterval/time.Second)))
+	require.False(t, managedAccountStandardSyncDue(instance, latest, now+1800-1))
+	require.True(t, managedAccountStandardSyncDue(instance, latest, now+1800))
 
 	conductor := &model.ManagedInstance{Id: 10, Kind: model.ManagedInstanceKindConductor}
 	conductorLatest := map[string]managedAccountScheduleState{
@@ -404,8 +445,9 @@ func TestManagedAccountStandardSyncDueRequiresEveryPreset(t *testing.T) {
 	conductorLatest[failedKey] = managedAccountScheduleState{
 		AttemptedAt: now, Status: model.ManagedInstanceCollectionFailed,
 	}
-	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)-1))
-	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+int64(managedAccountFailureCooldown/time.Second)))
+	conductor.CollectionIntervalSeconds = 3600
+	require.False(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+720-1))
+	require.True(t, managedAccountStandardSyncDue(conductor, conductorLatest, now+720))
 }
 
 func TestManagedAccountDailyArchiveForcesMidnightSyncWithFailureCooldown(t *testing.T) {
@@ -431,8 +473,9 @@ func TestManagedAccountDailyArchiveForcesMidnightSyncWithFailureCooldown(t *test
 	missingKey := keys[len(keys)-1]
 	dailyArchived[missingKey] = false
 	latest[missingKey] = managedAccountScheduleState{AttemptedAt: boundary + 10, Status: model.ManagedInstanceCollectionFailed}
-	require.False(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+int64(managedAccountFailureCooldown/time.Second)-1))
-	require.True(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+int64(managedAccountFailureCooldown/time.Second)))
+	instance.CollectionIntervalSeconds = 300
+	require.False(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+60-1))
+	require.True(t, managedAccountDailyArchiveSyncDue(instance, latest, dailyArchived, boundary, boundary+10+60))
 }
 
 func TestClaudeGatewayStandardSyncDueBackfillsVendorMetadata(t *testing.T) {

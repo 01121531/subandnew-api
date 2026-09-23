@@ -31,36 +31,40 @@ type CredentialInput struct {
 }
 
 type CreateInput struct {
-	Name                  string
-	Kind                  string
-	BaseURL               string
-	Environment           string
-	Labels                map[string]string
-	ManagementMode        string
-	TLSVerify             bool
-	RequestTimeoutSeconds int
-	CheckIntervalSeconds  int
-	AlertFailureThreshold int
-	Credential            *CredentialInput
-	Preflight             *ProbeResult
-	ActorID               int
-	AllowWriteMode        bool
+	Name                          string
+	Kind                          string
+	BaseURL                       string
+	Environment                   string
+	Labels                        map[string]string
+	ManagementMode                string
+	TLSVerify                     bool
+	RequestTimeoutSeconds         int
+	CheckIntervalSeconds          int
+	CollectionIntervalSeconds     int
+	CollectionStallTimeoutSeconds int
+	AlertFailureThreshold         int
+	Credential                    *CredentialInput
+	Preflight                     *ProbeResult
+	ActorID                       int
+	AllowWriteMode                bool
 }
 
 type UpdateInput struct {
-	Name                  string
-	Kind                  string
-	BaseURL               string
-	Environment           string
-	Labels                map[string]string
-	ManagementMode        string
-	TLSVerify             bool
-	RequestTimeoutSeconds int
-	CheckIntervalSeconds  int
-	AlertFailureThreshold int
-	ActorID               int
-	AllowConnectionChange bool
-	AllowWriteMode        bool
+	Name                          string
+	Kind                          string
+	BaseURL                       string
+	Environment                   string
+	Labels                        map[string]string
+	ManagementMode                string
+	TLSVerify                     bool
+	RequestTimeoutSeconds         int
+	CheckIntervalSeconds          int
+	CollectionIntervalSeconds     int
+	CollectionStallTimeoutSeconds int
+	AlertFailureThreshold         int
+	ActorID                       int
+	AllowConnectionChange         bool
+	AllowWriteMode                bool
 }
 
 type ListFilter struct {
@@ -116,6 +120,8 @@ func RedactConnectionDetails(view *InstanceView) *InstanceView {
 	instance.TLSVerify = false
 	instance.RequestTimeoutSeconds = 0
 	instance.CheckIntervalSeconds = 0
+	instance.CollectionIntervalSeconds = 0
+	instance.CollectionStallTimeoutSeconds = 0
 	instance.CreatedBy = 0
 	instance.UpdatedBy = 0
 	return &InstanceView{
@@ -126,7 +132,7 @@ func RedactConnectionDetails(view *InstanceView) *InstanceView {
 }
 
 func Create(input CreateInput) (*InstanceView, error) {
-	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.AlertFailureThreshold, input.ActorID)
+	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.CollectionIntervalSeconds, input.CollectionStallTimeoutSeconds, input.AlertFailureThreshold, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -314,7 +320,7 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 	if id <= 0 {
 		return nil, ErrInvalidInstance
 	}
-	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.AlertFailureThreshold, input.ActorID)
+	instance, err := buildInstance(input.Name, input.Kind, input.BaseURL, input.Environment, input.Labels, input.ManagementMode, input.TLSVerify, input.RequestTimeoutSeconds, input.CheckIntervalSeconds, input.CollectionIntervalSeconds, input.CollectionStallTimeoutSeconds, input.AlertFailureThreshold, input.ActorID)
 	if err != nil {
 		return nil, err
 	}
@@ -323,8 +329,10 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 		"environment": instance.Environment, "labels": instance.Labels, "management_mode": instance.ManagementMode,
 		"tls_verify": instance.TLSVerify, "request_timeout_seconds": instance.RequestTimeoutSeconds,
 		"check_interval_seconds": instance.CheckIntervalSeconds, "updated_by": input.ActorID,
-		"alert_failure_threshold": instance.AlertFailureThreshold,
-		"updated_at":              common.GetTimestamp(),
+		"collection_interval_seconds":      instance.CollectionIntervalSeconds,
+		"collection_stall_timeout_seconds": instance.CollectionStallTimeoutSeconds,
+		"alert_failure_threshold":          instance.AlertFailureThreshold,
+		"updated_at":                       common.GetTimestamp(),
 	}
 	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		var current model.ManagedInstance
@@ -334,6 +342,18 @@ func Update(id int64, input UpdateInput) (*InstanceView, error) {
 			}
 			return err
 		}
+		// Older clients do not send the collection fields. Preserve an existing
+		// per-instance policy instead of resetting it to the default on update.
+		collectionInterval := instance.CollectionIntervalSeconds
+		if input.CollectionIntervalSeconds == 0 {
+			collectionInterval = current.CollectionIntervalSeconds
+		}
+		collectionStallTimeout := instance.CollectionStallTimeoutSeconds
+		if input.CollectionStallTimeoutSeconds == 0 {
+			collectionStallTimeout = current.CollectionStallTimeoutSeconds
+		}
+		updates["collection_interval_seconds"] = collectionInterval
+		updates["collection_stall_timeout_seconds"] = collectionStallTimeout
 		connectionChanged := current.BaseURL != instance.BaseURL || current.Kind != instance.Kind || current.TLSVerify != instance.TLSVerify
 		if connectionChanged && !input.AllowConnectionChange {
 			return ErrConnectionChangeForbidden
@@ -443,7 +463,7 @@ func Delete(id int64, actorID int) error {
 	})
 }
 
-func buildInstance(name string, kind string, baseURL string, environment string, labels map[string]string, managementMode string, tlsVerify bool, requestTimeout int, checkInterval int, alertFailureThreshold int, actorID int) (*model.ManagedInstance, error) {
+func buildInstance(name string, kind string, baseURL string, environment string, labels map[string]string, managementMode string, tlsVerify bool, requestTimeout int, checkInterval int, collectionInterval int, collectionStallTimeout int, alertFailureThreshold int, actorID int) (*model.ManagedInstance, error) {
 	name = strings.TrimSpace(name)
 	kind = strings.TrimSpace(kind)
 	if name == "" || !validKind(kind) {
@@ -473,7 +493,13 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 	if checkInterval == 0 {
 		checkInterval = 60
 	}
-	if requestTimeout < 1 || requestTimeout > 120 || checkInterval < 10 || checkInterval > 86400 || alertFailureThreshold < 0 || alertFailureThreshold > 100 {
+	if collectionInterval == 0 {
+		collectionInterval = model.ManagedInstanceDefaultCollectionIntervalSeconds
+	}
+	if collectionStallTimeout == 0 {
+		collectionStallTimeout = model.ManagedInstanceDefaultCollectionStallTimeoutSeconds
+	}
+	if requestTimeout < 1 || requestTimeout > 120 || checkInterval < 10 || checkInterval > 86400 || !validCollectionInterval(collectionInterval) || collectionStallTimeout < 60 || collectionStallTimeout > 86400 || alertFailureThreshold < 0 || alertFailureThreshold > 100 {
 		return nil, ErrInvalidInstance
 	}
 	parsedURL, err := url.Parse(normalizedURL)
@@ -490,9 +516,20 @@ func buildInstance(name string, kind string, baseURL string, environment string,
 	return &model.ManagedInstance{
 		Name: name, Kind: kind, BaseURL: normalizedURL, Environment: environment, Labels: string(labelsJSON),
 		ManagementMode: managementMode, Status: model.ManagedInstanceStatusUnknown, TLSVerify: tlsVerify,
-		RequestTimeoutSeconds: requestTimeout, CheckIntervalSeconds: checkInterval, CreatedBy: actorID, UpdatedBy: actorID,
+		RequestTimeoutSeconds: requestTimeout, CheckIntervalSeconds: checkInterval,
+		CollectionIntervalSeconds: collectionInterval, CollectionStallTimeoutSeconds: collectionStallTimeout,
+		CreatedBy: actorID, UpdatedBy: actorID,
 		AlertFailureThreshold: alertFailureThreshold,
 	}, nil
+}
+
+func validCollectionInterval(seconds int) bool {
+	switch seconds {
+	case 5 * 60, 15 * 60, 30 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60:
+		return true
+	default:
+		return false
+	}
 }
 
 func buildCredential(instanceID int64, input CredentialInput, actorID int) (*model.ManagedInstanceCredential, error) {

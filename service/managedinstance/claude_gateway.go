@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -482,21 +483,25 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 			*combined = page
 			combined.Accounts = nil
 		}
-		enrichClaudeGatewayAccountCosts(ctx, connector, credential, page.Accounts)
 		start := len(combined.Accounts)
-		combined.Accounts = append(combined.Accounts, page.Accounts...)
-		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
-			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
-		}
 		progressTotal := page.Total
 		if progressTotal <= 0 && page.TotalPages > 0 {
 			progressTotal = page.TotalPages * pageSize
 		}
+		if progressTotal < start+len(page.Accounts) {
+			progressTotal = start + len(page.Accounts)
+		}
+		var pageCompleted atomic.Int32
+		enrichClaudeGatewayAccountCosts(ctx, connector, credential, page.Accounts, func() {
+			completed := start + int(pageCompleted.Add(1))
+			reportInventoryProgress(ctx, completed, progressTotal)
+		})
+		combined.Accounts = append(combined.Accounts, page.Accounts...)
+		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
+			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
 		if progressTotal < len(combined.Accounts) {
 			progressTotal = len(combined.Accounts)
-		}
-		for index := start; index < len(combined.Accounts); index++ {
-			reportInventoryProgress(ctx, index+1, progressTotal)
 		}
 		more := false
 		if page.HasMore != nil {
@@ -516,13 +521,18 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 	return combined, nil
 }
 
-func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, credential *CredentialMaterial, accounts []claudeGatewayAccount) {
+func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, credential *CredentialMaterial, accounts []claudeGatewayAccount, onCompleted func()) {
+	if onCompleted == nil {
+		onCompleted = func() {}
+	}
 	pending := make([]int, 0, len(accounts))
 	for index := range accounts {
 		account := &accounts[index]
 		if account.TodayCost == nil && account.UsageWindows.Cost30D == nil && account.CostWindows.Cost30D == nil {
 			pending = append(pending, index)
+			continue
 		}
+		onCompleted()
 	}
 	if len(pending) == 0 {
 		return
@@ -543,6 +553,7 @@ func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, 
 				detail, err := fetchClaudeGatewayAccountDetail(detailCtx, connector, credential, accounts[index].ID)
 				cancel()
 				if err != nil {
+					onCompleted()
 					continue
 				}
 				account := &accounts[index]
@@ -555,6 +566,7 @@ func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, 
 				if detail.UsageWindows.Cost30D != nil {
 					account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
 				}
+				onCompleted()
 			}
 		}()
 	}

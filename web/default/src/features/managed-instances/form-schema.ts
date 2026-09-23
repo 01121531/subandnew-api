@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+const collectionIntervals = new Set([300, 900, 1800, 3600, 21600, 86400])
+
 function isManagedInstanceURL(value: string) {
   const normalized = /^https?:\/\//i.test(value.trim())
     ? value.trim()
@@ -44,6 +46,11 @@ export const managedInstanceFormSchema = z.object({
   tls_verify: z.boolean(),
   request_timeout_seconds: z.number().int().min(1).max(120),
   check_interval_seconds: z.number().int().min(10).max(86400),
+  collection_interval_seconds: z
+    .number()
+    .int()
+    .refine((value) => collectionIntervals.has(value)),
+  collection_stall_timeout_seconds: z.number().int().min(60).max(86400),
   alert_failure_threshold: z.number().int().min(0).max(100),
   labels: z.string(),
   auth_type: z.string(),

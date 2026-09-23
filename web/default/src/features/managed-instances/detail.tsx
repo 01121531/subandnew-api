@@ -458,6 +458,18 @@ function ConnectionSection({ instance }: { instance: ManagedInstance }) {
             count: instance.check_interval_seconds,
           })}
         />
+        <Info
+          label={t('Collection interval')}
+          value={t('{{count}} minutes', {
+            count: Math.round(instance.collection_interval_seconds / 60),
+          })}
+        />
+        <Info
+          label={t('No-progress timeout')}
+          value={t('{{count}} minutes', {
+            count: Math.round(instance.collection_stall_timeout_seconds / 60),
+          })}
+        />
       </dl>
       {Object.keys(instance.labels).length > 0 && (
         <div className='mt-4 border-t pt-4'>
