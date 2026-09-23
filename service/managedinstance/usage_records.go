@@ -89,11 +89,12 @@ type UsageRecordExportProgress struct {
 }
 
 type UsageRecordExportArtifact struct {
-	FileName     string `json:"file_name"`
-	RecordCount  int    `json:"record_count"`
-	WarningCount int    `json:"warning_count,omitempty"`
-	Size         int64  `json:"size"`
-	ExpiresAt    int64  `json:"expires_at"`
+	FileName       string                            `json:"file_name"`
+	RecordCount    int                               `json:"record_count"`
+	WarningCount   int                               `json:"warning_count,omitempty"`
+	WarningDetails []model.ManagedUsageExportWarning `json:"warning_details,omitempty"`
+	Size           int64                             `json:"size"`
+	ExpiresAt      int64                             `json:"expires_at"`
 }
 
 type UsageRecordExportProgressCallback func(UsageRecordExportProgress) error

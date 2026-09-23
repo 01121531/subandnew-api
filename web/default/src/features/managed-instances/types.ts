@@ -180,6 +180,10 @@ export interface ManagedInstanceInventoryItem {
   requests?: number
   tokens?: number
   cost?: number
+  requests_period?: string
+  tokens_period?: string
+  cost_period?: string
+  cost_available?: boolean
   cost_unit?: 'usd' | 'quota'
   usage_window_days?: number
   requests_24h?: number
@@ -366,6 +370,8 @@ export interface ManagedInstanceAccountOutputItem {
   total_requests: number
   total_tokens: number
   amount: number
+  amount_available?: boolean
+  amount_period?: string
   currency: string
   collection_status: ManagedInstanceCollectionStatus
   error_code?: string

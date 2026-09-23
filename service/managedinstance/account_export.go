@@ -68,7 +68,8 @@ func ExportAccountsXLSXToTaskFile(ctx context.Context, taskID string, input Acco
 	if err != nil {
 		return nil, err
 	}
-	return writeAccountExportWorkbook(taskID, input, rows, warnings)
+	warningDetails := accountExportWarnings(rows)
+	return writeAccountExportWorkbook(taskID, input, rows, warnings, warningDetails)
 }
 
 func collectAccountExportRows(ctx context.Context, input AccountExportInput, onProgress UsageRecordExportProgressCallback) ([]AccountExportRow, int, error) {
@@ -184,7 +185,8 @@ func collectClaudeGatewayAccountExportMetrics(indexes []int, selected []AccountE
 			metrics.totalTokens = *account.Tokens
 			metrics.hasTotalTokens = true
 		}
-		if account.Cost != nil && strings.EqualFold(account.CostUnit, "usd") {
+		costAvailable := account.CostAvailable == nil || *account.CostAvailable
+		if account.Cost != nil && costAvailable && strings.EqualFold(account.CostUnit, "usd") {
 			metrics.amount = *account.Cost
 			metrics.hasAmount = true
 		}
@@ -393,7 +395,38 @@ func retryAccountExport(ctx context.Context, instanceID int64, actorID int, oper
 	return err
 }
 
-func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []AccountExportRow, warnings int) (*UsageRecordExportArtifact, error) {
+func accountExportWarnings(rows []AccountExportRow) []model.ManagedUsageExportWarning {
+	warnings := make([]model.ManagedUsageExportWarning, 0)
+	for index, row := range rows {
+		if strings.TrimSpace(row.ErrorCode) == "" {
+			continue
+		}
+		account := row.Selection.Account
+		accountID := account.IDText
+		if accountID == "" && account.ID > 0 {
+			accountID = strconv.FormatInt(account.ID, 10)
+		}
+		message := "账号统计不可用"
+		switch row.ErrorCode {
+		case "account_snapshot_missing":
+			message = "账号不在最新成功快照中"
+		case "account_usage_unavailable":
+			message = "账号统计未返回可用数据"
+		}
+		warnings = append(warnings, model.ManagedUsageExportWarning{
+			Row: int64(index + 2), InstanceID: row.Selection.InstanceID, InstanceName: row.Selection.InstanceName,
+			AccountID: accountID, AccountName: account.Name, AccountEmail: account.Email,
+			Code: row.ErrorCode, Message: message,
+		})
+	}
+	return warnings
+}
+
+func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []AccountExportRow, warnings int, warningDetails ...[]model.ManagedUsageExportWarning) (*UsageRecordExportArtifact, error) {
+	details := []model.ManagedUsageExportWarning(nil)
+	if len(warningDetails) > 0 {
+		details = warningDetails[0]
+	}
 	path, temporaryPath, err := accountExportTaskPaths(taskID)
 	if err != nil {
 		return nil, err
@@ -507,7 +540,7 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	if err != nil {
 		return nil, err
 	}
-	return &UsageRecordExportArtifact{FileName: "accounts-" + time.Now().Format("20060102-150405") + ".xlsx", RecordCount: len(rows), WarningCount: warnings, Size: info.Size(), ExpiresAt: time.Now().Add(usageRecordExportRetention).Unix()}, nil
+	return &UsageRecordExportArtifact{FileName: "accounts-" + time.Now().Format("20060102-150405") + ".xlsx", RecordCount: len(rows), WarningCount: warnings, WarningDetails: details, Size: info.Size(), ExpiresAt: time.Now().Add(usageRecordExportRetention).Unix()}, nil
 }
 
 func accountExportCellValues(row AccountExportRow, window TimeWindow, location *time.Location) []any {

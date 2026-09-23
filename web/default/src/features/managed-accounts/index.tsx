@@ -437,9 +437,25 @@ function formatSurvivalDuration(seconds: number | null, t: TFunction) {
 }
 
 function formatCost(item: ManagedInstanceInventoryItem) {
-  if (item.cost == null) return '--'
+  if (item.cost == null || item.cost_available === false) return '--'
   if (item.cost_unit === 'usd') return exactCurrency.format(item.cost)
   return exactNumber.format(item.cost)
+}
+
+function formatCostPeriod(item: ManagedInstanceInventoryItem, t: TFunction) {
+  if (item.cost_available === false || item.cost == null) {
+    return t('Not provided')
+  }
+  switch (item.cost_period) {
+    case 'today':
+      return t('Today output')
+    case '30d':
+      return t('30-day cost')
+    case 'lifetime':
+      return t('Lifetime cost')
+    default:
+      return t('Output amount')
+  }
 }
 
 function formatSuccessRate24H(item: ManagedInstanceInventoryItem) {
@@ -2343,7 +2359,8 @@ function AccountOutputTable({
                             {succeeded
                               ? formatOutputAmount(
                                   output.amount,
-                                  output.currency
+                                  output.currency,
+                                  output.amount_available !== false
                                 )
                               : t('Collection failed')}
                           </span>
@@ -2494,7 +2511,11 @@ function AccountOutputTable({
                       className='pe-6 text-right font-medium tabular-nums'
                     >
                       {hasAccountOutputMetrics(output)
-                        ? formatOutputAmount(output.amount, output.currency)
+                        ? formatOutputAmount(
+                            output.amount,
+                            output.currency,
+                            output.amount_available !== false
+                          )
                         : t('Collection failed')}
                     </TableCell>
                   </TableRow>
@@ -2674,7 +2695,7 @@ function AccountTable(props: {
   if (props.family === 'mercer_router') {
     usageColumnLabel = t('Actual consumption')
   }
-  if (isClaudeGateway) usageColumnLabel = `${t('Total consumption')} (30d)`
+  if (isClaudeGateway) usageColumnLabel = t('Claude Gateway output')
   const loadFields = accountLoadFields(
     isConductor,
     isClaudeGateway,
@@ -2782,7 +2803,7 @@ function AccountTable(props: {
                           {!isConductor && (
                             <AdminDataField fields={['amount']}>
                               <span className='text-foreground font-medium'>
-                                {usageColumnLabel}: {formatCost(item)}
+                                {formatCostPeriod(item, t)}: {formatCost(item)}
                               </span>
                             </AdminDataField>
                           )}

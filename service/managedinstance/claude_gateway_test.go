@@ -258,6 +258,73 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 	require.Equal(t, 15.0, *item.LimitedRequests24H)
 }
 
+func TestClaudeGatewayAccountItemPrefersTodayCostAndTracksPeriods(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"today","status":"active","total_cost":99,"today_cost":0,"usage_windows":{"cost_30d":12.5,"req_30d":300,"tokens_30d":4000}}`), &account))
+	item := claudeGatewayAccountItem(account, nil)
+	require.NotNil(t, item.Cost)
+	require.Zero(t, *item.Cost)
+	require.Equal(t, "today", item.CostPeriod)
+	require.NotNil(t, item.CostAvailable)
+	require.True(t, *item.CostAvailable)
+	require.Equal(t, "30d", item.RequestsPeriod)
+	require.Equal(t, "30d", item.TokensPeriod)
+
+	var legacy claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"legacy","status":"active","usage_windows":{"cost_30d":12.5}}`), &legacy))
+	legacyItem := claudeGatewayAccountItem(legacy, nil)
+	require.Equal(t, 12.5, *legacyItem.Cost)
+	require.Equal(t, "30d", legacyItem.CostPeriod)
+	require.True(t, *legacyItem.CostAvailable)
+
+	var missing claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"missing","status":"active"}`), &missing))
+	missingItem := claudeGatewayAccountItem(missing, nil)
+	require.Equal(t, "lifetime", missingItem.CostPeriod)
+	require.False(t, *missingItem.CostAvailable)
+}
+
+func TestDecodeClaudeGatewayAccountDetailReadsCostWindows(t *testing.T) {
+	account, err := decodeClaudeGatewayAccountDetail([]byte(`{"data":{"id":"detail-1","cost_windows":{"cost_30d":"8.75"}}}`))
+	require.NoError(t, err)
+	require.Equal(t, "detail-1", account.ID)
+	require.NotNil(t, account.CostWindows.Cost30D)
+	require.Equal(t, 8.75, float64(*account.CostWindows.Cost30D))
+}
+
+func TestClaudeGatewayInventoryEnrichesMissingCostFromDetail(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	detailRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
+			writeProbeJSON(response, `{"accounts":[{"id":"missing-cost","name":"missing-cost","status":"active","health_status":"healthy"}],"total":1}`)
+		case "/api/admin/oauth-accounts/missing-cost":
+			detailRequests++
+			writeProbeJSON(response, `{"data":{"id":"missing-cost","cost_windows":{"cost_30d":"7.25"}}}`)
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "test-secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	page := view.Data.(*InventoryPage)
+	require.Len(t, page.Items, 1)
+	require.NotNil(t, page.Items[0].Cost)
+	require.Equal(t, 7.25, *page.Items[0].Cost)
+	require.Equal(t, "30d", page.Items[0].CostPeriod)
+	require.NotNil(t, page.Items[0].CostAvailable)
+	require.True(t, *page.Items[0].CostAvailable)
+	require.Equal(t, 1, detailRequests)
+}
+
 func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -333,7 +400,7 @@ func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
 		case "/api/admin/oauth-accounts":
 			accountRequests++
 			require.Equal(t, "1", request.URL.Query().Get("page_mode"))
-			require.Equal(t, "20", request.URL.Query().Get("page_size"))
+			require.Equal(t, "100", request.URL.Query().Get("page_size"))
 			require.Equal(t, "all", request.URL.Query().Get("status"))
 			require.Equal(t, "today_cost", request.URL.Query().Get("sort"))
 			require.Equal(t, "desc", request.URL.Query().Get("direction"))

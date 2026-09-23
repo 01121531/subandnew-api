@@ -171,6 +171,35 @@ export async function createManagedAccountExport(
   return response.data
 }
 
+type UsageRecordExportWarning = {
+  row?: number
+  instance_id?: number
+  instance_name?: string
+  account_id?: string
+  account_name?: string
+  account_email?: string
+  warning_code?: string
+  warning_message: string
+}
+
+export type UsageRecordExportWarnings = {
+  task_id: string
+  warning_count: number
+  items: UsageRecordExportWarning[]
+  messages: string[]
+  truncated: boolean
+}
+
+export async function getUsageRecordsExportWarnings(
+  taskId: string
+): Promise<ApiResponse<UsageRecordExportWarnings>> {
+  const response = await api.get<ApiResponse<UsageRecordExportWarnings>>(
+    `/api/managed-exports/${encodeURIComponent(taskId)}/warnings`,
+    { disableDuplicate: true, skipErrorHandler: true }
+  )
+  return response.data
+}
+
 export async function downloadUsageRecordsExport(taskId: string) {
   const response = await api.get(
     `/api/managed-exports/${encodeURIComponent(taskId)}/download`,

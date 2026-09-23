@@ -21,6 +21,8 @@ type AccountOutputItem struct {
 	TotalRequests    float64       `json:"total_requests"`
 	TotalTokens      float64       `json:"total_tokens"`
 	Amount           float64       `json:"amount"`
+	AmountAvailable  *bool         `json:"amount_available,omitempty"`
+	AmountPeriod     string        `json:"amount_period,omitempty"`
 	Currency         string        `json:"currency"`
 	CollectionStatus string        `json:"collection_status"`
 	ErrorCode        string        `json:"error_code,omitempty"`

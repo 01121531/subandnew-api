@@ -470,6 +470,20 @@ func managedUsageExportView(record *model.ManagedUsageExport) *ManagedUsageExpor
 	}
 }
 
+func GetManagedUsageExportWarnings(taskID string, actorID int, root bool) (*model.ManagedUsageExport, []model.ManagedUsageExportWarning, error) {
+	record, err := GetManagedUsageExport(taskID, actorID, root)
+	if err != nil || record == nil {
+		return record, nil, err
+	}
+	var items []model.ManagedUsageExportWarning
+	if strings.TrimSpace(record.WarningDetails) != "" {
+		if err := json.Unmarshal([]byte(record.WarningDetails), &items); err != nil {
+			return nil, nil, err
+		}
+	}
+	return record, items, nil
+}
+
 func ListManagedUsageExports(filter model.ManagedUsageExportListFilter) (*ManagedUsageExportListView, error) {
 	list, err := model.ListManagedUsageExports(filter)
 	if err != nil {
@@ -650,6 +664,7 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 	}
 	if accessErr != nil || recordErr != nil || record == nil {
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "admin_data_forbidden")
+		_ = model.SetManagedUsageExportWarningDetails(task.TaskID, nil)
 		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, 0, "admin_data_forbidden", 0)
 		return
 	}
@@ -718,6 +733,7 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 			errorCode = "account_export_failed"
 		}
 		if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode) == nil {
+			_ = model.SetManagedUsageExportWarningDetails(task.TaskID, nil)
 			_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusFailed, "", 0, 0, 0, errorCode, 0)
 		}
 		return
@@ -726,7 +742,18 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 		managedinstance.RecordUsageRecordExportAudit(payload.InstanceID, payload.ActorID, artifact.RecordCount, nil)
 	}
 	if model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, artifact, "") == nil {
-		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusSucceeded, artifact.FileName, artifact.Size, artifact.RecordCount, artifact.WarningCount, "", artifact.ExpiresAt)
+		warningDetails := append([]model.ManagedUsageExportWarning(nil), artifact.WarningDetails...)
+		for _, note := range payload.Notes {
+			if strings.Contains(note, "Warning") || strings.Contains(note, "警告") || strings.Contains(note, "stale / 旧数据: true") {
+				warningDetails = append(warningDetails, model.ManagedUsageExportWarning{Code: "scheduled_report_warning", Message: note})
+			}
+		}
+		_ = model.SetManagedUsageExportWarningDetails(task.TaskID, warningDetails)
+		warningCount := artifact.WarningCount
+		if len(warningDetails) > warningCount {
+			warningCount = len(warningDetails)
+		}
+		_ = model.FinishManagedUsageExport(task.TaskID, model.ManagedUsageExportStatusSucceeded, artifact.FileName, artifact.Size, artifact.RecordCount, warningCount, "", artifact.ExpiresAt)
 	}
 }
 

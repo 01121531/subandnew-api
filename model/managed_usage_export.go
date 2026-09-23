@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/01121531/subandnew-api/common"
@@ -23,34 +24,46 @@ const (
 
 var ErrManagedUsageExportConflict = errors.New("managed usage export status conflict")
 
+type ManagedUsageExportWarning struct {
+	Row          int64  `json:"row,omitempty"`
+	InstanceID   int64  `json:"instance_id,omitempty"`
+	InstanceName string `json:"instance_name,omitempty"`
+	AccountID    string `json:"account_id,omitempty"`
+	AccountName  string `json:"account_name,omitempty"`
+	AccountEmail string `json:"account_email,omitempty"`
+	Code         string `json:"warning_code,omitempty"`
+	Message      string `json:"warning_message"`
+}
+
 type ManagedUsageExport struct {
-	ID           int64            `json:"id" gorm:"primaryKey"`
-	TaskID       string           `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
-	ScheduleID   int64            `json:"schedule_id,omitempty" gorm:"not null;default:0;index"`
-	InstanceID   int64            `json:"instance_id" gorm:"not null;index"`
-	InstanceName string           `json:"instance_name" gorm:"type:varchar(128);not null"`
-	InstanceKind string           `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
-	ActorID      int              `json:"actor_id" gorm:"not null;index"`
-	ActorName    string           `json:"actor_name" gorm:"type:varchar(128);not null"`
-	ExportKind   string           `json:"export_kind" gorm:"type:varchar(32);not null;default:'usage_records';index"`
-	FileFormat   string           `json:"file_format" gorm:"type:varchar(16);not null;default:'csv'"`
-	Source       string           `json:"source,omitempty" gorm:"type:varchar(32)"`
-	Query        string           `json:"-" gorm:"type:text;not null"`
-	DataPolicy   *AdminDataPolicy `json:"-" gorm:"serializer:json;type:text"`
-	Status       string           `json:"status" gorm:"type:varchar(32);not null;index"`
-	Progress     int              `json:"progress" gorm:"not null;default:0"`
-	Processed    int64            `json:"processed" gorm:"bigint;not null;default:0"`
-	Total        int64            `json:"total" gorm:"bigint;not null;default:0"`
-	FileName     string           `json:"file_name" gorm:"type:varchar(255)"`
-	FileSize     int64            `json:"file_size" gorm:"bigint;not null;default:0"`
-	RecordCount  int              `json:"record_count" gorm:"not null;default:0"`
-	WarningCount int              `json:"warning_count" gorm:"not null;default:0"`
-	ErrorCode    string           `json:"error_code" gorm:"type:varchar(128)"`
-	StartedAt    int64            `json:"started_at" gorm:"bigint;not null;default:0"`
-	FinishedAt   int64            `json:"finished_at" gorm:"bigint;not null;default:0"`
-	ExpiresAt    int64            `json:"expires_at" gorm:"bigint;not null;default:0;index"`
-	CreatedAt    int64            `json:"created_at" gorm:"bigint;not null;index"`
-	UpdatedAt    int64            `json:"updated_at" gorm:"bigint;not null;index"`
+	ID             int64            `json:"id" gorm:"primaryKey"`
+	TaskID         string           `json:"task_id" gorm:"type:varchar(64);not null;uniqueIndex"`
+	ScheduleID     int64            `json:"schedule_id,omitempty" gorm:"not null;default:0;index"`
+	InstanceID     int64            `json:"instance_id" gorm:"not null;index"`
+	InstanceName   string           `json:"instance_name" gorm:"type:varchar(128);not null"`
+	InstanceKind   string           `json:"instance_kind" gorm:"type:varchar(32);not null;index"`
+	ActorID        int              `json:"actor_id" gorm:"not null;index"`
+	ActorName      string           `json:"actor_name" gorm:"type:varchar(128);not null"`
+	ExportKind     string           `json:"export_kind" gorm:"type:varchar(32);not null;default:'usage_records';index"`
+	FileFormat     string           `json:"file_format" gorm:"type:varchar(16);not null;default:'csv'"`
+	Source         string           `json:"source,omitempty" gorm:"type:varchar(32)"`
+	Query          string           `json:"-" gorm:"type:text;not null"`
+	DataPolicy     *AdminDataPolicy `json:"-" gorm:"serializer:json;type:text"`
+	Status         string           `json:"status" gorm:"type:varchar(32);not null;index"`
+	Progress       int              `json:"progress" gorm:"not null;default:0"`
+	Processed      int64            `json:"processed" gorm:"bigint;not null;default:0"`
+	Total          int64            `json:"total" gorm:"bigint;not null;default:0"`
+	FileName       string           `json:"file_name" gorm:"type:varchar(255)"`
+	FileSize       int64            `json:"file_size" gorm:"bigint;not null;default:0"`
+	RecordCount    int              `json:"record_count" gorm:"not null;default:0"`
+	WarningCount   int              `json:"warning_count" gorm:"not null;default:0"`
+	WarningDetails string           `json:"-" gorm:"type:text"`
+	ErrorCode      string           `json:"error_code" gorm:"type:varchar(128)"`
+	StartedAt      int64            `json:"started_at" gorm:"bigint;not null;default:0"`
+	FinishedAt     int64            `json:"finished_at" gorm:"bigint;not null;default:0"`
+	ExpiresAt      int64            `json:"expires_at" gorm:"bigint;not null;default:0;index"`
+	CreatedAt      int64            `json:"created_at" gorm:"bigint;not null;index"`
+	UpdatedAt      int64            `json:"updated_at" gorm:"bigint;not null;index"`
 }
 
 type ManagedExportItem struct {
@@ -267,7 +280,7 @@ func StartManagedUsageExport(taskID string) error {
 		Where("task_id = ? AND status = ?", taskID, ManagedUsageExportStatusPending).
 		Updates(map[string]any{
 			"status": ManagedUsageExportStatusRunning, "progress": 0,
-			"processed": 0, "total": 0, "error_code": "",
+			"processed": 0, "total": 0, "error_code": "", "warning_details": "",
 			"started_at": now, "finished_at": 0, "updated_at": now,
 		})
 	if result.Error != nil {
@@ -298,6 +311,24 @@ func FinishManagedUsageExport(taskID string, status string, fileName string, fil
 			"warning_count": warningCount,
 			"error_code":    errorCode, "finished_at": now, "expires_at": expiresAt, "updated_at": now,
 		}).Error
+}
+
+func SetManagedUsageExportWarningDetails(taskID string, details []ManagedUsageExportWarning) error {
+	const maxWarningDetails = 10000
+	encoded := ""
+	if len(details) > maxWarningDetails {
+		details = details[:maxWarningDetails]
+	}
+	if len(details) > 0 {
+		data, err := json.Marshal(details)
+		if err != nil {
+			return err
+		}
+		encoded = string(data)
+	}
+	return DB.Model(&ManagedUsageExport{}).Where("task_id = ?", taskID).Updates(map[string]any{
+		"warning_details": encoded, "updated_at": common.GetTimestamp(),
+	}).Error
 }
 
 func CancelManagedUsageExport(taskID string, actorID int, root bool) error {
@@ -339,7 +370,7 @@ func RequeueManagedUsageExport(taskID string, lockedBy string) error {
 		if err := tx.Model(&ManagedUsageExport{}).Where("task_id = ?", taskID).
 			Updates(map[string]any{
 				"status": ManagedUsageExportStatusPending, "progress": 0, "processed": 0,
-				"total": 0, "started_at": 0, "finished_at": 0, "error_code": "", "updated_at": now,
+				"total": 0, "started_at": 0, "finished_at": 0, "error_code": "", "warning_details": "", "updated_at": now,
 			}).Error; err != nil {
 			return err
 		}

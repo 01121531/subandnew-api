@@ -62,26 +62,28 @@ func (value *claudeGatewayNumber) UnmarshalJSON(data []byte) error {
 }
 
 type claudeGatewayAccount struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name"`
-	Email            string              `json:"email"`
-	AccountType      string              `json:"account_type"`
-	AuthKind         string              `json:"auth_kind"`
-	Status           string              `json:"status"`
-	HealthStatus     string              `json:"health_status"`
-	FailureKind      string              `json:"failure_kind"`
-	LastError        string              `json:"last_error"`
-	Provider         string              `json:"provider"`
-	InferenceBackend string              `json:"inference_backend"`
-	GroupName        string              `json:"group_name"`
-	OwnerUserID      string              `json:"owner_user_id"`
-	CreatedAt        string              `json:"created_at"`
-	LastUsedAt       string              `json:"last_used_at"`
-	DisabledAt       string              `json:"disabled_at"`
-	ExpiresAt        string              `json:"expires_at"`
-	TotalRequests    claudeGatewayNumber `json:"total_requests"`
-	TotalTokens      claudeGatewayNumber `json:"total_tokens"`
-	TotalCost        claudeGatewayNumber `json:"total_cost"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`
+	Email            string               `json:"email"`
+	AccountType      string               `json:"account_type"`
+	AuthKind         string               `json:"auth_kind"`
+	Status           string               `json:"status"`
+	HealthStatus     string               `json:"health_status"`
+	FailureKind      string               `json:"failure_kind"`
+	LastError        string               `json:"last_error"`
+	Provider         string               `json:"provider"`
+	InferenceBackend string               `json:"inference_backend"`
+	GroupName        string               `json:"group_name"`
+	OwnerUserID      string               `json:"owner_user_id"`
+	CreatedAt        string               `json:"created_at"`
+	LastUsedAt       string               `json:"last_used_at"`
+	DisabledAt       string               `json:"disabled_at"`
+	ExpiresAt        string               `json:"expires_at"`
+	TotalRequests    claudeGatewayNumber  `json:"total_requests"`
+	TotalTokens      claudeGatewayNumber  `json:"total_tokens"`
+	TotalCost        claudeGatewayNumber  `json:"total_cost"`
+	TodayCost        *claudeGatewayNumber `json:"today_cost"`
+	hasTotalCost     bool
 	Requests24H      claudeGatewayNumber `json:"req_24h"`
 	Successful24H    claudeGatewayNumber `json:"ok_24h"`
 	Limited24H       claudeGatewayNumber `json:"limited_24h"`
@@ -97,6 +99,9 @@ type claudeGatewayAccount struct {
 		Tokens30D   *claudeGatewayNumber `json:"tokens_30d"`
 		Cost30D     *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"usage_windows"`
+	CostWindows struct {
+		Cost30D *claudeGatewayNumber `json:"cost_30d"`
+	} `json:"cost_windows"`
 	Stats struct {
 		RPM               int                 `json:"rpm"`
 		Concurrent        int                 `json:"concurrent"`
@@ -120,6 +125,13 @@ func (account *claudeGatewayAccount) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*account = claudeGatewayAccount(decoded.plainAccount)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	rawTotalCost, hasTotalCost := fields["total_cost"]
+	rawTotalCost = bytes.TrimSpace(rawTotalCost)
+	account.hasTotalCost = hasTotalCost && len(rawTotalCost) > 0 && !bytes.Equal(rawTotalCost, []byte("null")) && !bytes.Equal(rawTotalCost, []byte(`""`))
 	ownerUserID, err := claudeGatewayFlexibleID(decoded.OwnerUserID)
 	if err != nil {
 		return err
@@ -188,8 +200,13 @@ type claudeGatewayAccountSummary struct {
 }
 
 type claudeGatewayAccountsPage struct {
-	Accounts []claudeGatewayAccount      `json:"accounts"`
-	Summary  claudeGatewayAccountSummary `json:"summary"`
+	Accounts   []claudeGatewayAccount      `json:"accounts"`
+	Summary    claudeGatewayAccountSummary `json:"summary"`
+	Total      int                         `json:"total"`
+	Page       int                         `json:"page"`
+	PageSize   int                         `json:"page_size"`
+	TotalPages int                         `json:"total_pages"`
+	HasMore    *bool                       `json:"has_more"`
 }
 
 type claudeGatewayOverview struct {
@@ -433,31 +450,124 @@ func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, c
 
 func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) (*claudeGatewayAccountsPage, error) {
 	request := claudeGatewayDoJSONWithMaxBody
-	endpoint := "/api/admin/oauth-accounts?page_mode=1&page=1&page_size=20&status=all&recovery_window=all&fable_recovery_window=all&sort=today_cost&direction=desc"
 	if bulk {
 		request = claudeGatewayDoBulkJSON
-		endpoint = "/api/admin/oauth-accounts"
 	}
-	response, err := request(
-		ctx,
-		connector,
-		credential,
-		http.MethodGet,
-		endpoint,
-		nil,
-		claudeGatewayAccountsMaxBodyBytes,
-	)
+	const pageSize = 100
+	combined := &claudeGatewayAccountsPage{}
+	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
+		query := url.Values{}
+		query.Set("page_mode", "1")
+		query.Set("page", strconv.Itoa(pageNumber))
+		query.Set("page_size", strconv.Itoa(pageSize))
+		query.Set("status", "all")
+		query.Set("recovery_window", "all")
+		query.Set("fable_recovery_window", "all")
+		query.Set("sort", "today_cost")
+		query.Set("direction", "desc")
+		response, err := request(ctx, connector, credential, http.MethodGet, "/api/admin/oauth-accounts?"+query.Encode(), nil, claudeGatewayAccountsMaxBodyBytes)
+		if err != nil {
+			return nil, claudeGatewayCollectionError("accounts", err)
+		}
+		if err := requireHTTPStatus(response); err != nil {
+			return nil, claudeGatewayCollectionError("accounts", err)
+		}
+		var page claudeGatewayAccountsPage
+		if json.Unmarshal(response.Body, &page) != nil || page.Accounts == nil || len(page.Accounts) > managedInstanceInventoryMaxItems {
+			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
+		if pageNumber == 1 {
+			*combined = page
+			combined.Accounts = append([]claudeGatewayAccount(nil), page.Accounts...)
+		} else {
+			combined.Accounts = append(combined.Accounts, page.Accounts...)
+		}
+		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
+			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
+		more := false
+		if page.HasMore != nil {
+			more = *page.HasMore
+		} else if page.TotalPages > pageNumber {
+			more = true
+		} else if page.Total > len(combined.Accounts) {
+			more = true
+		} else if page.Total == 0 && len(page.Accounts) == pageSize {
+			more = true
+		}
+		if !more {
+			break
+		}
+	}
+	combined.Total = len(combined.Accounts)
+	enrichClaudeGatewayAccountCosts(ctx, connector, credential, combined.Accounts)
+	return combined, nil
+}
+
+func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, credential *CredentialMaterial, accounts []claudeGatewayAccount) {
+	for index := range accounts {
+		account := &accounts[index]
+		if account.TodayCost != nil || account.UsageWindows.Cost30D != nil || account.CostWindows.Cost30D != nil {
+			continue
+		}
+		detail, err := fetchClaudeGatewayAccountDetail(ctx, connector, credential, account.ID)
+		if err != nil {
+			continue
+		}
+		if detail.TodayCost != nil {
+			account.TodayCost = detail.TodayCost
+		}
+		if detail.CostWindows.Cost30D != nil {
+			account.CostWindows.Cost30D = detail.CostWindows.Cost30D
+		}
+		if detail.UsageWindows.Cost30D != nil {
+			account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
+		}
+	}
+}
+
+func fetchClaudeGatewayAccountDetail(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID string) (claudeGatewayAccount, error) {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return claudeGatewayAccount{}, &ProbeError{Code: "claude_gateway_account_detail_invalid_id"}
+	}
+	response, err := claudeGatewayDoJSONWithMaxBody(ctx, connector, credential, http.MethodGet, "/api/admin/oauth-accounts/"+url.PathEscape(accountID), nil, claudeGatewayAccountsMaxBodyBytes)
 	if err != nil {
-		return nil, claudeGatewayCollectionError("accounts", err)
+		return claudeGatewayAccount{}, claudeGatewayCollectionError("account_detail", err)
 	}
 	if err := requireHTTPStatus(response); err != nil {
-		return nil, claudeGatewayCollectionError("accounts", err)
+		return claudeGatewayAccount{}, claudeGatewayCollectionError("account_detail", err)
 	}
-	var page claudeGatewayAccountsPage
-	if json.Unmarshal(response.Body, &page) != nil || page.Accounts == nil || len(page.Accounts) > managedInstanceInventoryMaxItems {
-		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+	return decodeClaudeGatewayAccountDetail(response.Body)
+}
+
+func decodeClaudeGatewayAccountDetail(data []byte) (claudeGatewayAccount, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return claudeGatewayAccount{}, errors.New("empty Claude Gateway account detail response")
 	}
-	return &page, nil
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return claudeGatewayAccount{}, err
+	}
+	if raw, ok := envelope["data"]; ok {
+		if account, err := decodeClaudeGatewayAccountDetail(raw); err == nil {
+			return account, nil
+		}
+	}
+	if raw, ok := envelope["account"]; ok {
+		if account, err := decodeClaudeGatewayAccountDetail(raw); err == nil {
+			return account, nil
+		}
+	}
+	var account claudeGatewayAccount
+	if err := json.Unmarshal(data, &account); err != nil {
+		return claudeGatewayAccount{}, err
+	}
+	if strings.TrimSpace(account.ID) == "" && account.CostWindows.Cost30D == nil && account.UsageWindows.Cost30D == nil && account.TodayCost == nil {
+		return claudeGatewayAccount{}, errors.New("Claude Gateway account detail is missing account data")
+	}
+	return account, nil
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
@@ -691,17 +801,32 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 	rateLimited := claudeGatewayRateLimited(account)
 	enabled := claudeGatewayAccountAvailable(account)
 	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
+	requestsPeriod, tokensPeriod := "lifetime", "lifetime"
+	costPeriod := "lifetime"
+	costAvailable := account.hasTotalCost
 	usageWindowDays := 0
 	if account.UsageWindows.Requests30D != nil {
 		requests = float64(*account.UsageWindows.Requests30D)
+		requestsPeriod = "30d"
 		usageWindowDays = 30
 	}
 	if account.UsageWindows.Tokens30D != nil {
 		tokens = float64(*account.UsageWindows.Tokens30D)
+		tokensPeriod = "30d"
 		usageWindowDays = 30
 	}
-	if account.UsageWindows.Cost30D != nil {
-		cost = float64(*account.UsageWindows.Cost30D)
+	if account.TodayCost != nil {
+		cost = float64(*account.TodayCost)
+		costPeriod = "today"
+		costAvailable = true
+	} else if account.CostWindows.Cost30D != nil || account.UsageWindows.Cost30D != nil {
+		if account.CostWindows.Cost30D != nil {
+			cost = float64(*account.CostWindows.Cost30D)
+		} else {
+			cost = float64(*account.UsageWindows.Cost30D)
+		}
+		costPeriod = "30d"
+		costAvailable = true
 		usageWindowDays = 30
 	}
 	requests24H := float64(account.Requests24H)
@@ -725,6 +850,7 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
 		DisabledAt: parseClaudeGatewayTime(account.DisabledAt), ExpiresAt: parseClaudeGatewayTime(account.ExpiresAt),
 		Requests: &requests, Tokens: &tokens, Cost: &cost, CostUnit: "usd", UsageWindowDays: usageWindowDays,
+		RequestsPeriod: requestsPeriod, TokensPeriod: tokensPeriod, CostPeriod: costPeriod, CostAvailable: &costAvailable,
 		Requests24H: &requests24H, SuccessfulRequests24H: &successful24H, LimitedRequests24H: &limited24H,
 		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
 		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
@@ -1016,13 +1142,16 @@ func collectClaudeGatewayAccountOutput(result *AccountOutputResult, items []Inve
 		if item.Cost != nil {
 			amount = *item.Cost
 		}
+		amountAvailable := item.CostAvailable == nil || *item.CostAvailable
 		result.Items[index] = AccountOutputItem{
-			Account: item, TotalRequests: requests, TotalTokens: tokens, Amount: amount,
+			Account: item, TotalRequests: requests, TotalTokens: tokens, Amount: amount, AmountAvailable: &amountAvailable, AmountPeriod: item.CostPeriod,
 			Currency: "USD", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
 		}
 		result.CollectedAccounts++
 		result.TotalRequests += requests
 		result.TotalTokens += tokens
-		result.TotalAmount += amount
+		if amountAvailable {
+			result.TotalAmount += amount
+		}
 	}
 }

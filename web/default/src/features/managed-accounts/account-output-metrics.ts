@@ -2,6 +2,7 @@ type OutputMetrics = {
   collection_status?: string
   currency?: string
   amount?: number
+  amount_available?: boolean
   total_requests?: number
   total_tokens?: number
 }
@@ -21,13 +22,19 @@ export function hasAccountOutputMetrics(output: OutputMetrics): boolean {
   )
 }
 
+function hasAccountOutputAmount(output: OutputMetrics): boolean {
+  return output.amount_available !== false && Number.isFinite(output.amount)
+}
+
 export function formatOutputAmount(
   value: number | null | undefined,
-  currency?: string
+  currency?: string,
+  available = true
 ): string {
   if (
     value == null ||
     !Number.isFinite(value) ||
+    !available ||
     !currency ||
     currency === 'mixed'
   ) {
@@ -49,9 +56,15 @@ export function accountOutputTotals(outputs: OutputMetrics[]) {
     }
     return collected.reduce((total, output) => total + (output[key] ?? 0), 0)
   }
-  const currencies = new Set(collected.map((output) => output.currency))
+  const amountCollected = collected.filter(hasAccountOutputAmount)
+  const currencies = new Set(amountCollected.map((output) => output.currency))
   const currency = currencies.size === 1 ? [...currencies][0] : 'mixed'
-  const amount = !currency || currency === 'mixed' ? null : sum('amount')
+  const amount =
+    !currency ||
+    currency === 'mixed' ||
+    amountCollected.length !== collected.length
+      ? null
+      : sum('amount')
   return {
     added: outputs.length,
     collected: collected.length,

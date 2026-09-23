@@ -716,6 +716,25 @@ func GetManagedUsageExport(c *gin.Context) {
 	adminDataJSON(c, http.StatusOK, view)
 }
 
+func GetManagedUsageExportWarnings(c *gin.Context) {
+	record, items, err := service.GetManagedUsageExportWarnings(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
+	if err != nil {
+		managedInstanceError(c, err)
+		return
+	}
+	if record == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "usage export not found"})
+		return
+	}
+	adminDataJSON(c, http.StatusOK, gin.H{
+		"task_id":       record.TaskID,
+		"warning_count": record.WarningCount,
+		"items":         items,
+		"messages":      []string{},
+		"truncated":     record.WarningCount > len(items),
+	})
+}
+
 func DownloadManagedUsageExport(c *gin.Context) {
 	record, err := service.GetManagedUsageExport(c.Param("task_id"), c.GetInt("id"), c.GetInt("role") >= common.RoleRootUser)
 	if err != nil {

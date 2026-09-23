@@ -73,6 +73,7 @@ import {
   exportInstanceKindClassName,
   exportInstanceKindLabel,
 } from './status-meta'
+import { WarningDetailsDialog } from './warning-details-dialog'
 
 const PAGE_SIZE = 20
 const SKELETON_ROWS = [
@@ -206,12 +207,15 @@ function ExportKindBadge({ item }: { item: UsageRecordExportTask }) {
 function ExportWarningBadge({ item }: { item: UsageRecordExportTask }) {
   if (item.status !== 'succeeded' || item.warning_count <= 0) return null
   return (
-    <Badge
-      className='border-warning/30 bg-warning/10 text-warning'
-      variant='outline'
-    >
-      完成但有警告
-    </Badge>
+    <div className='flex flex-wrap items-center gap-1'>
+      <Badge
+        className='border-warning/30 bg-warning/10 text-warning'
+        variant='outline'
+      >
+        完成但有警告
+      </Badge>
+      <WarningDetailsDialog item={item} />
+    </div>
   )
 }
 
