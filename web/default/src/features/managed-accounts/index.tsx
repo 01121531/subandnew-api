@@ -83,6 +83,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -110,10 +111,12 @@ import { isInstanceConnectionError } from '@/features/managed-instances/errors'
 import type {
   ManagedInstance,
   ManagedAccountRangeInput,
+  ManagedAccountSyncProgress,
   ManagedInstanceAccountOutputItem,
   ManagedInstanceInventoryItem,
   ManagedInstanceInventorySource,
   ManagedInstanceRealtimeState,
+  ManagedInstanceTask,
 } from '@/features/managed-instances/types'
 import { useManagedInstanceRealtimeEvents } from '@/features/managed-instances/use-realtime-events'
 import { createManagedAccountExport } from '@/features/usage-records/api'
@@ -911,6 +914,8 @@ function FullManagedAccounts() {
     rangeQueryKey,
     accountRangeInput
   )
+  const snapshotQueriesRef = useRef(snapshotQueries)
+  snapshotQueriesRef.current = snapshotQueries
   const exportRangeKey =
     snapshotQueries.find((query) => query.data?.data.range.range_key)?.data
       ?.data.range.range_key ??
@@ -1174,6 +1179,27 @@ function FullManagedAccounts() {
     const task = query.data?.data.task
     return task && ['pending', 'running'].includes(task.status)
   })
+  useEffect(() => {
+    if (!hasActiveTask) return
+    const interval = window.setInterval(() => {
+      snapshotQueriesRef.current.forEach((query) => {
+        const task = query.data?.data.task
+        if (task && ['pending', 'running'].includes(task.status)) {
+          void query.refetch()
+        }
+      })
+    }, 1500)
+    return () => window.clearInterval(interval)
+  }, [hasActiveTask])
+  const collectionProgress = useMemo(
+    () =>
+      instances.flatMap((instance, index) => {
+        const task = snapshotQueries[index]?.data?.data.task
+        if (!task || !['pending', 'running'].includes(task.status)) return []
+        return [{ instance, task, progress: readAccountSyncProgress(task) }]
+      }),
+    [instances, snapshotQueries]
+  )
   const refreshNeeded = snapshotQueries.some(
     (query) => query.data?.data.refresh_recommended
   )
@@ -1388,6 +1414,7 @@ function FullManagedAccounts() {
           failed={cacheRefreshFailed}
           hasData={collectedInstances > 0}
         />
+        <AccountCollectionProgress items={collectionProgress} />
         {family === 'conductor' && (
           <ConductorRealtimeStatus
             status={conductorRealtime.status}
@@ -1641,6 +1668,105 @@ function FullManagedAccounts() {
         </SectionPageLayout.Content>
       </SectionPageLayout>
     </ScheduleScope.Provider>
+  )
+}
+
+function readAccountSyncProgress(
+  task: ManagedInstanceTask
+): ManagedAccountSyncProgress {
+  const state =
+    task.state && typeof task.state === 'object'
+      ? (task.state as ManagedAccountSyncProgress)
+      : {}
+  const total =
+    typeof state.total === 'number' && state.total > 0 ? state.total : 1
+  const step =
+    typeof state.step === 'number'
+      ? Math.min(total, Math.max(0, state.step))
+      : 0
+  const progress =
+    typeof state.progress === 'number'
+      ? Math.min(100, Math.max(0, state.progress))
+      : Math.round((step / total) * 100)
+  return {
+    stage: state.stage ?? 'queued',
+    step,
+    total,
+    progress,
+  }
+}
+
+const ACCOUNT_SYNC_STAGE_LABELS: Record<string, string> = {
+  queued: 'Queued for collection',
+  inventory: 'Collecting account inventory',
+  output_1d: 'Collecting 1-day output',
+  output_7d: 'Collecting 7-day output',
+  output_14d: 'Collecting 14-day output',
+  output_30d: 'Collecting 30-day output',
+  output_custom: 'Collecting selected-period output',
+  completed: 'Collection complete',
+  failed: 'Collection failed',
+}
+
+function AccountCollectionProgress(props: {
+  items: Array<{
+    instance: ManagedInstance
+    task: ManagedInstanceTask
+    progress: ManagedAccountSyncProgress
+  }>
+}) {
+  const { t } = useTranslation()
+  if (props.items.length === 0) return null
+  return (
+    <div
+      className='border-primary/25 bg-primary/5 rounded-lg border px-4 py-3'
+      aria-live='polite'
+    >
+      <div className='flex items-center gap-2 text-sm font-medium'>
+        <DatabaseZap className='text-primary size-4' />
+        {t('Account data collection progress')}
+      </div>
+      <div className='mt-3 grid gap-3 md:grid-cols-2'>
+        {props.items.map(({ instance, task, progress }) => {
+          const percent = progress.progress ?? 0
+          return (
+            <div
+              key={`${instance.id}-${task.task_id}`}
+              className='bg-background/70 min-w-0 rounded-md border px-3 py-3'
+            >
+              <div className='flex items-start justify-between gap-3'>
+                <span className='min-w-0 truncate text-sm font-medium'>
+                  {instance.name}
+                </span>
+                <Badge variant='outline' className='shrink-0'>
+                  {t(task.status)}
+                </Badge>
+              </div>
+              <div className='text-muted-foreground mt-2 flex flex-wrap items-center justify-between gap-2 text-xs'>
+                <span>
+                  {t(
+                    ACCOUNT_SYNC_STAGE_LABELS[progress.stage ?? 'queued'] ??
+                      'Collecting account data'
+                  )}
+                </span>
+                <span className='tabular-nums'>
+                  {t('Step {{step}} of {{total}}', {
+                    step: progress.step,
+                    total: progress.total,
+                  })}
+                </span>
+              </div>
+              <div className='mt-2 flex items-center gap-2'>
+                <Progress value={percent} className='h-1.5' />
+                <span className='text-muted-foreground w-10 text-right text-xs tabular-nums'>
+                  {percent}%
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 

@@ -423,6 +423,13 @@ export interface ManagedAccountRefreshView {
   task?: ManagedInstanceTask
 }
 
+export interface ManagedAccountSyncProgress {
+  stage?: string
+  step?: number
+  total?: number
+  progress?: number
+}
+
 export interface ManagedInstanceAlert {
   id: number
   instance_id: number

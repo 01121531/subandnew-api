@@ -182,6 +182,11 @@ func TestManagedAccountRefreshCooldownAndDeduplication(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, forced.Enqueued)
 	require.NotNil(t, forced.Task)
+	initialProgress, ok := forced.Task.State.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "queued", initialProgress["stage"])
+	require.EqualValues(t, 5, initialProgress["total"])
+	require.EqualValues(t, 0, initialProgress["progress"])
 
 	duplicate, err := EnqueueManagedAccountRefresh(instance.Id, 1, accountRange, true)
 	require.NoError(t, err)

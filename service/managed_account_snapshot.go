@@ -81,6 +81,13 @@ type ManagedAccountSyncPayload struct {
 	Range      ManagedAccountRange `json:"range"`
 }
 
+type managedAccountSyncProgress struct {
+	Stage    string `json:"stage"`
+	Step     int    `json:"step"`
+	Total    int    `json:"total"`
+	Progress int    `json:"progress"`
+}
+
 type managedAccountSyncHandler struct{}
 
 var (
@@ -318,7 +325,13 @@ func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange Ma
 		return &ManagedAccountRefreshView{}, nil
 	}
 	payload := ManagedAccountSyncPayload{InstanceID: instanceID, ActorID: actorID, Mode: mode, Range: accountRange}
-	task, created, err := EnqueueScopedSystemTask(model.SystemTaskTypeManagedAccountSync, scope, payload, nil)
+	total := 1
+	if mode == managedAccountStandardTaskMode {
+		total = 5
+	}
+	task, created, err := EnqueueScopedSystemTask(model.SystemTaskTypeManagedAccountSync, scope, payload, managedAccountSyncProgress{
+		Stage: "queued", Total: total,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -659,6 +672,7 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 	results := map[string]any{}
 	failed := false
 	if payload.Mode == managedAccountStandardTaskMode {
+		_ = updateManagedAccountSyncProgress(task, runnerID, "inventory", 0, 5)
 		inventory, collectErr := collectManagedAccountObservation(ctx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
 			return managedinstance.CollectInventory(ctx, payload.InstanceID, "auto", "")
 		})
@@ -675,14 +689,18 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		results["inventory"] = managedAccountTaskResult(inventory, collectErr)
 		if collectErr != nil || inventory == nil || inventory.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 			failed = true
-			for _, days := range managedAccountPresetDays {
+			for index, days := range managedAccountPresetDays {
+				_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+1, 5)
 				accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
 				_ = saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindOutput, accountRange, inventory, collectErr)
+				_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+2, 5)
 			}
 		} else {
+			_ = updateManagedAccountSyncProgress(task, runnerID, "output_1d", 1, 5)
 			failed = collectManagedAccountPresetOutputs(ctx, task, runnerID, payload, results)
 		}
 	} else {
+		_ = updateManagedAccountSyncProgress(task, runnerID, "output_custom", 0, 1)
 		failed = collectManagedAccountCustomOutput(ctx, task, runnerID, payload, results)
 	}
 	if ctx.Err() != nil {
@@ -696,13 +714,40 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 	if failed {
 		status = model.SystemTaskStatusFailed
 		errorCode = "account_collection_failed"
+		_ = updateManagedAccountSyncProgress(task, runnerID, "failed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode))
+	} else if err := updateManagedAccountSyncProgress(task, runnerID, "completed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode)); err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("managed account progress update failed for %s: %v", task.TaskID, err))
 	}
 	_ = model.FinishSystemTask(task.TaskID, runnerID, status, results, errorCode)
 }
 
+func progressTotalForManagedAccountTask(mode string) int {
+	if mode == managedAccountStandardTaskMode {
+		return 5
+	}
+	return 1
+}
+
+func updateManagedAccountSyncProgress(task *model.SystemTask, runnerID string, stage string, step int, total int) error {
+	if total <= 0 {
+		total = 1
+	}
+	if step < 0 {
+		step = 0
+	}
+	if step > total {
+		step = total
+	}
+	return model.UpdateSystemTaskState(task.TaskID, runnerID, managedAccountSyncProgress{
+		Stage: stage, Step: step, Total: total, Progress: step * 100 / total,
+	})
+}
+
 func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
 	failed := false
-	for _, days := range managedAccountPresetDays {
+	for index, days := range managedAccountPresetDays {
+		step := index + 1
+		_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", step, 5)
 		accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
 		accountRange, err := resolvedManagedAccountRange(accountRange, time.Now())
 		if err != nil {
@@ -719,6 +764,7 @@ func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemT
 			return true
 		}
 		results[accountRange.RangeKey] = managedAccountTaskResult(observation, collectErr)
+		_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", step+1, 5)
 		if collectErr != nil || observation == nil || observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 			failed = true
 		}
@@ -738,6 +784,7 @@ func collectManagedAccountCustomOutput(ctx context.Context, task *model.SystemTa
 		return true
 	}
 	results[accountRange.RangeKey] = managedAccountTaskResult(observation, collectErr)
+	_ = updateManagedAccountSyncProgress(task, runnerID, "output_custom", 1, 1)
 	return collectErr != nil || observation == nil || observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded
 }
 

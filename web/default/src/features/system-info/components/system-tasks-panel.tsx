@@ -88,6 +88,7 @@ const PROGRESS_BAR_CLASS_NAME: Record<SystemTaskStatus, string> = {
 const TYPE_LABEL: Record<string, string> = {
   managed_instance_probe: 'Instance health check',
   managed_instance_operation: 'Instance operation',
+  managed_account_sync: 'Account data collection',
 }
 
 function isActiveStatus(status: SystemTaskStatus) {
