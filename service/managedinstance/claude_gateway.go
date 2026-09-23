@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/fnv"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -403,16 +404,17 @@ func (claudeGatewayAdapter) Inventory(ctx context.Context, connector *Connector,
 	if resourceKind != "account" || credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
 		return nil, ErrUnsupportedCapability
 	}
-	accounts, err := fetchClaudeGatewayAccountsBulk(ctx, connector, credential)
+	accountsPage, err := fetchClaudeGatewayAccountsBulk(ctx, connector, credential)
 	if err != nil {
 		return nil, err
 	}
+	accounts := accountsPage.Accounts
 	vendors, vendorErr := fetchClaudeGatewayVendors(ctx, connector, credential)
 	vendorObservedAt := common.GetTimestamp()
 	if vendorErr != nil {
 		vendors, vendorObservedAt = previousClaudeGatewayVendors(connector.instanceID)
 	}
-	page := claudeGatewayInventoryPage(accounts, vendors)
+	page := claudeGatewayInventoryPage(accounts, vendors, accountsPage.Total)
 	page.VendorObservedAt = vendorObservedAt
 	page.VendorCollectionStatus = model.ManagedInstanceCollectionSucceeded
 	if vendorErr == nil && claudeGatewayUnmatchedVendorCount(page.Items) > 0 {
@@ -443,12 +445,24 @@ func fetchClaudeGatewayAccounts(ctx context.Context, connector *Connector, crede
 	return fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, false)
 }
 
-func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, credential *CredentialMaterial) ([]claudeGatewayAccount, error) {
+func fetchClaudeGatewayAccountsBulk(ctx context.Context, connector *Connector, credential *CredentialMaterial) (*claudeGatewayAccountsPage, error) {
 	page, err := fetchClaudeGatewayAccountsWithMode(ctx, connector, credential, true)
 	if err != nil {
 		return nil, err
 	}
-	return page.Accounts, nil
+	return page, nil
+}
+
+func claudeGatewaySummaryTotal(page claudeGatewayAccountsPage) (int, bool) {
+	if page.Summary.TotalRows == nil {
+		return 0, false
+	}
+	value := float64(*page.Summary.TotalRows)
+	maxInt := float64(^uint(0) >> 1)
+	if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value || value > maxInt {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connector, credential *CredentialMaterial, bulk bool) (*claudeGatewayAccountsPage, error) {
@@ -458,6 +472,8 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 	}
 	const pageSize = 100
 	combined := &claudeGatewayAccountsPage{}
+	reportedTotal := 0
+	hasReportedTotal := false
 	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
 		query := url.Values{}
 		query.Set("page_mode", "1")
@@ -483,8 +499,15 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 			*combined = page
 			combined.Accounts = nil
 		}
+		if total, ok := claudeGatewaySummaryTotal(page); ok && (!hasReportedTotal || total > reportedTotal) {
+			reportedTotal = total
+			hasReportedTotal = true
+		}
 		start := len(combined.Accounts)
 		progressTotal := page.Total
+		if hasReportedTotal {
+			progressTotal = reportedTotal
+		}
 		if progressTotal <= 0 && page.TotalPages > 0 {
 			progressTotal = page.TotalPages * pageSize
 		}
@@ -508,6 +531,8 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 			more = *page.HasMore
 		} else if page.TotalPages > pageNumber {
 			more = true
+		} else if hasReportedTotal && reportedTotal > len(combined.Accounts) && (page.PageSize > 0 || len(page.Accounts) == pageSize) {
+			more = true
 		} else if page.Total > len(combined.Accounts) {
 			more = true
 		} else if page.Total == 0 && len(page.Accounts) == pageSize {
@@ -517,7 +542,11 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 			break
 		}
 	}
-	combined.Total = len(combined.Accounts)
+	if hasReportedTotal {
+		combined.Total = reportedTotal
+	} else {
+		combined.Total = len(combined.Accounts)
+	}
 	return combined, nil
 }
 
@@ -844,12 +873,15 @@ func fetchClaudeGatewayUsageSummary(ctx context.Context, connector *Connector, c
 	return envelope.Summary, nil
 }
 
-func claudeGatewayInventoryPage(accounts []claudeGatewayAccount, vendors map[string]claudeGatewayVendor) *InventoryPage {
+func claudeGatewayInventoryPage(accounts []claudeGatewayAccount, vendors map[string]claudeGatewayVendor, total int) *InventoryPage {
 	items := make([]InventoryItem, 0, len(accounts))
 	for _, account := range accounts {
 		items = append(items, claudeGatewayAccountItem(account, vendors))
 	}
-	return &InventoryPage{ResourceKind: "account", Items: items, Total: len(items)}
+	if total < len(items) {
+		total = len(items)
+	}
+	return &InventoryPage{ResourceKind: "account", Items: items, Total: total}
 }
 
 func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]claudeGatewayVendor) InventoryItem {
@@ -1024,7 +1056,7 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 		}
 	}
 	accounts := accountsPage.Accounts
-	page := claudeGatewayInventoryPage(accounts, nil)
+	page := claudeGatewayInventoryPage(accounts, nil, accountsPage.Total)
 	accountRPM, concurrency, sessions, available, reporting := 0.0, 0.0, 0, 0, 0
 	for index, account := range accounts {
 		if account.Stats.RPM >= 0 {
@@ -1048,10 +1080,7 @@ func RefreshClaudeGatewayRealtime(ctx context.Context, instanceID int64) (Manage
 	if accountsPage.Summary.AvailableAccounts != nil && *accountsPage.Summary.AvailableAccounts >= 0 {
 		available = int(*accountsPage.Summary.AvailableAccounts)
 	}
-	totalAccounts := len(accounts)
-	if accountsPage.Summary.TotalRows != nil && *accountsPage.Summary.TotalRows >= 0 {
-		totalAccounts = int(*accountsPage.Summary.TotalRows)
-	}
+	totalAccounts := accountsPage.Total
 	now := common.GetTimestamp()
 	state := ManagedRealtimeState{
 		InstanceID: instanceID, ObservedAt: now, LastAttemptAt: now, StreamStatus: "connected",
