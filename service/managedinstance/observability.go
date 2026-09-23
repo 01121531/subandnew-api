@@ -171,6 +171,45 @@ type ObservationView struct {
 
 type CommitGuard func(*gorm.DB) error
 
+type inventoryProgressContextKey struct{}
+
+type inventoryProgressReporter struct {
+	mu            sync.Mutex
+	callback      func(completed int, total int)
+	lastCompleted int
+	lastTotal     int
+}
+
+func withInventoryProgress(ctx context.Context, progress func(completed int, total int)) context.Context {
+	if progress == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, inventoryProgressContextKey{}, &inventoryProgressReporter{callback: progress})
+}
+
+func reportInventoryProgress(ctx context.Context, completed int, total int) {
+	reporter, ok := ctx.Value(inventoryProgressContextKey{}).(*inventoryProgressReporter)
+	if !ok || reporter == nil || reporter.callback == nil {
+		return
+	}
+	if completed < 0 {
+		completed = 0
+	}
+	if total < completed {
+		total = completed
+	}
+	reporter.mu.Lock()
+	if completed == reporter.lastCompleted && total == reporter.lastTotal {
+		reporter.mu.Unlock()
+		return
+	}
+	reporter.lastCompleted = completed
+	reporter.lastTotal = total
+	callback := reporter.callback
+	reporter.mu.Unlock()
+	callback(completed, total)
+}
+
 func (adapter newAPIAdapter) Inventory(ctx context.Context, connector *Connector, credential *CredentialMaterial, resourceKind string, cursor string) (*InventoryPage, error) {
 	if credentialAccessScope(credential) == model.ManagedInstanceAccessUser {
 		if strings.TrimSpace(cursor) != "" {
@@ -754,6 +793,10 @@ func CollectInventory(ctx context.Context, instanceID int64, resourceKind string
 	return collectInventory(ctx, instanceID, resourceKind, cursor, nil)
 }
 
+func CollectInventoryWithProgress(ctx context.Context, instanceID int64, resourceKind string, cursor string, progress func(completed int, total int)) (*ObservationView, error) {
+	return collectInventory(withInventoryProgress(ctx, progress), instanceID, resourceKind, cursor, nil)
+}
+
 func CollectInventoryWithCommitGuard(ctx context.Context, instanceID int64, resourceKind string, cursor string, guard CommitGuard) (*ObservationView, error) {
 	if err := authz.CheckContextInstances(ctx, instanceID); err != nil {
 		return nil, err
@@ -786,6 +829,9 @@ func collectInventory(ctx context.Context, instanceID int64, resourceKind string
 	}
 	if instance.Kind == model.ManagedInstanceKindConductor && collectionErr == nil && normalizeResourceKind(resourceKind, "account") == "account" {
 		enrichConductorInventorySources(ctx, connector, credential, page)
+	}
+	if cursor == "" && collectionErr == nil && page != nil {
+		reportInventoryProgress(ctx, len(page.Items), page.Total)
 	}
 	if cursor != "" {
 		view, _, err := observationView(instance.Id, observedAt, page, collectionErr)

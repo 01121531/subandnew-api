@@ -428,6 +428,8 @@ export interface ManagedAccountSyncProgress {
   step?: number
   total?: number
   progress?: number
+  item_completed?: number
+  item_total?: number
 }
 
 export interface ManagedInstanceAlert {

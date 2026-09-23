@@ -28,9 +28,11 @@ type claudeGatewaySession struct {
 }
 
 const (
-	claudeGatewaySessionTTL           = 10 * time.Minute
-	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
-	claudeGatewayBulkRequestTimeout   = 60 * time.Second
+	claudeGatewaySessionTTL            = 10 * time.Minute
+	claudeGatewayAccountsMaxBodyBytes  = int64(64 * 1024 * 1024)
+	claudeGatewayBulkRequestTimeout    = 60 * time.Second
+	claudeGatewayAccountDetailTimeout  = 20 * time.Second
+	claudeGatewayCostEnrichmentWorkers = 8
 )
 
 var claudeGatewaySessions sync.Map
@@ -478,12 +480,23 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 		}
 		if pageNumber == 1 {
 			*combined = page
-			combined.Accounts = append([]claudeGatewayAccount(nil), page.Accounts...)
-		} else {
-			combined.Accounts = append(combined.Accounts, page.Accounts...)
+			combined.Accounts = nil
 		}
+		enrichClaudeGatewayAccountCosts(ctx, connector, credential, page.Accounts)
+		start := len(combined.Accounts)
+		combined.Accounts = append(combined.Accounts, page.Accounts...)
 		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
 			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
+		progressTotal := page.Total
+		if progressTotal <= 0 && page.TotalPages > 0 {
+			progressTotal = page.TotalPages * pageSize
+		}
+		if progressTotal < len(combined.Accounts) {
+			progressTotal = len(combined.Accounts)
+		}
+		for index := start; index < len(combined.Accounts); index++ {
+			reportInventoryProgress(ctx, index+1, progressTotal)
 		}
 		more := false
 		if page.HasMore != nil {
@@ -500,30 +513,62 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 		}
 	}
 	combined.Total = len(combined.Accounts)
-	enrichClaudeGatewayAccountCosts(ctx, connector, credential, combined.Accounts)
 	return combined, nil
 }
 
 func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, credential *CredentialMaterial, accounts []claudeGatewayAccount) {
+	pending := make([]int, 0, len(accounts))
 	for index := range accounts {
 		account := &accounts[index]
-		if account.TodayCost != nil || account.UsageWindows.Cost30D != nil || account.CostWindows.Cost30D != nil {
-			continue
-		}
-		detail, err := fetchClaudeGatewayAccountDetail(ctx, connector, credential, account.ID)
-		if err != nil {
-			continue
-		}
-		if detail.TodayCost != nil {
-			account.TodayCost = detail.TodayCost
-		}
-		if detail.CostWindows.Cost30D != nil {
-			account.CostWindows.Cost30D = detail.CostWindows.Cost30D
-		}
-		if detail.UsageWindows.Cost30D != nil {
-			account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
+		if account.TodayCost == nil && account.UsageWindows.Cost30D == nil && account.CostWindows.Cost30D == nil {
+			pending = append(pending, index)
 		}
 	}
+	if len(pending) == 0 {
+		return
+	}
+
+	workerCount := min(claudeGatewayCostEnrichmentWorkers, len(pending))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				detailCtx, cancel := context.WithTimeout(ctx, claudeGatewayAccountDetailTimeout)
+				detail, err := fetchClaudeGatewayAccountDetail(detailCtx, connector, credential, accounts[index].ID)
+				cancel()
+				if err != nil {
+					continue
+				}
+				account := &accounts[index]
+				if detail.TodayCost != nil {
+					account.TodayCost = detail.TodayCost
+				}
+				if detail.CostWindows.Cost30D != nil {
+					account.CostWindows.Cost30D = detail.CostWindows.Cost30D
+				}
+				if detail.UsageWindows.Cost30D != nil {
+					account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
+				}
+			}
+		}()
+	}
+
+dispatch:
+	for _, index := range pending {
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			break dispatch
+		}
+	}
+	close(jobs)
+	workers.Wait()
 }
 
 func fetchClaudeGatewayAccountDetail(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID string) (claudeGatewayAccount, error) {

@@ -1693,6 +1693,14 @@ function readAccountSyncProgress(
     step,
     total,
     progress,
+    item_completed:
+      typeof state.item_completed === 'number'
+        ? Math.max(0, state.item_completed)
+        : undefined,
+    item_total:
+      typeof state.item_total === 'number'
+        ? Math.max(0, state.item_total)
+        : undefined,
   }
 }
 
@@ -1749,12 +1757,21 @@ function AccountCollectionProgress(props: {
                       'Collecting account data'
                   )}
                 </span>
-                <span className='tabular-nums'>
-                  {t('Step {{step}} of {{total}}', {
-                    step: progress.step,
-                    total: progress.total,
-                  })}
-                </span>
+                {progress.item_total ? (
+                  <span className='tabular-nums'>
+                    {t('Collected {{completed}} / {{total}} accounts', {
+                      completed: progress.item_completed ?? 0,
+                      total: progress.item_total,
+                    })}
+                  </span>
+                ) : (
+                  <span className='tabular-nums'>
+                    {t('Step {{step}} of {{total}}', {
+                      step: progress.step,
+                      total: progress.total,
+                    })}
+                  </span>
+                )}
               </div>
               <div className='mt-2 flex items-center gap-2'>
                 <Progress value={percent} className='h-1.5' />

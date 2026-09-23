@@ -1372,6 +1372,7 @@
     "Collection failed": "采集失败",
     "Collecting account data": "正在采集账号数据",
     "Step {{step}} of {{total}}": "第 {{step}} / {{total}} 步",
+    "Collected {{completed}} / {{total}} accounts": "已采集 {{completed}} / {{total}} 个账号",
     "Updating account data in the background": "正在后台更新账号数据",
     "Collected at {{time}}": "采集于 {{time}}",
     "Next automatic update at {{time}}": "下次自动更新于 {{time}}",

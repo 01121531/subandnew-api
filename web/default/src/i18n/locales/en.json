@@ -1372,6 +1372,7 @@
     "Collection failed": "Collection failed",
     "Collecting account data": "Collecting account data",
     "Step {{step}} of {{total}}": "Step {{step}} of {{total}}",
+    "Collected {{completed}} / {{total}} accounts": "Collected {{completed}} / {{total}} accounts",
     "Updating account data in the background": "Updating account data in the background",
     "Collected at {{time}}": "Collected at {{time}}",
     "Next automatic update at {{time}}": "Next automatic update at {{time}}",

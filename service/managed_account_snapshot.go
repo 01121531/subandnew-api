@@ -26,6 +26,7 @@ const (
 	managedAccountSyncInterval      = 15 * time.Minute
 	managedAccountRefreshCooldown   = managedAccountSyncInterval
 	managedAccountFailureCooldown   = time.Minute
+	managedAccountSyncTimeout       = 10 * time.Minute
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
@@ -82,10 +83,12 @@ type ManagedAccountSyncPayload struct {
 }
 
 type managedAccountSyncProgress struct {
-	Stage    string `json:"stage"`
-	Step     int    `json:"step"`
-	Total    int    `json:"total"`
-	Progress int    `json:"progress"`
+	Stage         string `json:"stage"`
+	Step          int    `json:"step"`
+	Total         int    `json:"total"`
+	Progress      int    `json:"progress"`
+	ItemCompleted int    `json:"item_completed,omitempty"`
+	ItemTotal     int    `json:"item_total,omitempty"`
 }
 
 type managedAccountSyncHandler struct{}
@@ -657,13 +660,19 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "invalid_account_sync_payload")
 		return
 	}
-	release, err := acquireManagedAccountSlots(ctx, payload.InstanceID)
+	workCtx, cancel := context.WithTimeout(ctx, managedAccountSyncTimeout)
+	defer cancel()
+	release, err := acquireManagedAccountSlots(workCtx, payload.InstanceID)
 	if err != nil {
 		if ctx.Err() != nil && model.RequeueSystemTask(task.TaskID, runnerID) == nil {
 			notifySystemTaskRunner()
 			return
 		}
-		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, "account_sync_cancelled")
+		errorCode := "account_sync_cancelled"
+		if workCtx.Err() != nil {
+			errorCode = "account_collection_timeout"
+		}
+		_ = model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusFailed, nil, errorCode)
 		return
 	}
 	defer release()
@@ -673,8 +682,10 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 	failed := false
 	if payload.Mode == managedAccountStandardTaskMode {
 		_ = updateManagedAccountSyncProgress(task, runnerID, "inventory", 0, 5)
-		inventory, collectErr := collectManagedAccountObservation(ctx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
-			return managedinstance.CollectInventory(ctx, payload.InstanceID, "auto", "")
+		inventory, collectErr := collectManagedAccountObservation(workCtx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
+			return managedinstance.CollectInventoryWithProgress(workCtx, payload.InstanceID, "auto", "", func(completed int, total int) {
+				_ = updateManagedAccountInventoryProgress(task, runnerID, completed, total)
+			})
 		})
 		if ctx.Err() != nil {
 			if model.RequeueSystemTask(task.TaskID, runnerID) == nil {
@@ -697,11 +708,11 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 			}
 		} else {
 			_ = updateManagedAccountSyncProgress(task, runnerID, "output_1d", 1, 5)
-			failed = collectManagedAccountPresetOutputs(ctx, task, runnerID, payload, results)
+			failed = collectManagedAccountPresetOutputs(workCtx, task, runnerID, payload, results)
 		}
 	} else {
 		_ = updateManagedAccountSyncProgress(task, runnerID, "output_custom", 0, 1)
-		failed = collectManagedAccountCustomOutput(ctx, task, runnerID, payload, results)
+		failed = collectManagedAccountCustomOutput(workCtx, task, runnerID, payload, results)
 	}
 	if ctx.Err() != nil {
 		if model.RequeueSystemTask(task.TaskID, runnerID) == nil {
@@ -714,6 +725,9 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 	if failed {
 		status = model.SystemTaskStatusFailed
 		errorCode = "account_collection_failed"
+		if workCtx.Err() != nil {
+			errorCode = "account_collection_timeout"
+		}
 		_ = updateManagedAccountSyncProgress(task, runnerID, "failed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode))
 	} else if err := updateManagedAccountSyncProgress(task, runnerID, "completed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode)); err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("managed account progress update failed for %s: %v", task.TaskID, err))
@@ -740,6 +754,29 @@ func updateManagedAccountSyncProgress(task *model.SystemTask, runnerID string, s
 	}
 	return model.UpdateSystemTaskState(task.TaskID, runnerID, managedAccountSyncProgress{
 		Stage: stage, Step: step, Total: total, Progress: step * 100 / total,
+	})
+}
+
+func updateManagedAccountInventoryProgress(task *model.SystemTask, runnerID string, completed int, total int) error {
+	if completed < 0 {
+		completed = 0
+	}
+	if total < completed {
+		total = completed
+	}
+	progress := 0
+	if total > 0 {
+		progress = completed * 100 / total / progressTotalForManagedAccountTask(managedAccountStandardTaskMode)
+		if completed > 0 && progress == 0 {
+			progress = 1
+		}
+		if completed >= total {
+			progress = 100 / progressTotalForManagedAccountTask(managedAccountStandardTaskMode)
+		}
+	}
+	return model.UpdateSystemTaskState(task.TaskID, runnerID, managedAccountSyncProgress{
+		Stage: "inventory", Total: progressTotalForManagedAccountTask(managedAccountStandardTaskMode),
+		Progress: progress, ItemCompleted: completed, ItemTotal: total,
 	})
 }
 

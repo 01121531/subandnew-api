@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -323,6 +324,51 @@ func TestClaudeGatewayInventoryEnrichesMissingCostFromDetail(t *testing.T) {
 	require.NotNil(t, page.Items[0].CostAvailable)
 	require.True(t, *page.Items[0].CostAvailable)
 	require.Equal(t, 1, detailRequests)
+}
+
+func TestClaudeGatewayInventoryEnrichesMissingCostsConcurrently(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var detailRequests atomic.Int32
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	progressCompleted := make([]int, 0, 4)
+	progressTotals := make([]int, 0, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			writeProbeJSON(response, `{"accounts":[{"id":"missing-1","status":"active"},{"id":"missing-2","status":"active"},{"id":"missing-3","status":"active"},{"id":"missing-4","status":"active"}],"total":4}`)
+		case "/api/admin/oauth-accounts/missing-1", "/api/admin/oauth-accounts/missing-2", "/api/admin/oauth-accounts/missing-3", "/api/admin/oauth-accounts/missing-4":
+			detailRequests.Add(1)
+			current := inFlight.Add(1)
+			for {
+				previous := maxInFlight.Load()
+				if current <= previous || maxInFlight.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+			inFlight.Add(-1)
+			writeProbeJSON(response, `{"data":{"cost_windows":{"cost_30d":"7.25"}}}`)
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "test-secret"})
+
+	view, err := CollectInventoryWithProgress(context.Background(), instance.Id, "auto", "", func(completed int, total int) {
+		progressCompleted = append(progressCompleted, completed)
+		progressTotals = append(progressTotals, total)
+	})
+	require.NoError(t, err)
+	require.Len(t, view.Data.(*InventoryPage).Items, 4)
+	require.Equal(t, int32(4), detailRequests.Load())
+	require.GreaterOrEqual(t, maxInFlight.Load(), int32(2))
+	require.Equal(t, []int{1, 2, 3, 4}, progressCompleted)
+	require.Equal(t, []int{4, 4, 4, 4}, progressTotals)
 }
 
 func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
