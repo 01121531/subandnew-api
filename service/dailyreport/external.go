@@ -10,10 +10,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/01121531/subandnew-api/model"
-	"github.com/01121531/subandnew-api/service/managedaccount"
+	controlplaneservice "github.com/01121531/subandnew-api/service"
 	"github.com/01121531/subandnew-api/service/managedinstance"
 )
 
@@ -86,6 +87,16 @@ type SupplierOption struct {
 	Name string `json:"name"`
 }
 
+type supplierOptionsCacheEntry struct {
+	observedAt int64
+	items      []SupplierOption
+}
+
+var supplierOptionsCache = struct {
+	sync.Mutex
+	items map[int64]supplierOptionsCacheEntry
+}{items: map[int64]supplierOptionsCacheEntry{}}
+
 func ValidateDateRange(startDate, endDate string) (Window, Window, error) {
 	start, err := NaturalDay(startDate)
 	if err != nil {
@@ -106,16 +117,24 @@ func ListClaudeGatewaySuppliers(ctx context.Context, instanceID int64) ([]Suppli
 	if instance.Kind != model.ManagedInstanceKindClaudeGateway {
 		return nil, errors.New("daily report supplier options require Claude Gateway")
 	}
+	observedAt, err := controlplaneservice.GetManagedAccountInventorySnapshotObservedAt(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	supplierOptionsCache.Lock()
+	if cached, ok := supplierOptionsCache.items[instanceID]; ok && cached.observedAt == observedAt {
+		items := append([]SupplierOption(nil), cached.items...)
+		supplierOptionsCache.Unlock()
+		return items, nil
+	}
+	supplierOptionsCache.Unlock()
+	page, err := controlplaneservice.GetManagedAccountInventorySnapshot(instanceID)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]SupplierOption{}
-	for page := 1; page <= 100; page++ {
-		result, err := managedaccount.Execute(ctx, managedaccount.Query{
-			InstanceIDs: []int64{instanceID}, Dataset: managedaccount.DatasetInventory,
-			Page: page, PageSize: 100, AllowLargePage: true,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range result.Items {
+	if page != nil {
+		for _, item := range page.Items {
 			code := strings.TrimSpace(item.VendorID)
 			name := strings.TrimSpace(item.VendorName)
 			if code == "" {
@@ -126,15 +145,15 @@ func ListClaudeGatewaySuppliers(ctx context.Context, instanceID int64) ([]Suppli
 			}
 			seen[code] = SupplierOption{Code: code, Name: name}
 		}
-		if !result.HasMore {
-			break
-		}
 	}
 	items := make([]SupplierOption, 0, len(seen))
 	for _, item := range seen {
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+	supplierOptionsCache.Lock()
+	supplierOptionsCache.items[instanceID] = supplierOptionsCacheEntry{observedAt: observedAt, items: append([]SupplierOption(nil), items...)}
+	supplierOptionsCache.Unlock()
 	return items, nil
 }
 

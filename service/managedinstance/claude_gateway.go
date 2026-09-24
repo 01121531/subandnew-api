@@ -104,6 +104,8 @@ type claudeGatewayAccount struct {
 		Cost30D     *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"usage_windows"`
 	CostWindows struct {
+		Cost5H  *claudeGatewayNumber `json:"cost_5h"`
+		Cost7D  *claudeGatewayNumber `json:"cost_7d"`
 		Cost30D *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"cost_windows"`
 	Stats struct {
@@ -810,11 +812,11 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		value := float64(*account.Stats.DailyTokens)
 		todayTokens = &value
 	}
-	if account.Stats.DailyCost != nil {
-		value := float64(*account.Stats.DailyCost)
-		todayCost = &value
-	} else if account.TodayCost != nil {
+	if account.TodayCost != nil {
 		value := float64(*account.TodayCost)
+		todayCost = &value
+	} else if account.Stats.DailyCost != nil {
+		value := float64(*account.Stats.DailyCost)
 		todayCost = &value
 	}
 	requests24H := float64(account.Requests24H)

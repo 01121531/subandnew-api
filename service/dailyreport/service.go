@@ -171,9 +171,7 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 	filtered := full
 	var accountCount int64
 	query := managedaccount.Query{InstanceIDs: []int64{instanceID}, Dataset: managedaccount.DatasetOutput, PresetDays: 1, Page: 1, PageSize: 10000, AllowLargePage: true}
-	claudeGateway := false
 	if instance, getErr := managedinstance.Get(instanceID); getErr == nil && instance.Kind == model.ManagedInstanceKindClaudeGateway {
-		claudeGateway = true
 		query.Dataset = managedaccount.DatasetInventory
 		query.Range = "all"
 		query.PresetDays = 0
@@ -196,9 +194,6 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 			filtered = Metrics{Currency: full.Currency}
 			for _, item := range result.Items {
 				requests, tokens, amount := item.Requests, item.Tokens, item.Amount
-				if claudeGateway {
-					requests, tokens, amount = item.TodayRequests, item.TodayTokens, item.TodayCost
-				}
 				if requests != nil {
 					filtered.Requests += *requests
 				}

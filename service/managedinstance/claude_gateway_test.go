@@ -307,6 +307,35 @@ func TestClaudeGatewayAccountItemDoesNotSubstituteDailyStats(t *testing.T) {
 	require.False(t, *item.CostAvailable)
 }
 
+func TestClaudeGatewayAccountFieldMappingKeepsTimeScopesSeparate(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"scoped",
+		"total_requests":100,"total_tokens":2000,"total_cost":12.5,
+		"today_cost":1.25,
+		"cost_windows":{"cost_5h":0.5,"cost_7d":7.5,"cost_30d":30.5},
+		"stats":{"daily_req":9,"daily_tok":90,"daily_cost":0}
+	}`), &account))
+	item := claudeGatewayAccountItem(account, nil)
+	require.Equal(t, 100.0, *item.Requests)
+	require.Equal(t, 2000.0, *item.Tokens)
+	require.Equal(t, 12.5, *item.Cost)
+	require.Equal(t, 1.25, *item.TodayCost)
+	require.Equal(t, 9.0, *item.TodayRequests)
+	require.Equal(t, 90.0, *item.TodayTokens)
+}
+
+func TestClaudeGatewayMissingLifetimeFieldsStayUnavailable(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"missing","status":"active","cost_windows":{"cost_30d":7.5}}`), &account))
+	item := claudeGatewayAccountItem(account, nil)
+	require.Nil(t, item.Requests)
+	require.Nil(t, item.Tokens)
+	require.Nil(t, item.Cost)
+	require.NotNil(t, item.CostAvailable)
+	require.False(t, *item.CostAvailable)
+}
+
 func TestClaudeGatewayAccountItemPreservesExplicitZeroLifetimeTotals(t *testing.T) {
 	var account claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{

@@ -419,6 +419,26 @@ func GetManagedAccountInventorySnapshot(instanceID int64) (*managedinstance.Inve
 	return &page, nil
 }
 
+// GetManagedAccountInventorySnapshotObservedAt returns the last successful
+// inventory timestamp without decoding the full account snapshot.
+func GetManagedAccountInventorySnapshotObservedAt(instanceID int64) (int64, error) {
+	if instanceID <= 0 {
+		return 0, managedinstance.ErrInvalidInstance
+	}
+	if err := backfillManagedAccountInventory(instanceID); err != nil {
+		return 0, err
+	}
+	var observedAt int64
+	err := model.DB.Model(&model.ManagedAccountSnapshot{}).
+		Where("instance_id = ? AND snapshot_kind = ? AND range_key = ? AND observed_at > 0 AND payload <> ''",
+			instanceID, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey).
+		Pluck("observed_at", &observedAt).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	return observedAt, err
+}
+
 // GetManagedAccountOutputSnapshot returns the account-output rows for the
 // selected range. Older clients may omit rangeKey, so fall back to the latest
 // successful output snapshot in that case.
