@@ -501,6 +501,125 @@ func TestClaudeGatewayInventoryUsesSummaryTotalRowsForProgressAndInventoryTotal(
 	require.Equal(t, [][2]int{{1, 6}, {2, 6}, {3, 6}, {4, 6}, {5, 6}, {6, 6}}, progress)
 }
 
+func TestClaudeGatewayAccountPageRetriesTransientFailures(t *testing.T) {
+	t.Setenv("CLAUDE_GATEWAY_RETRY_DELAY", "0")
+	attempts := 0
+	request := func(context.Context, *Connector, *CredentialMaterial, string, string, any, int64) (*ConnectorResponse, error) {
+		attempts++
+		if attempts <= 2 {
+			return &ConnectorResponse{StatusCode: http.StatusTooManyRequests}, nil
+		}
+		return &ConnectorResponse{StatusCode: http.StatusOK, Body: []byte(`{"accounts":[{"id":"retry-account"}],"total":1}`)}, nil
+	}
+
+	page, err := fetchClaudeGatewayAccountPageWithRetry(context.Background(), request, nil, nil, 1, 100)
+	require.NoError(t, err)
+	require.Len(t, page.Accounts, 1)
+	require.Equal(t, 3, attempts)
+}
+
+func TestClaudeGatewayAccountPageDoesNotRetryPermanentFailures(t *testing.T) {
+	attempts := 0
+	request := func(context.Context, *Connector, *CredentialMaterial, string, string, any, int64) (*ConnectorResponse, error) {
+		attempts++
+		return &ConnectorResponse{StatusCode: http.StatusUnauthorized}, nil
+	}
+
+	page, err := fetchClaudeGatewayAccountPageWithRetry(context.Background(), request, nil, nil, 1, 100)
+	require.Error(t, err)
+	require.Nil(t, page)
+	require.Equal(t, 1, attempts)
+}
+
+func TestClaudeGatewayAccountPageStopsAfterFiveRetries(t *testing.T) {
+	t.Setenv("CLAUDE_GATEWAY_RETRY_DELAY", "0")
+	attempts := 0
+	request := func(context.Context, *Connector, *CredentialMaterial, string, string, any, int64) (*ConnectorResponse, error) {
+		attempts++
+		return &ConnectorResponse{StatusCode: http.StatusBadGateway}, nil
+	}
+
+	page, err := fetchClaudeGatewayAccountPageWithRetry(context.Background(), request, nil, nil, 1, 100)
+	require.Error(t, err)
+	require.Nil(t, page)
+	require.Equal(t, claudeGatewayInventoryMaxRetries+1, attempts)
+}
+
+func TestClaudeGatewayInventoryFetchesKnownPagesConcurrently(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	t.Setenv("CLAUDE_GATEWAY_INVENTORY_WORKERS", "2")
+	var active atomic.Int32
+	var maximum atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			page, err := strconv.Atoi(request.URL.Query().Get("page"))
+			require.NoError(t, err)
+			current := active.Add(1)
+			for {
+				previous := maximum.Load()
+				if current <= previous || maximum.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			defer active.Add(-1)
+			time.Sleep(40 * time.Millisecond)
+			_, _ = fmt.Fprintf(response, `{"accounts":[{"id":"account-%d"}],"total":4,"page":%d,"page_size":100,"total_pages":4}`, page, page)
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	require.Len(t, view.Data.(*InventoryPage).Items, 4)
+	require.GreaterOrEqual(t, maximum.Load(), int32(2))
+}
+
+func TestClaudeGatewayInventoryStopsUnknownPageCountAtLastPage(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	t.Setenv("CLAUDE_GATEWAY_INVENTORY_WORKERS", "4")
+	var highestPage atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			page, err := strconv.Atoi(request.URL.Query().Get("page"))
+			require.NoError(t, err)
+			for {
+				previous := highestPage.Load()
+				if int32(page) <= previous || highestPage.CompareAndSwap(previous, int32(page)) {
+					break
+				}
+			}
+			switch page {
+			case 1:
+				writeProbeJSON(response, `{"accounts":[{"id":"account-1"}],"has_more":true}`)
+			case 2:
+				writeProbeJSON(response, `{"accounts":[{"id":"account-2"}],"has_more":false}`)
+			default:
+				http.NotFound(response, request)
+			}
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectInventory(context.Background(), instance.Id, "auto", "")
+	require.NoError(t, err)
+	require.Len(t, view.Data.(*InventoryPage).Items, 2)
+	require.Less(t, highestPage.Load(), int32(20))
+}
+
 func TestClaudeGatewayAccountAvailableMatchesGatewayDashboard(t *testing.T) {
 	tests := []struct {
 		name          string

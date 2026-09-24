@@ -3,13 +3,17 @@ package managedinstance
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"hash/fnv"
 	"math"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +36,9 @@ const (
 	claudeGatewaySessionTTL           = 10 * time.Minute
 	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
 	claudeGatewayBulkRequestTimeout   = 60 * time.Second
+	claudeGatewayInventoryWorkers     = 16
+	claudeGatewayInventoryMaxWorkers  = 64
+	claudeGatewayInventoryMaxRetries  = 5
 )
 
 var claudeGatewaySessions sync.Map
@@ -482,71 +489,43 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 	combined := &claudeGatewayAccountsPage{}
 	reportedTotal := 0
 	hasReportedTotal := false
-	for pageNumber := 1; pageNumber <= managedInstanceInventoryMaxPages; pageNumber++ {
-		query := url.Values{}
-		query.Set("page_mode", "1")
-		query.Set("page", strconv.Itoa(pageNumber))
-		query.Set("page_size", strconv.Itoa(pageSize))
-		query.Set("status", "all")
-		query.Set("recovery_window", "all")
-		query.Set("fable_recovery_window", "all")
-		query.Set("sort", "today_cost")
-		query.Set("direction", "desc")
-		response, err := request(ctx, connector, credential, http.MethodGet, "/api/admin/oauth-accounts?"+query.Encode(), nil, claudeGatewayAccountsMaxBodyBytes)
-		if err != nil {
-			return nil, claudeGatewayCollectionError("accounts", err)
-		}
-		if err := requireHTTPStatus(response); err != nil {
-			return nil, claudeGatewayCollectionError("accounts", err)
-		}
-		var page claudeGatewayAccountsPage
-		if json.Unmarshal(response.Body, &page) != nil || page.Accounts == nil || len(page.Accounts) > managedInstanceInventoryMaxItems {
-			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
-		}
-		if pageNumber == 1 {
-			*combined = page
-			combined.Accounts = nil
-		}
-		if total, ok := claudeGatewaySummaryTotal(page); ok && (!hasReportedTotal || total > reportedTotal) {
-			reportedTotal = total
-			hasReportedTotal = true
-		}
-		start := len(combined.Accounts)
-		progressTotal := page.Total
+	first, err := fetchClaudeGatewayAccountPageWithRetry(ctx, request, connector, credential, 1, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	*combined = *first
+	combined.Accounts = append([]claudeGatewayAccount(nil), first.Accounts...)
+	if total, ok := claudeGatewaySummaryTotal(*first); ok {
+		reportedTotal, hasReportedTotal = total, true
+	}
+	progressTotal := first.Total
+	if hasReportedTotal && reportedTotal > progressTotal {
+		progressTotal = reportedTotal
+	}
+	for index := range first.Accounts {
+		reportInventoryProgress(ctx, index+1, max(progressTotal, index+1))
+	}
+
+	pageCount, knownPageCount := claudeGatewayAccountPageCount(first, pageSize)
+	if knownPageCount && pageCount == 1 {
 		if hasReportedTotal {
-			progressTotal = reportedTotal
+			combined.Total = reportedTotal
+		} else {
+			combined.Total = len(combined.Accounts)
 		}
-		if progressTotal <= 0 && page.TotalPages > 0 {
-			progressTotal = page.TotalPages * pageSize
+		return combined, nil
+	}
+
+	workers := claudeGatewayInventoryWorkerLimit()
+	if knownPageCount {
+		if err := collectClaudeGatewayAccountPages(ctx, request, connector, credential, pageSize, 2, pageCount, workers, combined, &reportedTotal, &hasReportedTotal); err != nil {
+			return nil, err
 		}
-		if progressTotal < start+len(page.Accounts) {
-			progressTotal = start + len(page.Accounts)
-		}
-		for index := range page.Accounts {
-			reportInventoryProgress(ctx, start+index+1, progressTotal)
-		}
-		combined.Accounts = append(combined.Accounts, page.Accounts...)
-		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
-			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
-		}
-		if progressTotal < len(combined.Accounts) {
-			progressTotal = len(combined.Accounts)
-		}
-		more := false
-		if page.HasMore != nil {
-			more = *page.HasMore
-		} else if page.TotalPages > pageNumber {
-			more = true
-		} else if hasReportedTotal && reportedTotal > len(combined.Accounts) && (page.PageSize > 0 || len(page.Accounts) == pageSize) {
-			more = true
-		} else if page.Total > len(combined.Accounts) {
-			more = true
-		} else if page.Total == 0 && len(page.Accounts) == pageSize {
-			more = true
-		}
-		if !more {
-			break
-		}
+	} else if err := collectClaudeGatewayAccountPagesUntilEnd(ctx, request, connector, credential, pageSize, workers, combined, &reportedTotal, &hasReportedTotal); err != nil {
+		return nil, err
+	}
+	if len(combined.Accounts) > managedInstanceInventoryMaxItems {
+		return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response"}
 	}
 	if hasReportedTotal {
 		combined.Total = reportedTotal
@@ -554,6 +533,238 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 		combined.Total = len(combined.Accounts)
 	}
 	return combined, nil
+}
+
+type claudeGatewayAccountPageResult struct {
+	number           int
+	page             *claudeGatewayAccountsPage
+	retries          int
+	transientFailure bool
+	err              error
+}
+
+func claudeGatewayInventoryWorkerLimit() int {
+	workers := claudeGatewayInventoryWorkers
+	if value, parseErr := strconv.Atoi(strings.TrimSpace(os.Getenv("CLAUDE_GATEWAY_INVENTORY_WORKERS"))); parseErr == nil && value > 0 {
+		workers = value
+	}
+	return max(1, min(workers, claudeGatewayInventoryMaxWorkers))
+}
+
+func claudeGatewayAccountPageCount(first *claudeGatewayAccountsPage, pageSize int) (int, bool) {
+	if first == nil {
+		return 0, false
+	}
+	if first.TotalPages > 0 {
+		return min(first.TotalPages, managedInstanceInventoryMaxPages), true
+	}
+	if first.Total > pageSize {
+		return min((first.Total+pageSize-1)/pageSize, managedInstanceInventoryMaxPages), true
+	}
+	if first.HasMore == nil || !*first.HasMore {
+		return 1, true
+	}
+	return 0, false
+}
+
+func collectClaudeGatewayAccountPages(ctx context.Context, request claudeGatewayAccountRequest, connector *Connector, credential *CredentialMaterial, pageSize, firstPage, lastPage, workers int, combined *claudeGatewayAccountsPage, reportedTotal *int, hasReportedTotal *bool) error {
+	for pageNumber := firstPage; pageNumber <= lastPage; {
+		batchSize := min(workers, lastPage-pageNumber+1)
+		results := fetchClaudeGatewayAccountPageBatch(ctx, request, connector, credential, pageSize, pageNumber, pageNumber+batchSize-1)
+		if err := appendClaudeGatewayAccountPageBatch(ctx, results, combined, reportedTotal, hasReportedTotal); err != nil {
+			return err
+		}
+		if batchHadTransientFailure(results) {
+			workers = max(1, workers/2)
+		} else if workers < claudeGatewayInventoryMaxWorkers {
+			workers++
+		}
+		pageNumber += batchSize
+	}
+	return nil
+}
+
+func collectClaudeGatewayAccountPagesUntilEnd(ctx context.Context, request claudeGatewayAccountRequest, connector *Connector, credential *CredentialMaterial, pageSize, workers int, combined *claudeGatewayAccountsPage, reportedTotal *int, hasReportedTotal *bool) error {
+	for firstPage := 2; firstPage <= managedInstanceInventoryMaxPages; {
+		lastPage := min(firstPage+workers-1, managedInstanceInventoryMaxPages)
+		results := fetchClaudeGatewayAccountPageBatch(ctx, request, connector, credential, pageSize, firstPage, lastPage)
+		stopAfter := 0
+		for pageNumber := firstPage; pageNumber <= lastPage; pageNumber++ {
+			result := results[pageNumber]
+			if result.err != nil {
+				if terminalInventoryPageError(result.err) {
+					stopAfter = pageNumber - 1
+					break
+				}
+				return result.err
+			}
+			if result.page == nil || len(result.page.Accounts) < pageSize || (result.page.HasMore != nil && !*result.page.HasMore) {
+				stopAfter = pageNumber
+				break
+			}
+		}
+		if stopAfter == 0 {
+			stopAfter = lastPage
+		}
+		for pageNumber := stopAfter + 1; pageNumber <= lastPage; pageNumber++ {
+			delete(results, pageNumber)
+		}
+		if err := appendClaudeGatewayAccountPageBatch(ctx, results, combined, reportedTotal, hasReportedTotal); err != nil {
+			return err
+		}
+		if stopAfter < lastPage {
+			return nil
+		}
+		if batchHadTransientFailure(results) {
+			workers = max(1, workers/2)
+		} else if workers < claudeGatewayInventoryMaxWorkers {
+			workers++
+		}
+		firstPage = lastPage + 1
+	}
+	return nil
+}
+
+func fetchClaudeGatewayAccountPageBatch(ctx context.Context, request claudeGatewayAccountRequest, connector *Connector, credential *CredentialMaterial, pageSize, firstPage, lastPage int) map[int]claudeGatewayAccountPageResult {
+	results := make(chan claudeGatewayAccountPageResult, lastPage-firstPage+1)
+	var wait sync.WaitGroup
+	for pageNumber := firstPage; pageNumber <= lastPage; pageNumber++ {
+		wait.Add(1)
+		go func(pageNumber int) {
+			defer wait.Done()
+			result := fetchClaudeGatewayAccountPageWithRetryStats(ctx, request, connector, credential, pageNumber, pageSize)
+			result.number = pageNumber
+			results <- result
+		}(pageNumber)
+	}
+	wait.Wait()
+	close(results)
+	pages := make(map[int]claudeGatewayAccountPageResult, lastPage-firstPage+1)
+	for result := range results {
+		pages[result.number] = result
+	}
+	return pages
+}
+
+func appendClaudeGatewayAccountPageBatch(ctx context.Context, results map[int]claudeGatewayAccountPageResult, combined *claudeGatewayAccountsPage, reportedTotal *int, hasReportedTotal *bool) error {
+	pageNumbers := make([]int, 0, len(results))
+	for pageNumber := range results {
+		pageNumbers = append(pageNumbers, pageNumber)
+	}
+	sort.Ints(pageNumbers)
+	for _, pageNumber := range pageNumbers {
+		result := results[pageNumber]
+		if result.err != nil {
+			return result.err
+		}
+		if result.page == nil || result.page.Accounts == nil {
+			return &ProbeError{Code: "claude_gateway_accounts_invalid_response"}
+		}
+		start := len(combined.Accounts)
+		combined.Accounts = append(combined.Accounts, result.page.Accounts...)
+		for index := range result.page.Accounts {
+			reportInventoryProgress(ctx, start+index+1, max(*reportedTotal, len(combined.Accounts)))
+		}
+		if total, ok := claudeGatewaySummaryTotal(*result.page); ok && (!*hasReportedTotal || total > *reportedTotal) {
+			*reportedTotal, *hasReportedTotal = total, true
+		}
+	}
+	return nil
+}
+
+func batchHadTransientFailure(results map[int]claudeGatewayAccountPageResult) bool {
+	for _, result := range results {
+		if result.transientFailure {
+			return true
+		}
+	}
+	return false
+}
+
+type claudeGatewayAccountRequest func(context.Context, *Connector, *CredentialMaterial, string, string, any, int64) (*ConnectorResponse, error)
+
+func fetchClaudeGatewayAccountPageWithRetry(ctx context.Context, request claudeGatewayAccountRequest, connector *Connector, credential *CredentialMaterial, pageNumber, pageSize int) (*claudeGatewayAccountsPage, error) {
+	result := fetchClaudeGatewayAccountPageWithRetryStats(ctx, request, connector, credential, pageNumber, pageSize)
+	return result.page, result.err
+}
+
+func fetchClaudeGatewayAccountPageWithRetryStats(ctx context.Context, request claudeGatewayAccountRequest, connector *Connector, credential *CredentialMaterial, pageNumber, pageSize int) claudeGatewayAccountPageResult {
+	query := url.Values{}
+	query.Set("page_mode", "1")
+	query.Set("page", strconv.Itoa(pageNumber))
+	query.Set("page_size", strconv.Itoa(pageSize))
+	query.Set("status", "all")
+	query.Set("recovery_window", "all")
+	query.Set("fable_recovery_window", "all")
+	query.Set("sort", "today_cost")
+	query.Set("direction", "desc")
+	path := "/api/admin/oauth-accounts?" + query.Encode()
+	for attempt := 0; attempt <= claudeGatewayInventoryMaxRetries; attempt++ {
+		response, err := request(ctx, connector, credential, http.MethodGet, path, nil, claudeGatewayAccountsMaxBodyBytes)
+		if err == nil {
+			err = requireHTTPStatus(response)
+		}
+		if err == nil {
+			var page claudeGatewayAccountsPage
+			if json.Unmarshal(response.Body, &page) == nil && page.Accounts != nil && len(page.Accounts) <= managedInstanceInventoryMaxItems {
+				return claudeGatewayAccountPageResult{page: &page, retries: attempt, transientFailure: attempt > 0}
+			}
+			err = &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
+		}
+		if !claudeGatewayRetryable(err) || attempt == claudeGatewayInventoryMaxRetries {
+			return claudeGatewayAccountPageResult{retries: attempt, transientFailure: attempt > 0, err: claudeGatewayCollectionError("accounts", err)}
+		}
+		if ctx.Err() != nil {
+			return claudeGatewayAccountPageResult{retries: attempt, transientFailure: true, err: ctx.Err()}
+		}
+		backoff := claudeGatewayRetryDelay(attempt)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return claudeGatewayAccountPageResult{retries: attempt + 1, transientFailure: true, err: ctx.Err()}
+		}
+	}
+	return claudeGatewayAccountPageResult{err: ctx.Err()}
+}
+
+func claudeGatewayRetryDelay(attempt int) time.Duration {
+	base := time.Second << attempt
+	if override, parseErr := time.ParseDuration(strings.TrimSpace(os.Getenv("CLAUDE_GATEWAY_RETRY_DELAY"))); parseErr == nil && override >= 0 {
+		base = override << attempt
+	}
+	if base <= 0 {
+		return 0
+	}
+	jitterLimit := minDuration(base/4, 250*time.Millisecond)
+	if jitterLimit <= 0 {
+		return base
+	}
+	jitter, err := crand.Int(crand.Reader, big.NewInt(int64(jitterLimit)+1))
+	if err != nil {
+		return base
+	}
+	return base + time.Duration(jitter.Int64())
+}
+
+func minDuration(left, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func claudeGatewayRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var probeErr *ProbeError
+	if errors.As(err, &probeErr) {
+		return probeErr.StatusCode == http.StatusRequestTimeout || probeErr.StatusCode == http.StatusTooManyRequests || probeErr.StatusCode >= 500
+	}
+	var networkErr net.Error
+	return errors.As(err, &networkErr) && (networkErr.Timeout() || !errors.Is(err, context.Canceled))
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
