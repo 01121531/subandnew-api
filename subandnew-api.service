@@ -8,6 +8,8 @@ WorkingDirectory=/opt/subandnew-api
 ExecStart=/opt/subandnew-api/subandnew-api --port 3000 --log-dir /var/log/subandnew-api
 Restart=always
 RestartSec=5
+# Keep the online-update helper alive while systemd restarts the main process.
+KillMode=process
 EnvironmentFile=-/opt/subandnew-api/.env
 
 [Install]

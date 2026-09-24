@@ -115,6 +115,16 @@ bun run dev
 
 生产镜像发布到 `ghcr.io/01121531/subandnew-api:latest`。
 
+使用 systemd 部署独立 Linux 二进制时，安装或更新 `subandnew-api.service` 后需要重新加载单元：
+
+```bash
+sudo install -m 0644 subandnew-api.service /etc/systemd/system/subandnew-api.service
+sudo systemctl daemon-reload
+sudo systemctl restart subandnew-api
+```
+
+服务单元中的 `KillMode=process` 用于保留在线升级 helper，让 systemd 重启主进程时不会把替换流程一并终止。Docker、Kubernetes 和多实例部署不使用内置在线替换，应由外部发布流程升级。
+
 ### 4. 源码构建
 
 ```bash
