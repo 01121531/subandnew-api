@@ -87,6 +87,8 @@ type claudeGatewayAccount struct {
 	TotalTokens      claudeGatewayNumber  `json:"total_tokens"`
 	TotalCost        claudeGatewayNumber  `json:"total_cost"`
 	TodayCost        *claudeGatewayNumber `json:"today_cost"`
+	hasTotalRequests bool
+	hasTotalTokens   bool
 	hasTotalCost     bool
 	Requests24H      claudeGatewayNumber `json:"req_24h"`
 	Successful24H    claudeGatewayNumber `json:"ok_24h"`
@@ -107,15 +109,15 @@ type claudeGatewayAccount struct {
 		Cost30D *claudeGatewayNumber `json:"cost_30d"`
 	} `json:"cost_windows"`
 	Stats struct {
-		RPM               int                 `json:"rpm"`
-		Concurrent        int                 `json:"concurrent"`
-		ActiveSessions    int                 `json:"active_sessions"`
-		DailyRequests     claudeGatewayNumber `json:"daily_req"`
-		DailyTokens       claudeGatewayNumber `json:"daily_tok"`
-		DailyCost         claudeGatewayNumber `json:"daily_cost"`
-		Cooldown          bool                `json:"cooldown"`
-		CooldownReason    string              `json:"cooldown_reason"`
-		CooldownRemaining int                 `json:"cooldown_remaining_seconds"`
+		RPM               int                  `json:"rpm"`
+		Concurrent        int                  `json:"concurrent"`
+		ActiveSessions    int                  `json:"active_sessions"`
+		DailyRequests     *claudeGatewayNumber `json:"daily_req"`
+		DailyTokens       *claudeGatewayNumber `json:"daily_tok"`
+		DailyCost         *claudeGatewayNumber `json:"daily_cost"`
+		Cooldown          bool                 `json:"cooldown"`
+		CooldownReason    string               `json:"cooldown_reason"`
+		CooldownRemaining int                  `json:"cooldown_remaining_seconds"`
 	} `json:"stats"`
 }
 
@@ -133,15 +135,21 @@ func (account *claudeGatewayAccount) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	rawTotalCost, hasTotalCost := fields["total_cost"]
-	rawTotalCost = bytes.TrimSpace(rawTotalCost)
-	account.hasTotalCost = hasTotalCost && len(rawTotalCost) > 0 && !bytes.Equal(rawTotalCost, []byte("null")) && !bytes.Equal(rawTotalCost, []byte(`""`))
+	account.hasTotalRequests = claudeGatewayFieldPresent(fields, "total_requests")
+	account.hasTotalTokens = claudeGatewayFieldPresent(fields, "total_tokens")
+	account.hasTotalCost = claudeGatewayFieldPresent(fields, "total_cost")
 	ownerUserID, err := claudeGatewayFlexibleID(decoded.OwnerUserID)
 	if err != nil {
 		return err
 	}
 	account.OwnerUserID = ownerUserID
 	return nil
+}
+
+func claudeGatewayFieldPresent(fields map[string]json.RawMessage, key string) bool {
+	raw, ok := fields[key]
+	raw = bytes.TrimSpace(raw)
+	return ok && len(raw) > 0 && !bytes.Equal(raw, []byte("null")) && !bytes.Equal(raw, []byte(`""`))
 }
 
 type claudeGatewayVendor struct {
@@ -554,14 +562,20 @@ func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, 
 	if onCompleted == nil {
 		onCompleted = func() {}
 	}
+	var completionMu sync.Mutex
+	reportCompleted := func() {
+		completionMu.Lock()
+		defer completionMu.Unlock()
+		onCompleted()
+	}
 	pending := make([]int, 0, len(accounts))
 	for index := range accounts {
 		account := &accounts[index]
-		if account.TodayCost == nil && account.UsageWindows.Cost30D == nil && account.CostWindows.Cost30D == nil {
+		if account.TodayCost == nil && account.Stats.DailyCost == nil && account.UsageWindows.Cost30D == nil && account.CostWindows.Cost30D == nil {
 			pending = append(pending, index)
 			continue
 		}
-		onCompleted()
+		reportCompleted()
 	}
 	if len(pending) == 0 {
 		return
@@ -582,12 +596,35 @@ func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, 
 				detail, err := fetchClaudeGatewayAccountDetail(detailCtx, connector, credential, accounts[index].ID)
 				cancel()
 				if err != nil {
-					onCompleted()
+					reportCompleted()
 					continue
 				}
 				account := &accounts[index]
 				if detail.TodayCost != nil {
 					account.TodayCost = detail.TodayCost
+				}
+				if detail.hasTotalRequests {
+					account.TotalRequests = detail.TotalRequests
+					account.hasTotalRequests = true
+				}
+				if detail.hasTotalTokens {
+					account.TotalTokens = detail.TotalTokens
+					account.hasTotalTokens = true
+				}
+				if detail.Stats.DailyRequests != nil {
+					account.Stats.DailyRequests = detail.Stats.DailyRequests
+				}
+				if detail.Stats.DailyTokens != nil {
+					account.Stats.DailyTokens = detail.Stats.DailyTokens
+				}
+				if detail.Stats.DailyCost != nil {
+					account.Stats.DailyCost = detail.Stats.DailyCost
+				}
+				if detail.UsageWindows.Requests30D != nil {
+					account.UsageWindows.Requests30D = detail.UsageWindows.Requests30D
+				}
+				if detail.UsageWindows.Tokens30D != nil {
+					account.UsageWindows.Tokens30D = detail.UsageWindows.Tokens30D
 				}
 				if detail.CostWindows.Cost30D != nil {
 					account.CostWindows.Cost30D = detail.CostWindows.Cost30D
@@ -595,7 +632,7 @@ func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, 
 				if detail.UsageWindows.Cost30D != nil {
 					account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
 				}
-				onCompleted()
+				reportCompleted()
 			}
 		}()
 	}
@@ -898,14 +935,24 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		requests = float64(*account.UsageWindows.Requests30D)
 		requestsPeriod = "30d"
 		usageWindowDays = 30
+	} else if account.Stats.DailyRequests != nil {
+		requests = float64(*account.Stats.DailyRequests)
+		requestsPeriod = "today"
 	}
 	if account.UsageWindows.Tokens30D != nil {
 		tokens = float64(*account.UsageWindows.Tokens30D)
 		tokensPeriod = "30d"
 		usageWindowDays = 30
+	} else if account.Stats.DailyTokens != nil {
+		tokens = float64(*account.Stats.DailyTokens)
+		tokensPeriod = "today"
 	}
 	if account.TodayCost != nil {
 		cost = float64(*account.TodayCost)
+		costPeriod = "today"
+		costAvailable = true
+	} else if account.Stats.DailyCost != nil {
+		cost = float64(*account.Stats.DailyCost)
 		costPeriod = "today"
 		costAvailable = true
 	} else if account.CostWindows.Cost30D != nil || account.UsageWindows.Cost30D != nil {

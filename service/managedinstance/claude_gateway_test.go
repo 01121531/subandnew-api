@@ -286,6 +286,49 @@ func TestClaudeGatewayAccountItemPrefersTodayCostAndTracksPeriods(t *testing.T) 
 	require.False(t, *missingItem.CostAvailable)
 }
 
+func TestClaudeGatewayAccountItemUsesDailyStatsWhenTopLevelMetricsAreMissing(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"daily-stats",
+		"status":"active",
+		"stats":{"daily_req":"42","daily_tok":1234,"daily_cost":"9.875"}
+	}`), &account))
+
+	item := claudeGatewayAccountItem(account, nil)
+	require.NotNil(t, item.Requests)
+	require.Equal(t, 42.0, *item.Requests)
+	require.Equal(t, "today", item.RequestsPeriod)
+	require.NotNil(t, item.Tokens)
+	require.Equal(t, 1234.0, *item.Tokens)
+	require.Equal(t, "today", item.TokensPeriod)
+	require.NotNil(t, item.Cost)
+	require.Equal(t, 9.875, *item.Cost)
+	require.Equal(t, "today", item.CostPeriod)
+	require.NotNil(t, item.CostAvailable)
+	require.True(t, *item.CostAvailable)
+}
+
+func TestClaudeGatewayAccountItemPreservesExplicitZeroDailyStats(t *testing.T) {
+	var account claudeGatewayAccount
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id":"daily-zero",
+		"status":"active",
+		"stats":{"daily_req":0,"daily_tok":"0","daily_cost":0}
+	}`), &account))
+
+	item := claudeGatewayAccountItem(account, nil)
+	require.NotNil(t, item.Requests)
+	require.Zero(t, *item.Requests)
+	require.Equal(t, "today", item.RequestsPeriod)
+	require.NotNil(t, item.Tokens)
+	require.Zero(t, *item.Tokens)
+	require.Equal(t, "today", item.TokensPeriod)
+	require.NotNil(t, item.Cost)
+	require.Zero(t, *item.Cost)
+	require.Equal(t, "today", item.CostPeriod)
+	require.True(t, *item.CostAvailable)
+}
+
 func TestDecodeClaudeGatewayAccountDetailReadsCostWindows(t *testing.T) {
 	account, err := decodeClaudeGatewayAccountDetail([]byte(`{"data":{"id":"detail-1","cost_windows":{"cost_30d":"8.75"}}}`))
 	require.NoError(t, err)
@@ -515,6 +558,50 @@ func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 	require.Equal(t, 123.0, result.TotalRequests)
 	require.Equal(t, 456.0, result.TotalTokens)
 	require.Equal(t, 7.89, result.TotalAmount)
+}
+
+func TestClaudeGatewayAccountOutputUsesDailyStatsWithoutDetailRequests(t *testing.T) {
+	newManagedInstanceTestDB(t)
+	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
+	var detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/admin/oauth-accounts":
+			writeProbeJSON(response, `{
+				"accounts":[{
+					"id":"daily-account",
+					"name":"daily-account",
+					"status":"active",
+					"health_status":"healthy",
+					"created_at":"1970-01-01T00:02:30Z",
+					"stats":{"daily_req":42,"daily_tok":1234,"daily_cost":9.875}
+				}],
+				"total":1
+			}`)
+		case "/api/admin/oauth-accounts/daily-account":
+			detailRequests.Add(1)
+			http.NotFound(response, request)
+		case "/api/admin/vendors":
+			writeProbeJSON(response, `{"items":[]}`)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+	instance := createProbeInstance(t, server.URL, model.ManagedInstanceKindClaudeGateway, CredentialInput{AuthType: "bearer_pat", Secret: "secret"})
+
+	view, err := CollectAccountOutput(context.Background(), instance.Id, TimeWindow{Start: 100, End: 200})
+	require.NoError(t, err)
+	result := view.Data.(*AccountOutputResult)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, 42.0, result.Items[0].TotalRequests)
+	require.Equal(t, 1234.0, result.Items[0].TotalTokens)
+	require.Equal(t, 9.875, result.Items[0].Amount)
+	require.Equal(t, "today", result.Items[0].AmountPeriod)
+	require.Equal(t, 42.0, result.TotalRequests)
+	require.Equal(t, 1234.0, result.TotalTokens)
+	require.Equal(t, 9.875, result.TotalAmount)
+	require.Zero(t, detailRequests.Load())
 }
 
 func TestRefreshClaudeGatewayRealtimeAggregatesAccounts(t *testing.T) {
