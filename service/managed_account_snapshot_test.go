@@ -30,6 +30,13 @@ func TestNormalizeManagedAccountRange(t *testing.T) {
 	require.Error(t, err)
 	_, err = NormalizeManagedAccountRange(0, 200, 100, "Asia/Shanghai")
 	require.Error(t, err)
+
+	all, err := NormalizeManagedAccountRangeWithMode("all", 0, 0, 200, "Asia/Shanghai")
+	require.NoError(t, err)
+	require.Equal(t, "all", all.Mode)
+	require.Equal(t, "all", all.RangeKey)
+	require.Zero(t, all.Start)
+	require.EqualValues(t, 200, all.End)
 }
 
 func TestManagedAccountFailedRefreshKeepsLastSuccess(t *testing.T) {
@@ -456,9 +463,9 @@ func TestManagedAccountDailyArchiveForcesMidnightSyncWithFailureCooldown(t *test
 	boundary := time.Date(2026, time.September, 3, 0, 0, 0, 0, location).Unix()
 	latest := make(map[string]managedAccountScheduleState)
 	dailyArchived := make(map[string]bool)
-	keys := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
-	for _, days := range managedAccountPresetDays {
-		keys = append(keys, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+	keys := []string{
+		managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey),
+		managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, managedAccountAllRangeKey),
 	}
 	for _, key := range keys {
 		latest[key] = managedAccountScheduleState{AttemptedAt: boundary - 1, Status: model.ManagedInstanceCollectionSucceeded}
@@ -482,25 +489,13 @@ func TestClaudeGatewayStandardSyncDueBackfillsVendorMetadata(t *testing.T) {
 	instance := &model.ManagedInstance{Id: 11, Kind: model.ManagedInstanceKindClaudeGateway}
 	now := int64(10_000)
 	latest := make(map[string]managedAccountScheduleState)
-	for _, item := range append([]struct {
+	for _, item := range []struct {
 		kind string
 		key  string
-	}{{model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey}}, func() []struct {
-		kind string
-		key  string
+	}{
+		{model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey},
+		{model.ManagedAccountSnapshotKindOutput, managedAccountAllRangeKey},
 	} {
-		items := make([]struct {
-			kind string
-			key  string
-		}, 0, len(managedAccountPresetDays))
-		for _, days := range managedAccountPresetDays {
-			items = append(items, struct {
-				kind string
-				key  string
-			}{model.ManagedAccountSnapshotKindOutput, "preset-" + strconv.Itoa(days)})
-		}
-		return items
-	}()...) {
 		latest[managedAccountScheduleKey(instance.Id, item.kind, item.key)] = managedAccountScheduleState{
 			AttemptedAt: now, Status: model.ManagedInstanceCollectionSucceeded,
 			VendorMetadataAvailable: item.kind != model.ManagedAccountSnapshotKindInventory,

@@ -178,6 +178,7 @@ export interface ManagedInstanceInventoryItem {
   status?: string
   enabled?: boolean
   created_at?: number
+  updated_at?: number
   last_activity_at?: number
   disabled_at?: number
   expires_at?: number
@@ -372,7 +373,9 @@ export interface ManagedInstanceRPMHistory {
 export interface ManagedInstanceAccountOutputItem {
   account: ManagedInstanceInventoryItem
   total_requests: number
+  requests_available?: boolean
   total_tokens: number
+  tokens_available?: boolean
   amount: number
   amount_available?: boolean
   amount_period?: string
@@ -395,6 +398,7 @@ interface ManagedInstanceAccountOutput {
 }
 
 export interface ManagedAccountRangeInput {
+  range?: 'all'
   preset_days?: 1 | 7 | 14 | 30
   start?: number
   end?: number
@@ -410,6 +414,7 @@ interface ManagedAccountSnapshotSection<T> {
 
 export interface ManagedAccountSnapshotView {
   range: {
+    mode?: 'all' | 'preset' | 'custom'
     range_key: string
     preset_days: number
     start: number

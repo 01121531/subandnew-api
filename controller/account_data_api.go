@@ -258,7 +258,7 @@ func GetOpenAccountData(c *gin.Context) {
 	response, err := accountdataapi.ProjectResponse(auth.View, gin.H{
 		"object": "list", "data": items,
 		"pagination":    gin.H{"page": result.Page, "page_size": result.PageSize, "total": result.Total, "has_more": result.HasMore},
-		"authorization": gin.H{"name": auth.View.Name, "dataset": result.Dataset, "preset_days": result.PresetDays},
+		"authorization": gin.H{"name": auth.View.Name, "dataset": result.Dataset, "range": result.Range, "preset_days": result.PresetDays},
 		"snapshot":      gin.H{"observed_at": accountDataTime(result.ObservedAt), "timezone": accountdataapiTimezone(), "stale": result.Stale, "partial": result.Partial, "sources": externalSourceStatuses(result.Sources)},
 	})
 	if err != nil {

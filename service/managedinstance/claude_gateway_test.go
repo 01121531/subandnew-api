@@ -251,33 +251,35 @@ func TestClaudeGatewayInventoryUsesHealthAndUsageWindows(t *testing.T) {
 	require.True(t, item.RateLimited)
 	require.Equal(t, int64(1787650200), item.DisabledAt)
 	require.Equal(t, int64(1787721160), item.ExpiresAt)
-	require.Equal(t, 30, item.UsageWindowDays)
-	require.Equal(t, 300.0, *item.Requests)
-	require.Equal(t, 4000.0, *item.Tokens)
-	require.Equal(t, 12.345678, *item.Cost)
+	require.Zero(t, item.UsageWindowDays)
+	require.Equal(t, 999.0, *item.Requests)
+	require.Equal(t, 9999.0, *item.Tokens)
+	require.Equal(t, 99.9999, *item.Cost)
 	require.Equal(t, 120.0, *item.Requests24H)
 	require.Equal(t, 100.0, *item.SuccessfulRequests24H)
 	require.Equal(t, 15.0, *item.LimitedRequests24H)
 }
 
-func TestClaudeGatewayAccountItemPrefersTodayCostAndTracksPeriods(t *testing.T) {
+func TestClaudeGatewayAccountItemUsesLifetimeTotalsOnly(t *testing.T) {
 	var account claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"today","status":"active","total_cost":99,"today_cost":0,"usage_windows":{"cost_30d":12.5,"req_30d":300,"tokens_30d":4000}}`), &account))
 	item := claudeGatewayAccountItem(account, nil)
 	require.NotNil(t, item.Cost)
-	require.Zero(t, *item.Cost)
-	require.Equal(t, "today", item.CostPeriod)
+	require.Equal(t, 99.0, *item.Cost)
+	require.Equal(t, "lifetime", item.CostPeriod)
 	require.NotNil(t, item.CostAvailable)
 	require.True(t, *item.CostAvailable)
-	require.Equal(t, "30d", item.RequestsPeriod)
-	require.Equal(t, "30d", item.TokensPeriod)
+	require.Nil(t, item.Requests)
+	require.Nil(t, item.Tokens)
+	require.Equal(t, "lifetime", item.RequestsPeriod)
+	require.Equal(t, "lifetime", item.TokensPeriod)
 
 	var legacy claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"legacy","status":"active","usage_windows":{"cost_30d":12.5}}`), &legacy))
 	legacyItem := claudeGatewayAccountItem(legacy, nil)
-	require.Equal(t, 12.5, *legacyItem.Cost)
-	require.Equal(t, "30d", legacyItem.CostPeriod)
-	require.True(t, *legacyItem.CostAvailable)
+	require.Nil(t, legacyItem.Cost)
+	require.Equal(t, "lifetime", legacyItem.CostPeriod)
+	require.False(t, *legacyItem.CostAvailable)
 
 	var missing claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"missing","status":"active"}`), &missing))
@@ -286,7 +288,7 @@ func TestClaudeGatewayAccountItemPrefersTodayCostAndTracksPeriods(t *testing.T) 
 	require.False(t, *missingItem.CostAvailable)
 }
 
-func TestClaudeGatewayAccountItemUsesDailyStatsWhenTopLevelMetricsAreMissing(t *testing.T) {
+func TestClaudeGatewayAccountItemDoesNotSubstituteDailyStats(t *testing.T) {
 	var account claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{
 		"id":"daily-stats",
@@ -295,49 +297,39 @@ func TestClaudeGatewayAccountItemUsesDailyStatsWhenTopLevelMetricsAreMissing(t *
 	}`), &account))
 
 	item := claudeGatewayAccountItem(account, nil)
-	require.NotNil(t, item.Requests)
-	require.Equal(t, 42.0, *item.Requests)
-	require.Equal(t, "today", item.RequestsPeriod)
-	require.NotNil(t, item.Tokens)
-	require.Equal(t, 1234.0, *item.Tokens)
-	require.Equal(t, "today", item.TokensPeriod)
-	require.NotNil(t, item.Cost)
-	require.Equal(t, 9.875, *item.Cost)
-	require.Equal(t, "today", item.CostPeriod)
+	require.Nil(t, item.Requests)
+	require.Equal(t, "lifetime", item.RequestsPeriod)
+	require.Nil(t, item.Tokens)
+	require.Equal(t, "lifetime", item.TokensPeriod)
+	require.Nil(t, item.Cost)
+	require.Equal(t, "lifetime", item.CostPeriod)
 	require.NotNil(t, item.CostAvailable)
-	require.True(t, *item.CostAvailable)
+	require.False(t, *item.CostAvailable)
 }
 
-func TestClaudeGatewayAccountItemPreservesExplicitZeroDailyStats(t *testing.T) {
+func TestClaudeGatewayAccountItemPreservesExplicitZeroLifetimeTotals(t *testing.T) {
 	var account claudeGatewayAccount
 	require.NoError(t, json.Unmarshal([]byte(`{
 		"id":"daily-zero",
 		"status":"active",
-		"stats":{"daily_req":0,"daily_tok":"0","daily_cost":0}
+		"total_requests":0,"total_tokens":"0","total_cost":0,
+		"stats":{"daily_req":42,"daily_tok":"1234","daily_cost":9.875}
 	}`), &account))
 
 	item := claudeGatewayAccountItem(account, nil)
 	require.NotNil(t, item.Requests)
 	require.Zero(t, *item.Requests)
-	require.Equal(t, "today", item.RequestsPeriod)
+	require.Equal(t, "lifetime", item.RequestsPeriod)
 	require.NotNil(t, item.Tokens)
 	require.Zero(t, *item.Tokens)
-	require.Equal(t, "today", item.TokensPeriod)
+	require.Equal(t, "lifetime", item.TokensPeriod)
 	require.NotNil(t, item.Cost)
 	require.Zero(t, *item.Cost)
-	require.Equal(t, "today", item.CostPeriod)
+	require.Equal(t, "lifetime", item.CostPeriod)
 	require.True(t, *item.CostAvailable)
 }
 
-func TestDecodeClaudeGatewayAccountDetailReadsCostWindows(t *testing.T) {
-	account, err := decodeClaudeGatewayAccountDetail([]byte(`{"data":{"id":"detail-1","cost_windows":{"cost_30d":"8.75"}}}`))
-	require.NoError(t, err)
-	require.Equal(t, "detail-1", account.ID)
-	require.NotNil(t, account.CostWindows.Cost30D)
-	require.Equal(t, 8.75, float64(*account.CostWindows.Cost30D))
-}
-
-func TestClaudeGatewayInventoryEnrichesMissingCostFromDetail(t *testing.T) {
+func TestClaudeGatewayInventoryDoesNotFetchMissingCostFromDetail(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	detailRequests := 0
@@ -362,38 +354,23 @@ func TestClaudeGatewayInventoryEnrichesMissingCostFromDetail(t *testing.T) {
 	require.NoError(t, err)
 	page := view.Data.(*InventoryPage)
 	require.Len(t, page.Items, 1)
-	require.NotNil(t, page.Items[0].Cost)
-	require.Equal(t, 7.25, *page.Items[0].Cost)
-	require.Equal(t, "30d", page.Items[0].CostPeriod)
+	require.Nil(t, page.Items[0].Cost)
+	require.Equal(t, "lifetime", page.Items[0].CostPeriod)
 	require.NotNil(t, page.Items[0].CostAvailable)
-	require.True(t, *page.Items[0].CostAvailable)
-	require.Equal(t, 1, detailRequests)
+	require.False(t, *page.Items[0].CostAvailable)
+	require.Zero(t, detailRequests)
 }
 
-func TestClaudeGatewayInventoryEnrichesMissingCostsConcurrently(t *testing.T) {
+func TestClaudeGatewayInventoryReportsProgressWithoutDetailRequests(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	var detailRequests atomic.Int32
-	var inFlight atomic.Int32
-	var maxInFlight atomic.Int32
 	progressCompleted := make([]int, 0, 4)
 	progressTotals := make([]int, 0, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/admin/oauth-accounts":
 			writeProbeJSON(response, `{"accounts":[{"id":"missing-1","status":"active"},{"id":"missing-2","status":"active"},{"id":"missing-3","status":"active"},{"id":"missing-4","status":"active"}],"total":4}`)
-		case "/api/admin/oauth-accounts/missing-1", "/api/admin/oauth-accounts/missing-2", "/api/admin/oauth-accounts/missing-3", "/api/admin/oauth-accounts/missing-4":
-			detailRequests.Add(1)
-			current := inFlight.Add(1)
-			for {
-				previous := maxInFlight.Load()
-				if current <= previous || maxInFlight.CompareAndSwap(previous, current) {
-					break
-				}
-			}
-			time.Sleep(50 * time.Millisecond)
-			inFlight.Add(-1)
-			writeProbeJSON(response, `{"data":{"cost_windows":{"cost_30d":"7.25"}}}`)
 		case "/api/admin/vendors":
 			writeProbeJSON(response, `{"items":[]}`)
 		default:
@@ -409,8 +386,7 @@ func TestClaudeGatewayInventoryEnrichesMissingCostsConcurrently(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, view.Data.(*InventoryPage).Items, 4)
-	require.Equal(t, int32(4), detailRequests.Load())
-	require.GreaterOrEqual(t, maxInFlight.Load(), int32(2))
+	require.Zero(t, detailRequests.Load())
 	require.Equal(t, []int{1, 2, 3, 4}, progressCompleted)
 	require.Equal(t, []int{4, 4, 4, 4}, progressTotals)
 }
@@ -536,8 +512,11 @@ func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 			require.NoError(t, json.NewEncoder(response).Encode(map[string]any{
 				"accounts": []map[string]any{{
 					"id": "large-account", "name": "large-account", "status": "active", "health_status": "healthy",
-					"created_at":    "1970-01-01T00:02:30Z",
-					"usage_windows": map[string]any{"req_30d": 123, "tokens_30d": 456, "cost_30d": 7.89},
+					"created_at":     "1970-01-01T00:02:30Z",
+					"total_requests": 123,
+					"total_tokens":   456,
+					"total_cost":     7.89,
+					"usage_windows":  map[string]any{"req_30d": 123, "tokens_30d": 456, "cost_30d": 7.89},
 				}},
 				"padding": strings.Repeat("x", int(defaultConnectorMaxBodyBytes)),
 			}))
@@ -560,7 +539,7 @@ func TestClaudeGatewayAccountOutputAcceptsLargeInventoryResponse(t *testing.T) {
 	require.Equal(t, 7.89, result.TotalAmount)
 }
 
-func TestClaudeGatewayAccountOutputUsesDailyStatsWithoutDetailRequests(t *testing.T) {
+func TestClaudeGatewayAccountOutputDoesNotUseDailyStatsOrDetailRequests(t *testing.T) {
 	newManagedInstanceTestDB(t)
 	t.Setenv(managedInstanceAllowedCIDRsEnv, "127.0.0.0/8")
 	var detailRequests atomic.Int32
@@ -594,13 +573,16 @@ func TestClaudeGatewayAccountOutputUsesDailyStatsWithoutDetailRequests(t *testin
 	require.NoError(t, err)
 	result := view.Data.(*AccountOutputResult)
 	require.Len(t, result.Items, 1)
-	require.Equal(t, 42.0, result.Items[0].TotalRequests)
-	require.Equal(t, 1234.0, result.Items[0].TotalTokens)
-	require.Equal(t, 9.875, result.Items[0].Amount)
-	require.Equal(t, "today", result.Items[0].AmountPeriod)
-	require.Equal(t, 42.0, result.TotalRequests)
-	require.Equal(t, 1234.0, result.TotalTokens)
-	require.Equal(t, 9.875, result.TotalAmount)
+	require.Zero(t, result.Items[0].TotalRequests)
+	require.False(t, *result.Items[0].RequestsAvailable)
+	require.Zero(t, result.Items[0].TotalTokens)
+	require.False(t, *result.Items[0].TokensAvailable)
+	require.Zero(t, result.Items[0].Amount)
+	require.False(t, *result.Items[0].AmountAvailable)
+	require.Equal(t, "lifetime", result.Items[0].AmountPeriod)
+	require.Zero(t, result.TotalRequests)
+	require.Zero(t, result.TotalTokens)
+	require.Zero(t, result.TotalAmount)
 	require.Zero(t, detailRequests.Load())
 }
 

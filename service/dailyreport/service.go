@@ -171,6 +171,13 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 	filtered := full
 	var accountCount int64
 	query := managedaccount.Query{InstanceIDs: []int64{instanceID}, Dataset: managedaccount.DatasetOutput, PresetDays: 1, Page: 1, PageSize: 10000, AllowLargePage: true}
+	claudeGateway := false
+	if instance, getErr := managedinstance.Get(instanceID); getErr == nil && instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		claudeGateway = true
+		query.Dataset = managedaccount.DatasetInventory
+		query.Range = "all"
+		query.PresetDays = 0
+	}
 	if rule != nil && strings.TrimSpace(rule.FilterJSON) != "" && rule.FilterJSON != "{}" {
 		var raw struct {
 			MatchMode    string                              `json:"match_mode"`
@@ -188,14 +195,18 @@ func collectManaged(ctx context.Context, instanceID int64, window Window, rule *
 		if rule != nil && strings.TrimSpace(rule.FilterJSON) != "" && rule.FilterJSON != "{}" {
 			filtered = Metrics{Currency: full.Currency}
 			for _, item := range result.Items {
-				if item.Requests != nil {
-					filtered.Requests += *item.Requests
+				requests, tokens, amount := item.Requests, item.Tokens, item.Amount
+				if claudeGateway {
+					requests, tokens, amount = item.TodayRequests, item.TodayTokens, item.TodayCost
 				}
-				if item.Tokens != nil {
-					filtered.TotalTokens += *item.Tokens
+				if requests != nil {
+					filtered.Requests += *requests
 				}
-				if item.Amount != nil {
-					filtered.Cost += *item.Amount
+				if tokens != nil {
+					filtered.TotalTokens += *tokens
+				}
+				if amount != nil {
+					filtered.Cost += *amount
 				}
 			}
 		}

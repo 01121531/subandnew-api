@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/01121531/subandnew-api/common"
@@ -30,11 +29,9 @@ type claudeGatewaySession struct {
 }
 
 const (
-	claudeGatewaySessionTTL            = 10 * time.Minute
-	claudeGatewayAccountsMaxBodyBytes  = int64(64 * 1024 * 1024)
-	claudeGatewayBulkRequestTimeout    = 60 * time.Second
-	claudeGatewayAccountDetailTimeout  = 20 * time.Second
-	claudeGatewayCostEnrichmentWorkers = 8
+	claudeGatewaySessionTTL           = 10 * time.Minute
+	claudeGatewayAccountsMaxBodyBytes = int64(64 * 1024 * 1024)
+	claudeGatewayBulkRequestTimeout   = 60 * time.Second
 )
 
 var claudeGatewaySessions sync.Map
@@ -80,6 +77,7 @@ type claudeGatewayAccount struct {
 	GroupName        string               `json:"group_name"`
 	OwnerUserID      string               `json:"owner_user_id"`
 	CreatedAt        string               `json:"created_at"`
+	UpdatedAt        string               `json:"updated_at"`
 	LastUsedAt       string               `json:"last_used_at"`
 	DisabledAt       string               `json:"disabled_at"`
 	ExpiresAt        string               `json:"expires_at"`
@@ -522,11 +520,9 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 		if progressTotal < start+len(page.Accounts) {
 			progressTotal = start + len(page.Accounts)
 		}
-		var pageCompleted atomic.Int32
-		enrichClaudeGatewayAccountCosts(ctx, connector, credential, page.Accounts, func() {
-			completed := start + int(pageCompleted.Add(1))
-			reportInventoryProgress(ctx, completed, progressTotal)
-		})
+		for index := range page.Accounts {
+			reportInventoryProgress(ctx, start+index+1, progressTotal)
+		}
 		combined.Accounts = append(combined.Accounts, page.Accounts...)
 		if len(combined.Accounts) > managedInstanceInventoryMaxItems {
 			return nil, &ProbeError{Code: "claude_gateway_accounts_invalid_response", StatusCode: response.StatusCode}
@@ -556,141 +552,6 @@ func fetchClaudeGatewayAccountsWithMode(ctx context.Context, connector *Connecto
 		combined.Total = len(combined.Accounts)
 	}
 	return combined, nil
-}
-
-func enrichClaudeGatewayAccountCosts(ctx context.Context, connector *Connector, credential *CredentialMaterial, accounts []claudeGatewayAccount, onCompleted func()) {
-	if onCompleted == nil {
-		onCompleted = func() {}
-	}
-	var completionMu sync.Mutex
-	reportCompleted := func() {
-		completionMu.Lock()
-		defer completionMu.Unlock()
-		onCompleted()
-	}
-	pending := make([]int, 0, len(accounts))
-	for index := range accounts {
-		account := &accounts[index]
-		if account.TodayCost == nil && account.Stats.DailyCost == nil && account.UsageWindows.Cost30D == nil && account.CostWindows.Cost30D == nil {
-			pending = append(pending, index)
-			continue
-		}
-		reportCompleted()
-	}
-	if len(pending) == 0 {
-		return
-	}
-
-	workerCount := min(claudeGatewayCostEnrichmentWorkers, len(pending))
-	jobs := make(chan int)
-	var workers sync.WaitGroup
-	workers.Add(workerCount)
-	for range workerCount {
-		go func() {
-			defer workers.Done()
-			for index := range jobs {
-				if ctx.Err() != nil {
-					return
-				}
-				detailCtx, cancel := context.WithTimeout(ctx, claudeGatewayAccountDetailTimeout)
-				detail, err := fetchClaudeGatewayAccountDetail(detailCtx, connector, credential, accounts[index].ID)
-				cancel()
-				if err != nil {
-					reportCompleted()
-					continue
-				}
-				account := &accounts[index]
-				if detail.TodayCost != nil {
-					account.TodayCost = detail.TodayCost
-				}
-				if detail.hasTotalRequests {
-					account.TotalRequests = detail.TotalRequests
-					account.hasTotalRequests = true
-				}
-				if detail.hasTotalTokens {
-					account.TotalTokens = detail.TotalTokens
-					account.hasTotalTokens = true
-				}
-				if detail.Stats.DailyRequests != nil {
-					account.Stats.DailyRequests = detail.Stats.DailyRequests
-				}
-				if detail.Stats.DailyTokens != nil {
-					account.Stats.DailyTokens = detail.Stats.DailyTokens
-				}
-				if detail.Stats.DailyCost != nil {
-					account.Stats.DailyCost = detail.Stats.DailyCost
-				}
-				if detail.UsageWindows.Requests30D != nil {
-					account.UsageWindows.Requests30D = detail.UsageWindows.Requests30D
-				}
-				if detail.UsageWindows.Tokens30D != nil {
-					account.UsageWindows.Tokens30D = detail.UsageWindows.Tokens30D
-				}
-				if detail.CostWindows.Cost30D != nil {
-					account.CostWindows.Cost30D = detail.CostWindows.Cost30D
-				}
-				if detail.UsageWindows.Cost30D != nil {
-					account.UsageWindows.Cost30D = detail.UsageWindows.Cost30D
-				}
-				reportCompleted()
-			}
-		}()
-	}
-
-dispatch:
-	for _, index := range pending {
-		select {
-		case jobs <- index:
-		case <-ctx.Done():
-			break dispatch
-		}
-	}
-	close(jobs)
-	workers.Wait()
-}
-
-func fetchClaudeGatewayAccountDetail(ctx context.Context, connector *Connector, credential *CredentialMaterial, accountID string) (claudeGatewayAccount, error) {
-	accountID = strings.TrimSpace(accountID)
-	if accountID == "" {
-		return claudeGatewayAccount{}, &ProbeError{Code: "claude_gateway_account_detail_invalid_id"}
-	}
-	response, err := claudeGatewayDoJSONWithMaxBody(ctx, connector, credential, http.MethodGet, "/api/admin/oauth-accounts/"+url.PathEscape(accountID), nil, claudeGatewayAccountsMaxBodyBytes)
-	if err != nil {
-		return claudeGatewayAccount{}, claudeGatewayCollectionError("account_detail", err)
-	}
-	if err := requireHTTPStatus(response); err != nil {
-		return claudeGatewayAccount{}, claudeGatewayCollectionError("account_detail", err)
-	}
-	return decodeClaudeGatewayAccountDetail(response.Body)
-}
-
-func decodeClaudeGatewayAccountDetail(data []byte) (claudeGatewayAccount, error) {
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 {
-		return claudeGatewayAccount{}, errors.New("empty Claude Gateway account detail response")
-	}
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return claudeGatewayAccount{}, err
-	}
-	if raw, ok := envelope["data"]; ok {
-		if account, err := decodeClaudeGatewayAccountDetail(raw); err == nil {
-			return account, nil
-		}
-	}
-	if raw, ok := envelope["account"]; ok {
-		if account, err := decodeClaudeGatewayAccountDetail(raw); err == nil {
-			return account, nil
-		}
-	}
-	var account claudeGatewayAccount
-	if err := json.Unmarshal(data, &account); err != nil {
-		return claudeGatewayAccount{}, err
-	}
-	if strings.TrimSpace(account.ID) == "" && account.CostWindows.Cost30D == nil && account.UsageWindows.Cost30D == nil && account.TodayCost == nil {
-		return claudeGatewayAccount{}, errors.New("Claude Gateway account detail is missing account data")
-	}
-	return account, nil
 }
 
 func fetchClaudeGatewayVendors(ctx context.Context, connector *Connector, credential *CredentialMaterial) (map[string]claudeGatewayVendor, error) {
@@ -926,44 +787,35 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 	status := firstNonEmpty(account.HealthStatus, account.Status)
 	rateLimited := claudeGatewayRateLimited(account)
 	enabled := claudeGatewayAccountAvailable(account)
-	requests, tokens, cost := float64(account.TotalRequests), float64(account.TotalTokens), float64(account.TotalCost)
-	requestsPeriod, tokensPeriod := "lifetime", "lifetime"
-	costPeriod := "lifetime"
+	var requests, tokens, cost *float64
+	if account.hasTotalRequests {
+		value := float64(account.TotalRequests)
+		requests = &value
+	}
+	if account.hasTotalTokens {
+		value := float64(account.TotalTokens)
+		tokens = &value
+	}
+	if account.hasTotalCost {
+		value := float64(account.TotalCost)
+		cost = &value
+	}
 	costAvailable := account.hasTotalCost
-	usageWindowDays := 0
-	if account.UsageWindows.Requests30D != nil {
-		requests = float64(*account.UsageWindows.Requests30D)
-		requestsPeriod = "30d"
-		usageWindowDays = 30
-	} else if account.Stats.DailyRequests != nil {
-		requests = float64(*account.Stats.DailyRequests)
-		requestsPeriod = "today"
+	var todayRequests, todayTokens, todayCost *float64
+	if account.Stats.DailyRequests != nil {
+		value := float64(*account.Stats.DailyRequests)
+		todayRequests = &value
 	}
-	if account.UsageWindows.Tokens30D != nil {
-		tokens = float64(*account.UsageWindows.Tokens30D)
-		tokensPeriod = "30d"
-		usageWindowDays = 30
-	} else if account.Stats.DailyTokens != nil {
-		tokens = float64(*account.Stats.DailyTokens)
-		tokensPeriod = "today"
+	if account.Stats.DailyTokens != nil {
+		value := float64(*account.Stats.DailyTokens)
+		todayTokens = &value
 	}
-	if account.TodayCost != nil {
-		cost = float64(*account.TodayCost)
-		costPeriod = "today"
-		costAvailable = true
-	} else if account.Stats.DailyCost != nil {
-		cost = float64(*account.Stats.DailyCost)
-		costPeriod = "today"
-		costAvailable = true
-	} else if account.CostWindows.Cost30D != nil || account.UsageWindows.Cost30D != nil {
-		if account.CostWindows.Cost30D != nil {
-			cost = float64(*account.CostWindows.Cost30D)
-		} else {
-			cost = float64(*account.UsageWindows.Cost30D)
-		}
-		costPeriod = "30d"
-		costAvailable = true
-		usageWindowDays = 30
+	if account.Stats.DailyCost != nil {
+		value := float64(*account.Stats.DailyCost)
+		todayCost = &value
+	} else if account.TodayCost != nil {
+		value := float64(*account.TodayCost)
+		todayCost = &value
 	}
 	requests24H := float64(account.Requests24H)
 	successful24H := float64(account.Successful24H)
@@ -983,10 +835,11 @@ func claudeGatewayAccountItem(account claudeGatewayAccount, vendors map[string]c
 		VendorID: strings.TrimSpace(account.OwnerUserID),
 		Type:     firstNonEmpty(account.AccountType, account.AuthKind),
 		Platform: firstNonEmpty(account.Provider, account.InferenceBackend), Group: account.GroupName,
-		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
+		Status: status, Enabled: &enabled, CreatedAt: parseClaudeGatewayTime(account.CreatedAt), UpdatedAt: parseClaudeGatewayTime(account.UpdatedAt), LastActivityAt: parseClaudeGatewayTime(account.LastUsedAt),
 		DisabledAt: parseClaudeGatewayTime(account.DisabledAt), ExpiresAt: parseClaudeGatewayTime(account.ExpiresAt),
-		Requests: &requests, Tokens: &tokens, Cost: &cost, CostUnit: "usd", UsageWindowDays: usageWindowDays,
-		RequestsPeriod: requestsPeriod, TokensPeriod: tokensPeriod, CostPeriod: costPeriod, CostAvailable: &costAvailable,
+		Requests: requests, Tokens: tokens, Cost: cost, CostUnit: "usd",
+		RequestsPeriod: "lifetime", TokensPeriod: "lifetime", CostPeriod: "lifetime", CostAvailable: &costAvailable,
+		TodayRequests: todayRequests, TodayTokens: todayTokens, TodayCost: todayCost,
 		Requests24H: &requests24H, SuccessfulRequests24H: &successful24H, LimitedRequests24H: &limited24H,
 		RPM: &rpm, ActiveSessions: &sessions, RateLimited: rateLimited,
 		ErrorMessage: firstNonEmpty(account.LastError, account.FailureKind, account.Stats.CooldownReason, recoveryError),
@@ -1276,13 +1129,20 @@ func collectClaudeGatewayAccountOutput(result *AccountOutputResult, items []Inve
 			amount = *item.Cost
 		}
 		amountAvailable := item.CostAvailable == nil || *item.CostAvailable
+		requestsAvailable := item.Requests != nil
+		tokensAvailable := item.Tokens != nil
 		result.Items[index] = AccountOutputItem{
-			Account: item, TotalRequests: requests, TotalTokens: tokens, Amount: amount, AmountAvailable: &amountAvailable, AmountPeriod: item.CostPeriod,
+			Account: item, TotalRequests: requests, RequestsAvailable: &requestsAvailable, TotalTokens: tokens, TokensAvailable: &tokensAvailable,
+			Amount: amount, AmountAvailable: &amountAvailable, AmountPeriod: item.CostPeriod,
 			Currency: "USD", CollectionStatus: model.ManagedInstanceCollectionSucceeded,
 		}
 		result.CollectedAccounts++
-		result.TotalRequests += requests
-		result.TotalTokens += tokens
+		if requestsAvailable {
+			result.TotalRequests += requests
+		}
+		if tokensAvailable {
+			result.TotalTokens += tokens
+		}
 		if amountAvailable {
 			result.TotalAmount += amount
 		}

@@ -92,7 +92,7 @@ func TestOpenAccountDataProjectsFieldsAndHonorsETag(t *testing.T) {
 		LastAttemptAt: now, LastAttemptStatus: model.ManagedInstanceCollectionSucceeded,
 	}).Error)
 	created, err := accountdataapi.Create(t.Context(), accountdataapi.ConfigInput{
-		Name: "partner", Dataset: managedaccount.DatasetInventory, PresetDays: 7, InstanceIDs: []int64{instance.Id},
+		Name: "partner", Dataset: managedaccount.DatasetInventory, Range: "all", InstanceIDs: []int64{instance.Id},
 		Fields: []string{"name", "email", "note", "available"}, SortBy: "name", SortOrder: "asc", PageSize: 50,
 		RateLimitPerMinute: 60,
 	}, 1)

@@ -43,6 +43,7 @@ type ManagedUsageExportPayload struct {
 	ActorID       int                        `json:"actor_id"`
 	Query         url.Values                 `json:"query,omitempty"`
 	Source        string                     `json:"source,omitempty"`
+	RangeKey      string                     `json:"range_key,omitempty"`
 	Window        managedinstance.TimeWindow `json:"window,omitempty"`
 	Locale        string                     `json:"locale,omitempty"`
 }
@@ -236,7 +237,9 @@ func PrepareManagedAccountExport(actorID int, request ManagedAccountExportReques
 		return nil, err
 	}
 	request.Source = strings.TrimSpace(request.Source)
-	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || request.Window.Start <= 0 || request.Window.End <= request.Window.Start || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
+	allTime := request.RangeKey == managedAccountAllRangeKey
+	invalidWindow := request.Window.End <= request.Window.Start || (!allTime && request.Window.Start <= 0)
+	if actorID <= 0 || (request.Source != "inventory" && request.Source != "account_output") || len(request.Items) == 0 || len(request.Items) > 10000 || invalidWindow || len(request.FilterSnapshot) > 65536 || (len(request.FilterSnapshot) > 0 && !json.Valid(request.FilterSnapshot)) {
 		return nil, managedinstance.ErrInvalidInstance
 	}
 	if err := access.CheckQuery(url.Values{"search": {request.Search}, "keyword": {request.ExcludeSearch}}); err != nil {
@@ -306,6 +309,9 @@ func PrepareManagedAccountExport(actorID int, request ManagedAccountExportReques
 		instance, err := managedinstance.Get(instanceID)
 		if err != nil {
 			return nil, err
+		}
+		if allTime && instance.Kind != model.ManagedInstanceKindClaudeGateway {
+			return nil, managedinstance.ErrInvalidInstance
 		}
 		inventory := make(map[int64]managedinstance.InventoryItem)
 		accountIDAliases := make(map[string]int64)
@@ -417,7 +423,7 @@ func PrepareManagedAccountExport(actorID int, request ManagedAccountExportReques
 	if err != nil {
 		return nil, err
 	}
-	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: request.Source, Window: request.Window, Locale: request.Locale}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: request.Source, RangeKey: request.RangeKey, Window: request.Window, Locale: request.Locale}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(selections)), Stage: "queued"}
 	record := &model.ManagedUsageExport{
 		InstanceID: soleInstanceID, InstanceName: instanceName, InstanceKind: instanceKind,
@@ -613,7 +619,7 @@ func enqueueManagedAccountExportSelections(actorID int, original *model.ManagedU
 	if err != nil {
 		return nil, err
 	}
-	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: snapshot.Source, Window: snapshot.Window, Locale: snapshot.Locale}
+	payload := ManagedUsageExportPayload{ExportKind: model.ManagedExportKindAccounts, ActorID: actorID, Source: snapshot.Source, RangeKey: snapshot.RangeKey, Window: snapshot.Window, Locale: snapshot.Locale}
 	state := managedinstance.UsageRecordExportProgress{Progress: 0, Total: int64(len(items)), Stage: "queued"}
 	task, err := model.CreateManagedUsageExportWithItems(&model.ManagedUsageExport{
 		InstanceID: original.InstanceID, InstanceName: original.InstanceName, InstanceKind: original.InstanceKind,
@@ -697,7 +703,7 @@ func (managedUsageExportHandler) Run(ctx context.Context, task *model.SystemTask
 				selections = append(selections, selection)
 			}
 			if err == nil {
-				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections, VisibleFields: access.Policy.Fields, Notes: payload.Notes, SnapshotTimes: payload.SnapshotTimes}, progressCallback)
+				artifact, err = managedinstance.ExportAccountsXLSXToTaskFile(ctx, task.TaskID, managedinstance.AccountExportInput{Source: payload.Source, RangeKey: payload.RangeKey, Window: payload.Window, Locale: payload.Locale, ActorID: payload.ActorID, Selected: selections, VisibleFields: access.Policy.Fields, Notes: payload.Notes, SnapshotTimes: payload.SnapshotTimes}, progressCallback)
 			}
 		}
 	} else {

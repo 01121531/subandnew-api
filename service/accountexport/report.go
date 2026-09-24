@@ -126,7 +126,7 @@ func PrepareRun(ctx context.Context, ownerID int, config Config, scheduledAt tim
 		return nil, err
 	}
 	query := config.Query
-	if query.PresetDays == 0 {
+	if query.Range != "all" && query.PresetDays == 0 {
 		query.PresetDays = 30
 	}
 	query.Page, query.PageSize, query.AllowLargePage = 1, 10000, true
@@ -185,9 +185,13 @@ func PrepareRun(ctx context.Context, ownerID int, config Config, scheduledAt tim
 	if err != nil {
 		return nil, err
 	}
-	accountRange, err := service.NormalizeManagedAccountRange(query.PresetDays, 0, 0, "Asia/Shanghai")
+	accountRange, err := service.NormalizeManagedAccountRangeWithMode(query.Range, query.PresetDays, 0, 0, "Asia/Shanghai")
 	if err != nil {
 		return nil, err
+	}
+	if query.Range == "all" {
+		window.Start = 0
+		window.End = scheduledAt.Unix()
 	}
 	export, err := service.PrepareManagedAccountExport(ownerID, service.ManagedAccountExportRequest{
 		Source: query.Dataset, RangeKey: accountRange.RangeKey, Window: window, Locale: config.Locale,

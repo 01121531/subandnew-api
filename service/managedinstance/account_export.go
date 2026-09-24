@@ -31,6 +31,7 @@ type AccountExportInput struct {
 	SnapshotTimes map[int64]int64          `json:"snapshot_times,omitempty"`
 	Notes         []string                 `json:"notes,omitempty"`
 	Source        string                   `json:"source"`
+	RangeKey      string                   `json:"range_key,omitempty"`
 	Window        TimeWindow               `json:"window"`
 	Locale        string                   `json:"locale"`
 	ActorID       int                      `json:"actor_id,omitempty"`
@@ -58,7 +59,8 @@ type accountExportMetrics struct {
 }
 
 func ExportAccountsXLSXToTaskFile(ctx context.Context, taskID string, input AccountExportInput, onProgress UsageRecordExportProgressCallback) (*UsageRecordExportArtifact, error) {
-	if len(input.Selected) == 0 || len(input.Selected) > accountExportLimit || input.Window.Start <= 0 || input.Window.End <= input.Window.Start {
+	allTime := input.RangeKey == "all"
+	if len(input.Selected) == 0 || len(input.Selected) > accountExportLimit || input.Window.End <= input.Window.Start || (!allTime && input.Window.Start <= 0) {
 		return nil, ErrInvalidInstance
 	}
 	if input.Window.Timezone == "" {
@@ -73,6 +75,7 @@ func ExportAccountsXLSXToTaskFile(ctx context.Context, taskID string, input Acco
 }
 
 func collectAccountExportRows(ctx context.Context, input AccountExportInput, onProgress UsageRecordExportProgressCallback) ([]AccountExportRow, int, error) {
+	allTime := input.RangeKey == "all"
 	rows := make([]AccountExportRow, len(input.Selected))
 	byInstance := make(map[int64][]int)
 	for index, selected := range input.Selected {
@@ -96,7 +99,7 @@ func collectAccountExportRows(ctx context.Context, input AccountExportInput, onP
 			results, failures, collectionErr = collectPagedAccountExportMetrics(ctx, instanceID, input.ActorID, indexes, input.Selected, input.Window)
 		case model.ManagedInstanceKindClaudeGateway:
 			results = collectClaudeGatewayAccountExportMetrics(indexes, input.Selected, input.Source, input.Window)
-			if input.SnapshotTimes != nil {
+			if input.SnapshotTimes != nil && !allTime {
 				observed := input.SnapshotTimes[instanceID]
 				for _, index := range indexes {
 					account := input.Selected[index].Account
@@ -440,7 +443,7 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	defer workbook.Close()
 	const sheet = "账号导出"
 	workbook.SetSheetName("Sheet1", sheet)
-	headers := []string{"账号归属", "供应商", "供应商邮箱", "账号 Email", "账号类型", "录入时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
+	headers := []string{"账号归属", "供应商", "供应商邮箱", "账号 Email", "账号类型", "创建时间", "更新时间", "存活时间（截至结算时刻）", "录入备注", "请求数", "输入 Tokens", "输出 Tokens", "缓存写入 Tokens", "缓存读取 Tokens", "消费金额 ($)", "实例", "平台", "账号 ID", "可用状态", "总 Tokens", "统计状态", "统计错误"}
 	for column, header := range headers {
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = workbook.SetCellValue(sheet, cell, header)
@@ -462,31 +465,31 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 	headerStyle, _ := workbook.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Color: "#111827"}, Fill: excelize.Fill{Type: "pattern", Color: []string{"#F3F4F6"}, Pattern: 1}, Border: []excelize.Border{{Type: "bottom", Color: "#D1D5DB", Style: 1}}, Alignment: &excelize.Alignment{Vertical: "center"}})
 	numberStyle, _ := workbook.NewStyle(&excelize.Style{NumFmt: 3})
 	moneyStyle, _ := workbook.NewStyle(&excelize.Style{CustomNumFmt: stringPointer("$#,##0.00000000")})
-	_ = workbook.SetCellStyle(sheet, "A1", "U1", headerStyle)
+	_ = workbook.SetCellStyle(sheet, "A1", "V1", headerStyle)
 	if len(rows) > 0 {
 		end := len(rows) + 1
-		_ = workbook.SetCellStyle(sheet, "I2", fmt.Sprintf("M%d", end), numberStyle)
-		_ = workbook.SetCellStyle(sheet, "S2", fmt.Sprintf("S%d", end), numberStyle)
-		_ = workbook.SetCellStyle(sheet, "N2", fmt.Sprintf("N%d", end), moneyStyle)
+		_ = workbook.SetCellStyle(sheet, "J2", fmt.Sprintf("N%d", end), numberStyle)
+		_ = workbook.SetCellStyle(sheet, "T2", fmt.Sprintf("T%d", end), numberStyle)
+		_ = workbook.SetCellStyle(sheet, "O2", fmt.Sprintf("O%d", end), moneyStyle)
 	}
-	widths := map[string]float64{"A": 20, "B": 20, "C": 30, "D": 32, "E": 16, "F": 20, "G": 25, "H": 26, "I": 14, "J": 16, "K": 16, "L": 18, "M": 18, "N": 18, "O": 20, "P": 16, "Q": 22, "R": 14, "S": 18, "T": 16, "U": 30}
+	widths := map[string]float64{"A": 20, "B": 20, "C": 30, "D": 32, "E": 16, "F": 20, "G": 20, "H": 25, "I": 26, "J": 14, "K": 16, "L": 16, "M": 18, "N": 18, "O": 18, "P": 20, "Q": 16, "R": 22, "S": 14, "T": 18, "U": 16, "V": 30}
 	for column, width := range widths {
 		_ = workbook.SetColWidth(sheet, column, column, width)
 	}
 	_ = workbook.SetRowHeight(sheet, 1, 24)
 	_ = workbook.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 	if input.VisibleFields != nil {
-		groups := []string{"vendor", "vendor", "vendor", "email", "", "time", "time", "email", "requests", "tokens", "tokens", "tokens", "tokens", "amount", "", "", "", "status", "tokens", "", "status"}
+		groups := []string{"vendor", "vendor", "vendor", "email", "", "time", "time", "time", "email", "requests", "tokens", "tokens", "tokens", "tokens", "amount", "", "", "", "status", "tokens", "", "status"}
 		remaining := len(groups)
 		for index := len(groups) - 1; index >= 0; index-- {
 			allowed := groups[index] == "" || input.VisibleFields[groups[index]]
 			if index == 2 {
 				allowed = allowed && input.VisibleFields["email"]
 			}
-			if index == 6 {
+			if index == 7 {
 				allowed = allowed && input.VisibleFields["status"]
 			}
-			if index == 7 {
+			if index == 8 {
 				for _, category := range model.AdminDataFields {
 					allowed = allowed && input.VisibleFields[category]
 				}
@@ -503,14 +506,18 @@ func writeAccountExportWorkbook(taskID string, input AccountExportInput, rows []
 		endColumn, _ := excelize.ColumnNumberToName(remaining)
 		_ = workbook.AutoFilter(sheet, "A1:"+endColumn+"1", nil)
 	} else {
-		_ = workbook.AutoFilter(sheet, "A1:U1", nil)
+		_ = workbook.AutoFilter(sheet, "A1:V1", nil)
 	}
-	if len(input.Notes) > 0 {
+	reportNotes := append([]string(nil), input.Notes...)
+	if input.RangeKey == "all" {
+		reportNotes = append(reportNotes, "统计范围：全部时间", "报表生成时间："+time.Now().In(location).Format("2006/01/02 15:04:05"))
+	}
+	if len(reportNotes) > 0 {
 		if _, err := workbook.NewSheet("Report info"); err != nil {
 			return nil, err
 		}
 		_ = workbook.SetColWidth("Report info", "A", "A", 100)
-		for index, note := range input.Notes {
+		for index, note := range reportNotes {
 			_ = workbook.SetCellStr("Report info", fmt.Sprintf("A%d", index+1), note)
 		}
 	}
@@ -552,6 +559,10 @@ func accountExportCellValues(row AccountExportRow, window TimeWindow, location *
 	if item.CreatedAt > 0 {
 		createdAt = time.Unix(item.CreatedAt, 0).In(location).Format("2006/01/02 15:04")
 	}
+	updatedAt := ""
+	if item.UpdatedAt > 0 {
+		updatedAt = time.Unix(item.UpdatedAt, 0).In(location).Format("2006/01/02 15:04")
+	}
 	available := "未知"
 	if item.Enabled != nil {
 		if *item.Enabled {
@@ -568,7 +579,7 @@ func accountExportCellValues(row AccountExportRow, window TimeWindow, location *
 		}
 	}
 	return []any{
-		ownership, item.VendorName, item.VendorEmail, item.Email, accountType, createdAt, accountExportSurvival(item, window.End), note,
+		ownership, item.VendorName, item.VendorEmail, item.Email, accountType, createdAt, updatedAt, accountExportSurvival(item, window.End), note,
 		optionalFloat(row.Requests), optionalFloat(row.InputTokens), optionalFloat(row.OutputTokens), optionalFloat(row.CacheWriteTokens), optionalFloat(row.CacheReadTokens), optionalFloat(row.Amount),
 		row.Selection.InstanceName, row.Selection.InstanceKind, firstNonEmpty(item.IDText, strconv.FormatInt(item.ID, 10)), available, optionalFloat(row.TotalTokens), status, row.ErrorCode,
 	}

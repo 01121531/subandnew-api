@@ -29,10 +29,13 @@ const (
 	managedAccountCustomRetention   = 30 * 24 * time.Hour
 	managedAccountDefaultTimezone   = "Asia/Shanghai"
 	managedAccountInventoryRangeKey = "inventory"
-	managedAccountSnapshotSchema    = 4
+	managedAccountAllRangeKey       = "all"
+	managedAccountSnapshotSchema    = 5
 	managedAccountStandardTaskMode  = "standard"
 	managedAccountCustomTaskMode    = "custom"
 )
+
+var ErrClaudeGatewayAllTimeOnly = errors.New("claude_gateway_all_time_only")
 
 type managedAccountCollectionWatchdog struct {
 	ctx      context.Context
@@ -136,6 +139,7 @@ func managedInstanceCollectionStallTimeout(instance *model.ManagedInstance) time
 var managedAccountPresetDays = [...]int{1, 7, 14, 30}
 
 type ManagedAccountRange struct {
+	Mode       string `json:"mode,omitempty"`
 	RangeKey   string `json:"range_key"`
 	PresetDays int    `json:"preset_days"`
 	Start      int64  `json:"start"`
@@ -206,12 +210,26 @@ func (managedAccountSyncHandler) Type() string {
 }
 
 func NormalizeManagedAccountRange(presetDays int, start int64, end int64, timezone string) (ManagedAccountRange, error) {
+	return NormalizeManagedAccountRangeWithMode("", presetDays, start, end, timezone)
+}
+
+func NormalizeManagedAccountRangeWithMode(mode string, presetDays int, start int64, end int64, timezone string) (ManagedAccountRange, error) {
 	timezone = strings.TrimSpace(timezone)
 	if timezone == "" {
 		timezone = managedAccountDefaultTimezone
 	}
 	if _, err := time.LoadLocation(timezone); err != nil {
 		return ManagedAccountRange{}, managedinstance.ErrInvalidInstance
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == managedAccountAllRangeKey {
+		if presetDays != 0 || start != 0 {
+			return ManagedAccountRange{}, managedinstance.ErrInvalidInstance
+		}
+		if end == 0 {
+			end = common.GetTimestamp()
+		}
+		return ManagedAccountRange{Mode: managedAccountAllRangeKey, RangeKey: managedAccountAllRangeKey, End: end, Timezone: timezone}, nil
 	}
 	if presetDays == 0 && start == 0 && end == 0 {
 		presetDays = 7
@@ -228,7 +246,7 @@ func NormalizeManagedAccountRange(presetDays int, start int64, end int64, timezo
 			return ManagedAccountRange{}, managedinstance.ErrInvalidInstance
 		}
 		return ManagedAccountRange{
-			RangeKey: "preset-" + strconv.Itoa(presetDays), PresetDays: presetDays, Timezone: timezone,
+			Mode: "preset", RangeKey: "preset-" + strconv.Itoa(presetDays), PresetDays: presetDays, Timezone: timezone,
 		}, nil
 	}
 	if start <= 0 || end <= start {
@@ -236,8 +254,41 @@ func NormalizeManagedAccountRange(presetDays int, start int64, end int64, timezo
 	}
 	digest := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s", start, end, timezone)))
 	return ManagedAccountRange{
-		RangeKey: "custom-" + hex.EncodeToString(digest[:12]), Start: start, End: end, Timezone: timezone,
+		Mode: "custom", RangeKey: "custom-" + hex.EncodeToString(digest[:12]), Start: start, End: end, Timezone: timezone,
 	}, nil
+}
+
+func NormalizeManagedAccountRangeForInstance(instanceID int64, mode string, presetDays int, start int64, end int64, timezone string) (ManagedAccountRange, error) {
+	instance, err := managedinstance.Get(instanceID)
+	if err != nil {
+		return ManagedAccountRange{}, err
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		if mode == "" && presetDays == 0 && start == 0 && end == 0 {
+			mode = managedAccountAllRangeKey
+		}
+		if mode != managedAccountAllRangeKey || presetDays != 0 || start != 0 {
+			return ManagedAccountRange{}, ErrClaudeGatewayAllTimeOnly
+		}
+	} else if mode == managedAccountAllRangeKey {
+		return ManagedAccountRange{}, managedinstance.ErrInvalidInstance
+	}
+	return NormalizeManagedAccountRangeWithMode(mode, presetDays, start, end, timezone)
+}
+
+func validateManagedAccountRangeForInstance(instance *managedinstance.InstanceView, accountRange ManagedAccountRange) error {
+	if instance == nil || instance.ManagedInstance == nil {
+		return managedinstance.ErrInvalidInstance
+	}
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		if accountRange.RangeKey != managedAccountAllRangeKey {
+			return ErrClaudeGatewayAllTimeOnly
+		}
+	} else if accountRange.RangeKey == managedAccountAllRangeKey {
+		return managedinstance.ErrInvalidInstance
+	}
+	return nil
 }
 
 func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRange) (*ManagedAccountSnapshotView, error) {
@@ -246,6 +297,9 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	}
 	instance, err := managedinstance.Get(instanceID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateManagedAccountRangeForInstance(instance, accountRange); err != nil {
 		return nil, err
 	}
 	_ = backfillManagedAccountInventory(instanceID)
@@ -262,7 +316,7 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 	touchManagedAccountSnapshots(now, inventory, output)
 
 	mode := managedAccountStandardTaskMode
-	if accountRange.PresetDays == 0 {
+	if accountRange.Mode == managedAccountCustomTaskMode || (accountRange.Mode == "" && accountRange.PresetDays == 0 && accountRange.RangeKey != managedAccountAllRangeKey) {
 		mode = managedAccountCustomTaskMode
 	}
 	task, err := model.GetActiveScopedSystemTask(model.SystemTaskTypeManagedAccountSync, managedAccountTaskScope(instanceID, mode, accountRange.RangeKey))
@@ -278,7 +332,7 @@ func GetManagedAccountSnapshot(instanceID int64, accountRange ManagedAccountRang
 		response := task.ToResponse()
 		view.Task = &response
 	}
-	if accountRange.PresetDays == 0 {
+	if mode == managedAccountCustomTaskMode {
 		view.RefreshRecommended = output == nil || output.ObservedAt <= 0
 	} else {
 		view.RefreshRecommended = managedAccountSectionNeedsRefreshForInstance(inventory, now, instance.ManagedInstance)
@@ -408,11 +462,15 @@ func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange Ma
 	if instanceID <= 0 || accountRange.RangeKey == "" {
 		return nil, managedinstance.ErrInvalidInstance
 	}
-	if _, err := managedinstance.Get(instanceID); err != nil {
+	instance, err := managedinstance.Get(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateManagedAccountRangeForInstance(instance, accountRange); err != nil {
 		return nil, err
 	}
 	mode := managedAccountStandardTaskMode
-	if accountRange.PresetDays == 0 {
+	if accountRange.Mode == managedAccountCustomTaskMode || (accountRange.Mode == "" && accountRange.PresetDays == 0 && accountRange.RangeKey != managedAccountAllRangeKey) {
 		mode = managedAccountCustomTaskMode
 	}
 	scope := managedAccountTaskScope(instanceID, mode, accountRange.RangeKey)
@@ -426,10 +484,7 @@ func EnqueueManagedAccountRefresh(instanceID int64, actorID int, accountRange Ma
 		return &ManagedAccountRefreshView{}, nil
 	}
 	payload := ManagedAccountSyncPayload{InstanceID: instanceID, ActorID: actorID, Mode: mode, Range: accountRange}
-	total := 1
-	if mode == managedAccountStandardTaskMode {
-		total = 5
-	}
+	total := progressTotalForManagedAccountTask(mode, instance.Kind)
 	task, created, err := EnqueueScopedSystemTask(model.SystemTaskTypeManagedAccountSync, scope, payload, managedAccountSyncProgress{
 		Stage: "queued", Total: total,
 	})
@@ -711,7 +766,7 @@ func managedAccountDailyArchiveEligible(kind string, rangeKey string) bool {
 			return true
 		}
 	}
-	return false
+	return rangeKey == managedAccountAllRangeKey
 }
 
 func managedAccountArchiveDay(timestamp int64) (string, int64) {
@@ -805,12 +860,13 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 
 	results := map[string]any{}
 	failed := false
+	progressTotal := progressTotalForManagedAccountTask(payload.Mode, instance.Kind)
 	if payload.Mode == managedAccountStandardTaskMode {
-		_ = updateManagedAccountSyncProgress(task, runnerID, "inventory", 0, 5)
+		_ = updateManagedAccountSyncProgress(task, runnerID, "inventory", 0, progressTotal)
 		inventory, collectErr := collectManagedAccountObservation(workCtx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
 			return managedinstance.CollectInventoryWithProgress(workCtx, payload.InstanceID, "auto", "", func(completed int, total int) {
 				watchdog.Signal()
-				_ = updateManagedAccountInventoryProgress(task, runnerID, completed, total)
+				_ = updateManagedAccountInventoryProgress(task, runnerID, completed, total, progressTotal)
 			})
 		})
 		if ctx.Err() != nil {
@@ -830,14 +886,23 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 		results["inventory"] = managedAccountTaskResult(inventory, collectErr)
 		if collectErr != nil || inventory == nil || inventory.CollectionStatus != model.ManagedInstanceCollectionSucceeded {
 			failed = true
-			for index, days := range managedAccountPresetDays {
-				_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+1, 5)
-				accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
-				_ = saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindOutput, accountRange, inventory, collectErr)
-				_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+2, 5)
+			if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+				_ = updateManagedAccountSyncProgress(task, runnerID, "output_all", 1, progressTotal)
+				_ = saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindOutput, payload.Range, inventory, collectErr)
+			} else {
+				for index, days := range managedAccountPresetDays {
+					_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+1, progressTotal)
+					accountRange, _ := NormalizeManagedAccountRange(days, 0, 0, payload.Range.Timezone)
+					_ = saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindOutput, accountRange, inventory, collectErr)
+					_ = updateManagedAccountSyncProgress(task, runnerID, "output_"+strconv.Itoa(days)+"d", index+2, progressTotal)
+				}
 			}
+		} else if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+			_ = updateManagedAccountSyncProgress(task, runnerID, "output_all", 1, progressTotal)
+			watchdog.Signal()
+			failed = collectManagedAccountAllOutput(workCtx, task, runnerID, payload, results)
 		} else {
-			_ = updateManagedAccountSyncProgress(task, runnerID, "output_1d", 1, 5)
+			_ = updateManagedAccountSyncProgress(task, runnerID, "output_1d", 1, progressTotal)
 			watchdog.Signal()
 			failed = collectManagedAccountPresetOutputs(workCtx, task, runnerID, payload, results)
 		}
@@ -861,15 +926,18 @@ func (managedAccountSyncHandler) Run(ctx context.Context, task *model.SystemTask
 	if failed {
 		status = model.SystemTaskStatusFailed
 		errorCode = "account_collection_failed"
-		_ = updateManagedAccountSyncProgress(task, runnerID, "failed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode))
-	} else if err := updateManagedAccountSyncProgress(task, runnerID, "completed", progressTotalForManagedAccountTask(payload.Mode), progressTotalForManagedAccountTask(payload.Mode)); err != nil {
+		_ = updateManagedAccountSyncProgress(task, runnerID, "failed", progressTotal, progressTotal)
+	} else if err := updateManagedAccountSyncProgress(task, runnerID, "completed", progressTotal, progressTotal); err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("managed account progress update failed for %s: %v", task.TaskID, err))
 	}
 	_ = model.FinishSystemTask(task.TaskID, runnerID, status, results, errorCode)
 }
 
-func progressTotalForManagedAccountTask(mode string) int {
+func progressTotalForManagedAccountTask(mode string, kind string) int {
 	if mode == managedAccountStandardTaskMode {
+		if kind == model.ManagedInstanceKindClaudeGateway {
+			return 2
+		}
 		return 5
 	}
 	return 1
@@ -890,7 +958,7 @@ func updateManagedAccountSyncProgress(task *model.SystemTask, runnerID string, s
 	})
 }
 
-func updateManagedAccountInventoryProgress(task *model.SystemTask, runnerID string, completed int, total int) error {
+func updateManagedAccountInventoryProgress(task *model.SystemTask, runnerID string, completed int, total int, progressTotal int) error {
 	if completed < 0 {
 		completed = 0
 	}
@@ -899,16 +967,16 @@ func updateManagedAccountInventoryProgress(task *model.SystemTask, runnerID stri
 	}
 	progress := 0
 	if total > 0 {
-		progress = completed * 100 / total / progressTotalForManagedAccountTask(managedAccountStandardTaskMode)
+		progress = completed * 100 / total / progressTotal
 		if completed > 0 && progress == 0 {
 			progress = 1
 		}
 		if completed >= total {
-			progress = 100 / progressTotalForManagedAccountTask(managedAccountStandardTaskMode)
+			progress = 100 / progressTotal
 		}
 	}
 	return model.UpdateSystemTaskState(task.TaskID, runnerID, managedAccountSyncProgress{
-		Stage: "inventory", Total: progressTotalForManagedAccountTask(managedAccountStandardTaskMode),
+		Stage: "inventory", Total: progressTotal,
 		Progress: progress, ItemCompleted: completed, ItemTotal: total,
 	})
 }
@@ -942,6 +1010,28 @@ func collectManagedAccountPresetOutputs(ctx context.Context, task *model.SystemT
 		watchdogSignalFromContext(ctx)
 	}
 	return failed
+}
+
+func collectManagedAccountAllOutput(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
+	accountRange := payload.Range
+	if accountRange.End == 0 {
+		accountRange.End = common.GetTimestamp()
+	}
+	observation, collectErr := collectManagedAccountObservation(ctx, payload.InstanceID, payload.ActorID, func() (*managedinstance.ObservationView, error) {
+		return managedinstance.CollectAccountOutput(ctx, payload.InstanceID, managedinstance.TimeWindow{
+			Start: 0, End: accountRange.End, Timezone: accountRange.Timezone,
+		})
+	})
+	if ctx.Err() != nil {
+		return true
+	}
+	if err := saveManagedAccountSnapshot(task.TaskID, runnerID, payload.InstanceID, model.ManagedAccountSnapshotKindOutput, accountRange, observation, collectErr); err != nil {
+		return true
+	}
+	results[managedAccountAllRangeKey] = managedAccountTaskResult(observation, collectErr)
+	_ = updateManagedAccountSyncProgress(task, runnerID, "output_all", 2, 2)
+	watchdogSignalFromContext(ctx)
+	return collectErr != nil || observation == nil || observation.CollectionStatus != model.ManagedInstanceCollectionSucceeded
 }
 
 func collectManagedAccountCustomOutput(ctx context.Context, task *model.SystemTask, runnerID string, payload ManagedAccountSyncPayload, results map[string]any) bool {
@@ -1038,10 +1128,11 @@ func scheduleDueManagedAccountSyncs(now int64) {
 		if len(ids) == 0 {
 			return true
 		}
-		presetKeys := make([]string, 0, len(managedAccountPresetDays))
+		presetKeys := make([]string, 0, len(managedAccountPresetDays)+1)
 		for _, days := range managedAccountPresetDays {
 			presetKeys = append(presetKeys, "preset-"+strconv.Itoa(days))
 		}
+		presetKeys = append(presetKeys, managedAccountAllRangeKey)
 		var snapshots []model.ManagedAccountSnapshot
 		if err := model.DB.Select("instance_id", "snapshot_kind", "range_key", "schema_version", "last_attempt_at", "last_attempt_status").Where(
 			"instance_id IN ? AND ((snapshot_kind = ? AND range_key = ?) OR (snapshot_kind = ? AND range_key IN ?))",
@@ -1078,6 +1169,9 @@ func scheduleDueManagedAccountSyncs(now int64) {
 				continue
 			}
 			accountRange, _ := NormalizeManagedAccountRange(7, 0, 0, managedAccountDefaultTimezone)
+			if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+				accountRange, _ = NormalizeManagedAccountRangeWithMode(managedAccountAllRangeKey, 0, 0, now, managedAccountDefaultTimezone)
+			}
 			payload := ManagedAccountSyncPayload{InstanceID: instance.Id, Mode: managedAccountStandardTaskMode, Range: accountRange}
 			if _, _, err := EnqueueScopedSystemTask(model.SystemTaskTypeManagedAccountSync, managedAccountTaskScope(instance.Id, managedAccountStandardTaskMode, accountRange.RangeKey), payload, nil); err != nil {
 				logger.LogWarn(context.Background(), fmt.Sprintf("managed account scheduler enqueue failed: instance=%d err=%v", instance.Id, err))
@@ -1092,8 +1186,12 @@ func managedAccountDailyArchiveSyncDue(instance *model.ManagedInstance, latest m
 		return false
 	}
 	required := []string{managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindInventory, managedAccountInventoryRangeKey)}
-	for _, days := range managedAccountPresetDays {
-		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, managedAccountAllRangeKey))
+	} else {
+		for _, days := range managedAccountPresetDays {
+			required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+		}
 	}
 	for _, key := range required {
 		if dailyArchived[key] {
@@ -1135,8 +1233,12 @@ func managedAccountStandardSyncDue(instance *model.ManagedInstance, latest map[s
 		}
 	}
 	required := []string{inventoryKey}
-	for _, days := range managedAccountPresetDays {
-		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+	if instance.Kind == model.ManagedInstanceKindClaudeGateway {
+		required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, managedAccountAllRangeKey))
+	} else {
+		for _, days := range managedAccountPresetDays {
+			required = append(required, managedAccountScheduleKey(instance.Id, model.ManagedAccountSnapshotKindOutput, "preset-"+strconv.Itoa(days)))
+		}
 	}
 	for _, key := range required {
 		state := latest[key]
@@ -1158,10 +1260,11 @@ func currentManagedAccountSnapshotEvent(instanceID int64) (*ManagedAccountSnapsh
 	if instanceID <= 0 {
 		return nil, managedinstance.ErrInvalidInstance
 	}
-	presetKeys := make([]string, 0, len(managedAccountPresetDays))
+	presetKeys := make([]string, 0, len(managedAccountPresetDays)+1)
 	for _, days := range managedAccountPresetDays {
 		presetKeys = append(presetKeys, "preset-"+strconv.Itoa(days))
 	}
+	presetKeys = append(presetKeys, managedAccountAllRangeKey)
 	var snapshots []model.ManagedAccountSnapshot
 	if err := model.DB.Select(
 		"instance_id", "snapshot_kind", "range_key", "observed_at", "last_attempt_at", "last_attempt_status", "last_error_code",

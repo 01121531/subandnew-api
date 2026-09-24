@@ -193,6 +193,7 @@ function toInput(item: AccountDataAPI): AccountDataAPIInput {
     description: item.description,
     status: item.status,
     dataset: item.dataset,
+    range: item.range,
     preset_days: item.preset_days,
     instance_ids: item.instance_ids,
     include_terms: item.include_terms,
@@ -830,6 +831,7 @@ function AuthorizationEditor(props: {
     queryKey: [
       'account-data-api-filter-options',
       input.dataset,
+      input.range,
       input.preset_days,
       [...input.instance_ids].sort((left, right) => left - right),
     ],
@@ -837,6 +839,7 @@ function AuthorizationEditor(props: {
       getAccountDataAPIFilterOptions({
         instance_ids: input.instance_ids,
         dataset: input.dataset,
+        range: input.range,
         preset_days: input.preset_days,
       }),
     enabled: props.open && input.instance_ids.length > 0,
@@ -1043,7 +1046,7 @@ function AuthorizationEditor(props: {
                   </NativeSelect>
                 </Field>
               </div>
-              {input.dataset === 'account_output' && (
+              {input.dataset === 'account_output' && input.range !== 'all' && (
                 <Field label={t('产出时间范围')}>
                   <NativeSelect
                     className='w-full'

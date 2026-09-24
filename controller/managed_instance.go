@@ -46,6 +46,7 @@ type managedInstanceRequest struct {
 }
 
 type managedAccountRefreshRequest struct {
+	Range      string `json:"range"`
 	PresetDays int    `json:"preset_days"`
 	Start      int64  `json:"start"`
 	End        int64  `json:"end"`
@@ -508,7 +509,7 @@ func GetManagedInstanceAccountManagementSnapshot(c *gin.Context) {
 	presetDays, _ := strconv.Atoi(c.Query("preset_days"))
 	start, _ := strconv.ParseInt(c.Query("start"), 10, 64)
 	end, _ := strconv.ParseInt(c.Query("end"), 10, 64)
-	accountRange, err := service.NormalizeManagedAccountRange(presetDays, start, end, c.Query("timezone"))
+	accountRange, err := service.NormalizeManagedAccountRangeForInstance(id, c.Query("range"), presetDays, start, end, c.Query("timezone"))
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -537,7 +538,7 @@ func RefreshManagedInstanceAccountManagement(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "invalid request"})
 		return
 	}
-	accountRange, err := service.NormalizeManagedAccountRange(request.PresetDays, request.Start, request.End, request.Timezone)
+	accountRange, err := service.NormalizeManagedAccountRangeForInstance(id, request.Range, request.PresetDays, request.Start, request.End, request.Timezone)
 	if err != nil {
 		managedInstanceError(c, err)
 		return
@@ -1188,6 +1189,8 @@ func managedInstanceError(c *gin.Context, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, service.ErrClaudeGatewayAllTimeOnly):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"success": false, "message": service.ErrClaudeGatewayAllTimeOnly.Error()})
 	case errors.Is(err, managedinstance.ErrInstanceConnectionFailed):
 		c.JSON(http.StatusBadGateway, gin.H{"success": false, "message": managedinstance.ErrInstanceConnectionFailed.Error()})
 	case errors.Is(err, managedinstance.ErrRemoteDataUnavailable):

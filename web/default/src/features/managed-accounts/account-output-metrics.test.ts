@@ -27,6 +27,12 @@ test('real zero is retained but missing observations never become zero', () => {
   expect(
     accountOutputTotals([{ amount: 10, currency: 'USD' }, { currency: 'USD' }])
       .amount
-  ).toBeNull()
+  ).toBe(10)
+  const partial = accountOutputTotals([
+    { total_requests: 12, requests_available: true },
+    { total_requests: 0, requests_available: false },
+  ])
+  expect(partial.requests).toBe(12)
+  expect(partial.missingRequests).toBe(1)
   expect(formatOutputAmount(0, 'USD')).not.toBe('--')
 })

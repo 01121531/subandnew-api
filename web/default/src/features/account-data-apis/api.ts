@@ -52,6 +52,7 @@ export async function listAccountDataAPIInstances() {
 export async function getAccountDataAPIFilterOptions(input: {
   instance_ids: number[]
   dataset: AccountDataAPIInput['dataset']
+  range?: 'all'
   preset_days: number
 }) {
   const response = await api.post<Response<AccountDataAPIFilterOptions>>(

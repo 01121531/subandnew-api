@@ -17,15 +17,17 @@ const accountOutputCollectionTimeout = 30 * time.Second
 const accountOutputInventorySnapshotTTL = 20 * time.Minute
 
 type AccountOutputItem struct {
-	Account          InventoryItem `json:"account"`
-	TotalRequests    float64       `json:"total_requests"`
-	TotalTokens      float64       `json:"total_tokens"`
-	Amount           float64       `json:"amount"`
-	AmountAvailable  *bool         `json:"amount_available,omitempty"`
-	AmountPeriod     string        `json:"amount_period,omitempty"`
-	Currency         string        `json:"currency"`
-	CollectionStatus string        `json:"collection_status"`
-	ErrorCode        string        `json:"error_code,omitempty"`
+	Account           InventoryItem `json:"account"`
+	TotalRequests     float64       `json:"total_requests"`
+	RequestsAvailable *bool         `json:"requests_available,omitempty"`
+	TotalTokens       float64       `json:"total_tokens"`
+	TokensAvailable   *bool         `json:"tokens_available,omitempty"`
+	Amount            float64       `json:"amount"`
+	AmountAvailable   *bool         `json:"amount_available,omitempty"`
+	AmountPeriod      string        `json:"amount_period,omitempty"`
+	Currency          string        `json:"currency"`
+	CollectionStatus  string        `json:"collection_status"`
+	ErrorCode         string        `json:"error_code,omitempty"`
 }
 
 type AccountOutputResult struct {
@@ -56,7 +58,8 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 	if window.End == 0 {
 		window.End = common.GetTimestamp()
 	}
-	if window.Start == 0 {
+	allTime := instance.Kind == model.ManagedInstanceKindClaudeGateway && window.Start == 0
+	if window.Start == 0 && !allTime {
 		window.Start = window.End - 7*86400
 	}
 	if window.Start < 0 || window.Start >= window.End {
@@ -83,7 +86,7 @@ func CollectAccountOutput(ctx context.Context, instanceID int64, window TimeWind
 	}
 	items := make([]InventoryItem, 0)
 	for _, item := range page.Items {
-		if item.CreatedAt >= window.Start && item.CreatedAt <= window.End {
+		if allTime || item.CreatedAt >= window.Start && item.CreatedAt <= window.End {
 			items = append(items, item)
 		}
 	}

@@ -56,6 +56,7 @@ type InventoryItem struct {
 	Status                string   `json:"status,omitempty"`
 	Enabled               *bool    `json:"enabled,omitempty"`
 	CreatedAt             int64    `json:"created_at,omitempty"`
+	UpdatedAt             int64    `json:"updated_at,omitempty"`
 	LastActivityAt        int64    `json:"last_activity_at,omitempty"`
 	DisabledAt            int64    `json:"disabled_at,omitempty"`
 	ExpiresAt             int64    `json:"expires_at,omitempty"`
@@ -68,6 +69,9 @@ type InventoryItem struct {
 	TokensPeriod          string   `json:"tokens_period,omitempty"`
 	CostPeriod            string   `json:"cost_period,omitempty"`
 	CostAvailable         *bool    `json:"cost_available,omitempty"`
+	TodayRequests         *float64 `json:"today_requests,omitempty"`
+	TodayTokens           *float64 `json:"today_tokens,omitempty"`
+	TodayCost             *float64 `json:"today_cost,omitempty"`
 	Requests24H           *float64 `json:"requests_24h,omitempty"`
 	SuccessfulRequests24H *float64 `json:"successful_requests_24h,omitempty"`
 	LimitedRequests24H    *float64 `json:"limited_requests_24h,omitempty"`

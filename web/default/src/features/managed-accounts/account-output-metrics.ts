@@ -3,6 +3,8 @@ type OutputMetrics = {
   currency?: string
   amount?: number
   amount_available?: boolean
+  requests_available?: boolean
+  tokens_available?: boolean
   total_requests?: number
   total_tokens?: number
 }
@@ -47,24 +49,23 @@ export function formatOutputAmount(
 export function accountOutputTotals(outputs: OutputMetrics[]) {
   // Field grants can redact collection status independently of the measurements.
   const collected = outputs.filter(hasAccountOutputMetrics)
+  const availabilityKey = {
+    amount: 'amount_available',
+    total_requests: 'requests_available',
+    total_tokens: 'tokens_available',
+  } as const
   const sum = (key: 'amount' | 'total_requests' | 'total_tokens') => {
-    if (
-      !collected.length ||
-      collected.some((output) => !Number.isFinite(output[key]))
-    ) {
-      return null
-    }
-    return collected.reduce((total, output) => total + (output[key] ?? 0), 0)
+    const available = collected.filter(
+      (output) =>
+        output[availabilityKey[key]] !== false && Number.isFinite(output[key])
+    )
+    if (!available.length) return null
+    return available.reduce((total, output) => total + (output[key] ?? 0), 0)
   }
   const amountCollected = collected.filter(hasAccountOutputAmount)
   const currencies = new Set(amountCollected.map((output) => output.currency))
   const currency = currencies.size === 1 ? [...currencies][0] : 'mixed'
-  const amount =
-    !currency ||
-    currency === 'mixed' ||
-    amountCollected.length !== collected.length
-      ? null
-      : sum('amount')
+  const amount = !currency || currency === 'mixed' ? null : sum('amount')
   return {
     added: outputs.length,
     collected: collected.length,
@@ -72,9 +73,18 @@ export function accountOutputTotals(outputs: OutputMetrics[]) {
     tokens: sum('total_tokens'),
     amount,
     average:
-      amount == null || collected.length !== outputs.length || !outputs.length
+      amount == null || !amountCollected.length
         ? null
-        : amount / outputs.length,
+        : amount / amountCollected.length,
     currency,
+    missingRequests: collected.filter(
+      (output) => output.requests_available === false
+    ).length,
+    missingTokens: collected.filter(
+      (output) => output.tokens_available === false
+    ).length,
+    missingAmount: collected.filter(
+      (output) => output.amount_available === false
+    ).length,
   }
 }

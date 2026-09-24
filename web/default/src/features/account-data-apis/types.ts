@@ -19,6 +19,7 @@ export type AccountDataAPIInput = {
   description: string
   status: AccountDataAPIStatus
   dataset: AccountDataAPIDataset
+  range?: 'all'
   preset_days: number
   instance_ids: number[]
   include_terms: string[]

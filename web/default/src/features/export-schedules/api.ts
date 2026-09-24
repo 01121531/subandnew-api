@@ -37,7 +37,8 @@ export type ScheduleConfig = {
   query: {
     instance_ids: number[]
     dataset: 'inventory' | 'account_output'
-    preset_days: number
+    range?: 'all'
+    preset_days?: number
     include_terms?: string[]
     exclude_terms?: string[]
     search?: string

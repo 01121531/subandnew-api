@@ -57,6 +57,7 @@ type ConfigInput struct {
 	Description        string                              `json:"description"`
 	Status             string                              `json:"status"`
 	Dataset            string                              `json:"dataset"`
+	Range              string                              `json:"range,omitempty"`
 	PresetDays         int                                 `json:"preset_days"`
 	InstanceIDs        []int64                             `json:"instance_ids"`
 	IncludeTerms       []string                            `json:"include_terms"`
@@ -94,6 +95,7 @@ type View struct {
 	Description        string                              `json:"description"`
 	Status             string                              `json:"status"`
 	Dataset            string                              `json:"dataset"`
+	Range              string                              `json:"range,omitempty"`
 	PresetDays         int                                 `json:"preset_days"`
 	Timezone           string                              `json:"timezone"`
 	InstanceIDs        []int64                             `json:"instance_ids"`
@@ -142,6 +144,7 @@ type PreviewResult struct {
 
 type FilterOptionsInput struct {
 	Dataset     string  `json:"dataset"`
+	Range       string  `json:"range,omitempty"`
 	PresetDays  int     `json:"preset_days"`
 	InstanceIDs []int64 `json:"instance_ids"`
 }
@@ -374,6 +377,7 @@ func FilterOptions(ctx context.Context, input FilterOptionsInput) (*FilterOption
 	query, err := managedaccount.NormalizeQuery(managedaccount.Query{
 		InstanceIDs: input.InstanceIDs,
 		Dataset:     input.Dataset,
+		Range:       input.Range,
 		PresetDays:  input.PresetDays,
 		NarrowFields: []string{
 			"vendor_name",
@@ -609,7 +613,7 @@ func QueryExternal(ctx context.Context, auth *Authenticated, page, pageSize int,
 	if sortBy != "" && !containsString(auth.View.Fields, sortBy) {
 		return nil, ErrInvalid
 	}
-	query := managedaccount.Query{InstanceIDs: auth.View.InstanceIDs, Dataset: auth.View.Dataset, PresetDays: auth.View.PresetDays,
+	query := managedaccount.Query{InstanceIDs: auth.View.InstanceIDs, Dataset: auth.View.Dataset, Range: auth.View.Range, PresetDays: normalizedPresetDays(auth.View.PresetDays),
 		IncludeTerms: auth.View.IncludeTerms, ExcludeTerms: auth.View.ExcludeTerms, MatchMode: auth.View.MatchMode, Rules: auth.View.Rules,
 		Search: search, SortBy: sortBy, SortOrder: sortOrder, Page: page, PageSize: pageSize}
 	if query.SortBy == "" {
@@ -754,7 +758,8 @@ func prepareInput(input ConfigInput) (ConfigInput, managedaccount.Query, error) 
 	if input.Dataset == "" {
 		input.Dataset = managedaccount.DatasetInventory
 	}
-	if input.PresetDays == 0 {
+	input.Range = strings.ToLower(strings.TrimSpace(input.Range))
+	if input.Range != "all" && input.PresetDays == 0 {
 		input.PresetDays = 7
 	}
 	if input.PageSize == 0 {
@@ -783,12 +788,15 @@ func prepareInput(input ConfigInput) (ConfigInput, managedaccount.Query, error) 
 	}
 	input.AllowedCIDRs = cidrs
 	query, err := managedaccount.NormalizeQuery(managedaccount.Query{InstanceIDs: input.InstanceIDs, Dataset: input.Dataset,
-		PresetDays: input.PresetDays, IncludeTerms: input.IncludeTerms, ExcludeTerms: input.ExcludeTerms,
+		Range: input.Range, PresetDays: input.PresetDays, IncludeTerms: input.IncludeTerms, ExcludeTerms: input.ExcludeTerms,
 		MatchMode: input.MatchMode, Rules: input.Rules, SortBy: input.SortBy, SortOrder: input.SortOrder, Page: 1, PageSize: 5})
 	if err != nil {
 		return input, managedaccount.Query{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
-	input.InstanceIDs, input.Dataset, input.PresetDays = query.InstanceIDs, query.Dataset, query.PresetDays
+	input.InstanceIDs, input.Dataset, input.Range, input.PresetDays = query.InstanceIDs, query.Dataset, query.Range, query.PresetDays
+	if query.Range == "all" {
+		input.PresetDays = -1
+	}
 	input.IncludeTerms, input.ExcludeTerms, input.MatchMode, input.Rules = query.IncludeTerms, query.ExcludeTerms, query.MatchMode, query.Rules
 	input.SortBy, input.SortOrder = query.SortBy, query.SortOrder
 	input = normalizeConfigCollections(input)
@@ -855,9 +863,14 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 	for index := range keys {
 		keyViews = append(keyViews, keyView(&keys[index]))
 	}
+	rangeMode := ""
+	presetDays := entry.PresetDays
+	if presetDays == -1 {
+		rangeMode, presetDays = "all", 0
+	}
 	return &View{ID: entry.ID, Name: entry.Name, Description: entry.Description, Status: entry.Status, Dataset: entry.Dataset,
 		configRevision: configRevision(entry, ids),
-		PresetDays:     entry.PresetDays, Timezone: entry.Timezone, InstanceIDs: ids, IncludeTerms: include, ExcludeTerms: exclude,
+		Range:          rangeMode, PresetDays: presetDays, Timezone: entry.Timezone, InstanceIDs: ids, IncludeTerms: include, ExcludeTerms: exclude,
 		MatchMode: entry.MatchMode, Rules: rules, Fields: fields, SortBy: entry.SortBy, SortOrder: entry.SortOrder,
 		PageSize: entry.PageSize, RateLimitPerMinute: entry.RateLimitPerMinute, AllowedCIDRs: cidrs,
 		PortalEnabled: entry.PortalEnabled, PortalConfigured: entry.PortalPasswordHash != "", PortalURL: portalURL(entry), PortalPasswordAt: entry.PortalPasswordAt,
@@ -866,6 +879,13 @@ func viewFor(entry *model.ManagedAccountAPI) (*View, error) {
 		CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
 		Stale:    entry.LastObservedAt == 0 || common.GetTimestamp()-entry.LastObservedAt > int64((20*time.Minute)/time.Second),
 		Endpoint: ExternalPath, Keys: keyViews}, nil
+}
+
+func normalizedPresetDays(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func normalizeConfigCollections(input ConfigInput) ConfigInput {

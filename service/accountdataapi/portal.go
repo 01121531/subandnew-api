@@ -49,6 +49,7 @@ type PortalView struct {
 	Description    string   `json:"description"`
 	Dataset        string   `json:"dataset"`
 	PresetDays     int      `json:"preset_days"`
+	Range          string   `json:"range,omitempty"`
 	Timezone       string   `json:"timezone"`
 	Fields         []string `json:"fields"`
 	FilterFields   []string `json:"filter_fields"`
@@ -331,7 +332,7 @@ func queryPortalLarge(ctx context.Context, auth *PortalAuthenticated, input Port
 }
 
 func portalManagedQuery(view *View, input PortalQueryInput) managedaccount.Query {
-	query := managedaccount.Query{InstanceIDs: view.InstanceIDs, Dataset: view.Dataset, PresetDays: view.PresetDays,
+	query := managedaccount.Query{InstanceIDs: view.InstanceIDs, Dataset: view.Dataset, Range: view.Range, PresetDays: view.PresetDays,
 		IncludeTerms: view.IncludeTerms, ExcludeTerms: view.ExcludeTerms, MatchMode: view.MatchMode, Rules: view.Rules,
 		NarrowIncludeTerms: input.IncludeTerms, NarrowExcludeTerms: input.ExcludeTerms, NarrowMatchMode: input.MatchMode,
 		NarrowRules: input.Rules, NarrowFields: PortalFilterFields(view.Fields), NarrowSearch: input.Search,
@@ -405,7 +406,7 @@ func loadPortal(slug, clientIP string) (*model.ManagedAccountAPI, *View, error) 
 }
 
 func portalView(view *View, expiresAt int64, csrf string) *PortalView {
-	return &PortalView{Authenticated: true, Name: view.Name, Description: view.Description, Dataset: view.Dataset, PresetDays: view.PresetDays,
+	return &PortalView{Authenticated: true, Name: view.Name, Description: view.Description, Dataset: view.Dataset, Range: view.Range, PresetDays: view.PresetDays,
 		Timezone: managedaccount.TimezoneShanghai, Fields: append([]string{"instance_id", "account_id"}, view.Fields...),
 		FilterFields: PortalFilterFields(view.Fields), PageSize: view.PageSize, ExpiresAt: expiresAt, CSRFToken: csrf,
 		LastObservedAt: view.LastObservedAt, Stale: view.Stale}

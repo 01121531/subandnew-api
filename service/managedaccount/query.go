@@ -49,6 +49,7 @@ var quickTermSeparator = regexp.MustCompile(`[,，\n]+`)
 type Query struct {
 	InstanceIDs        []int64                             `json:"instance_ids"`
 	Dataset            string                              `json:"dataset"`
+	Range              string                              `json:"range,omitempty"`
 	PresetDays         int                                 `json:"preset_days,omitempty"`
 	IncludeTerms       []string                            `json:"include_terms,omitempty"`
 	ExcludeTerms       []string                            `json:"exclude_terms,omitempty"`
@@ -94,12 +95,16 @@ type Item struct {
 	SourceID         string   `json:"source_id,omitempty"`
 	SourceName       string   `json:"source_name,omitempty"`
 	CreatedAt        int64    `json:"created_at,omitempty"`
+	UpdatedAt        int64    `json:"updated_at,omitempty"`
 	LastActivityAt   int64    `json:"last_activity_at,omitempty"`
 	DisabledAt       int64    `json:"disabled_at,omitempty"`
 	ExpiresAt        int64    `json:"expires_at,omitempty"`
 	Requests         *float64 `json:"requests,omitempty"`
 	Tokens           *float64 `json:"tokens,omitempty"`
 	Amount           *float64 `json:"amount,omitempty"`
+	TodayRequests    *float64 `json:"-"`
+	TodayTokens      *float64 `json:"-"`
+	TodayCost        *float64 `json:"-"`
 	Currency         string   `json:"currency,omitempty"`
 	RPM              *int     `json:"rpm,omitempty"`
 	ActiveSessions   *int     `json:"active_sessions,omitempty"`
@@ -137,6 +142,7 @@ type Summary struct {
 
 type Result struct {
 	Dataset       string              `json:"dataset"`
+	Range         string              `json:"range,omitempty"`
 	PresetDays    int                 `json:"preset_days,omitempty"`
 	Items         []Item              `json:"items"`
 	Total         int                 `json:"total"`
@@ -180,10 +186,17 @@ func NormalizeQuery(input Query) (Query, error) {
 	if input.Dataset != DatasetInventory && input.Dataset != DatasetOutput {
 		return input, errors.New("dataset must be inventory or account_output")
 	}
-	if input.PresetDays == 0 {
+	input.Range = strings.ToLower(strings.TrimSpace(input.Range))
+	if input.Range == "all" {
+		if input.PresetDays != 0 {
+			return input, errors.New("preset_days must be empty for all-time account queries")
+		}
+	} else if input.Range != "" {
+		return input, errors.New("range must be all when provided")
+	} else if input.PresetDays == 0 {
 		input.PresetDays = 7
 	}
-	if input.PresetDays != 1 && input.PresetDays != 7 && input.PresetDays != 14 && input.PresetDays != 30 {
+	if input.Range != "all" && input.PresetDays != 1 && input.PresetDays != 7 && input.PresetDays != 14 && input.PresetDays != 30 {
 		return input, errors.New("preset_days must be one of 1, 7, 14, or 30")
 	}
 	matchMode, rules, err := managedinstance.NormalizeAccountFilter(input.MatchMode, input.Rules, false)
@@ -291,7 +304,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	accountRange, err := controlplaneservice.NormalizeManagedAccountRange(input.PresetDays, 0, 0, TimezoneShanghai)
+	accountRange, err := controlplaneservice.NormalizeManagedAccountRangeWithMode(input.Range, input.PresetDays, 0, 0, TimezoneShanghai)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +325,12 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 			statuses = append(statuses, SourceStatus{InstanceID: instanceID, Status: "missing", ErrorCode: errorCode(getErr), Stale: true})
 			stale = true
 			continue
+		}
+		if input.Range == "all" && instance.Kind != model.ManagedInstanceKindClaudeGateway {
+			return nil, controlplaneservice.ErrClaudeGatewayAllTimeOnly
+		}
+		if input.Dataset == DatasetOutput && instance.Kind == model.ManagedInstanceKindClaudeGateway && input.Range != "all" {
+			return nil, controlplaneservice.ErrClaudeGatewayAllTimeOnly
 		}
 		status := SourceStatus{InstanceID: instanceID, InstanceName: SanitizeText(instance.Name), Platform: instance.Kind, Status: "no_data", Stale: true}
 		snapshot, snapshotErr := controlplaneservice.GetManagedAccountQuerySnapshot(instanceID, accountRange.RangeKey)
@@ -412,7 +431,7 @@ func Execute(ctx context.Context, input Query) (*Result, error) {
 		}
 	}
 	return &Result{
-		Dataset: input.Dataset, PresetDays: input.PresetDays, Items: items, Total: len(rows), Page: input.Page,
+		Dataset: input.Dataset, Range: input.Range, PresetDays: input.PresetDays, Items: items, Total: len(rows), Page: input.Page,
 		PageSize: input.PageSize, HasMore: end < len(rows), Summary: summary, Sources: statuses,
 		ObservedAt: observedAt, Stale: stale, Partial: partial || (successfulSources > 0 && successfulSources < len(input.InstanceIDs)), NoData: successfulSources == 0,
 		FilterOptions: finalizeFilterOptions(filterOptionSets),
@@ -485,8 +504,18 @@ func inventoryRow(instance *managedinstance.InstanceView, account managedinstanc
 func outputRow(instance *managedinstance.InstanceView, output managedinstance.AccountOutputItem, sources map[string]string) row {
 	item := itemFromInventory(instance, output.Account, sources)
 	if output.CollectionStatus == model.ManagedInstanceCollectionSucceeded {
-		requests, tokens, amount := output.TotalRequests, output.TotalTokens, output.Amount
-		item.Requests, item.Tokens, item.Amount = &requests, &tokens, &amount
+		if output.RequestsAvailable == nil || *output.RequestsAvailable {
+			requests := output.TotalRequests
+			item.Requests = &requests
+		}
+		if output.TokensAvailable == nil || *output.TokensAvailable {
+			tokens := output.TotalTokens
+			item.Tokens = &tokens
+		}
+		if output.AmountAvailable == nil || *output.AmountAvailable {
+			amount := output.Amount
+			item.Amount = &amount
+		}
 	}
 	item.Currency = SanitizeText(output.Currency)
 	item.CollectionStatus = output.CollectionStatus
@@ -506,8 +535,9 @@ func itemFromInventory(instance *managedinstance.InstanceView, account managedin
 		VendorName: SanitizeSensitiveText(account.VendorName), VendorEmail: SanitizeText(account.VendorEmail), Type: SanitizeText(account.Type),
 		Group: SanitizeText(account.Group), Status: SanitizeText(account.Status), Available: account.Enabled,
 		RateLimited: account.RateLimited, SourceID: SanitizeSensitiveText(account.SourceID), SourceName: SanitizeSensitiveText(sources[account.SourceID]),
-		CreatedAt: account.CreatedAt, LastActivityAt: account.LastActivityAt, DisabledAt: account.DisabledAt,
+		CreatedAt: account.CreatedAt, UpdatedAt: account.UpdatedAt, LastActivityAt: account.LastActivityAt, DisabledAt: account.DisabledAt,
 		ExpiresAt: account.ExpiresAt, RPM: account.RPM, ActiveSessions: account.ActiveSessions,
+		TodayRequests: account.TodayRequests, TodayTokens: account.TodayTokens, TodayCost: account.TodayCost,
 		Utilization5H: account.Utilization5H, Utilization7D: account.Utilization7D,
 	}
 }

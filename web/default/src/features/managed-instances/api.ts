@@ -282,6 +282,7 @@ export async function getManagedInstanceRPMHistory(
 
 function managedAccountRangeParams(input: ManagedAccountRangeInput) {
   const params = new URLSearchParams()
+  if (input.range) params.set('range', input.range)
   if (input.preset_days) params.set('preset_days', String(input.preset_days))
   if (input.start) params.set('start', String(input.start))
   if (input.end) params.set('end', String(input.end))

@@ -154,7 +154,8 @@ import { useBatchedAccountSnapshots } from './use-batched-account-snapshots'
 
 const ScheduleScope = createContext({
   instance_ids: [] as number[],
-  preset_days: 30,
+  range: undefined as 'all' | undefined,
+  preset_days: 30 as number | undefined,
   include_terms: [] as string[],
   exclude_terms: [] as string[],
 })
@@ -753,8 +754,9 @@ function AccountExportBar(props: {
             </MobileDetail>
             <div className='col-span-2'>
               <MobileDetail label={t('Time range')}>
-                {formatTimestamp(props.window.start)} -{' '}
-                {formatTimestamp(props.window.end)}
+                {props.rangeKey === 'all'
+                  ? t('All time')
+                  : `${formatTimestamp(props.window.start)} - ${formatTimestamp(props.window.end)}`}
               </MobileDetail>
             </div>
           </div>
@@ -883,6 +885,9 @@ function FullManagedAccounts() {
   )
 
   const accountRangeInput = useMemo<ManagedAccountRangeInput>(() => {
+    if (family === 'claude_gateway') {
+      return { range: 'all', timezone: 'Asia/Shanghai' }
+    }
     if (timeRange.presetDays) {
       return {
         preset_days: timeRange.presetDays,
@@ -895,18 +900,28 @@ function FullManagedAccounts() {
       end: Math.floor(resolved.end.getTime() / 1000),
       timezone: 'Asia/Shanghai',
     }
-  }, [timeRange])
-  const rangeQueryKey = timeRange.presetDays
-    ? `preset-${timeRange.presetDays}`
-    : `${accountRangeInput.start}-${accountRangeInput.end}`
+  }, [family, timeRange])
+  let rangeQueryKey = `${accountRangeInput.start}-${accountRangeInput.end}`
+  if (family === 'claude_gateway') {
+    rangeQueryKey = 'all'
+  } else if (timeRange.presetDays) {
+    rangeQueryKey = `preset-${timeRange.presetDays}`
+  }
   const exportWindow = useMemo(() => {
+    if (family === 'claude_gateway') {
+      return {
+        start: 0,
+        end: Math.floor(Date.now() / 1000),
+        timezone: 'Asia/Shanghai',
+      }
+    }
     const resolved = resolveFleetTimeRange(timeRange)
     return {
       start: Math.floor(resolved.start.getTime() / 1000),
       end: Math.floor(resolved.end.getTime() / 1000),
       timezone: 'Asia/Shanghai',
     }
-  }, [timeRange])
+  }, [family, timeRange])
   const selectionScopeKey = `${family}:${effectiveInstanceID}:${rangeQueryKey}`
 
   const snapshotQueries = useBatchedAccountSnapshots(
@@ -916,10 +931,15 @@ function FullManagedAccounts() {
   )
   const snapshotQueriesRef = useRef(snapshotQueries)
   snapshotQueriesRef.current = snapshotQueries
-  const exportRangeKey =
-    snapshotQueries.find((query) => query.data?.data.range.range_key)?.data
-      ?.data.range.range_key ??
-    (timeRange.presetDays ? `preset-${timeRange.presetDays}` : undefined)
+  const snapshotRangeKey = snapshotQueries.find(
+    (query) => query.data?.data.range.range_key
+  )?.data?.data.range.range_key
+  let exportRangeKey = snapshotRangeKey
+  if (!exportRangeKey && family === 'claude_gateway') {
+    exportRangeKey = 'all'
+  } else if (!exportRangeKey && timeRange.presetDays) {
+    exportRangeKey = `preset-${timeRange.presetDays}`
+  }
   const rows = useMemo<ResourceRow[]>(
     () =>
       instances.flatMap((instance, index) => {
@@ -1383,7 +1403,8 @@ function FullManagedAccounts() {
       JSON.stringify({
         name: `${t(familyLabel(family))} ${t('账号数据授权')}`,
         dataset: 'inventory',
-        preset_days: presetDays,
+        range: family === 'claude_gateway' ? 'all' : undefined,
+        preset_days: family === 'claude_gateway' ? 0 : presetDays,
         instance_ids: instances.map((instance) => instance.id),
         include_terms: searchValues,
         exclude_terms: excludeSearchValues,
@@ -1506,7 +1527,11 @@ function FullManagedAccounts() {
     <ScheduleScope.Provider
       value={{
         instance_ids: instances.map((i) => i.id),
-        preset_days: timeRange.presetDays ?? 30,
+        range: family === 'claude_gateway' ? 'all' : undefined,
+        preset_days:
+          family === 'claude_gateway'
+            ? undefined
+            : (timeRange.presetDays ?? 30),
         include_terms: searchValues,
         exclude_terms: excludeSearchValues,
       }}
@@ -1522,7 +1547,14 @@ function FullManagedAccounts() {
               <span className='hidden sm:inline'>{t('创建接口授权')}</span>
             </Button>
           )}
-          <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          {family === 'claude_gateway' ? (
+            <div className='border-input bg-background flex h-8 items-center gap-2 rounded-md border px-3 text-sm'>
+              <Clock3 className='text-muted-foreground size-4' />
+              {t('All time')}
+            </div>
+          ) : (
+            <FleetTimeRangeFilter value={timeRange} onChange={setTimeRange} />
+          )}
           <Button
             variant='outline'
             size='icon-sm'
@@ -1711,6 +1743,7 @@ const ACCOUNT_SYNC_STAGE_LABELS: Record<string, string> = {
   output_7d: 'Collecting 7-day output',
   output_14d: 'Collecting 14-day output',
   output_30d: 'Collecting 30-day output',
+  output_all: 'Collecting all-time cumulative output',
   output_custom: 'Collecting selected-period output',
   completed: 'Collection complete',
   failed: 'Collection failed',
@@ -2108,10 +2141,13 @@ function AccountOutputPanel(props: {
 }) {
   const { t } = useTranslation()
   const access = useAdminDataAccess()
+  const isLifetime = props.family === 'claude_gateway'
   const summary = [
     {
       key: 'added',
-      label: t('Accounts added in selected period'),
+      label: t(
+        isLifetime ? 'All accounts' : 'Accounts added in selected period'
+      ),
       value: props.totals.added,
       icon: UserPlus,
       tone: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
@@ -2145,7 +2181,11 @@ function AccountOutputPanel(props: {
       tone: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
     },
   ]
-  let emptyText = t('No accounts were added in the selected period')
+  let emptyText = t(
+    isLifetime
+      ? 'No account cumulative data'
+      : 'No accounts were added in the selected period'
+  )
   if (props.searching) emptyText = t('No matching accounts or channels')
   if (props.error) emptyText = t('Account output data could not be loaded')
   let detailContent: ReactNode
@@ -2178,15 +2218,28 @@ function AccountOutputPanel(props: {
       <CardHeader className='border-border/70 border-b py-3.5'>
         <CardTitle className='flex items-center gap-2'>
           <CircleDollarSign className='text-muted-foreground size-4' />
-          {t('New account output')}
+          {t(isLifetime ? 'Account cumulative output' : 'New account output')}
         </CardTitle>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Output generated in the selected period by accounts added in that period'
+            isLifetime
+              ? 'Lifetime cumulative output for all accounts in the current inventory'
+              : 'Output generated in the selected period by accounts added in that period'
           )}
         </p>
       </CardHeader>
       <CardContent className='p-0'>
+        {isLifetime &&
+          (props.totals.missingRequests > 0 ||
+            props.totals.missingTokens > 0 ||
+            props.totals.missingAmount > 0) && (
+            <div className='border-warning/30 bg-warning/5 text-warning border-b px-4 py-3 text-sm'>
+              {t('Cumulative data is incomplete')}: {t('Requests')}{' '}
+              {props.totals.missingRequests}, {t('Tokens')}{' '}
+              {props.totals.missingTokens}, {t('Amount')}{' '}
+              {props.totals.missingAmount}
+            </div>
+          )}
         <div className='bg-border grid grid-cols-1 gap-px border-b min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'>
           {summary
             .filter((item) => access.allows(item.key))
@@ -2407,7 +2460,7 @@ function AccountOutputTable({
       : []),
     {
       value: 'created_at',
-      label: t(isChannel ? 'Created At' : 'Uploaded at'),
+      label: t(isChannel || isClaudeGateway ? 'Created At' : 'Uploaded at'),
     },
     { value: 'requests', label: t('Requests') },
     { value: 'tokens', label: t('Tokens') },
@@ -2525,7 +2578,11 @@ function AccountOutputTable({
                   <div className='bg-muted/35 grid grid-cols-2 gap-x-4 gap-y-3 rounded-md p-3'>
                     <MobileDetail
                       fields={['time']}
-                      label={t(isChannel ? 'Created At' : 'Uploaded at')}
+                      label={t(
+                        isChannel || isClaudeGateway
+                          ? 'Created At'
+                          : 'Uploaded at'
+                      )}
                     >
                       {formatTimestamp(output.account.created_at)}
                     </MobileDetail>
@@ -2548,15 +2605,20 @@ function AccountOutputTable({
                       </MobileDetail>
                     )}
                     <MobileDetail fields={['requests']} label={t('Requests')}>
-                      {succeeded
+                      {succeeded && output.requests_available !== false
                         ? formatOptionalNumber(output.total_requests)
                         : '--'}
                     </MobileDetail>
                     <MobileDetail fields={['tokens']} label={t('Tokens')}>
-                      {succeeded
+                      {succeeded && output.tokens_available !== false
                         ? formatOptionalNumber(output.total_tokens)
                         : '--'}
                     </MobileDetail>
+                    {isClaudeGateway && (
+                      <MobileDetail fields={['time']} label={t('Updated at')}>
+                        {formatTimestamp(output.account.updated_at)}
+                      </MobileDetail>
+                    )}
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -2589,7 +2651,10 @@ function AccountOutputTable({
                 {sortableHead('instance', t('Instance'))}
                 {sortableHead(
                   'created_at',
-                  t(isChannel ? 'Created At' : 'Uploaded at')
+                  t(isChannel || isClaudeGateway ? 'Created At' : 'Uploaded at')
+                )}
+                {isClaudeGateway && (
+                  <TableHead fields={['time']}>{t('Updated at')}</TableHead>
                 )}
                 {sortableHead('requests', t('Requests'), 'right')}
                 {sortableHead('tokens', t('Tokens'), 'right')}
@@ -2636,11 +2701,20 @@ function AccountOutputTable({
                     <TableCell fields={['time']} className='whitespace-nowrap'>
                       {formatTimestamp(output.account.created_at)}
                     </TableCell>
+                    {isClaudeGateway && (
+                      <TableCell
+                        fields={['time']}
+                        className='whitespace-nowrap'
+                      >
+                        {formatTimestamp(output.account.updated_at)}
+                      </TableCell>
+                    )}
                     <TableCell
                       fields={['requests']}
                       className='text-right tabular-nums'
                     >
-                      {hasAccountOutputMetrics(output)
+                      {hasAccountOutputMetrics(output) &&
+                      output.requests_available !== false
                         ? formatOptionalNumber(output.total_requests)
                         : '--'}
                     </TableCell>
@@ -2648,7 +2722,8 @@ function AccountOutputTable({
                       fields={['tokens']}
                       className='text-right tabular-nums'
                     >
-                      {hasAccountOutputMetrics(output)
+                      {hasAccountOutputMetrics(output) &&
+                      output.tokens_available !== false
                         ? formatOptionalNumber(output.total_tokens)
                         : '--'}
                     </TableCell>
@@ -2862,7 +2937,7 @@ function AccountTable(props: {
     { value: 'instance', label: t('Instance') },
     {
       value: 'created_at',
-      label: t(isChannel ? 'Created At' : 'Uploaded at'),
+      label: t(isChannel || isClaudeGateway ? 'Created At' : 'Uploaded at'),
     },
     {
       value: 'cost',
@@ -2942,8 +3017,12 @@ function AccountTable(props: {
                         <div className='text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
                           <AdminDataField fields={['time']}>
                             <span>
-                              {t(isChannel ? 'Created At' : 'Uploaded at')}:{' '}
-                              {formatTimestamp(item.created_at)}
+                              {t(
+                                isChannel || isClaudeGateway
+                                  ? 'Created At'
+                                  : 'Uploaded at'
+                              )}
+                              : {formatTimestamp(item.created_at)}
                             </span>
                           </AdminDataField>
                           {!isConductor && (
@@ -3017,9 +3096,15 @@ function AccountTable(props: {
                       </MobileDetail>
                       <MobileDetail
                         fields={['time']}
-                        label={t('Last activity')}
+                        label={t(
+                          isClaudeGateway ? 'Updated at' : 'Last activity'
+                        )}
                       >
-                        {formatTimestamp(item.last_activity_at)}
+                        {formatTimestamp(
+                          isClaudeGateway
+                            ? item.updated_at
+                            : item.last_activity_at
+                        )}
                         {item.response_time_ms != null && (
                           <span className='text-muted-foreground block text-xs'>
                             {item.response_time_ms} ms
@@ -3103,12 +3188,18 @@ function AccountTable(props: {
                       : `${t('Platform')} / ${t('Type')}`}
                   </TableHead>
                   <TableHead fields={['time']}>
-                    {t(isChannel ? 'Created At' : 'Uploaded at')}
+                    {t(
+                      isChannel || isClaudeGateway
+                        ? 'Created At'
+                        : 'Uploaded at'
+                    )}
                   </TableHead>
                   <TableHead anyFields={loadFields} className='text-right'>
                     {loadColumnLabel}
                   </TableHead>
-                  <TableHead fields={['time']}>{t('Last activity')}</TableHead>
+                  <TableHead fields={['time']}>
+                    {t(isClaudeGateway ? 'Updated at' : 'Last activity')}
+                  </TableHead>
                   {showsSurvival && (
                     <TableHead fields={['time', 'status']}>
                       {t('Survival time')}
@@ -3217,7 +3308,11 @@ function AccountTable(props: {
                         className='whitespace-nowrap'
                       >
                         <p className='text-sm'>
-                          {formatTimestamp(item.last_activity_at)}
+                          {formatTimestamp(
+                            isClaudeGateway
+                              ? item.updated_at
+                              : item.last_activity_at
+                          )}
                         </p>
                         {item.response_time_ms != null && (
                           <p className='text-muted-foreground text-xs tabular-nums'>

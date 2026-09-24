@@ -48,16 +48,14 @@ export function AccountLoad(props: {
           </AdminDataField>
           <AdminDataField fields={['requests']}>
             <p>
-              {t('Requests')}:{' '}
-              {metric(
-                props.isClaudeGateway ? item.requests_24h : item.requests
-              )}
-              {props.isClaudeGateway && ' / 24h'}
+              {t(props.isClaudeGateway ? 'Cumulative requests' : 'Requests')}:{' '}
+              {metric(item.requests)}
             </p>
           </AdminDataField>
           <AdminDataField fields={['tokens']}>
             <p>
-              {t('Tokens')}: {metric(item.tokens)}
+              {t(props.isClaudeGateway ? 'Cumulative tokens' : 'Tokens')}:{' '}
+              {metric(item.tokens)}
             </p>
           </AdminDataField>
           {props.isClaudeGateway && (
